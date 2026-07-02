@@ -28,7 +28,7 @@ A coordinator breaks a question into parallel research tracks, each researcher s
 and scrapes the live web through a stealth browser, and an evaluator decides whether the
 answer is complete or another round is needed. The result is a single cited Markdown report.
 
-One engine backs several front-ends — the [pi](https://github.com/badlogic/pi-mono)
+One engine backs several front-ends — the [pi](https://github.com/earendil-works/pi)
 extension, a standalone CLI / agent skill (the same skill any skills-aware host runs,
 including OpenClaw), and a programmatic SDK.
 

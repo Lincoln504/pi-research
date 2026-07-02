@@ -374,6 +374,36 @@ describe('KnowledgeStore', () => {
     await expect(store.rebuildFtsIndex()).resolves.toBe(true);
   });
 
+  it('rebuildFtsIndex is still skipped on the next run after optimize() when no data changed', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com', text: 'test document', metadata: {}, timestamp: Date.now() },
+    ]);
+    // Run 1: rebuild builds the indexes, then compact/prune bumps the manifest version.
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+    await expect(store.optimize()).resolves.toBe(true);
+    // Run 2, no new data: optimize's layout-only version bump must NOT defeat the skip
+    // guard (regression: it used to force a needless rebuild + re-optimize every run).
+    await expect(store.rebuildFtsIndex()).resolves.toBe(false);
+  });
+
+  it('rebuildFtsIndex still runs after an equal-count re-ingest, even across optimize()', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/a', text: 'first', metadata: {}, timestamp: Date.now() },
+    ]);
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+    await expect(store.optimize()).resolves.toBe(true);
+    // Delete 1 + add 1 → identical row COUNT but a changed row SET. The delete/add
+    // transactions advance the version past the post-optimize baseline, so the version
+    // signal (not row count) must still trigger a rebuild — the case the guard defends.
+    await store.deleteByUrl('https://example.com/a');
+    await store.addDocuments([
+      { url: 'https://example.com/b', text: 'second', metadata: {}, timestamp: Date.now() },
+    ]);
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+  });
+
   it('optimize() compacts and prunes without error, and is a no-op while closing', async () => {
     await store.open();
     await store.addDocuments([

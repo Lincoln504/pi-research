@@ -13,10 +13,14 @@ inlined).
 
 camoufox-js / Camoufox browser
 
-`camoufox-js` is used in-process only to configure and launch the Camoufox
-(Firefox-fork) browser **binary as a separate operating-system process**, which
-this package then drives over the Playwright/CDP protocol. The Camoufox binary is
-downloaded and run separately and is subject to its own license.
+The `camoufox-js` npm package itself is licensed under **MPL-2.0** (file-level
+copyleft). It is resolved at install time and **not bundled** into this package's
+artifacts (`dist/*` is built `--packages=external`), so no MPL-covered source is
+combined into or redistributed by this MIT package. It is used in-process only to
+configure and launch the Camoufox (Firefox-fork) browser **binary as a separate
+operating-system process**, which this package then drives over the Playwright/CDP
+protocol. The Camoufox binary is downloaded and run separately and is subject to its
+own license.
 
 ua-parser-js
 
@@ -37,6 +41,17 @@ without an API key; no credentials are used and only caption text is read.
 Operators are responsible for ensuring their use complies with YouTube's Terms of
 Service. `jsdom` provides the DOM environment the BotGuard VM requires; it is
 loaded lazily (only when the tool runs) and never at startup.
+
+sharp / @img/sharp-libvips (via @huggingface/transformers)
+
+`@huggingface/transformers` pulls in `sharp` (Apache-2.0) for image decoding, which
+in turn installs prebuilt `@img/sharp-libvips-*` native packages licensed under
+**LGPL-3.0-or-later**. These are platform-specific shared libraries linked
+**dynamically** at runtime and resolved at install time; no LGPL code is statically
+linked into or bundled with this package (`dist/*` is built `--packages=external`).
+Dynamic linkage of an unmodified LGPL library from an MIT-licensed program is
+permitted by the LGPL. The image path is only exercised by the embedding/knowledge
+stack; text-only research does not load it.
 
 ### Verifying the dependency tree
 

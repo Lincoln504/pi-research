@@ -67,6 +67,33 @@ describe('KnowledgeStore Error Recovery', () => {
     await storeWithReconnect.close();
   });
 
+  it('withEmbedderReconnect also reconnects on a poison-sentinel rejection (no ECONNREFUSED in the message)', async () => {
+    // When the leader poisons its embed queue on a permanently-hung inference, an
+    // in-flight/queued embed is fast-failed with an "embedder poisoned" error that carries
+    // NO ECONNREFUSED. That must still drive a reconnect to the freshly-elected leader,
+    // not fail the write hard.
+    let callCount = 0;
+    const reconnectFactory = vi.fn().mockResolvedValue(mockEmbedder);
+
+    const storeWithReconnect = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: {
+        ...mockEmbedder,
+        embedMany: vi.fn().mockImplementation(() => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error('SerialQueue: embed permanently hung (exceeded hard deadline 600000ms) — embedder poisoned; leader stepping down');
+          }
+          return Promise.resolve([new Float32Array(384)]); })
+      } as any,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      reconnectFactory,
+    });
+    await storeWithReconnect.initialize();
+    await storeWithReconnect.addDocuments([{ url: 'https://poison.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+    expect(reconnectFactory).toHaveBeenCalledOnce();
+    await storeWithReconnect.close();
+  });
+
   it('deleteByUrl retry loop retries on "Version mismatch" and succeeds', async () => {
     await store.addDocuments([{ url: 'https://delete-retry.com', text: 'to be deleted', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
 

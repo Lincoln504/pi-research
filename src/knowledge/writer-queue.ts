@@ -21,9 +21,14 @@ interface WriterQueueOptions {
   chunker: Chunker | null;
 }
 
-function isConnectionRefused(err: unknown): boolean {
+function isEmbedderUnreachable(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return msg.includes('ECONNREFUSED');
+  // ECONNREFUSED: the embedding leader's HTTP endpoint is gone (dead/stepped-down leader,
+  // or an assertServing() refusal). "embedder poisoned": a queued/in-flight embed that was
+  // fast-failed when the leader poisoned its queue on a permanently-hung inference — that
+  // rejection carries no ECONNREFUSED, so match it explicitly so the ingest retries against
+  // the freshly-elected leader instead of being dropped.
+  return msg.includes('ECONNREFUSED') || msg.includes('embedder poisoned');
 }
 
 function isNoSpace(err: unknown): boolean {
@@ -86,7 +91,7 @@ export class WriterQueue implements IWriterQueue {
           }
         }
       } catch (err) {
-        if (isConnectionRefused(err)) {
+        if (isEmbedderUnreachable(err)) {
           logger.warn(`[writer-queue] Embedder unreachable for ${item.url}, retrying once after 2s...`);
           await new Promise(r => setTimeout(r, 2000));
           try {

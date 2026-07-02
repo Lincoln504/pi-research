@@ -248,9 +248,10 @@ write files, spawn processes, or make arbitrary network calls.
 Worker pool over direct browser — browser processes are isolated in workers so a crash
 in one cannot affect the orchestrator or other sessions.
 
-Pinned browser stack — `camoufox-js`, `playwright-core`, and `impit` are pinned to exact
-versions and upgraded together, because they are coupled and each floating range broke
-fresh consumer installs that our lockfile masked. camoufox-js `0.10.2` fetches Firefox
+Pinned browser stack — `playwright-core` and `impit` are pinned to exact versions and
+`camoufox-js` to its `0.10.x` line (`^0.10.2`, which excludes the `0.11.x` alpha); the
+three are coupled and upgraded together, because each floating range broke fresh consumer
+installs that our lockfile masked. camoufox-js `0.10.2` fetches Firefox
 135/beta.24, the newest camoufox with binaries for every supported OS (later builds
 dropped Windows). playwright-core `1.60.0` is the newest the FF135 Juggler protocol
 accepts (1.61 rejects it and fails every launch). impit `0.13.0` avoids the
@@ -259,6 +260,21 @@ accepts (1.61 rejects it and fails every launch). impit `0.13.0` avoids the
 propagate to consumers. Will upgrade all three together when camoufox ships stable
 cross-platform binaries. Rationale in full:
 `src/infrastructure/browser/thread-worker-browser.ts`.
+
+Pinned data stack — `apache-arrow` is a direct dependency at `21.1.0`, and `overrides`
+forces the whole tree to that single version so LanceDB and Arrow share one Arrow instance
+(mismatched Arrow copies do not interoperate — arrays built by one are rejected by the
+other). This sits above `@lancedb/lancedb` 0.29's declared Arrow peer ceiling
+(`>=15.0.0 <=18.1.0`); it is verified working, but the override should be re-validated
+whenever `@lancedb/lancedb` is upgraded.
+
+Transient-failure resilience — every LLM call is a potential single point of failure on a
+streaming endpoint that can drop mid-response (undici surfaces this as `terminated`). The
+coordinator and evaluator calls retry fast transient transport failures (socket aborts, 5xx,
+429, provider overload) with bounded exponential backoff — mirroring the per-researcher retry
+(`PI_RESEARCH_MAX_RETRIES`) — and, if still failing, degrade to a deterministic fallback plan
+rather than aborting the run. An app-level LLM timeout is not retried (it already spent the
+full budget); it degrades directly. Retry counts are internal constants, not configuration.
 
 Registry over direct imports — services are registered and resolved through the registry
 to support testing (mock replacement) and enforce init → use → dispose lifecycle.
@@ -294,7 +310,7 @@ YouTube transcripts
 
 Host & runtime
 
-- [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
+- [pi](https://github.com/earendil-works/pi) — the host runtime, agent SDK, and TUI toolkit
 - [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation
 
 ### Development

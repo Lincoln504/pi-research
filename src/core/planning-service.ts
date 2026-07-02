@@ -26,6 +26,7 @@ import { repairJsonWithLlm } from './llm/agentic-repair.ts';
 import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
 import { safeGetApiKeyAndHeaders } from './llm/model-registry-factory.ts';
 import { withTimeout } from './llm/llm-timeout.ts';
+import { retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { getConfig } from '../config.ts';
 import {
   PlanningResponseSchemaAsTSchema,
@@ -43,6 +44,53 @@ import {
   capResearcherQueries as _capResearcherQueries,
   generateResearchers as _generateResearchers,
 } from './planning-utils.ts';
+
+// The coordinator and evaluator LLM calls are single points of failure for a research
+// run, yet (unlike researcher sub-agents) they had no retry — so one transient transport
+// failure (an undici "terminated" mid-stream abort, ECONNRESET, 429, 5xx) aborted the whole
+// run. Retry them a bounded number of times. Kept low so that a genuine provider outage
+// (repeated full LLM_TIMEOUT_MS) still degrades to the deterministic fallback plan within a
+// sane wall-clock budget rather than multiplying a 5-minute timeout many times over.
+const LLM_MAX_RETRIES = 2;
+const LLM_RETRY_INITIAL_DELAY_MS = 1000;
+const LLM_RETRY_MAX_DELAY_MS = 8000;
+
+/**
+ * Whether a failed coordinator/evaluator LLM call should be RETRIED. Retries only fast,
+ * transient transport failures: an undici mid-stream abort ("terminated"), a dropped socket,
+ * a 5xx / 429 / provider-overload, or an empty ("no text content") response.
+ *
+ * Deliberately does NOT retry an app-level LLM timeout ("...timed out after Nms"): the attempt
+ * already ran the full LLM_TIMEOUT_MS, so an immediate re-run is unlikely to succeed, would
+ * leave the prior (still-running) stream orphaned and billed, and would multiply a multi-minute
+ * wait. A timeout instead degrades straight to the fallback plan (see the catch blocks, which
+ * treat "timed out" as degradable). A deliberate cancellation is never retried — detected by
+ * AbortSignal state / AbortError name, not by the message (withTimeout emits the same "cancelled
+ * or timed out" wording for a user-abort and a real timeout, and abortableDelay is the backstop).
+ *
+ * Exported for direct unit testing of the abort/timeout guards.
+ */
+export function isRetriableLlmError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return false;
+  if (error instanceof Error && error.name === 'AbortError') return false;
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (message.includes('timed out')) return false; // app timeout → degrade, don't retry
+  if (message.includes('no text content')) return true;
+  return isTransientError(error);
+}
+
+/**
+ * Whether an exhausted coordinator/evaluator failure should DEGRADE to the deterministic
+ * fallback plan rather than abort the run. Broader than the retry set: it also covers the
+ * app-level timeout (which is intentionally not retried). Only a genuinely non-transient error
+ * (bad request, missing auth) stays fatal — a fallback plan can't run without a working model.
+ */
+function isDegradableLlmError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return false;
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (message.includes('timed out')) return true;
+  return isRetriableLlmError(error, signal);
+}
 
 /**
  * Planning Service Implementation
@@ -233,21 +281,40 @@ export class PlanningService implements IPlanningService {
 
       const llmTimeout = config.LLM_TIMEOUT_MS;
 
-      const response = await withTimeout(
-        completeSimple(model, {
-          systemPrompt: populatedPrompt,
-          messages: [
-            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-          ],
-        }, buildSafeOptions(model, {
-          apiKey: authResult.apiKey || '',
-          headers: authResult.headers,
-          signal
-        }, config.PLANNING_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
-        llmTimeout, 'coordinator-generatePlan',
+      // Retry the transport call + response validation on transient failures. A mid-stream
+      // undici "terminated" abort surfaces as a stopReason:'error' response that only throws
+      // inside validateAndExtractText, so validation MUST sit inside the retried region. The
+      // agentic-repair / fallback path below stays OUTSIDE the retry — it handles present-but-
+      // malformed JSON (a different failure) and would otherwise be re-paid on every attempt.
+      const { response, responseText } = await retryWithBackoff(
+        async () => {
+          const response = await withTimeout(
+            completeSimple(model, {
+              systemPrompt: populatedPrompt,
+              messages: [
+                { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+              ],
+            }, buildSafeOptions(model, {
+              apiKey: authResult.apiKey || '',
+              headers: authResult.headers,
+              signal
+            }, config.PLANNING_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
+            llmTimeout, 'coordinator-generatePlan',
+          );
+          const responseText = validateAndExtractText(response, 'Coordinator');
+          return { response, responseText };
+        },
+        {
+          maxRetries: LLM_MAX_RETRIES,
+          initialDelay: LLM_RETRY_INITIAL_DELAY_MS,
+          maxDelay: LLM_RETRY_MAX_DELAY_MS,
+          label: 'coordinator-generatePlan',
+          signal,
+          isTransientError: (err) => isRetriableLlmError(err, signal),
+        },
       );
 
-      // Track usage
+      // Track usage once, on the successful attempt (failed attempts throw before here).
       const rawUsage = (response as any).usage;
       if (rawUsage) {
         const { tokens, cost } = extractUsage(model, rawUsage);
@@ -257,8 +324,6 @@ export class PlanningService implements IPlanningService {
           observer?.onTokensConsumed?.(tokens, cost);
         }
       }
-
-      const responseText = validateAndExtractText(response, 'Coordinator');
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;
@@ -326,8 +391,11 @@ export class PlanningService implements IPlanningService {
       // updatePlanForRound: build the deterministic single-researcher plan so the run can
       // still proceed. Hard failures (missing auth, an explicit provider error / rate
       // limit) stay fatal — a fallback plan can't run without a working model anyway.
-      const msg = err instanceof Error ? err.message : String(err);
-      const isTransient = msg.includes('timed out') || msg.includes('returned no text content');
+      // After retries are exhausted, a still-transient failure (timeout, empty response, or a
+      // transport abort like "terminated") degrades to the deterministic fallback plan so the
+      // run proceeds; only a genuinely non-transient error (missing auth, explicit provider
+      // rejection) stays fatal — a fallback plan can't run without a working model anyway.
+      const isTransient = isDegradableLlmError(err, signal);
       if (!isTransient) {
         logger.error('[PlanningService] Failed to generate plan:', err);
         throw err;
@@ -428,25 +496,42 @@ export class PlanningService implements IPlanningService {
 
       const llmTimeout = config.LLM_TIMEOUT_MS;
 
-      const response = await withTimeout(
-        completeSimple(model, {
-          systemPrompt: populatedPrompt,
-          messages: [
-            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-          ],
-          // The evaluator's response carries the final report whenever it synthesizes —
-          // which it may choose to do on ANY round (voluntary early finish), not just the
-          // forced final round. So every evaluator call gets the full synthesis budget; a
-          // small decision response simply uses a fraction of it. Clamped to the model.
-        }, buildSafeOptions(model, {
-          apiKey: authResult.apiKey || '',
-          headers: authResult.headers,
-          signal
-        }, config.SYNTHESIS_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
-        llmTimeout, 'evaluator-updatePlanForRound',
+      // Retry the transport call + validation on transient failures (see generatePlan for the
+      // rationale — a "terminated" abort only throws at validateAndExtractText, so validation
+      // must be inside the retried region; repair/fallback stays outside).
+      const { response, responseText } = await retryWithBackoff(
+        async () => {
+          const response = await withTimeout(
+            completeSimple(model, {
+              systemPrompt: populatedPrompt,
+              messages: [
+                { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+              ],
+              // The evaluator's response carries the final report whenever it synthesizes —
+              // which it may choose to do on ANY round (voluntary early finish), not just the
+              // forced final round. So every evaluator call gets the full synthesis budget; a
+              // small decision response simply uses a fraction of it. Clamped to the model.
+            }, buildSafeOptions(model, {
+              apiKey: authResult.apiKey || '',
+              headers: authResult.headers,
+              signal
+            }, config.SYNTHESIS_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
+            llmTimeout, 'evaluator-updatePlanForRound',
+          );
+          const responseText = validateAndExtractText(response, 'Evaluator');
+          return { response, responseText };
+        },
+        {
+          maxRetries: LLM_MAX_RETRIES,
+          initialDelay: LLM_RETRY_INITIAL_DELAY_MS,
+          maxDelay: LLM_RETRY_MAX_DELAY_MS,
+          label: 'evaluator-updatePlanForRound',
+          signal,
+          isTransientError: (err) => isRetriableLlmError(err, signal),
+        },
       );
 
-      // Track usage
+      // Track usage once, on the successful attempt (failed attempts throw before here).
       const rawUsage = (response as any).usage;
       if (rawUsage) {
         const { tokens, cost } = extractUsage(model, rawUsage);
@@ -456,8 +541,6 @@ export class PlanningService implements IPlanningService {
           observer?.onTokensConsumed?.(tokens, cost);
         }
       }
-
-      const responseText = validateAndExtractText(response, 'Evaluator');
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;

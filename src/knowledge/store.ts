@@ -44,9 +44,15 @@ export interface StoreOptions {
   ttlDays?: number;
 }
 
-function isConnectionRefused(err: unknown): boolean {
+function isEmbedderUnreachable(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return msg.includes('ECONNREFUSED');
+  // ECONNREFUSED: the leader's HTTP endpoint is gone (a dead/stepped-down leader, or an
+  // assertServing() refusal after this process stepped down). "embedder poisoned": an
+  // in-flight/queued embed that was fast-failed when the leader poisoned its queue on a
+  // permanently-hung inference — that rejection carries NO ECONNREFUSED, so it must be
+  // matched explicitly or the caller would fail hard instead of reconnecting to the
+  // freshly-elected leader.
+  return msg.includes('ECONNREFUSED') || msg.includes('embedder poisoned');
 }
 
 export class KnowledgeStore implements IKnowledgeStore {
@@ -467,7 +473,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     try {
       return await fn(this.options.embedder);
     } catch (err) {
-      if (isConnectionRefused(err) && this.options.reconnectFactory) {
+      if (isEmbedderUnreachable(err) && this.options.reconnectFactory) {
         logger.warn('[store] Embedder server unreachable, reconnecting and retrying...');
         this.options.embedder = await this.options.reconnectFactory();
         return fn(this.options.embedder);
@@ -830,6 +836,15 @@ export class KnowledgeStore implements IKnowledgeStore {
       const table = await this.getFreshTable();
       const startTime = Date.now();
       try {
+        // optimize() commits a new manifest version (compaction) but never changes the
+        // logical row set, so an FTS index that covered all rows before this call still
+        // covers them after. Record whether our rebuild baseline was current going in: if
+        // so, we advance it past optimize's version bump below. Otherwise rebuildFtsIndex's
+        // unchanged-version skip guard is defeated and every steady-state run needlessly
+        // rebuilds + re-optimizes (the disk-bloat regression). A stale baseline (index not
+        // current, or never built) is left untouched so the next rebuild still detects the
+        // pending change.
+        const wasFtsIndexCurrent = this.lastFtsVersion !== null && this.lastFtsVersion === await table.version();
         // cleanupOlderThan defaults to now: prune every prunable old version. The
         // current version is always retained, and (with deleteUnverified=false)
         // physical files inside LanceDB's safety window are kept regardless.
@@ -844,6 +859,11 @@ export class KnowledgeStore implements IKnowledgeStore {
         const removed = stats?.prune?.oldVersionsRemoved ?? 0;
         const bytesRemoved = stats?.prune?.bytesRemoved ?? 0;
         logger.info(`[store] Optimize complete: removed ${removed} old version(s), reclaimed ${bytesRemoved} bytes (${duration}ms).`);
+        // Keep the FTS skip-guard baseline in sync with optimize's layout-only version bump
+        // so the next rebuildFtsIndex correctly skips when no content changed.
+        if (wasFtsIndexCurrent) {
+          this.lastFtsVersion = await (await this.getFreshTable()).version();
+        }
         return true;
       } catch (err) {
         logger.warn('[store] Optimize failed:', err);

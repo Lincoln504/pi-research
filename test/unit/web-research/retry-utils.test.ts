@@ -19,14 +19,35 @@ describe('retry-utils', () => {
       expect(isTransientError(new Error('Rate limit exceeded'))).toBe(true);
     });
 
-    it('returns true for 5xx server errors', () => {
+    it('returns true for 5xx server errors and provider overload', () => {
       expect(isTransientError(new Error('HTTP 500: Internal Server Error'))).toBe(true);
       expect(isTransientError(new Error('HTTP 503: Service Unavailable'))).toBe(true);
+      expect(isTransientError(new Error('Model is overloaded'))).toBe(true);
+    });
+
+    it('returns true for undici mid-stream aborts (the "terminated" class)', () => {
+      // A dropped streaming response surfaces as `TypeError: terminated`; the coordinator
+      // relies on this being retryable so one socket cut does not abort the whole run.
+      expect(isTransientError(new Error('terminated'))).toBe(true);
+      expect(isTransientError(new Error('Coordinator failed: terminated'))).toBe(true);
+      expect(isTransientError(new Error('other side closed'))).toBe(true);
+      expect(isTransientError(new Error('socket hang up'))).toBe(true);
+      expect(isTransientError(new Error('UND_ERR_SOCKET'))).toBe(true);
+    });
+
+    it('walks the cause chain and the error code (undici nests the socket reason under cause)', () => {
+      const wrapped = new Error('terminated', { cause: new Error('other side closed') });
+      expect(isTransientError(wrapped)).toBe(true);
+      const byCause = new Error('request failed', { cause: Object.assign(new Error('read'), { code: 'ECONNRESET' }) });
+      expect(isTransientError(byCause)).toBe(true);
+      const byCode = Object.assign(new Error('opaque'), { code: 'UND_ERR_SOCKET' });
+      expect(isTransientError(byCode)).toBe(true);
     });
 
     it('returns false for other errors', () => {
       expect(isTransientError(new Error('HTTP 404: Not Found'))).toBe(false);
       expect(isTransientError(new Error('Validation failed'))).toBe(false);
+      expect(isTransientError(new Error('invalid_request_error: unsupported model id'))).toBe(false);
       expect(isTransientError(null)).toBe(false);
     });
 

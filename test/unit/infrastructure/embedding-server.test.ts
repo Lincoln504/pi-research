@@ -99,5 +99,73 @@ describe('EmbeddingServer', () => {
       await pB;
       expect(maxActive).toBe(1);
     });
+
+    it('poisons the queue on a permanently-hung task and fast-fails all callers without running the next', async () => {
+      vi.useFakeTimers();
+      try {
+        let secondStarted = false;
+        const onPoison = vi.fn();
+        // soft caller timeout 1000ms; hard deadline 2000ms (armed after the soft timeout).
+        const q = new _SerialQueue(200, 1000, 2000, onPoison);
+
+        const hung = () => new Promise<void>(() => { /* never settles — simulates a device-lost native stall */ });
+        const second = () => { secondStarted = true; return Promise.resolve(); };
+
+        const pA = q.enqueue(hung).catch((e: unknown) => e as Error);
+        const pB = q.enqueue(second).catch((e: unknown) => e as Error);
+
+        // Soft timeout fires → caller A is rejected promptly, but the slot is held
+        // (the hung work is still "running") and the queue is NOT yet poisoned.
+        await vi.advanceTimersByTimeAsync(1000);
+        const a = await pA as Error;
+        expect(a).toBeInstanceOf(Error);
+        expect(a.message).toContain('timed out');
+        expect(q.isPoisoned()).toBe(false);
+        expect(secondStarted).toBe(false);
+
+        // Hard deadline elapses while the work is still unsettled → poison.
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(q.isPoisoned()).toBe(true);
+        expect(onPoison).toHaveBeenCalledOnce();
+
+        // The queued task B is fast-failed with the poison error and NEVER ran
+        // (running it would be concurrent GPU inference on the stuck context).
+        const b = await pB as Error;
+        expect(b).toBeInstanceOf(Error);
+        expect(b.message).toContain('permanently hung');
+        expect(secondStarted).toBe(false);
+
+        // Any future enqueue fast-rejects immediately rather than hanging.
+        await expect(q.enqueue(second)).rejects.toThrow('permanently hung');
+        expect(secondStarted).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('leadership step-down', () => {
+    it('refuses embeds after shutdown instead of re-initializing a disposed embedder', async () => {
+      const embedSpy = vi.fn();
+      const embedManySpy = vi.fn();
+      const disposeSpy = vi.fn().mockResolvedValue(undefined);
+      const stepDownEmbedder = { embed: embedSpy, embedMany: embedManySpy, dispose: disposeSpy } as any;
+      const sm = {
+        getEmbeddingServer: vi.fn().mockResolvedValue(null),
+        clearEmbeddingServer: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      const s = new EmbeddingServer(stepDownEmbedder, sm, 'stepped-down-id');
+
+      // Simulate leadership loss / step-down.
+      await s.shutdown();
+
+      // The store still holds this instance; its next embed must be REFUSED with an
+      // ECONNREFUSED-bearing error (so withEmbedderReconnect re-resolves to the new
+      // leader) — never silently re-init the disposed embedder and re-acquire the GPU.
+      await expect(s.embed('x')).rejects.toThrow(/ECONNREFUSED/);
+      await expect(s.embedMany(['x'])).rejects.toThrow(/ECONNREFUSED/);
+      expect(embedSpy).not.toHaveBeenCalled();
+      expect(embedManySpy).not.toHaveBeenCalled();
+    });
   });
 });

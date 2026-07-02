@@ -398,7 +398,13 @@ export function isTransientSynthesisError(message: string): boolean {
     m.includes('returned no text content') ||
     m.includes('overloaded') ||
     m.includes('econnreset') ||
-    m.includes('fetch failed')
+    m.includes('fetch failed') ||
+    // undici mid-stream aborts of the synthesis/triage streaming response: a dropped
+    // connection surfaces as `TypeError: terminated` (cause "other side closed" / UND_ERR_SOCKET).
+    m.includes('terminated') ||
+    m.includes('other side closed') ||
+    m.includes('socket hang up') ||
+    m.includes('und_err')
   );
 }
 

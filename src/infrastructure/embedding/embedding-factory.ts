@@ -215,7 +215,13 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
       useCache: modelCfg.useCache,
     });
 
-    const server = new EmbeddingServer(embedder, stateManager, serverId);
+    const server = new EmbeddingServer(embedder, stateManager, serverId, () => {
+      // This leader poisoned itself after a permanently hung inference; drop the
+      // cached singleton so this process's next getEmbedder() re-elects. The store's
+      // reconnectFactory also triggers on the first fast-failed embed, so cluster
+      // recovery does not depend solely on this hook.
+      void clearEmbeddingInstance();
+    });
     let port: number;
     try {
       port = await server.startServer();

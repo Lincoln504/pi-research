@@ -181,39 +181,74 @@ export function withTimeout<T>(
 // ============================================================================
 
 /**
- * Default transient error detector
+ * True if a single error MESSAGE carries a transient signal. Split out so the same
+ * matching is applied both to the top-level error and to each link of a `cause`
+ * chain (undici nests the real socket reason under `error.cause`).
  */
-export function isTransientError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
+function messageIsTransient(message: string): boolean {
+  const m = message.toLowerCase();
 
-  const message = error.message.toLowerCase();
-
-  // Network errors (incl. mid-stream ECONNRESET and undici's generic "fetch failed",
-  // matching the LLM-synthesis classifier in research-knowledge-search.ts so the same
-  // transient signals are retried everywhere they can occur).
-  if (message.includes('econnrefused') || message.includes('enotfound') || message.includes('timeout') || message.includes('etimedout') || message.includes('econnreset') || message.includes('fetch failed')) {
+  // Network / socket-layer transport failures, including undici's mid-stream aborts:
+  // a dropped streaming response surfaces as `TypeError: terminated` (cause
+  // "other side closed" / UND_ERR_SOCKET / ECONNRESET). "timed out" is NOT included
+  // here on purpose — the generic classifier keeps "timeout"/"etimedout"; the LLM
+  // wrapper's "cancelled or timed out" wording is handled by the planning-service
+  // classifier, so a security/youtube caller's abort string isn't reinterpreted.
+  if (
+    m.includes('econnrefused') || m.includes('enotfound') || m.includes('timeout') ||
+    m.includes('etimedout') || m.includes('econnreset') || m.includes('fetch failed') ||
+    m.includes('terminated') || m.includes('other side closed') ||
+    m.includes('socket hang up') || m.includes('und_err')
+  ) {
     return true;
   }
 
   // Rate limiting. Anchor on word boundaries so we don't treat "generate",
   // "moderate" (contain "rate") or "429" embedded in a larger number as
   // transient — matching the StackExchange client's boundary-anchored guard.
-  if (/\b429\b/.test(message) || /\brate\b/.test(message) || message.includes('quota')) {
+  if (/\b429\b/.test(m) || /\brate\b/.test(m) || m.includes('quota')) {
     return true;
   }
 
-  // Temporary service unavailability or 5xx server errors. \b5\d\d\b matches a
-  // standalone 5xx code without matching a substring of e.g. a "50000" token.
+  // Temporary service unavailability, provider overload, or 5xx server errors.
+  // \b5\d\d\b matches a standalone 5xx code without matching a substring of e.g. "50000".
   if (
-    /\b5\d\d\b/.test(message) ||
-    message.includes('temporarily') ||
-    message.includes('unavailable')
+    /\b5\d\d\b/.test(m) ||
+    m.includes('temporarily') ||
+    m.includes('unavailable') ||
+    m.includes('overloaded')
   ) {
     return true;
   }
 
+  return false;
+}
+
+/**
+ * Default transient error detector. Inspects the error message AND walks the
+ * `cause` chain (bounded) plus any Node/undici error `code`, so a wrapped transport
+ * failure (undici nests the socket reason under `cause`) is still recognized on the
+ * direct-fetch paths where that chain survives.
+ */
+export function isTransientError(error: unknown): boolean {
+  // Reading .message/.cause/.code are plain property accesses on normal Error/undici objects,
+  // but guard against a pathological throwing getter so classification can never crash the
+  // retry loop — fail safe toward "not transient" (i.e. fail fast) if inspection throws.
+  try {
+    let current: unknown = error;
+    for (let depth = 0; current instanceof Error && depth < 5; depth++) {
+      if (messageIsTransient(current.message)) {
+        return true;
+      }
+      const code = (current as { code?: unknown }).code;
+      if (typeof code === 'string' && (/^und_err/i.test(code) || code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND')) {
+        return true;
+      }
+      current = (current as { cause?: unknown }).cause;
+    }
+  } catch {
+    return false;
+  }
   return false;
 }
 

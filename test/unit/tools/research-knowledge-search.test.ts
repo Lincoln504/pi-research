@@ -57,6 +57,10 @@ describe('isTransientSynthesisError — retry classification', () => {
     'read ECONNRESET',
     'fetch failed',
     'Model is overloaded, please retry',
+    'Knowledge Extraction failed: terminated',
+    'other side closed',
+    'socket hang up',
+    'UND_ERR_SOCKET',
   ])('treats %j as transient (retryable)', (msg) => {
     expect(isTransientSynthesisError(msg)).toBe(true);
   });

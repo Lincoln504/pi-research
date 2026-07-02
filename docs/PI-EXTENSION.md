@@ -1,6 +1,6 @@
 ## Pi Extension
 
-pi-research integrates as a [pi](https://github.com/badlogic/pi-mono)
+pi-research integrates as a [pi](https://github.com/earendil-works/pi)
 extension (`src/index.ts`) — a multi-agent web research engine with a real-time
 TUI, registered directly in the pi process.
 

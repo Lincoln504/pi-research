@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PlanningService } from '../../../src/core/planning-service.ts';
+import { PlanningService, isRetriableLlmError } from '../../../src/core/planning-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ vi.mock('../../../src/core/llm/inject-date.ts', () => ({
 
 import { completeSimple } from '@earendil-works/pi-ai/compat';
 import { loadPrompt } from '../../../src/core/llm/prompts.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
 import { getConfig } from '../../../src/config.ts';
 import type { StopReason } from '@earendil-works/pi-ai';
 
@@ -48,8 +49,14 @@ const MOCK_MODEL_REGISTRY = {
   getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: 'test-key', headers: {} }),
 } as any;
 
-/** Build a mock `completeSimple()` response with text content. */
-function makeCompleteResponse(text: string, stopReason: StopReason = 'stop') {
+/**
+ * Build a mock `completeSimple()` response with text content. Pass `errorMessage` to
+ * model a provider/transport failure the way undici actually surfaces it: completeSimple
+ * RESOLVES an AssistantMessage with stopReason:'error' + errorMessage (e.g. 'terminated'),
+ * and the throw happens later inside validateAndExtractText — so a retry layer must wrap
+ * validation, not just the network call.
+ */
+function makeCompleteResponse(text: string, stopReason: StopReason = 'stop', errorMessage?: string) {
   return {
     role: 'assistant' as const,
     content: [{ type: 'text' as const, text }],
@@ -62,6 +69,7 @@ function makeCompleteResponse(text: string, stopReason: StopReason = 'stop') {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
     stopReason,
+    ...(errorMessage ? { errorMessage } : {}),
     timestamp: 0,
   };
 }
@@ -87,6 +95,38 @@ function validSynthesizePlanJson(content = 'Final synthesis content') {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+describe('isRetriableLlmError — retry classification for the planning LLM calls', () => {
+  it('retries fast transient transport failures', () => {
+    expect(isRetriableLlmError(new Error('terminated'))).toBe(true);
+    expect(isRetriableLlmError(new Error('Coordinator failed: terminated'))).toBe(true);
+    expect(isRetriableLlmError(new Error('read ECONNRESET'))).toBe(true);
+    expect(isRetriableLlmError(new Error('503 Service Unavailable'))).toBe(true);
+    expect(isRetriableLlmError(new Error('Evaluator returned no text content from LLM'))).toBe(true);
+  });
+
+  it('does NOT retry an app-level LLM timeout (it degrades instead of orphaning a stream)', () => {
+    expect(isRetriableLlmError(new Error('LLM call timed out after 300000ms (coordinator-generatePlan)'))).toBe(false);
+  });
+
+  it('does NOT retry a non-transient error', () => {
+    expect(isRetriableLlmError(new Error('invalid_request_error: unsupported model id'))).toBe(false);
+    expect(isRetriableLlmError(new Error('401 unauthorized'))).toBe(false);
+  });
+
+  it('never retries once the caller signal is aborted, regardless of message', () => {
+    const ac = new AbortController();
+    ac.abort();
+    // A "terminated"/transient message that would normally retry must NOT once cancelled.
+    expect(isRetriableLlmError(new Error('terminated'), ac.signal)).toBe(false);
+    expect(isRetriableLlmError(new Error('coordinator-generatePlan cancelled or timed out'), ac.signal)).toBe(false);
+  });
+
+  it('never retries an AbortError by name even if the signal is not (yet) observed', () => {
+    const err = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    expect(isRetriableLlmError(err)).toBe(false);
+  });
+});
 
 describe('PlanningService', () => {
   let service: PlanningService;
@@ -257,18 +297,83 @@ describe('PlanningService', () => {
       await expect(service.generatePlan(BASE_OPTIONS)).rejects.toThrow();
     });
 
-    it('falls back to a single-researcher plan when the coordinator call fails transiently', async () => {
-      // A timeout / transient failure on the very first coordinator call must not abort
-      // the whole run — it degrades to the deterministic single-researcher plan.
-      vi.mocked(completeSimple).mockRejectedValueOnce(new Error('coordinator-generatePlan timed out after 300000ms'));
+    it('degrades to the single-researcher fallback on a timeout WITHOUT retrying (no orphaned streams)', async () => {
+      // An app-level LLM timeout already burned the full budget; re-running it would only
+      // orphan the prior stream and multiply the wait — so it degrades in a single attempt.
+      vi.mocked(completeSimple).mockRejectedValue(new Error('LLM call timed out after 300000ms (coordinator-generatePlan)'));
       const plan = await service.generatePlan(BASE_OPTIONS);
       expect(plan.action).toBe('delegate');
       expect(plan.researchers!.length).toBeGreaterThan(0);
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // timeout is NOT retried
+    });
+
+    it('retries a persistent transient transport abort, then degrades to the fallback after exhausting retries', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(completeSimple).mockRejectedValue(new Error('terminated'));
+        const p = service.generatePlan(BASE_OPTIONS);
+        await vi.runAllTimersAsync(); // fast-forward the inter-attempt backoff
+        const plan = await p;
+        expect(plan.action).toBe('delegate');
+        expect(plan.researchers!.length).toBeGreaterThan(0);
+        // 1 initial attempt + LLM_MAX_RETRIES(2) retries = 3 calls before degrading.
+        expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('retries a transient "terminated" stream abort, then succeeds (no fallback needed)', async () => {
+      // undici drops the streaming response mid-flight → completeSimple RESOLVES a
+      // stopReason:'error' message with errorMessage 'terminated'; the retry must recover it.
+      vi.useFakeTimers();
+      try {
+        vi.mocked(completeSimple)
+          .mockResolvedValueOnce(makeCompleteResponse('', 'error', 'terminated'))
+          .mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(2)));
+        const p = service.generatePlan(BASE_OPTIONS);
+        await vi.runAllTimersAsync();
+        const plan = await p;
+        expect(plan.action).toBe('delegate');
+        expect(plan.researchers!.length).toBeGreaterThan(0);
+        expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(2); // failed once, succeeded on retry
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('emits token metrics exactly once — for the successful attempt, not the failed retry', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(metrics.increment).mockClear(); // isolate from prior tests' accumulated calls
+        vi.mocked(completeSimple)
+          .mockResolvedValueOnce(makeCompleteResponse('', 'error', 'terminated'))
+          .mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
+        const p = service.generatePlan(BASE_OPTIONS);
+        await vi.runAllTimersAsync();
+        await p;
+        const tokenCalls = vi.mocked(metrics.increment).mock.calls.filter(c => c[0] === 'llm_tokens_total');
+        expect(tokenCalls).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('still throws if the coordinator fails for a non-transient reason', async () => {
-      vi.mocked(completeSimple).mockRejectedValueOnce(new Error('500 Internal Server Error from provider'));
+      // A non-transient provider rejection (bad request / unsupported model) is not retried
+      // and stays fatal — a fallback plan can't run without a working model anyway.
+      vi.mocked(completeSimple).mockRejectedValue(new Error('invalid_request_error: unsupported model id'));
       await expect(service.generatePlan(BASE_OPTIONS)).rejects.toThrow();
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // no retry on a non-transient error
+    });
+
+    it('does not retry a coordinator call cancelled by the caller', async () => {
+      const ac = new AbortController();
+      ac.abort();
+      vi.mocked(completeSimple).mockRejectedValue(new Error('coordinator-generatePlan cancelled or timed out'));
+      await expect(service.generatePlan({ ...BASE_OPTIONS, signal: ac.signal })).rejects.toThrow();
+      // A deliberate cancel is never transient → no retry, single attempt.
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1);
     });
 
     it('caps researchers to the maxTeamSize for the complexity level', async () => {
@@ -336,7 +441,7 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeGreaterThan(0);
     });
 
-    it('does NOT throw when the evaluator LLM call fails mid-run — continues the prior agenda', async () => {
+    it('does NOT throw when the evaluator LLM call times out mid-run — continues the prior agenda (no retry)', async () => {
       vi.mocked(completeSimple).mockRejectedValue(new Error('LLM call timed out'));
       const plan = await service.updatePlanForRound({
         ...BASE_OPTIONS,
@@ -344,6 +449,23 @@ describe('PlanningService', () => {
       });
       expect(plan.action).toBe('delegate');
       expect(plan.researchers!.length).toBeGreaterThan(0);
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // timeout degrades, not retried
+    });
+
+    it('retries a transient "terminated" evaluator abort, then succeeds', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(completeSimple)
+          .mockResolvedValueOnce(makeCompleteResponse('', 'error', 'terminated'))
+          .mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('recovered')));
+        const p = service.updatePlanForRound(BASE_OPTIONS);
+        await vi.runAllTimersAsync();
+        const plan = await p;
+        expect(plan.action).toBe('synthesize');
+        expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('synthesizes (does not throw) when the evaluator LLM call fails and there is no prior agenda', async () => {
