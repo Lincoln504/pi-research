@@ -2,8 +2,10 @@
 
 pi-research is a pi TUI extension for multi-agent web research. It runs inside the pi
 process, registers its tools and commands, and manages its own browser worker pool,
-service registry, and local knowledge store. The same engine is also exposed as a
-standalone CLI, a portable agent skill, and a programmatic SDK (`src/sdk.ts`).
+service registry, and local knowledge store. One engine backs every front-end: besides
+the pi extension it is exposed as a standalone CLI, a portable agent skill — the same
+skill any skills-aware host runs, including OpenClaw — and a programmatic SDK
+(`src/sdk.ts`).
 
 ```
 pi CLI
@@ -19,15 +21,19 @@ pi CLI
 ```
 
 1. A query enters through `runResearch` — the single internal entry point — with a depth.
-2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below). TUI and Agent
-   Skill are restricted to levels 1-3. 
-4. On the deep path the coordinator plans the research tracks and runs one initial
+   Callers phrase the request in natural language: when the `research` tool is invoked
+   in-session, the calling agent picks the depth (1–3) from the user's wording and the
+   task's complexity, guided by the tool's usage prompt (`src/prompts/research-tool-usage.md`).
+   CLI and SDK callers pass the depth explicitly.
+2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below). The TUI and agent
+   skill are restricted to levels 1–3.
+3. On the deep path the coordinator plans the research tracks and runs one initial
    search burst, then hands each researcher a set of result URLs to start from.
-5. Researchers scrape and read those pages through the scrape tooling and return cited
-   reports. They consider only from what they scraped this session.
-6. The evaluator reviews the round and either runs another round or synthesizes the
+4. Researchers scrape and read those pages through the scrape tooling and return cited
+   reports. They consider only what they scraped this session.
+5. The evaluator reviews the round and either runs another round or synthesizes the
    final report.
-7. The result is returned as a single cited Markdown report. the cited URLs and their
+6. The result is returned as a single cited Markdown report; the cited URLs and their
    summaries are queued into the knowledge store for future runs.
 
 ### Orchestration
