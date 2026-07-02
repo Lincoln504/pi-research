@@ -71,12 +71,16 @@ describe('stackexchange/output/table', () => {
         accepted_answer_id: 456,
         creation_date: 1609459200,
         tags: [],
-        body: 'A'.repeat(1001), // Too long body
+        body: 'A'.repeat(1001), // Long body
       }] as any;
 
       const result = formatQuestionsTable(questions);
       expect(result).toContain('**Score:** -5');
-      expect(result).not.toContain('**Body:**'); // Body too long to show
+      // A long body is truncated to a preview (not dropped entirely, which used to
+      // hide the body for exactly the longest questions).
+      expect(result).toContain('**Body:**');
+      expect(result).toContain(`${'A'.repeat(500)}...`);
+      expect(result).not.toContain('A'.repeat(501));
     });
 
     it('should handle unicode in question titles', () => {

@@ -24,8 +24,12 @@ export function formatQuestionsTable(questions: Question[]): string {
     output += `- **Link:** ${q.link}\n`;
     output += `- **Created:** ${new Date(q.creation_date * 1000).toLocaleString()}\n`;
 
-    if (q.body && q.body.length < 1000) {
-      output += `- **Body:** ${q.body.substring(0, 500)}...\n`;
+    if (q.body) {
+      // Truncate long bodies to a preview rather than dropping them entirely — the
+      // previous `length < 1000` guard omitted the Body line for the longest
+      // questions (the ones most in need of truncation).
+      const body = q.body.length > 500 ? `${q.body.substring(0, 500)}...` : q.body;
+      output += `- **Body:** ${body}\n`;
     }
 
     output += '\n---\n\n';

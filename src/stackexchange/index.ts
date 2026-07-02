@@ -173,7 +173,12 @@ async function executeSearch(
   const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0).join(';') : undefined;
 
   const allQuestions: Question[] = [];
-  const pageSize = Math.min(30, Math.ceil(limit / maxPages)); // Up to 30 per page
+  // Fetch up to `limit` per page (API max 30) so the common case needs a single
+  // request. maxPages is only a safety cap for when a page returns short of the
+  // limit — it is NOT a target, so we must not divide the limit across it (that
+  // made the default limit=10 spend 5 calls of 2 items each, burning quota and
+  // raising the odds of a mid-search backoff).
+  const pageSize = Math.min(30, limit); // Up to 30 per page
   
   for (let page = 1; page <= maxPages && allQuestions.length < limit; page++) {
     // Build query parameters with pagination

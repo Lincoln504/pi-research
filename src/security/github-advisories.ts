@@ -174,13 +174,19 @@ export async function searchGitHubAdvisories(
           apiUrl = `${GITHUB_API_BASE}/advisories/${encodeURIComponent(term)}`;
           endpointType = 'ghsa_lookup';
         } else {
-          // Server-side ecosystem narrowing when available, so the term can match
-          // beyond just the newest `maxResults` global advisories.
+          // Server-side narrowing so the term can match beyond just the newest
+          // `maxResults` global advisories. GitHub's /advisories endpoint has no
+          // free-text search, but it does support `affects=<package>`; a single-token
+          // term (npm/pip/maven package identifiers never contain whitespace, incl.
+          // scoped `@scope/name` and `group:artifact`) is treated as a package name.
+          // Multi-word terms keep the newest-N + client-side substring path, since
+          // `affects` on a non-package phrase would just return nothing.
           const ecosystemParam =
             options?.ecosystem !== undefined && options.ecosystem !== ''
               ? `&ecosystem=${encodeURIComponent(options.ecosystem)}`
               : '';
-          apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc${ecosystemParam}`;
+          const affectsParam = !/\s/.test(term) ? `&affects=${encodeURIComponent(term)}` : '';
+          apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc${ecosystemParam}${affectsParam}`;
           endpointType = 'search';
         }
 
@@ -290,12 +296,15 @@ export async function searchGitHubAdvisories(
           // Precise match for IDs
           if (advId === t || advCveId === t) return true;
 
-          // Partial match for everything else
+          // Partial match for everything else. Include affectedPackages so a
+          // server-side `affects=<package>` hit is not then dropped just because
+          // the advisory summary/description doesn't repeat the package name.
           return (
             advId.includes(t) ||
             advCveId.includes(t) ||
             advSummary.includes(t) ||
-            advDescription.includes(t)
+            advDescription.includes(t) ||
+            adv.affectedPackages.some(p => p.toLowerCase().includes(t))
           );
         });
       });
