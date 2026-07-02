@@ -30,7 +30,6 @@
     "docs/KNOWLEDGE-STORE.md",
     "docs/AGENT-SKILL.md",
     "docs/ARCHITECTURE.md",
-    "docs/banner.jpg",
     "scripts/setup.cjs",
     "scripts/cleanup.cjs",
     "scripts/build.cjs",
