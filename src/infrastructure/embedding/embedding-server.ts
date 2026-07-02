@@ -19,6 +19,10 @@ import type { Embedder } from '../../knowledge/embedder.ts';
 // SerialQueue — ensures embed/embedMany never run concurrently on the GPU
 // ---------------------------------------------------------------------------
 
+// Exported under a _-prefixed alias for focused unit testing of the
+// serialization invariant (below); the class itself stays internal.
+export { SerialQueue as _SerialQueue };
+
 class SerialQueue {
   private running = false;
   private readonly tasks: Array<() => Promise<void>> = [];
@@ -40,13 +44,27 @@ class SerialQueue {
         const timeoutPromise = new Promise<never>((_, rej) => {
           timer = setTimeout(() => rej(new Error(`SerialQueue: embed request timed out after ${this.timeoutMs}ms`)), this.timeoutMs);
         });
+        // Start the real GPU work once and keep a handle to it. On timeout we
+        // report to the caller promptly, but must NOT let pump() advance to the
+        // next task while this inference is still executing — Promise.race does
+        // not cancel the loser, and the same-PID GPU lock is re-entrant, so this
+        // queue is the only guard against concurrent GPU inference (the class of
+        // bug that previously caused native segfaults). fn() is invoked inside the
+        // try so a synchronous throw rejects the caller cleanly (task() itself
+        // never rejects, so pump()'s `await task()` can't produce an unhandled
+        // rejection).
+        let work: Promise<T> | undefined;
         try {
-          resolve(await Promise.race([fn(), timeoutPromise]));
+          work = fn();
+          resolve(await Promise.race([work, timeoutPromise]));
         } catch (e) {
           reject(e);
         } finally {
           if (timer !== undefined) clearTimeout(timer);
         }
+        // Hold the queue slot until the actual work settles, even past a reported
+        // timeout, to preserve the GPU-serialization invariant.
+        if (work) await work.catch(() => {});
       });
       if (!this.running) void this.pump();
     });
@@ -306,18 +324,34 @@ export class EmbeddingServer implements IEmbedder {
     const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
 
     let body = '';
+    let oversized = false;
     req.on('data', (chunk: Buffer) => {
       body += chunk;
       if (body.length > MAX_BODY_SIZE) {
+        oversized = true;
         req.destroy(new Error('Payload too large'));
       }
     });
 
-    req.on('error', (err) => {
-      logger.error('[EmbeddingServer] Request stream error:', err);
-    });
-
     await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => { if (!settled) { settled = true; resolve(); } };
+
+      // req.destroy() on an oversized body (and any client-side stream fault)
+      // emits 'error' but NOT 'end'. Without this the 'end'-only awaiter below
+      // would never resolve — the handler would dangle and the client would
+      // block until its own timeout. Respond (best-effort) and unblock.
+      req.on('error', (err) => {
+        logger.error('[EmbeddingServer] Request stream error:', err);
+        if (!res.headersSent) {
+          try {
+            res.writeHead(oversized ? 413 : 400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: oversized ? 'Payload too large' : 'Request stream error' }));
+          } catch { /* socket may already be torn down */ }
+        }
+        finish();
+      });
+
       req.on('end', async () => {
         try {
           if (req.method === 'GET' && req.url === '/health') {
@@ -328,14 +362,14 @@ export class EmbeddingServer implements IEmbedder {
             };
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(payload));
-            resolve();
+            finish();
             return;
           }
 
           if (req.method !== 'POST') {
             res.writeHead(405);
             res.end('Method Not Allowed');
-            resolve();
+            finish();
             return;
           }
 
@@ -373,7 +407,7 @@ export class EmbeddingServer implements IEmbedder {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: errorMessage }));
         }
-        resolve();
+        finish();
       });
     });
   }

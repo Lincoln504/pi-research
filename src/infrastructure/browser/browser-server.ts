@@ -56,17 +56,28 @@ export class BrowserServer {
                 }
 
                 let body = '';
+                let oversized = false;
                 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
 
-                req.on('data', chunk => { 
-                    body += chunk; 
+                req.on('data', chunk => {
+                    body += chunk;
                     if (body.length > MAX_BODY_SIZE) {
+                        oversized = true;
                         req.destroy(new Error('Payload too large'));
                     }
                 });
 
                 req.on('error', (err) => {
                     logger.error('[BrowserServer] Request stream error:', err);
+                    // req.destroy() on oversize emits 'error', not 'end', so no response
+                    // would otherwise be sent. Reply 413 best-effort before the socket
+                    // tears down so the client gets a clear status, not a bare reset.
+                    if (oversized && !res.headersSent) {
+                        try {
+                            res.writeHead(413, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Payload too large' }));
+                        } catch { /* socket may already be gone */ }
+                    }
                 });
 
                 req.on('end', async () => {
