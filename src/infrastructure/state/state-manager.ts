@@ -444,7 +444,7 @@ export class StateManager {
 
   // ==================== Embedding Server API ====================
 
-  public async getEmbeddingServer(): Promise<{ port: number; pid: number; serverId: string } | null> {
+  public async getEmbeddingServer(): Promise<{ port: number; pid: number; startTime?: number; serverId: string } | null> {
     const state = await this.readState();
     return state.embeddingServer ?? null;
   }

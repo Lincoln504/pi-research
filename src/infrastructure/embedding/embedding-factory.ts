@@ -14,6 +14,7 @@ import { logger } from '../../logger.ts';
 import { getService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
+import type { IProcessLifecycle } from '../../core/interfaces/process-interfaces.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import { Embedder } from '../../knowledge/embedder.ts';
 import { getModelEmbedderConfig } from '../../knowledge/model-config.ts';
@@ -44,16 +45,29 @@ async function isPortListening(port: number, timeoutMs = 2000): Promise<boolean>
 }
 
 // ---------------------------------------------------------------------------
-// Simple PID-alive check (no state-manager dependency)
+// Leader liveness — PID paired with start-time to defeat PID reuse
 // ---------------------------------------------------------------------------
 
-function isPidAliveStatic(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Decide whether a persisted embedding-leader entry still refers to a live process.
+ *
+ * Pairs the recorded PID with its start-time (when present) so a recycled PID — the OS
+ * handing a dead leader's PID to an unrelated new process, which a bare signal-0 check
+ * would mistake for the still-running leader — is correctly reported dead. This matches
+ * the PID-reuse handling the GPU lock and session cleanup already use. Entries written
+ * before start-time was recorded (no `startTime`) degrade to a bare liveness check, so
+ * older on-disk state keeps working with no migration.
+ *
+ * The reachable failure this closes is narrow: a leader that dies mid-model-init (its
+ * entry still carries the sentinel port -1, so the port probe is skipped) whose PID the
+ * OS then recycles. Without start-time the waiter would spin the full poll timeout on a
+ * leader that will never come; with it the stale entry is cleared immediately.
+ */
+export async function isEmbeddingLeaderAlive(
+  info: { pid: number; startTime?: number },
+  processLifecycle: Pick<IProcessLifecycle, 'isProcessAlive'>,
+): Promise<boolean> {
+  return processLifecycle.isProcessAlive(info.pid, info.startTime);
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +108,12 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
   const init = async (): Promise<IEmbedder> => {
     const serverId = crypto.randomUUID();
     const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
+    const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE);
+    // Recorded alongside our PID so another process can distinguish "leader still
+    // alive" from "our PID was recycled after we died" (getCurrentProcessStartTime
+    // caches, so this is a single cheap read). Null on a platform where it cannot be
+    // read → the entry omits it and liveness falls back to a bare signal-0 check.
+    const myStartTime = await processLifecycle.getCurrentProcessStartTime();
 
     // ---- Phase 1: Atomically claim candidacy under the state lock ----
     // Writing port=-1 acts as a mutex: other processes that see it will wait
@@ -104,7 +124,7 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
 
     await stateManager.updateState(async (state) => {
       if (state.embeddingServer) {
-        const alive = isPidAliveStatic(state.embeddingServer.pid);
+        const alive = await isEmbeddingLeaderAlive(state.embeddingServer, processLifecycle);
         if (alive) {
           // Either a real server (port > 0) or another process is initializing (port = -1)
           fastPathPort = state.embeddingServer.port;
@@ -114,7 +134,12 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
         delete state.embeddingServer;
       }
       // Claim the slot with sentinel port -1 to signal "initializing"
-      state.embeddingServer = { port: -1, pid: process.pid, serverId };
+      state.embeddingServer = {
+        port: -1,
+        pid: process.pid,
+        serverId,
+        ...(myStartTime !== null ? { startTime: myStartTime } : {}),
+      };
       iAmCandidate = true;
       return state;
     });
@@ -134,8 +159,9 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
           // Candidate died and cleared state — fall through to restart below
           break;
         }
-        if (!isPidAliveStatic(info.pid)) {
-          // Candidate process died without cleaning up
+        if (!(await isEmbeddingLeaderAlive(info, processLifecycle))) {
+          // Candidate process died without cleaning up (or its PID was recycled by
+          // an unrelated process — the start-time pairing catches that too).
           await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
           break;
         }

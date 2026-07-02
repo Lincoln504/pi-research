@@ -18,7 +18,7 @@ export interface IStateManager extends IService {
   getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; authSecret?: string } | null>;
   setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void>;
   clearBrowserServer(): Promise<void>;
-  getEmbeddingServer(): Promise<{ port: number; pid: number; serverId: string } | null>;
+  getEmbeddingServer(): Promise<{ port: number; pid: number; startTime?: number; serverId: string } | null>;
   clearEmbeddingServer(): Promise<void>;
   isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean>;
   acquireGpuLock(sessionId?: string, timeoutMs?: number): Promise<boolean>;

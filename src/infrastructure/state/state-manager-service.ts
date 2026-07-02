@@ -195,7 +195,7 @@ export class StateManagerService implements IStateManager {
   /**
    * Get the current embedding server information
    */
-  async getEmbeddingServer(): Promise<{ port: number; pid: number; serverId: string } | null> {
+  async getEmbeddingServer(): Promise<{ port: number; pid: number; startTime?: number; serverId: string } | null> {
     return this.getStateManager().getEmbeddingServer();
   }
 
