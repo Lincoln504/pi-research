@@ -46,7 +46,7 @@ a project-scoped setting you can change per directory:
 Change the mode for the current directory with the `/research-config` TUI (Knowledge Mode)
 in the pi extension, or with `pi-research knowledge-config set none|project|global` on the
 standalone CLI (`pi-research knowledge-config` shows the current mode and its source). Under
-the agent skill you don't run anything — you ask the agent to change it and it runs that
+the agent skill you don't have to run anything — you ask the agent to change it and it runs that
 command for you. All persist to the per-directory project registry; a per-directory value
 overrides a machine-wide `PI_RESEARCH_KNOWLEDGE_STORE_MODE` in `config.env`, and a real
 environment variable overrides everything. The change applies on the next run — no restart.

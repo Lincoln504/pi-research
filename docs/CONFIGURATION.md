@@ -213,7 +213,7 @@ pi-research knowledge-config                       # show the mode here and wher
 pi-research knowledge-config set none|project|global
 ```
 
-Under the agent skill you don't run this yourself — you ask the agent (e.g. "disable the
+Under the agent skill you don't have to run this yourself — you ask the agent (e.g. "disable the
 knowledge store here" / "make it project-scoped") and it runs the same command on your
 behalf. Either way it lands in the registry (above `config.env` in precedence), so a
 per-directory value overrides a machine-wide `config.env` default; a real environment

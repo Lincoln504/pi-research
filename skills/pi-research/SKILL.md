@@ -64,7 +64,7 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 
 The knowledge store — what `knowledge` searches — is **on by default** (mode `global`) and
 scoped per directory: `global` (one shared store), `project` (this directory only), or `none`
-(off here). The user manages it by **asking you in chat** — they don't run anything themselves.
+(off here). The user manages it by **asking you in chat** — they don't have to run anything themselves.
 
 When the user asks you to turn the store off, make it global, or scope it to this project for
 the current directory (or clearly implies a preference), do it on their behalf and tell them
