@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Limitless web research with knowledge store — usable from Pi, agent skill, or SDK.</strong>
+  <strong>Limitless web research with knowledge store — from Pi, agent skill, or SDK.</strong>
 </p>
 
 <p align="center">
