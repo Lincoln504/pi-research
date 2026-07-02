@@ -19,10 +19,6 @@ import type { Embedder } from '../../knowledge/embedder.ts';
 // SerialQueue — ensures embed/embedMany never run concurrently on the GPU
 // ---------------------------------------------------------------------------
 
-// Exported under a _-prefixed alias for focused unit testing of the
-// serialization invariant (below); the class itself stays internal.
-export { SerialQueue as _SerialQueue };
-
 class SerialQueue {
   private running = false;
   private readonly tasks: Array<() => Promise<void>> = [];
@@ -90,6 +86,10 @@ class SerialQueue {
     }
   }
 }
+
+// Exported under a _-prefixed alias for focused unit testing of the
+// serialization invariant; the class itself stays internal.
+export { SerialQueue as _SerialQueue };
 
 // ---------------------------------------------------------------------------
 // EmbeddingServer
