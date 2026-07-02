@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Embedder, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedder.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
 
 // vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)
 const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile } = vi.hoisted(() => {
@@ -648,6 +649,76 @@ describe('cache-aware initialization', () => {
       await expect(embedder.initialize()).rejects.toThrow(message);
       expect(mockRm).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe('input truncation (OOM guard)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAccess.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('truncates over-long input to maxTokens*charsPerToken chars before embedding, and records a metric', async () => {
+    const incSpy = vi.spyOn(metrics, 'increment');
+    // cap = maxTokens(10) * charsPerToken(2) = 20 chars
+    const e = new Embedder({ model: 'trunc-model', maxTokens: 10, charsPerToken: 2 });
+    await e.initialize();
+    mockPipelineFn.mockClear();
+    incSpy.mockClear();
+
+    await e.embed('x'.repeat(100));
+
+    // The pipeline must receive the truncated input, not the full 100 chars.
+    const passedInput = mockPipelineFn.mock.calls[0]![0] as string;
+    expect(passedInput).toHaveLength(20);
+    expect(passedInput).toBe('x'.repeat(20));
+    // The otherwise-silent truncation is surfaced as a metric.
+    expect(incSpy).toHaveBeenCalledWith('embedder_truncations_total', 1, { model: 'trunc-model' });
+  });
+
+  it('does NOT truncate or record a metric when input fits within the cap', async () => {
+    const incSpy = vi.spyOn(metrics, 'increment');
+    const e = new Embedder({ model: 'trunc-model', maxTokens: 10, charsPerToken: 2 });
+    await e.initialize();
+    mockPipelineFn.mockClear();
+    incSpy.mockClear();
+
+    await e.embed('short');
+
+    expect(mockPipelineFn.mock.calls[0]![0]).toBe('short');
+    expect(incSpy).not.toHaveBeenCalledWith('embedder_truncations_total', expect.anything(), expect.anything());
+  });
+
+  it('truncates each oversized document independently in embedMany', async () => {
+    const e = new Embedder({ model: 'trunc-model', maxTokens: 10, charsPerToken: 2 }); // cap 20
+    await e.initialize();
+    mockPipelineFn.mockClear();
+
+    await e.embedMany(['y'.repeat(50), 'ok']);
+
+    const batchArg = mockPipelineFn.mock.calls[0]![0] as string[];
+    expect(batchArg[0]).toHaveLength(20);
+    expect(batchArg[0]).toBe('y'.repeat(20));
+    expect(batchArg[1]).toBe('ok'); // untouched — already within the cap
+  });
+
+  it('truncates AFTER the query prefix is prepended (the prefix counts toward the cap)', async () => {
+    const incSpy = vi.spyOn(metrics, 'increment');
+    const e = new Embedder({ model: 'trunc-model', maxTokens: 10, charsPerToken: 2, queryPrefix: 'PFX:' });
+    await e.initialize();
+    mockPipelineFn.mockClear();
+    incSpy.mockClear();
+
+    await e.embed('z'.repeat(100));
+
+    const passedInput = mockPipelineFn.mock.calls[0]![0] as string;
+    expect(passedInput).toHaveLength(20);
+    expect(passedInput.startsWith('PFX:')).toBe(true); // prefix retained, tail dropped
+    expect(incSpy).toHaveBeenCalledWith('embedder_truncations_total', 1, { model: 'trunc-model' });
   });
 });
 

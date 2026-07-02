@@ -334,7 +334,17 @@ export class Embedder {
 
   private truncateText(text: string): string {
     const maxChars = this.maxTokens * this.charsPerToken;
-    return text.length > maxChars ? text.slice(0, maxChars) : text;
+    if (text.length > maxChars) {
+      // Hard OOM guard: never feed the model more than its context window (~maxTokens,
+      // approximated in chars). Only the tail-end of an oversized input is dropped from
+      // the VECTOR — the full text is still stored verbatim and covered by FTS — but the
+      // truncation is otherwise silent, so surface it: a spike here means chunks are
+      // arriving larger than the embed cap and vector recall on their tail is degraded.
+      metrics.increment('embedder_truncations_total', 1, { model: this.model });
+      logger.debug(`[embedder] Truncated input for embedding: ${text.length} -> ${maxChars} chars (model=${this.model})`);
+      return text.slice(0, maxChars);
+    }
+    return text;
   }
 
   async embed(text: string): Promise<Float32Array> {
