@@ -82,6 +82,36 @@ export async function initBrowser(): Promise<void> {
       if (!isBrowserConnected() || !context) {
         logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
 
+        // ---------------------------------------------------------------------
+        // Pinned browser stack — DO NOT caret-bump these three in isolation.
+        // They are one coupled set (see package.json + docs/ARCHITECTURE.md).
+        // Each was a real fresh-install/runtime break that our lockfile masked
+        // (consumers install without our lockfile, so a floating range resolves
+        // to a newer, broken version):
+        //
+        //   • camoufox-js  ^0.10.2  → fetches camoufox Firefox 135 / beta.24, the
+        //     NEWEST camoufox with binaries for every OS we support (Linux x64/
+        //     arm64, macOS x64/arm64, Windows x64). FF146/FF150 dropped the
+        //     Windows build entirely, so the 0.11.x line breaks Windows installs.
+        //   • playwright-core  1.60.0 (exact) → playwright-core and the camoufox
+        //     binary are one matched Juggler-protocol pair. 1.61 added a
+        //     viewport.isMobile field the FF135 build REJECTS ("property
+        //     viewport.isMobile not described in this scheme"), failing every
+        //     launch below. 1.60.0 is the newest playwright the FF135 Juggler
+        //     accepts.
+        //   • impit  0.13.0 (exact, a direct dep though only camoufox-js uses it)
+        //     → impit 0.13.1/0.14.0 shipped a `preinstall: npx only-allow pnpm`
+        //     guard (an upstream mistake, fixed in 0.14.1+) that hard-fails
+        //     `npm install -g`. Within camoufox-js's ^0.13.0 range 0.13.0 is the
+        //     only guard-free version; a direct-dep pin is the ONLY way to force
+        //     it for consumers (npm `overrides` don't propagate to installers of
+        //     a published package).
+        //
+        // Removal: upgrade all three together when camoufox ships stable
+        // cross-platform (incl. Windows) FF150 binaries — bumping camoufox-js to
+        // ≥0.11.1 also drops the impit pin (0.11.1 requires the fixed impit
+        // ^0.14.1) and needs playwright re-pinned to the new build's Juggler.
+        // Always re-verify a real headless run on Linux/macOS/Windows after.
         let CamoufoxModule: any;
         try {
           CamoufoxModule = await import('camoufox-js');

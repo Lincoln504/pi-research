@@ -247,15 +247,17 @@ write files, spawn processes, or make arbitrary network calls.
 Worker pool over direct browser — browser processes are isolated in workers so a crash
 in one cannot affect the orchestrator or other sessions.
 
-Pinned browser protocol pair — `playwright-core` is pinned to an exact version (not a
-caret range) because it and the camoufox Firefox binary are one matched protocol pair
-(Playwright's Juggler): a playwright-core newer than the camoufox build supports fails
-every browser launch (e.g. 1.61 added a `viewport.isMobile` field that the camoufox
-Firefox 135 build rejects). camoufox-js stays on the 0.10.x line, which fetches the
-stable, fully cross-platform camoufox build (Firefox 135 / beta.24); the 0.11.x line
-pulls a pre-release (alpha/beta) Firefox with no stable Windows binary. Do NOT caret-bump
-`playwright-core`, and do not move camoufox-js ahead of the browser's stable release —
-upgrade both together, deliberately, and re-verify a real headless run.
+Pinned browser stack — `camoufox-js`, `playwright-core`, and `impit` are pinned to exact
+versions and upgraded together, because they are coupled and each floating range broke
+fresh consumer installs that our lockfile masked. camoufox-js `0.10.2` fetches Firefox
+135/beta.24, the newest camoufox with binaries for every supported OS (later builds
+dropped Windows). playwright-core `1.60.0` is the newest the FF135 Juggler protocol
+accepts (1.61 rejects it and fails every launch). impit `0.13.0` avoids the
+`only-allow pnpm` preinstall guard that impit 0.13.1/0.14.0 shipped, which fails
+`npm install -g`; a direct-dependency pin is required because npm `overrides` do not
+propagate to consumers. Will upgrade all three together when camoufox ships stable
+cross-platform binaries. Rationale in full:
+`src/infrastructure/browser/thread-worker-browser.ts`.
 
 Registry over direct imports — services are registered and resolved through the registry
 to support testing (mock replacement) and enforce init → use → dispose lifecycle.

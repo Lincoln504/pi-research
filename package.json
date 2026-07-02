@@ -115,6 +115,7 @@
     "bgutils-js": "^3.2.0",
     "camoufox-js": "^0.10.2",
     "esbuild": "^0.28.1",
+    "impit": "0.13.0",
     "jsdom": "^29.1.1",
     "node-html-markdown": "^2.0.0",
     "pdf-oxide-wasm": "^0.3.55",
