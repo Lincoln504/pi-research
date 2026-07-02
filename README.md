@@ -82,7 +82,7 @@ See [Agent skill](docs/AGENT-SKILL.md) for details.
 
 The first install pulls the stealth browser engine, which takes a few minutes.
 
-### Stability (v1.0.0)
+### Stability (v1.x.x)
 
 v0.1.13 (April 20, 2026) was the last release before an extended break. Upstream
 pi/SDK API changes and a re-architecture around the stealth-browser stack left the
