@@ -178,6 +178,17 @@ const LOCAL_SCOPE_KEYS = new Set([
 ]);
 
 /**
+ * True for a per-directory (project-scoped) env-var key. Exported so the CLI's config.env→env
+ * bridge can EXCLUDE these: promoting a per-directory key into process.env would make config.env
+ * out-rank the per-directory registry (process.env is top precedence), silently defeating a
+ * per-directory override. Kept as a file layer instead, the registry can override it per-cwd —
+ * matching how the pi extension / SDK resolve config.
+ */
+export function isProjectScopedKey(key: string): boolean {
+  return LOCAL_SCOPE_KEYS.has(key);
+}
+
+/**
  * User-scoped keys for one-time migration from registry → config.env.
  * Derived from ALL schema keys minus LOCAL_SCOPE_KEYS, plus a few extra keys
  * not in the schema but present in the env.
@@ -400,6 +411,53 @@ export function getDbDir(config?: Config, cwd: string = process.cwd()): string {
   }
   // Default unified database in the global config directory
   return path.join(getGlobalConfigDir(), 'knowledge_db');
+}
+
+export interface KnowledgeStoreModeInfo {
+  mode: 'none' | 'project' | 'global';
+  /** Human-readable source of the EFFECTIVE value (highest-precedence source that set it). */
+  origin: string;
+  /** Physical LanceDB directory backing the store (shared across project/global modes). */
+  dbDir: string;
+}
+
+/**
+ * Resolve the effective KNOWLEDGE_STORE_MODE for a directory AND explain WHERE the value came
+ * from. Backs the `knowledge-config` CLI and any agent/user asking "why is the store X here".
+ * The origin walks the same precedence createConfig applies, highest first:
+ *   env var  >  per-directory project registry  >  {iface}.env overlay  >  config.env  >  default.
+ * (Legacy .pi-research.env local keys are auto-migrated into the registry on load, so a value
+ * there surfaces as the registry origin.)
+ */
+export function describeKnowledgeStoreMode(
+  cwd: string = process.cwd(),
+  iface?: ConfigInterface,
+): KnowledgeStoreModeInfo {
+  const cfg = getConfig(cwd, iface);
+  const KEY = 'PI_RESEARCH_KNOWLEDGE_STORE_MODE';
+  const fileHasKey = (p: string): boolean => {
+    try {
+      return fs.existsSync(p) && parseDotEnv(fs.readFileSync(p, 'utf-8'))[KEY] !== undefined;
+    } catch {
+      return false;
+    }
+  };
+
+  let origin = 'built-in default';
+  if (process.env[KEY] !== undefined) {
+    origin = 'environment variable';
+  } else {
+    let registryHasKey = false;
+    try {
+      const registry = loadProjectSettingsRegistry();
+      registryHasKey = registry[normalizeWorkspacePath(cwd)]?.[KEY] !== undefined;
+    } catch { /* unreadable registry → not the origin */ }
+    if (registryHasKey) origin = 'this directory (project settings)';
+    else if (iface && fileHasKey(getInterfaceEnvFilePath(iface))) origin = `${iface}.env overlay`;
+    else if (fileHasKey(getGlobalEnvFilePath())) origin = 'config.env (machine-wide default)';
+  }
+
+  return { mode: cfg.KNOWLEDGE_STORE_MODE, origin, dbDir: getDbDir(cfg, cwd) };
 }
 
 function parseDotEnv(content: string): Record<string, string> {

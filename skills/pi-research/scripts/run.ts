@@ -287,6 +287,7 @@ function printUsage(): void {
       'USAGE',
       '  node run.mjs research  "<query>" [--depth <1|2|3>] [--model provider/id]',
       '  node run.mjs knowledge "<query>" ["<q2>" ...]',
+      '  node run.mjs knowledge-config [set <none|project|global>]',
       '  node run.mjs status [--json]',
       '',
       'This locates the installed pi-research engine and forwards the subcommand to it.',

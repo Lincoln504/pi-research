@@ -6,9 +6,10 @@
  * paths that can run without a live model (help, version, bad args).
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync, execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -129,6 +130,55 @@ describe('parseArgs — knowledge', () => {
     expect(() =>
       parseArgs(['node', 'cli.mjs', 'knowledge', '--bogus', 'query']),
     ).toThrow(UsageError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseArgs — knowledge-config
+// ---------------------------------------------------------------------------
+
+describe('parseArgs — knowledge-config', () => {
+  it('bare command defaults to the show action', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'knowledge-config']);
+    expect(r.command).toBe('knowledge-config');
+    expect(r.knowledgeConfig).toEqual({ action: 'show', json: false });
+  });
+
+  it('explicit show with --json', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'knowledge-config', 'show', '--json']);
+    expect(r.knowledgeConfig).toEqual({ action: 'show', json: true });
+  });
+
+  it('set with each valid mode', () => {
+    for (const mode of ['none', 'project', 'global'] as const) {
+      const r = parseArgs(['node', 'cli.mjs', 'knowledge-config', 'set', mode]);
+      expect(r.knowledgeConfig).toEqual({ action: 'set', mode, json: false });
+    }
+  });
+
+  it('set --json is carried through', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'knowledge-config', 'set', 'project', '--json']);
+    expect(r.knowledgeConfig).toEqual({ action: 'set', mode: 'project', json: true });
+  });
+
+  it('set with no mode → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'knowledge-config', 'set'])).toThrow(UsageError);
+  });
+
+  it('set with an invalid mode → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'knowledge-config', 'set', 'sometimes'])).toThrow(UsageError);
+  });
+
+  it('set with an extra positional arg → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'knowledge-config', 'set', 'project', 'extra'])).toThrow(UsageError);
+  });
+
+  it('unknown action → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'knowledge-config', 'toggle'])).toThrow(UsageError);
+  });
+
+  it('unknown flag → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'knowledge-config', '--bogus'])).toThrow(UsageError);
   });
 });
 
@@ -336,6 +386,112 @@ describe('CLI subprocess — status', () => {
     expect(parsed).toHaveProperty('ready');
     expect(parsed).toHaveProperty('credentials');
     expect(parsed).toHaveProperty('paths');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subprocess — knowledge-config end-to-end, hermetic per-directory scoping.
+// Runs the built CLI against an isolated HOME + state dir so the real ~/.pi is
+// never touched and results are deterministic regardless of the developer's own
+// config.env. Exercises the actual persistence + precedence behavior, not mocks.
+// ---------------------------------------------------------------------------
+
+describe('CLI subprocess — knowledge-config (hermetic per-directory scoping)', () => {
+  let home: string;
+  let stateDir: string;
+  let work: string;
+
+  /** Build a clean environment: drop all ambient PI_RESEARCH_* and pin HOME + state dir. */
+  const hermeticEnv = (extra?: Record<string, string>): Record<string, string> => {
+    const base: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
+    }
+    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_STATE_DIR: stateDir, ...extra };
+  };
+  const runIn = (dir: string, args: string[], extra?: Record<string, string>) =>
+    spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: 'utf-8', env: hermeticEnv(extra), timeout: 20_000 });
+  const showJson = (dir: string, extra?: Record<string, string>) => {
+    const r = runIn(dir, ['knowledge-config', '--json'], extra);
+    expect(r.status).toBe(0);
+    return JSON.parse(r.stdout);
+  };
+  const mkdir = (name: string) => { const d = path.join(work, name); mkdirSync(d, { recursive: true }); return d; };
+
+  beforeAll(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), 'pir-kc-home-'));
+    stateDir = path.join(home, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    work = mkdtempSync(path.join(os.tmpdir(), 'pir-kc-work-'));
+  });
+  afterAll(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('defaults to global (enabled everywhere) from the built-in default when nothing is configured', () => {
+    const info = showJson(mkdir('default'));
+    expect(info.mode).toBe('global');
+    expect(info.origin).toBe('built-in default');
+  });
+
+  it('set persists the mode per-directory; a sibling directory is unaffected', () => {
+    const a = mkdir('a');
+    const b = mkdir('b');
+
+    const set = runIn(a, ['knowledge-config', 'set', 'project', '--json']);
+    expect(set.status).toBe(0);
+    const setInfo = JSON.parse(set.stdout);
+    expect(setInfo.saved).toBe(true);
+    expect(setInfo.mode).toBe('project');
+    expect(setInfo.previous).toBe('global');
+
+    const aShow = showJson(a);
+    expect(aShow.mode).toBe('project');
+    expect(aShow.origin).toBe('this directory (project settings)');
+
+    const bShow = showJson(b);        // sibling dir must NOT inherit a's override
+    expect(bShow.mode).toBe('global');
+    expect(bShow.origin).toBe('built-in default');
+  });
+
+  it('a per-directory setting overrides a machine-wide config.env default (bridge-fix regression guard)', () => {
+    // A machine-wide 'none' default in config.env must stay a low-precedence FILE layer, not be
+    // promoted into process.env — otherwise the per-directory registry could never override it.
+    const researchDir = path.join(home, '.pi', 'research');
+    mkdirSync(researchDir, { recursive: true });
+    writeFileSync(path.join(researchDir, 'config.env'), 'PI_RESEARCH_KNOWLEDGE_STORE_MODE=none\n');
+    try {
+      const c = mkdir('c');
+      const before = showJson(c);
+      expect(before.mode).toBe('none');
+      expect(before.origin).toBe('config.env (machine-wide default)');
+
+      const set = runIn(c, ['knowledge-config', 'set', 'global']);
+      expect(set.status).toBe(0);
+
+      const after = showJson(c);
+      expect(after.mode).toBe('global'); // registry beats the config.env machine-wide default
+      expect(after.origin).toBe('this directory (project settings)');
+    } finally {
+      rmSync(path.join(researchDir, 'config.env'), { force: true });
+    }
+  });
+
+  it('a real environment variable outranks the per-directory write, and set says so', () => {
+    const d = mkdir('d');
+    const set = runIn(d, ['knowledge-config', 'set', 'project'], { PI_RESEARCH_KNOWLEDGE_STORE_MODE: 'none' });
+    expect(set.status).toBe(0);
+    expect(set.stdout).toMatch(/higher-precedence environment variable/);
+    const info = showJson(d, { PI_RESEARCH_KNOWLEDGE_STORE_MODE: 'none' });
+    expect(info.mode).toBe('none');
+    expect(info.origin).toBe('environment variable');
+  });
+
+  it('set with an invalid mode exits 64', () => {
+    const r = runIn(mkdir('e'), ['knowledge-config', 'set', 'bogus']);
+    expect(r.status).toBe(64);
+    expect(r.stderr).toContain('invalid knowledge store mode');
   });
 });
 

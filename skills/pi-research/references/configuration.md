@@ -41,6 +41,22 @@ over `config.env` for the CLI only. Precedence:
 `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`, the report ends with
 `Research report saved to: <path>` — surface that path.
 
+### Knowledge-store scope (per-directory)
+
+`PI_RESEARCH_KNOWLEDGE_STORE_MODE` is **per-directory** (project-scoped): `global` (one
+shared store — the default), `project` (scoped to the current directory), or `none`
+(disabled here). The user changes it by asking you in chat; when they do, run it for them:
+
+```sh
+node "<SKILL_DIR>/scripts/run.mjs" knowledge-config                     # current mode + its source
+node "<SKILL_DIR>/scripts/run.mjs" knowledge-config set none|project|global
+```
+
+`set` persists to the per-directory project registry (`~/.pi/research/state/
+project-settings.json`, keyed by the directory) and applies on the next run. It overrides a
+machine-wide `config.env` default; a real `PI_RESEARCH_KNOWLEDGE_STORE_MODE` env var still
+outranks both (the command says so when that happens).
+
 ### Exit codes
 
 `0` success · `64` bad arguments · `78` not configured (engine missing or no

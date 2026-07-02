@@ -34,7 +34,7 @@ import {
 } from './sdk.ts';
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
-import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath } from './config.ts';
+import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
 // ---------------------------------------------------------------------------
@@ -183,6 +183,10 @@ function bridgeConfigEnv(explicitConfigPath?: string): { path: string; loaded: b
       if (!fs.existsSync(filePath)) continue;
       const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
       for (const [k, v] of Object.entries(parsed)) {
+        // Skip per-directory (project-scoped) keys: promoting them into process.env would make
+        // config.env out-rank the per-directory registry, defeating a per-cwd override. They are
+        // still applied as a lower-precedence file layer by getConfig()/loadEnvFiles().
+        if (isProjectScopedKey(k)) continue;
         if (process.env[k] === undefined && (k.startsWith('PI_RESEARCH_') || k === 'STACKEXCHANGE_API_KEY' || k === 'GITHUB_TOKEN' || k === 'NVD_API_KEY')) {
           process.env[k] = v;
         }
@@ -538,6 +542,61 @@ async function cmdStatus(json?: boolean): Promise<number> {
   return EXIT.OK;
 }
 
+/**
+ * knowledge-config subcommand: show or set the per-directory knowledge-store mode.
+ *
+ * `set` persists the mode for the CURRENT working directory via the same registry writer the
+ * interactive /research-config menu uses (saveConfig scope 'local' → ~/.pi/research/state/
+ * project-settings.json keyed by the normalized cwd), then resetConfig() so the new value is
+ * what the very next getConfig() returns. This is the supported way for an agent to change the
+ * setting on the user's behalf without hand-editing the locked registry JSON. A machine-wide
+ * default is set instead via the PI_RESEARCH_KNOWLEDGE_STORE_MODE env var (per-run) or config.env.
+ */
+async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeConfig']>): Promise<number> {
+  const cwd = process.cwd();
+
+  if (kc.action === 'set') {
+    const before = getConfig(cwd, 'cli').KNOWLEDGE_STORE_MODE;
+    const cfg = { ...getConfig(cwd, 'cli'), KNOWLEDGE_STORE_MODE: kc.mode! };
+    saveConfig(cfg, 'local', cwd); // per-directory registry write
+    resetConfig();                 // drop the cached config so `after` re-resolves from disk
+    const info = describeKnowledgeStoreMode(cwd, 'cli');
+    // The write always persists to the registry, but a real env var out-ranks the registry, so
+    // the EFFECTIVE mode can still differ from what was requested. Surface that instead of
+    // silently reporting a no-op.
+    const overridden = info.mode !== kc.mode;
+    if (kc.json) {
+      toStdout(pretty({ command: 'knowledge-config', action: 'set', requested: kc.mode, previous: before, saved: true, effectiveOverriddenBy: overridden ? info.origin : null, ...info, cwd }));
+      return EXIT.OK;
+    }
+    toStdout(
+      `knowledge store mode for this directory: ${before} -> ${kc.mode}  (saved per-directory)\n` +
+      `  scope:   ${kc.mode === 'none' ? 'disabled here' : kc.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
+      `  saved:   per-directory (${cwd})\n` +
+      `  db dir:  ${info.dbDir}\n` +
+      (overridden
+        ? `\nNOTE: the effective mode here is still '${info.mode}' because a higher-precedence ${info.origin} overrides it. Clear that source for this setting to take effect.\n`
+        : ''),
+    );
+    return EXIT.OK;
+  }
+
+  // show
+  const info = describeKnowledgeStoreMode(cwd, 'cli');
+  if (kc.json) {
+    toStdout(pretty({ command: 'knowledge-config', action: 'show', ...info, cwd }));
+    return EXIT.OK;
+  }
+  toStdout(
+    `knowledge store mode: ${info.mode}   (source: ${info.origin})\n` +
+    `  scope:   ${info.mode === 'none' ? 'disabled here' : info.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
+    `  db dir:  ${info.dbDir}\n` +
+    `\nchange it for THIS directory:  ${BINARY_NAME} knowledge-config set <none|project|global>\n` +
+    `change the machine-wide default: set PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode> in ${resolvedConfigPaths().configEnv}\n`,
+  );
+  return EXIT.OK;
+}
+
 // ---------------------------------------------------------------------------
 // Error reporting & shutdown
 // ---------------------------------------------------------------------------
@@ -608,6 +667,7 @@ interface ParsedArgs {
   command?: string;
   research?: ResearchArgs;
   knowledge?: { queries: string[]; json?: boolean };
+  knowledgeConfig?: { action: 'show' | 'set'; mode?: 'none' | 'project' | 'global'; json?: boolean };
   status?: { json?: boolean };
   configPath?: string;
   json?: boolean;
@@ -633,6 +693,11 @@ COMMANDS
     --config <path>              Read additional config from this file.
     --json                       Emit a JSON object.
 
+  knowledge-config [show]        Show the knowledge-store mode for this directory + its source.
+    --json                       Emit a JSON object.
+  knowledge-config set <mode>    Set the mode for THIS directory (none | project | global);
+                                 persisted per-directory. Takes effect on the next run.
+
   status                         Show detected config, model/key, and readiness.
     --json                       Emit a JSON object.
 
@@ -650,10 +715,10 @@ CONFIGURE
   The pi extension has its own optional overlay file:
     pi extension: ${p.piIfaceEnv}
 
-  Knowledge store (global by default; set to 'project' to scope per-directory,
-  or 'none' to disable):
-    PI_RESEARCH_KNOWLEDGE_STORE_MODE=none  (or project)
-    in ${p.configEnv}
+  Knowledge store — ON by default in every directory (mode 'global', one shared store).
+    per-directory:  ${BINARY_NAME} knowledge-config set <none|project|global>
+    machine-wide:   PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode>  in ${p.configEnv}
+    'project' scopes the store to the current directory; 'none' disables it here.
 
   Run \`${BINARY_NAME} status\` to see exactly what is detected.
 
@@ -717,6 +782,46 @@ export function parseArgs(argv: string[]): ParsedArgs {
     out.knowledge = { queries: positional, json };
     out.configPath = configPath;
     return out;
+  }
+
+  if (cmd === 'knowledge-config') {
+    let json = false;
+    let configPath: string | undefined;
+    const positional: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === '--json') json = true;
+      else if (a === '--config' && rest[i + 1]) configPath = rest[++i];
+      else if (a?.startsWith('--')) {
+        throw new UsageError(`unknown option for knowledge-config: ${a}`);
+      } else if (a !== undefined) {
+        positional.push(a);
+      }
+    }
+    const action = positional[0] ?? 'show';
+    if (action === 'show') {
+      out.command = 'knowledge-config';
+      out.knowledgeConfig = { action: 'show', json };
+      out.configPath = configPath;
+      return out;
+    }
+    if (action === 'set') {
+      const mode = positional[1];
+      if (mode === undefined) {
+        throw new UsageError('knowledge-config set requires a mode: none | project | global.');
+      }
+      if (mode !== 'none' && mode !== 'project' && mode !== 'global') {
+        throw new UsageError(`invalid knowledge store mode "${mode}". Use one of: none | project | global.`);
+      }
+      if (positional.length > 2) {
+        throw new UsageError(`unexpected argument "${positional[2]}" after "knowledge-config set ${mode}".`);
+      }
+      out.command = 'knowledge-config';
+      out.knowledgeConfig = { action: 'set', mode, json };
+      out.configPath = configPath;
+      return out;
+    }
+    throw new UsageError(`unknown knowledge-config action "${action}". Use: show | set <none|project|global>.`);
   }
 
   if (cmd === 'research') {
@@ -846,6 +951,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdStatus(parsed.status?.json);
     case 'knowledge':
       return cmdKnowledge(parsed.knowledge!.queries, parsed.knowledge!.json);
+    case 'knowledge-config':
+      return cmdKnowledgeConfig(parsed.knowledgeConfig!);
     case 'research':
       return cmdResearch(parsed.research!);
     default:

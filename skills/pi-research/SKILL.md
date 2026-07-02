@@ -31,7 +31,8 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
    intent before any live research — it's instant and free.
    - Complete answer → use it, skip live research.
    - Partial → note it, fill gaps with `research`.
-   - Exit 78 → store disabled/unconfigured; stay silent (opt-in feature), just proceed.
+   - Exit 78 → store is off in this directory; proceed with `research`. Don't mention it
+     unless the user asks — then see *Knowledge store scope* below to turn it on.
 2. **Live research — always depth `1`.** It's the default and correct for
    effectively every request; depth 1 already decomposes and parallelises
    internally, so it covers big/broad/complex/important topics too. Do NOT raise
@@ -58,6 +59,23 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 | `78` on `research` | Engine missing or no model/key | **Stop. Relay full stderr** (it shows where to configure). Don't retry until fixed. |
 | `70` | Runtime error | Relay stderr; suggest one retry for transient failures (network, rate limit). |
 | `64` | Bad arguments | Fix args; don't surface unless the query itself is malformed. |
+
+## Knowledge store scope (act on the user's request)
+
+The knowledge store — what `knowledge` searches — is **on by default** (mode `global`) and
+scoped per directory: `global` (one shared store), `project` (this directory only), or `none`
+(off here). The user manages it by **asking you in chat** — they don't run anything themselves.
+
+When the user asks you to turn the store off, make it global, or scope it to this project for
+the current directory (or clearly implies a preference), do it on their behalf and tell them
+the new setting. Check the current one first if useful:
+
+```
+node "<SKILL_DIR>/scripts/run.mjs" knowledge-config                    # current mode + where it's set
+node "<SKILL_DIR>/scripts/run.mjs" knowledge-config set none|project|global
+```
+
+The change applies to the current directory on the next run. Never change it unprompted.
 
 ## When NOT to use this
 

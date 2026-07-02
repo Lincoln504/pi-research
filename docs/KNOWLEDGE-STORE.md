@@ -43,6 +43,14 @@ a project-scoped setting you can change per directory:
 | `project` | Findings are scoped to the working directory they were created in; only that directory retrieves them. |
 | `none` | The store is disabled — no data is read or written. The `research_knowledge_search` tool stays registered (so re-enabling the mode later needs no pi restart) but is not advertised to the agent: its prompt guidance is stripped, and any direct call returns a "knowledge store is disabled" result. The `/knowledge-store` command is unavailable. |
 
+Change the mode for the current directory with the `/research-config` TUI (Knowledge Mode)
+in the pi extension, or with `pi-research knowledge-config set none|project|global` on the
+standalone CLI (`pi-research knowledge-config` shows the current mode and its source). Under
+the agent skill you don't run anything — you ask the agent to change it and it runs that
+command for you. All persist to the per-directory project registry; a per-directory value
+overrides a machine-wide `PI_RESEARCH_KNOWLEDGE_STORE_MODE` in `config.env`, and a real
+environment variable overrides everything. The change applies on the next run — no restart.
+
 All scopes share one physical LanceDB directory; project vs. global rows are
 distinguished by columns (a normalized workspace path and a global flag) and filtered
 at query time, not by separate folders. The default database directory is

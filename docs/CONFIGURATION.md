@@ -205,6 +205,19 @@ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH=2
 Project registry. Project-scoped settings (research depth and knowledge-store
 mode) are stored per directory in `project-settings.json`, keyed by normalized
 working-directory path. They override the base and overlays for that directory only.
+In the pi extension the `/research-config` TUI writes them. On the standalone CLI you can
+set the knowledge-store mode per directory directly:
+
+```sh
+pi-research knowledge-config                       # show the mode here and where it comes from
+pi-research knowledge-config set none|project|global
+```
+
+Under the agent skill you don't run this yourself — you ask the agent (e.g. "disable the
+knowledge store here" / "make it project-scoped") and it runs the same command on your
+behalf. Either way it lands in the registry (above `config.env` in precedence), so a
+per-directory value overrides a machine-wide `config.env` default; a real environment
+variable still outranks both.
 
 process.env. A real environment variable always wins. For a one-off override,
 just export the variable for that process.
