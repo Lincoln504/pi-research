@@ -13,7 +13,7 @@ global file entirely and run purely from defaults + `process.env` + `options.con
 
 > Runtime requirement. The package exports (`.` and `/sdk`) resolve to
 > TypeScript source — there is no transpiled `dist/sdk.js`. Import it from a
-> TypeScript-aware runtime: the pi host (which loads it natively), Node ≥ 22.6
+> TypeScript-aware runtime: the pi host (which loads it natively), Node ≥ 22.19
 > with type stripping (`node --experimental-strip-types your-script.ts`, the
 > default from Node 23.6+), or a loader such as `tsx` / `ts-node`. Plain
 > `node script.js` doing `require('@lincoln504/pi-research/sdk')` will not work.

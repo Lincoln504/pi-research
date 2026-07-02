@@ -93,6 +93,11 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
         run: npm ci --legacy-peer-deps
+      # Self-heal the @lancedb/lancedb native binding (npm/cli#4828 can drop it),
+      # mirroring the CI unit-test job. test:unit loads the binding via
+      # store.initialize(), so without this a dropped binding would flake the release.
+      - name: Ensure native bindings
+        run: node scripts/ensure-native-deps.cjs
       - run: npm run lint
       - run: npm run type-check
       - run: npm run type-check:tests
