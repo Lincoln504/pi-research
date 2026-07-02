@@ -29,10 +29,6 @@ Check the knowledge store first. For a web-research question, call `research_kno
 
 ---
 
-**Knowledge store scope (only if the user asks):** the store is on by default and its scope is per-directory — `global` (one shared store, the default), `project` (scoped to this directory), or `none` (off here). These tools can't change the setting themselves; if the user wants it changed, tell them to run the `/research-config` command (Knowledge Mode), which applies live with no restart.
-
----
-
 #### What counts as web research?
 
 - Questions requiring current information (news, trends, latest developments)
