@@ -205,7 +205,7 @@ src/
 ├── config.ts             env-var parsing, validation, singleton
 ├── constants.ts          team sizes, round caps, tool budgets, batch limits
 ├── logger.ts             structured logger (JSONL, TUI-safe)
-├── tool.ts               research + health tool definitions
+├── tool.ts               re-export barrel for the research + health tool definitions
 ├── research-config.ts    /research-config TUI
 ├── core/
 │   ├── llm/              prompts, model resolution, agentic JSON repair, inject-date
@@ -220,9 +220,10 @@ src/
 │   ├── knowledge-store-service.ts, metrics-service.ts, file-lock-service.ts
 │   └── process-lifecycle-service.ts
 ├── orchestration/
-│   ├── session/          in-memory research-session tracking, PI session metadata
 │   ├── deep-research-orchestrator.ts, quick-research-orchestrator.ts
-│   ├── research-orchestration-service.ts, researcher-executor.ts, researcher.ts
+│   ├── research-orchestration-service.ts, research-synthesis-service.ts
+│   ├── research-session-service.ts, session-state.ts, session-context.ts
+│   ├── researcher-executor.ts, researcher.ts, headless-observer.ts
 ├── prompts/              Markdown prompt templates for all agents
 ├── tools/                search, scrape, youtube_transcript, security, stackexchange, grep, read, knowledge-search
 ├── knowledge/            embedder, store, writer queue, chunker, migration, webgpu probe

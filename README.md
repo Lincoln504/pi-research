@@ -50,8 +50,7 @@ Ask in natural language — the tool understands the depth needed:
 - Unlimited search and scrape, for free — you only pay for LLM tokens.
 - Context-efficient — it returns a synthesized, cited report to the chat instead of dumping raw web content into the conversation.
 - Safe by design — web access runs inside a specialized, limited research agent with no filesystem or shell access.
-- Search a little or a lot — three depth levels (four in SDK mode, which adds the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
-- Holds up against other tools — many in the pi community have built competitive web-research extensions. Though pi-research has not been tested head-to-head against these, it does outperform the Claude Code web-research subagent: usually faster to respond and more comprehensive in results, and cheap to run via a smaller model.
+- Search a little or a lot — three depth levels in the pi tool (four via the SDK and standalone CLI, which add the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
 
 ### Requirements / limitations
 
@@ -77,6 +76,8 @@ Standalone CLI / agent skill
 ```bash
 npm install -g @lincoln504/pi-research
 ```
+
+Then configure a model and key — set `PI_RESEARCH_MODEL` (e.g. `openai/gpt-4o`) plus `PI_RESEARCH_API_KEY` and `PI_RESEARCH_PROVIDER`, either as environment variables or in `~/.pi/research/config.env`. See [Configuration](docs/CONFIGURATION.md). (The pi extension needs no key — it uses pi's own auth.)
 
 See [Agent skill](docs/AGENT-SKILL.md) for details.
 

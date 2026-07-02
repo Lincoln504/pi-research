@@ -31,7 +31,7 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
    intent before any live research — it's instant and free.
    - Complete answer → use it, skip live research.
    - Partial → note it, fill gaps with `research`.
-   - Exit 78 → store disabled/empty; stay silent (opt-in feature), just proceed.
+   - Exit 78 → store disabled/unconfigured; stay silent (opt-in feature), just proceed.
 2. **Live research — always depth `1`.** It's the default and correct for
    effectively every request; depth 1 already decomposes and parallelises
    internally, so it covers big/broad/complex/important topics too. Do NOT raise

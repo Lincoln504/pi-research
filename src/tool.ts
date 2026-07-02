@@ -12,7 +12,7 @@
  * - observers/research-observer-impl.ts - Research lifecycle observer
  * - cleanup/research-cleanup.ts - Session cleanup logic
  * - tui/research-health.ts - Health check helpers
- * - orchestration/session/pi-session.ts - PI session metadata helpers
+ * - orchestration/research-session-service.ts - session tracking and metadata helpers
  */
 
 /**

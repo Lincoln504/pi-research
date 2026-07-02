@@ -51,8 +51,9 @@ CPU/RAM-sensitive and set only via `PI_RESEARCH_WORKER_THREADS`.
 ### Environment variables
 
 Every setting is also an environment variable. The repo's
-[`.env.example`](../.env.example) is the canonical, exhaustive list with inline
-notes; this section groups the same variables with their defaults and valid ranges.
+[`.env.example`](https://github.com/Lincoln504/pi-research/blob/main/.env.example)
+is the canonical, exhaustive list with inline notes; this section groups the same
+variables with their defaults and valid ranges.
 Out-of-range numeric values are clamped (with a warning); an invalid enum value
 falls back to the default (with a warning).
 
