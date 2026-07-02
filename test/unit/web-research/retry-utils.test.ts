@@ -29,6 +29,13 @@ describe('retry-utils', () => {
       expect(isTransientError(new Error('Validation failed'))).toBe(false);
       expect(isTransientError(null)).toBe(false);
     });
+
+    it('does not over-classify words/numbers that merely contain "rate" or a 5xx substring', () => {
+      // "generate"/"moderate" contain "rate"; a token count contains "500".
+      expect(isTransientError(new Error('failed to generate a research plan'))).toBe(false);
+      expect(isTransientError(new Error('response was moderate quality'))).toBe(false);
+      expect(isTransientError(new Error('context of 50000 tokens exceeded budget'))).toBe(false);
+    });
   });
 
   describe('retryWithBackoff', () => {

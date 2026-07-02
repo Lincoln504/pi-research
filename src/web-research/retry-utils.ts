@@ -197,20 +197,19 @@ export function isTransientError(error: unknown): boolean {
     return true;
   }
 
-  // Rate limiting
-  if (message.includes('429') || message.includes('rate') || message.includes('quota')) {
+  // Rate limiting. Anchor on word boundaries so we don't treat "generate",
+  // "moderate" (contain "rate") or "429" embedded in a larger number as
+  // transient — matching the StackExchange client's boundary-anchored guard.
+  if (/\b429\b/.test(message) || /\brate\b/.test(message) || message.includes('quota')) {
     return true;
   }
 
-  // Temporary service unavailability or server errors
+  // Temporary service unavailability or 5xx server errors. \b5\d\d\b matches a
+  // standalone 5xx code without matching a substring of e.g. a "50000" token.
   if (
-    message.includes('503') || 
-    message.includes('500') || 
-    message.includes('502') || 
-    message.includes('504') ||
-    message.includes('temporarily') || 
-    message.includes('unavailable') ||
-    message.includes('http 5')
+    /\b5\d\d\b/.test(message) ||
+    message.includes('temporarily') ||
+    message.includes('unavailable')
   ) {
     return true;
   }
