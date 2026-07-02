@@ -133,6 +133,85 @@ describe('OSV Client', () => {
       expect(result.vulnerabilities[0]!.id).toBe('OSV-HIGH');
     });
 
+    it('surfaces a CVSS v4-only record under a severity filter instead of silently dropping it', async () => {
+      // scoreCvss3 only computes CVSS v3, so a record whose only severity signal is a
+      // CVSS v4 vector stays UNKNOWN with no numeric score. Under a severity filter the
+      // old code dropped it — hiding a possibly-CRITICAL advisory. It is a scored vuln
+      // we simply can't rank, so it must be surfaced, not hidden.
+      const mockResponse = {
+        vulns: [
+          {
+            id: 'OSV-V4-ONLY',
+            severity: [
+              { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => mockResponse } as Response);
+
+      const result = await searchOSV(['pkg'], { ecosystem: 'npm', severity: 'CRITICAL' });
+
+      expect(result.count).toBe(1);
+      expect(result.vulnerabilities[0]!.id).toBe('OSV-V4-ONLY');
+      // Honest about not being able to rank it (rather than a guessed severity).
+      expect(result.vulnerabilities[0]!.severity).toBe('UNKNOWN');
+    });
+
+    it('drops a rankable non-matching record while still surfacing an unscored one', async () => {
+      // Proves the inclusion is scoped to UNSCORED records: a LOW record is rankable and
+      // does not match a CRITICAL filter, so it is still dropped; the v4-only record is
+      // surfaced. Both behaviors in one response.
+      const mockResponse = {
+        vulns: [
+          { id: 'OSV-LOW', database_specific: { severity: 'LOW' } },
+          {
+            id: 'OSV-V4-ONLY',
+            severity: [{ type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N' }],
+          },
+        ],
+      };
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => mockResponse } as Response);
+
+      const result = await searchOSV(['pkg'], { ecosystem: 'npm', severity: 'CRITICAL' });
+
+      expect(result.vulnerabilities.map((v) => v.id)).toEqual(['OSV-V4-ONLY']);
+    });
+
+    it('still drops a record with NO severity signal at all under a filter (no flooding)', async () => {
+      const mockResponse = { vulns: [{ id: 'OSV-NOSEV', summary: 'no severity anywhere' }] };
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => mockResponse } as Response);
+
+      const result = await searchOSV(['pkg'], { ecosystem: 'npm', severity: 'HIGH' });
+
+      expect(result.count).toBe(0);
+    });
+
+    it('surfaces an unscored CVSS vector carried at the affected-package level under a filter', async () => {
+      // Some ecosystems attach the CVSS entry to affected[].severity rather than the
+      // top-level severity[]. That is still an unscored-but-present vector, so it must
+      // survive a severity filter too.
+      const mockResponse = {
+        vulns: [
+          {
+            id: 'OSV-AFFECTED-V4',
+            affected: [
+              {
+                package: { name: 'p' },
+                severity: [{ type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N' }],
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => mockResponse } as Response);
+
+      const result = await searchOSV(['pkg'], { ecosystem: 'npm', severity: 'HIGH' });
+
+      expect(result.count).toBe(1);
+      expect(result.vulnerabilities[0]!.id).toBe('OSV-AFFECTED-V4');
+    });
+
     it('should parse complex OSV fields (ranges, CWEs, references)', async () => {
       const mockVuln = {
         id: 'OSV-COMPLEX',

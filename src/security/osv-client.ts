@@ -170,7 +170,24 @@ export async function searchOSV(
           // every medium-severity OSV result (the most common filter value).
           const want = options.severity.toUpperCase();
           const normalized = want === 'MODERATE' ? 'MEDIUM' : want;
-          if (vuln.severity !== normalized) continue;
+          if (vuln.severity === 'UNKNOWN') {
+            // We could not rank this record. If it nonetheless carries a CVSS vector we
+            // don't score — mapOsvItemToVulnerability only computes CVSS v3, so a v4-only
+            // (increasingly common) or v2-only record stays UNKNOWN — it IS a scored
+            // vulnerability whose number we simply can't compute. Silently dropping it
+            // under a severity filter would hide a possible HIGH/CRITICAL, so surface it
+            // instead (the safe bias for security triage: a false-include beats a hidden
+            // finding). A record with NO severity signal at all stays filtered out so
+            // results are not flooded with genuinely unranked noise.
+            const hasUnscoredVector =
+              (Array.isArray(item.severity) && item.severity.length > 0) ||
+              (Array.isArray(item.affected) &&
+                item.affected.some((a) => Array.isArray(a.severity) && a.severity.length > 0));
+            if (!hasUnscoredVector) continue;
+            metrics.increment('osv_unscored_included_total', 1, { filter: normalized });
+          } else if (vuln.severity !== normalized) {
+            continue;
+          }
         }
         vulns.push(vuln);
       }
