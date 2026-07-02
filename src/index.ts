@@ -552,7 +552,11 @@ export default async function (pi: ExtensionAPI) {
     // Gate the KNOWLEDGE SEARCH prompt block on LIVE Knowledge Mode (not the startup tool
     // binding, which is now always registered) so enabling/disabling via /research-config
     // applies without a Pi restart. The tool must also be selected for this turn.
-    const knowledgeModeEnabled = getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE !== 'none';
+    // Key the gate off the SAME cwd the tool and /knowledge-store command resolve config
+    // from (ctx.cwd, not the activation pi.cwd) — KNOWLEDGE_STORE_MODE is per-directory, so
+    // when the session cwd differs from the activation dir the prompt block and the tool
+    // must not disagree on whether the store is enabled.
+    const knowledgeModeEnabled = getConfig(ctx.cwd ?? (pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE !== 'none';
     const isKnowledgeSearchAvailable = knowledgeModeEnabled &&
       (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name));
 

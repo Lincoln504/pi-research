@@ -40,7 +40,7 @@ export function validateQuery(query: string): { isValid: boolean; error?: string
   const dangerousPatterns = [
     /<script/i,
     /javascript:/i,
-    /on\w+\s*=/i, // Event handlers like onclick=
+    /(^|[\s"'<])on\w+\s*=/i, // Event handlers like onclick= (boundary-anchored so "pokemon2=" / "season2=" don't false-positive)
     /<iframe/i,
     /<object/i,
     /<embed/i,

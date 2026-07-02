@@ -268,7 +268,7 @@ class SessionMetrics {
    * Returns a shallow copy so callers cannot mutate the internal list.
    */
   public getRunHistory(): readonly RunSummary[] {
-    return this._runHistory;
+    return [...this._runHistory];
   }
 
   // ── Run lifecycle API ──────────────────────────────────────────────────

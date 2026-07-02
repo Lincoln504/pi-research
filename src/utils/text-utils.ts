@@ -134,7 +134,9 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
  * Format a timestamp as a human-readable relative time string.
  */
 export function formatTimeAgo(isoTimestamp: string): string {
-  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  const parsed = new Date(isoTimestamp).getTime();
+  if (Number.isNaN(parsed)) return 'unknown';
+  const diffMs = Date.now() - parsed;
   const diffMinutes = Math.floor(diffMs / 60_000);
   if (diffMinutes < 1) return 'just now';
   if (diffMinutes < 60) return `${diffMinutes}m ago`;

@@ -554,7 +554,7 @@ function reportError(err: unknown, what: string): number {
     lower.includes('no api key') ||
     lower.includes('provider must be specified') ||
     lower.includes('invalid model string') ||
-    lower.includes('auth') ||
+    lower.includes('authentication') ||
     lower.includes('unauthorized') ||
     lower.includes('api key');
 
