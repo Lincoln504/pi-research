@@ -52,19 +52,6 @@ describe('TUI Research Panel', () => {
       const headerLine = lines[0];
       expect(headerLine).toMatch(/Research.*50%/);
     });
-
-    it('should NOT render status message in header if present (removed per user preference)', () => {
-      const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
-      state.statusMessage = 'planning';
-      
-      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
-      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
-      const component = componentCreator({} as any, mockTheme);
-      const lines = component.render(80);
-      
-      const headerLine = lines[0];
-      expect(headerLine).not.toContain('planning');
-    });
   });
 
   describe('coordinator column identified by slice id, not label text', () => {

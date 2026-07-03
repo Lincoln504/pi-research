@@ -77,8 +77,7 @@ export function createResearchObserver(
         addSlice(panelState, state.quickSliceLabel, state.quickSliceLabel, false);
         activateSlice(panelState, state.quickSliceLabel);
         updateSliceStatus(panelState, state.quickSliceLabel, 'starting...', debouncedRefresh);
-        panelState.statusMessage = 'researching';
-        
+
         const units = getUnitsPerResearcher();
         panelState.progress = { expected: units, made: 0 };
       }
@@ -94,7 +93,6 @@ export function createResearchObserver(
       }
       const status = attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning';
       updateSliceStatus(panelState, 'coord', status, debouncedRefresh);
-      panelState.statusMessage = status;
       // Keep steering acceptable: the coordinator LLM cannot be interrupted, but a
       // message entered now is queued (not injected mid-call) and consumed at the
       // next round boundary. Forcing it false here diverted it to a separate pi
@@ -105,7 +103,6 @@ export function createResearchObserver(
 
     onPlanningProgress: (status) => {
       updateSliceStatus(panelState, 'coord', status, debouncedRefresh);
-      panelState.statusMessage = status;
       debouncedRefresh();
     },
 
@@ -119,7 +116,6 @@ export function createResearchObserver(
     onPlanningSuccess: (plan) => {
       updateSliceStatus(panelState, 'coord', 'ready', debouncedRefresh);
       completeSlice(panelState, 'coord');
-      panelState.statusMessage = undefined;
       const unitsPerResearcher = getUnitsPerResearcher();
       const count = plan.researchers?.length || 0;
       const units = (count * unitsPerResearcher) + LEAD_EVAL_UNITS;
@@ -164,7 +160,6 @@ export function createResearchObserver(
         activateSlice(panelState, sliceId); // Ensure not queued
         updateSliceStatus(panelState, sliceId, 'searching...', debouncedRefresh);
       }
-      panelState.statusMessage = 'searching';
       panelState.isSearching = true;
 
       // Search phase — steering is acceptable (will be consumed at next round boundary)
@@ -207,7 +202,6 @@ export function createResearchObserver(
 
       const status = `${count} results`;
       if (sliceId) updateSliceStatus(panelState, sliceId, status, debouncedRefresh);
-      panelState.statusMessage = `searching: ${status}`;
       debouncedRefresh();
     },
 
@@ -221,7 +215,6 @@ export function createResearchObserver(
       }
       panelState.waveFrame = undefined;
       panelState.waveColors = undefined; // Clear persistent colors for next search
-      panelState.statusMessage = undefined;
 
       // Mirror onSearchStart: only complete a box that actually hosted the search
       // (coordinator in round 1, quick slice in quick mode). Rounds 2+ have none.
@@ -360,7 +353,6 @@ export function createResearchObserver(
       addSlice(panelState, 'eval', 'eval', false);
       activateSlice(panelState, 'eval');
       updateSliceStatus(panelState, 'eval', 'evaluating', debouncedRefresh);
-      panelState.statusMessage = 'evaluating';
       // Keep steering acceptable during evaluation. The running evaluator call
       // already captured its inputs, so a message entered now is queued and acted
       // on at the NEXT round start (the whole point of mid-run steering). Forcing
@@ -372,7 +364,6 @@ export function createResearchObserver(
 
     onEvaluationProgress: (status) => {
       updateSliceStatus(panelState, 'eval', status, debouncedRefresh);
-      panelState.statusMessage = status;
       debouncedRefresh();
     },
 
@@ -384,7 +375,6 @@ export function createResearchObserver(
 
     onEvaluationDecision: (action, plan, round) => {
       completeSlice(panelState, 'eval');
-      panelState.statusMessage = undefined;
       // Only clear completed researchers when returning final synthesis
       // On delegation, researchers stay visible while new round researchers are added
       if (action === 'synthesize') {
@@ -414,14 +404,12 @@ export function createResearchObserver(
 
     onComplete: () => {
       if (panelState.progress) panelState.progress.made = panelState.progress.expected;
-      panelState.statusMessage = undefined;
       panelState.steeringAcceptable = false;
       debouncedRefresh();
     },
 
     onError: () => {
       if (panelState.progress) panelState.progress.made = panelState.progress.expected;
-      panelState.statusMessage = undefined;
       panelState.steeringAcceptable = false;
       debouncedRefresh();
     }

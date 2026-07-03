@@ -45,8 +45,6 @@ export interface ResearchPanelState {
   isSearching?: boolean;
   /** Optional progress bar data. Set after planning completes. */
   progress?: ResearchProgress;
-  /** Temporary status message displayed in the header (e.g. 'planning...') */
-  statusMessage?: string;
   /** Animation frame counter for traveling wave effect during search */
   waveFrame?: number;
   /** Last-visit frame per position for wave animation decay */
