@@ -68,6 +68,10 @@ export class QuickResearchOrchestrator {
     observer?.onStart?.(query, 0);
 
     let subscription: (() => void) | undefined;
+    // Tracks whether a terminal callback (onComplete/onError) has fired, so the outer
+    // catch below can fire onError for an EARLY throw (healthcheck/session-setup, before
+    // the inner research try) without double-firing when the inner catch already handled it.
+    let terminalCallbackFired = false;
 
     try {
         // Pre-flight health check to ensure browser pool is operational.
@@ -367,6 +371,7 @@ export class QuickResearchOrchestrator {
           // effect of onSearchComplete — leaving it stuck when the researcher answered
           // without searching. Now the lifecycle mirrors deep mode.
           observer?.onResearcherComplete?.('quick', result);
+          terminalCallbackFired = true;
           observer?.onComplete?.(result);
           return result;
         } catch (error) {
@@ -384,9 +389,24 @@ export class QuickResearchOrchestrator {
           if (!aborted) {
             observer?.onResearcherFailure?.('quick', error instanceof Error ? error.message : String(error));
           }
+          terminalCallbackFired = true;
           observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
           throw error;
         }
+    } catch (error) {
+        // Any throw BEFORE the inner research try (healthcheck failure at :99, session
+        // registration at :212, container disposed mid-setup) skips the inner catch, so
+        // without this run() would reject with onStart fired but no terminal callback —
+        // leaving the TUI/headless quick slice stuck "in progress" forever. Fire onError
+        // exactly once (the inner catch sets the flag for its own scope).
+        if (!terminalCallbackFired) {
+          const aborted = signal?.aborted === true;
+          if (!aborted) {
+            observer?.onResearcherFailure?.('quick', error instanceof Error ? error.message : String(error));
+          }
+          observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+        }
+        throw error;
     } finally {
         if (subscription) subscription();
 

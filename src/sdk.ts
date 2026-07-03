@@ -56,6 +56,12 @@ let globalApiKey: string | undefined = undefined;
 let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
 let _lastSessionId: string | null = null;
+// Guards against overlapping runDeepResearch calls on the one SDK instance. The
+// `_last*` accessors below are module singletons with last-writer-wins semantics, so a
+// second concurrent run would silently corrupt the first run's reported sessionId /
+// metrics / reports. Concurrent runs are documented-unsupported; this converts that
+// silent mis-attribution into an explicit, contract-matching error.
+let _isRunning = false;
 // The researchId of the most recent runDeepResearch call. Per-researcher reports are
 // stored keyed by researchId (not sessionId), so getResearchReports() must look them up
 // by this value — sessionId is a distinct random UUID that was never a report key.
@@ -382,11 +388,11 @@ export async function scrapeUrl(url: string, signal?: AbortSignal): Promise<Scra
  *          tracked internally; call getResearchReports() (no args) afterwards to
  *          retrieve the per-researcher reports from this run.
  *
- * Note: `_lastSessionId` and `_lastRunSummary` are module-level singletons with
- * last-writer-wins semantics. Overlapping concurrent calls will overwrite each
- * other's session/metrics state. Use `runResearchDetailed()` — which captures
- * both atomically before returning — or pass an explicit sessionId to
- * `getResearchReports()` when running concurrent sessions.
+ * Note: `_lastSessionId` and `_lastRunSummary` are module-level singletons. Because
+ * overlapping concurrent calls would corrupt each other's session/metrics/report state,
+ * a concurrent call on the same SDK instance throws immediately (run sequentially, or use
+ * a separate process/instance). Within a run, `runResearchDetailed()` captures the
+ * session/metrics atomically.
  */
 export async function runDeepResearch(
   query: string,
@@ -394,6 +400,11 @@ export async function runDeepResearch(
   signal?: AbortSignal
 ): Promise<string> {
   if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+
+  if (_isRunning) {
+    throw new Error('A research run is already in progress on this SDK instance; concurrent runs are not supported. Await the current run, or use a separate process/instance.');
+  }
+  _isRunning = true;
 
   const researchId = `sdk-${Date.now()}`;
   const sessionId = randomUUID();
@@ -463,6 +474,13 @@ export async function runDeepResearch(
     _lastErrorReport = runTracker.getReport();
     logRunErrorSummary(_lastErrorReport, depthLabel, 'error');
     throw err;
+  } finally {
+    // Free the per-run PiSessionState that shouldStopResearch()/getFailedResearchers()
+    // lazily created (keyed by this run's random sessionId). A long-lived SDK/benchmark
+    // process doing thousands of runs would otherwise accumulate one never-freed entry
+    // (failures/aborts/panels) per run — only full shutdown reclaimed them before.
+    try { endResearchSession(sessionId, researchId); } catch { /* best-effort */ }
+    _isRunning = false;
   }
 }
 
@@ -675,7 +693,7 @@ export async function searchKnowledge(
   };
 }
 
-import { clearAllSessionState } from './orchestration/session-state.ts';
+import { clearAllSessionState, endResearchSession } from './orchestration/session-state.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
 /**
