@@ -17,6 +17,10 @@ coverage/
 .nyc_output/
 test-results/
 
+# Skill launcher SOURCE — only the built run.mjs (produced by build.cjs skill on prepare)
+# is executed; the .ts source would otherwise ship as dead weight in the tarball.
+skills/pi-research/scripts/run.ts
+
 
 # Build tooling (defence-in-depth; not in files[])
 .github/

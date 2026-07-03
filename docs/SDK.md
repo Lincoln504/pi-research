@@ -12,12 +12,18 @@ global file entirely and run purely from defaults + `process.env` + `options.con
 — self-contained and reproducible from code.
 
 > Runtime requirement. The package exports (`.` and `/sdk`) resolve to
-> TypeScript source — there is no transpiled `dist/sdk.js`. Import it from a
-> TypeScript-aware runtime: the pi host (which loads it natively), Node ≥ 22.19
-> with type stripping (`node --experimental-strip-types your-script.ts`, the
-> default from Node 23.6+), or a loader such as `tsx` / `ts-node`. Plain
-> `node script.js` doing `require('@lincoln504/pi-research/sdk')` will not work.
-> (`engines.node` is `>=22.19.0`, so a supported install already meets this.)
+> TypeScript source — there is no transpiled `dist/sdk.js`. It must run on a
+> runtime that *transforms* TypeScript, not merely strips types: the source uses
+> `enum` and constructor parameter properties, which Node's strip-only mode
+> (`--experimental-strip-types`, the default since Node 23.6) rejects with
+> `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. Use one of:
+> - the pi host, which loads it natively;
+> - **`node --experimental-transform-types your-script.ts`** — must be passed
+>   explicitly; full transform is not the default on any current Node release;
+> - a loader such as `tsx` or `ts-node`.
+>
+> Plain `node script.js` doing `require('@lincoln504/pi-research/sdk')`, or
+> `--experimental-strip-types`, will not work. (`engines.node` is `>=22.19.0`.)
 
 ```typescript
 import {
@@ -52,8 +58,14 @@ await shutdownResearchSDK();
 `options.apiKey` + `options.provider`, else `process.env.PI_RESEARCH_API_KEY` /
 `PI_RESEARCH_PROVIDER`, else pi's `~/.pi/agent/auth.json`. Other exports include
 `runResearchDetailed`, `searchKnowledge`, `scrapeUrl`, `getResearchHealth`,
-`getLastRunStats`, and `getSessionMetrics`. Both `@lincoln504/pi-research` and
-`@lincoln504/pi-research/sdk` export these symbols.
+`getLastRunStats`, and `getSessionMetrics`, plus `exportKnowledge` (write the
+knowledge store to a web-consumable JSON file) and the post-run telemetry accessors
+`getLastRunMetrics`, `getLastRunSummary`, and `getLastErrorReport`. Both
+`@lincoln504/pi-research` and `@lincoln504/pi-research/sdk` export these symbols.
+
+> Concurrency: a single initialized SDK instance runs one research call at a time.
+> Overlapping `runDeepResearch`/`runQuickResearch` calls on the same instance throw
+> — run them sequentially, or use a separate process per concurrent run.
 
 The SDK does not write report files. Report export is a front-end concern — the pi
 extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.

@@ -21,6 +21,7 @@
     "dist/webgpu-probe.mjs",
     "dist/prompts/",
     "skills/",
+    "!skills/pi-research/scripts/run.ts",
     "!src/.env",
     "!src/.env.local",
     "!src/.env.*.local",
@@ -151,7 +152,7 @@
     "depngn": "^0.6.0",
     "eslint": "^10.4.0",
     "npm-check-updates": "^22.2.1",
-    "typescript": "^6.0.3",
+    "typescript": ">=6.0.3 <6.1.0",
     "vitest": "^4.1.7"
   }
 }
