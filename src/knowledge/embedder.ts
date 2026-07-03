@@ -147,6 +147,11 @@ export class Embedder {
         return;
       }
       this.state = 'ready';
+      // Re-point the global ref on the idle→active revive: a prior idle dispose() called
+      // unregisterGlobalEmbedder() (nulling the ref), which would otherwise leave the
+      // beforeExit ORT-teardown safety net pointing at nothing for the now-live pipeline.
+      // Idempotent — the shutdown task is WeakSet-guarded, so no callback is leaked.
+      registerGlobalEmbedder(this);
     } catch (err) {
       this.state = 'failed';
       throw err;

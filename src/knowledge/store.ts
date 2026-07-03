@@ -58,11 +58,6 @@ export class KnowledgeStore implements IKnowledgeStore {
   private manifestPath: string;
   private isClosing = false;
   private activeWrites = new Set<Promise<any>>();
-  // Set when getFreshTable() had to fall back to the existing cached handle after a
-  // transient re-open failure (i.e. this.table may NOT reflect the latest committed
-  // version). The FTS skip-guard consults this to fail SAFE — rebuild rather than trust
-  // a version() read off a possibly-stale snapshot and wrongly skip needed indexing.
-  private tableHandleStale = false;
   // LanceDB table version at the last successful FTS rebuild. rebuildFtsIndex() skips
   // when the version is unchanged: a research run that committed no new transactions
   // would otherwise create a fresh FTS index (and a new table version) on every cleanup,
@@ -272,6 +267,14 @@ export class KnowledgeStore implements IKnowledgeStore {
       await this.saveManifest();
     } catch (err) {
       logger.error('[store] Failed to open database:', err);
+      // Roll back a partial open: connect() may have succeeded (this.db set) before a
+      // later step (createTable/migration/evict/saveManifest) threw. Leaving this.db set
+      // makes a subsequent open() short-circuit on `if (this.db) return` and treat a
+      // half-open store (this.table possibly null) as ready. Null both so the next open
+      // genuinely retries.
+      try { await this.db?.close(); } catch { /* best-effort */ }
+      this.db = null;
+      this.table = null;
       throw err;
     }
   }
@@ -483,10 +486,21 @@ export class KnowledgeStore implements IKnowledgeStore {
    * a cheap manifest re-read.
    */
   private async getFreshTable(): Promise<lancedb.Table> {
+    return (await this.openFreshTable()).table;
+  }
+
+  /**
+   * Re-open the table and report whether the returned handle is a genuinely fresh
+   * re-open (`stale=false`) or a fallback to the previously-cached handle after a
+   * transient re-open failure (`stale=true`). The FTS skip-guards must reason about
+   * the freshness of the handle THEY hold, not a shared field a concurrent op can
+   * reset out from under them — so staleness is returned per-call, not stored.
+   */
+  private async openFreshTable(): Promise<{ table: lancedb.Table; stale: boolean }> {
     if (!this.db) throw new Error('Store not open');
     try {
       this.table = await this.db.openTable(this.tableName);
-      this.tableHandleStale = false;
+      return { table: this.table, stale: false };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // If the table genuinely no longer exists (dropped/renamed by another
@@ -498,12 +512,11 @@ export class KnowledgeStore implements IKnowledgeStore {
       }
       if (!this.table) throw err;
       // Transient (lock/IO) refresh failure: keep using the existing handle, but
-      // log at WARN so the degraded path is visible rather than silent, and mark the
-      // handle stale so version-based skip guards fail safe (rebuild, don't skip).
-      this.tableHandleStale = true;
+      // log at WARN so the degraded path is visible rather than silent, and report
+      // the handle as stale so version-based skip guards fail safe (rebuild, don't skip).
       logger.warn(`[store] Failed to refresh table handle, using existing: ${msg}`);
+      return { table: this.table, stale: true };
     }
-    return this.table!;
   }
 
   /**
@@ -544,7 +557,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         return;
       }
 
-      const table = await this.getFreshTable();
+      let table = await this.getFreshTable();
       const workspace = this.getWorkspace();
 
       await this.withEmbedderReconnect(async (embedder) => {
@@ -575,9 +588,13 @@ export class KnowledgeStore implements IKnowledgeStore {
               const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
               logger.debug(`[store] Write contention detected, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
               await new Promise(r => setTimeout(r, delay));
-              
-              // Refresh table handle for the next attempt
-              await this.getFreshTable();
+
+              // Refresh the table handle AND rebind the local so the retry writes
+              // against the latest committed version. Discarding this return (the prior
+              // bug) left every retry re-running against the same version-pinned snapshot,
+              // so a Version-mismatch conflict re-failed all 5 attempts and the batch was
+              // silently dropped under concurrent cross-process writes.
+              table = await this.getFreshTable();
               continue;
             }
             throw err;
@@ -697,9 +714,14 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async findDocumentsByUrl(url: string): Promise<StoreDocument[]> {
-    const table = await this.getFreshTable();
-    const scopeFilter = this.getScopeFilter();
-    return findDocumentsByUrl(table, url, scopeFilter);
+    // Coordinate with close(): findByUrl runs via the writer-queue in the post-run
+    // background window (link-description storage), exactly when a Ctrl+C-driven
+    // close() is most likely to race it — read against a freed native handle otherwise.
+    return this.trackOperation('findDocumentsByUrl', [] as StoreDocument[], async () => {
+      const table = await this.getFreshTable();
+      const scopeFilter = this.getScopeFilter();
+      return findDocumentsByUrl(table, url, scopeFilter);
+    });
   }
 
   async exportForWeb(outputPath: string): Promise<void> {
@@ -757,6 +779,9 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null> {
+    // Runs mid-research (scrape cache lookup); coordinate with close() so a teardown
+    // can't free the native handle while this query is in flight.
+    return this.trackOperation('rebuildDocument', null, async () => {
     const table = await this.getFreshTable();
     const scopeFilter = this.getScopeFilter();
 
@@ -791,16 +816,22 @@ export class KnowledgeStore implements IKnowledgeStore {
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'parse_error' });
       return null;
     }
+    });
   }
 
   async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<{ url: string; description: string; provenance?: string }[]> {
-    const table = await this.getFreshTable();
-    const scopeFilter = this.getScopeFilter();
-    return this.circuitBreaker.execute(() =>
-      this.withEmbedderReconnect(embedder =>
-        findRelevantUrls(table, embedder, query, this.getReranker.bind(this), options.limit ?? 20, scopeFilter)
-      )
-    );
+    // Runs mid-research from both orchestrators + the knowledge-search tool. Keep the
+    // circuitBreaker/embedder-reconnect INSIDE the tracked fn so a clean close-skip
+    // returns [] rather than surfacing a use-after-close error that trips the breaker.
+    return this.trackOperation('findRelevantUrls', [] as { url: string; description: string; provenance?: string }[], async () => {
+      const table = await this.getFreshTable();
+      const scopeFilter = this.getScopeFilter();
+      return this.circuitBreaker.execute(() =>
+        this.withEmbedderReconnect(embedder =>
+          findRelevantUrls(table, embedder, query, this.getReranker.bind(this), options.limit ?? 20, scopeFilter)
+        )
+      );
+    });
   }
 
   async rebuildFtsIndex(): Promise<boolean> {
@@ -816,7 +847,7 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private async _rebuildFtsIndexInner(): Promise<boolean> {
-    const table = await this.getFreshTable();
+    const { table, stale } = await this.openFreshTable();
     try {
       const count = await table.countRows();
       if (count === 0) {
@@ -834,7 +865,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       // fell back to a stale cached handle, version() may read an old snapshot that
       // happens to equal lastFtsVersion — skipping a rebuild that new content needs.
       // Fail safe: rebuild.
-      if (!this.tableHandleStale && this.lastFtsVersion === version) {
+      if (!stale && this.lastFtsVersion === version) {
         logger.debug(`[store] Skipping FTS index rebuild (table version unchanged at ${version})`);
         return false;
       }
@@ -889,7 +920,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     if (this.options.knowledgeMode === 'none') return false;
 
     const run = async (): Promise<boolean> => {
-      const table = await this.getFreshTable();
+      const { table, stale } = await this.openFreshTable();
       const startTime = Date.now();
       try {
         // optimize() commits a new manifest version (compaction) but never changes the
@@ -900,7 +931,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         // rebuilds + re-optimizes (the disk-bloat regression). A stale baseline (index not
         // current, or never built) is left untouched so the next rebuild still detects the
         // pending change.
-        const wasFtsIndexCurrent = !this.tableHandleStale && this.lastFtsVersion !== null && this.lastFtsVersion === await table.version();
+        const wasFtsIndexCurrent = !stale && this.lastFtsVersion !== null && this.lastFtsVersion === await table.version();
         // cleanupOlderThan defaults to now: prune every prunable old version. The
         // current version is always retained, and (with deleteUnverified=false)
         // physical files inside LanceDB's safety window are kept regardless.
@@ -1022,45 +1053,50 @@ export class KnowledgeStore implements IKnowledgeStore {
   async countScoped(workspace?: string): Promise<{ local: number; global: number; projects: number }> {
     if (!this.db) return { local: 0, global: 0, projects: 0 };
 
-    let retryCount = 0;
-    const MAX_RETRIES = 5;
-    const BASE_DELAY = 100;
+    // Coordinate with close() — runs from healthcheck + research-config status display.
+    // Keep the contention-retry loop INSIDE the tracked fn so a clean close-skip returns
+    // zeroed counts rather than throwing a non-retryable use-after-close.
+    return this.trackOperation('countScoped', { local: 0, global: 0, projects: 0 }, async () => {
+      let retryCount = 0;
+      const MAX_RETRIES = 5;
+      const BASE_DELAY = 100;
 
-    while (retryCount <= MAX_RETRIES) {
-      try {
-        const table = await this.getFreshTable();
-        const ws = normalizeWorkspacePath(workspace || this.getWorkspace());
-        const escaped = ws.replace(/'/g, "''");
+      while (retryCount <= MAX_RETRIES) {
+        try {
+          const table = await this.getFreshTable();
+          const ws = normalizeWorkspacePath(workspace || this.getWorkspace());
+          const escaped = ws.replace(/'/g, "''");
 
-        const [local, global] = await Promise.all([
-          table.countRows(`workspace = '${escaped}'`),
-          table.countRows(`is_global = true`)
-        ]);
+          const [local, global] = await Promise.all([
+            table.countRows(`workspace = '${escaped}'`),
+            table.countRows(`is_global = true`)
+          ]);
 
-        const allWorkspaces = await table.query()
-          .select(['workspace'])
-          .toArray();
+          const allWorkspaces = await table.query()
+            .select(['workspace'])
+            .toArray();
 
-        const uniqueWorkspaces = new Set<string>();
-        for (const row of allWorkspaces) {
-          if (row.workspace) uniqueWorkspaces.add(row.workspace as string);
+          const uniqueWorkspaces = new Set<string>();
+          for (const row of allWorkspaces) {
+            if (row.workspace) uniqueWorkspaces.add(row.workspace as string);
+          }
+
+          return { local, global, projects: uniqueWorkspaces.size };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+            retryCount++;
+            if (retryCount > MAX_RETRIES) throw err;
+            const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+            logger.debug(`[store] Read contention detected in countScoped, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw err;
         }
-
-        return { local, global, projects: uniqueWorkspaces.size };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
-          retryCount++;
-          if (retryCount > MAX_RETRIES) throw err;
-          const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
-          logger.debug(`[store] Read contention detected in countScoped, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
-          continue;
-        }
-        throw err;
       }
-    }
-    return { local: 0, global: 0, projects: 0 }; // Should not be reached
+      return { local: 0, global: 0, projects: 0 }; // Should not be reached
+    });
   }
 
   async clear(filter?: string): Promise<void> {

@@ -144,13 +144,25 @@ export function markWebGpuFallback(): void {
 // Global embedder reference for process-exit cleanup.
 let globalEmbedderRef: { dispose: () => Promise<void> } | null = null;
 
+// Instances that have already registered a shutdown-manager task. ShutdownManager
+// dedups by task IDENTITY, and each registerGlobalEmbedder call would otherwise pass a
+// fresh closure — so re-registering the same instance (e.g. on the idle→active revive
+// that restores globalEmbedderRef) must NOT add a second, never-removed task. The
+// WeakSet lets a disposed instance be GC'd without leaking an entry.
+const embeddersWithShutdownTask = new WeakSet<object>();
+
 /**
  * Register an Embedder instance for process-exit cleanup.
- * Called by Embedder constructor.
+ * Called by the Embedder constructor AND on each idle→active revive in initialize(),
+ * so it must be idempotent: the ref is always (re-)pointed, but the shutdown task is
+ * registered at most once per instance.
  */
 export function registerGlobalEmbedder(e: { dispose: () => Promise<void> }): void {
   globalEmbedderRef = e;
-  
+
+  if (embeddersWithShutdownTask.has(e)) return;
+  embeddersWithShutdownTask.add(e);
+
   // Register with shutdown manager for graceful extension shutdown.
   shutdownManager.register(async () => {
     if (globalEmbedderRef === e) {
