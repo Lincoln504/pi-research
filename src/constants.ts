@@ -104,6 +104,16 @@ export const MAX_EXTRA_ROUNDS_WITH_STEERING = 2;
 
 export const OSV_TIMEOUT_MS = 10000;
 
+/**
+ * Hard cap for the out-of-process WebGPU viability probe when the embedding model
+ * is ALREADY cached on disk. A real WebGPU init on a capable host completes in
+ * ~1-3s; this bounds the fall-back-to-CPU on a GPU-less host (headless VM/CI/
+ * software-Vulkan) to seconds instead of the multi-minute model-init budget. The
+ * first-ever run (model not yet downloaded) keeps the full init budget — see
+ * resolveEmbeddingDevice. Mirrors the cached-pipeline 30s reuse in embedder.ts.
+ */
+export const WEBGPU_PROBE_TIMEOUT_MS = 30_000;
+
 // ==================== Export Constants ====================
 
 /** Maximum query length for validation */

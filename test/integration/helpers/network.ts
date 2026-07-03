@@ -16,6 +16,13 @@ const NETWORK_ERROR_PATTERNS: readonly RegExp[] = [
     /throttle_violation/i,
     /too many requests/i,
     /rate limit/i,
+    // Upstream API throttling from the live third-party APIs these integration
+    // tests hit (Stack Exchange / NVD / OSV / GitHub Advisory). Shared CI datacenter
+    // IPs exhaust the anonymous per-IP quota, so an HTTP 429/503 is an environment
+    // condition, not a code fault — treat it like any other transient network miss.
+    // (The tools format these as e.g. "Stack Exchange error: HTTP 429 …".)
+    /HTTP 429/i,
+    /HTTP 503/i,
     // HTML error responses from APIs (application-level failures)
     /<\!DOCTYPE/i,
     /<html/i,

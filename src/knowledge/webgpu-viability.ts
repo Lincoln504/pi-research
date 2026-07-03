@@ -24,6 +24,8 @@ import * as path from 'node:path';
 
 import { logger } from '../logger.ts';
 import { getModelCacheDir } from './embedder-utils.ts';
+import { isModelCached } from './embedder-init.ts';
+import { WEBGPU_PROBE_TIMEOUT_MS } from '../constants.ts';
 
 export type ResolvedDevice = 'webgpu' | 'cpu';
 
@@ -169,11 +171,25 @@ function runProbe(model: string, cacheDir: string, timeoutMs: number): Promise<b
 }
 
 /**
+ * In-process memoization of the running probe, keyed by host signature. Mirrors
+ * the embedding-factory `_embeddingInitPromise` singleton idiom: the probe AND its
+ * `writeVerdict` persist run inside ONE promise held at module scope. If the caller
+ * that started the probe is torn down before it settles (e.g. a health check losing
+ * a `Promise.race` timeout, or a store dispose), the module-level reference keeps
+ * the promise alive so `writeVerdict` still runs on the continuation — so the
+ * expensive probe is paid at most once per process instead of repeating every init.
+ * Bypassed under PI_RESEARCH_WEBGPU_REPROBE=1 (same escape hatch as readVerdict).
+ */
+let _probeInFlight: { signature: string; promise: Promise<boolean> } | null = null;
+
+/**
  * Resolve the configured device to a concrete backend. See module header.
  *
  * @param requested  config EMBEDDING_DEVICE value ('auto' | 'webgpu' | 'cpu')
  * @param model      embedding model id (passed to the probe)
- * @param timeoutMs  hard cap for the probe child (model may need to download)
+ * @param timeoutMs  hard cap for the probe child on a first-ever (uncached) run,
+ *                   where the child may still download the model. Once the model is
+ *                   cached, WEBGPU_PROBE_TIMEOUT_MS applies instead (fast CPU fallback).
  */
 export async function resolveEmbeddingDevice(
   requested: string,
@@ -192,10 +208,27 @@ export async function resolveEmbeddingDevice(
     return cached ? 'webgpu' : 'cpu';
   }
 
-  logger.info('[embedder] Probing WebGPU viability in a disposable child process...');
-  const cacheDir = getModelCacheDir();
-  const viable = await runProbe(model, cacheDir, timeoutMs);
-  await writeVerdict(signature, viable);
+  const reprobe = process.env['PI_RESEARCH_WEBGPU_REPROBE'] === '1';
+  if (reprobe || _probeInFlight?.signature !== signature) {
+    // A cached model needs only a fast WebGPU init, so bound the probe tightly to
+    // fail fast to CPU on a GPU-less host; an uncached first run may download the
+    // model inside the probe, so keep the full caller budget there.
+    const probeTimeoutMs = (await isModelCached(model)) ? WEBGPU_PROBE_TIMEOUT_MS : timeoutMs;
+    logger.info('[embedder] Probing WebGPU viability in a disposable child process...');
+    const cacheDir = getModelCacheDir();
+    // runProbe never throws and writeVerdict swallows its own errors, so this
+    // promise never rejects — no poisoned-memo concern.
+    _probeInFlight = {
+      signature,
+      promise: (async () => {
+        const v = await runProbe(model, cacheDir, probeTimeoutMs);
+        await writeVerdict(signature, v);
+        return v;
+      })(),
+    };
+  }
+
+  const viable = await _probeInFlight.promise;
   logger.info(
     viable
       ? '[embedder] WebGPU probe succeeded — using WebGPU.'

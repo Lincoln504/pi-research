@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable, resolveHeadlessMode } from '../infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../infrastructure/browser/task-execution-service.ts';
-import { getService, tryGetServiceContainerFromCtx, getServiceContainer } from '../core/service-registry.ts';
+import { getService, tryGetServiceContainerFromCtx, getServiceContainer, ServiceLifecycle } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IStateManager, IHealthRegistryService, IKnowledgeStoreService, ISchedulerService } from '../core/service-interfaces.ts';
@@ -82,6 +82,30 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
 
   // Register Knowledge Store Check
   registry.register('KnowledgeStore', async (options) => {
+    // Idle fast-path — mirrors the BrowserRuntime check above. Read the ALREADY
+    // resolved instance via tryGet(), which does NOT initialize the service;
+    // getService() (below) would run the full LanceDB open + ONNX model load +
+    // WebGPU probe, so a non-forced health check must never take that path on a
+    // cold store. Only inspect for real when the store is already initialized OR an
+    // explicit probe is requested (force).
+    const existing = container.tryGet<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    const alreadyInitialized = existing?.lifecycle === ServiceLifecycle.INITIALIZED;
+    if (!alreadyInitialized && !options?.force) {
+      const idleCwd = existing?.getCwd() ?? process.cwd();
+      if (getConfig(idleCwd).KNOWLEDGE_STORE_MODE === 'none') {
+        return { healthy: true, diagnostic: { status: 'disabled in config' } };
+      }
+      // A store that already resolved-then-disabled (native stack absent) reports
+      // its permanent capability gap; an unresolved store is simply idle.
+      if (existing?.lifecycle === ServiceLifecycle.DISABLED) {
+        return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
+      }
+      const status = existing?.lifecycle === ServiceLifecycle.INITIALIZING ? 'initializing' : 'ready (idle)';
+      return { healthy: true, diagnostic: { status } };
+    }
+
+    // Full inspection (already-initialized OR forced): resolve via getService —
+    // cheap when warm (early-returns), full init only on a forced cold probe.
     // Resolve cwd from the live service (it captured ctx.cwd at init) so the
     // health check reads the SAME config the store actually uses. Reading
     // process.cwd() here silently ignored SDK/CLI cwd overrides.

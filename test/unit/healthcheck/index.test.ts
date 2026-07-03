@@ -243,7 +243,11 @@ describe('healthcheck', () => {
       { allowOverwrite: true, enableLogging: false }
     );
 
-    const result = await runHealthCheck();
+    // force: a non-forced check no longer force-initializes the store (it reports
+    // idle on a cold store); actively probing the embedding server's liveness is a
+    // forced operation, and is also what an already-initialized store does on a
+    // normal check.
+    const result = await runHealthCheck({ force: true });
 
     const ks = result.components?.find(c => c.component === 'KnowledgeStore');
     expect(ks?.healthy).toBe(false);
@@ -274,12 +278,38 @@ describe('healthcheck', () => {
       { allowOverwrite: true, enableLogging: false }
     );
 
-    const result = await runHealthCheck();
+    // force: resolving the store is what surfaces the native-binding failure; a
+    // non-forced check reports idle without resolving (see the idle-path test below).
+    const result = await runHealthCheck({ force: true });
 
     const ks = result.components?.find(c => c.component === 'KnowledgeStore');
     expect(ks?.healthy).toBe(true);
     expect(String(ks?.diagnostic?.['status'])).toMatch(/native embedding\/vector stack unavailable/i);
     // The degraded store must NOT drag overall health to unhealthy.
+    expect(result.status).not.toBe('unhealthy');
+  });
+
+  it('reports the knowledge store idle (ready) WITHOUT resolving/initializing it on a non-forced check', async () => {
+    // Fix A: a non-forced health check must not resolve a cold store (resolving runs
+    // the LanceDB open + ONNX model load + WebGPU probe). It reports a cheap idle
+    // status via the non-initializing tryGet(), exactly like the BrowserRuntime check.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    // The factory throws if ever invoked — proving a non-forced check never resolves it.
+    const factory = vi.fn(() => { throw new Error('store must not be initialized by a non-forced health check'); });
+    registerService(ServiceNames.KNOWLEDGE_STORE, factory, { allowOverwrite: true, enableLogging: false });
+
+    const result = await runHealthCheck(); // non-forced
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    expect(String(ks?.diagnostic?.['status'])).toBe('ready (idle)');
+    expect(factory).not.toHaveBeenCalled();
     expect(result.status).not.toBe('unhealthy');
   });
 
