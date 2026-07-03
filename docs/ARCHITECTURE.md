@@ -270,6 +270,16 @@ other). This sits above `@lancedb/lancedb` 0.29's declared Arrow peer ceiling
 (`>=15.0.0 <=18.1.0`); it is verified working, but the override should be re-validated
 whenever `@lancedb/lancedb` is upgraded.
 
+Pinned validation library — `typebox` is pinned to the exact version the pi host packages
+depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` pin `1.1.38`). Every
+tool's parameter schema is built with TypeBox here and handed across the boundary to pi's
+tool system, so the two must agree on `Value.Check`/`Convert` semantics. A floating `^1.1.38`
+range let a fresh consumer install resolve pi-research to a newer TypeBox than pi's, shipping
+an untested cross-version pairing; the exact pin keeps pi-research on the same version pi
+validates with. Bump it in lockstep with the pi host, not independently. (`undici`, by
+contrast, tracks the host's major — the host is on undici 8, and pi-research only uses the
+stable `Agent` connector API, so it follows `^8`.)
+
 Transient-failure resilience — every LLM call is a potential single point of failure on a
 streaming endpoint that can drop mid-response (undici surfaces this as `terminated`). The
 coordinator and evaluator calls retry fast transient transport failures (socket aborts, 5xx,
