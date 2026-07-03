@@ -112,12 +112,17 @@ export async function fetchVideoTranscripts(
   // 1) Throwaway session to obtain stable visitor data for the PoToken binding.
   let visitorData: string;
   try {
-    const seed = await withTimeout(
+    // Route the once-per-batch seed session through the same breaker as fetchOne: the
+    // seed + mint are the steps most prone to a SYSTEMIC outage (BotGuard/attestation
+    // down, non-residential IP), and without the breaker every batch paid the full
+    // timeout on each one. Only transient errors count toward the threshold (the breaker
+    // gates on isTransientError), so a permanent "no residential IP" failure won't trip it.
+    const seed = await breaker.execute(() => withTimeout(
       Innertube.create({ retrieve_player: false }),
       timeoutMs,
       'youtube:create-seed-session',
       signal,
-    );
+    ));
     visitorData = seed.session.context?.client?.visitorData ?? '';
   } catch (error) {
     logger.warn(`[youtube] Failed to create seed session: ${msg(error)}`);
@@ -139,12 +144,12 @@ export async function fetchVideoTranscripts(
     // kept running and held the mutex forever — one stalled Google socket then hung every later
     // YouTube mint in the run (each surfacing as a 20s "token unavailable").
     const mintSignal = createTimeoutSignal(timeoutMs, signal);
-    tokens = await withTimeout(
+    tokens = await breaker.execute(() => withTimeout(
       mintPoTokens([visitorData, ...videoIds], { requestKey: opts.requestKey, fetchImpl, signal: mintSignal }),
       timeoutMs,
       'youtube:mint',
       signal,
-    );
+    ));
   } catch (error) {
     // Without a PoToken, timedtext silently returns empty — so degrade honestly:
     // report every video as unavailable with the real reason.
@@ -341,6 +346,11 @@ function parseJson3(body: string): string {
   try {
     parsed = JSON.parse(body);
   } catch {
+    // Log the real cause: an unparseable body is NOT necessarily an empty
+    // bot-protection response (the caller's default diagnosis) — it can be an HTML
+    // interstitial or a response-shape change. A short snippet disambiguates without
+    // dumping a huge/again-sensitive body.
+    logger.debug(`[youtube] timedtext body was not valid json3 (first 120 chars): ${body.slice(0, 120)}`);
     return '';
   }
   const events = (parsed as { events?: unknown[] }).events;
