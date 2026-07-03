@@ -14,6 +14,10 @@ import { ServiceNames } from '../../core/interfaces/service-names.ts';
 import { StateValidator } from './state-validator.ts';
 import { CURRENT_STATE_VERSION } from '../types/state-types.ts';
 
+// How many newest .quarantine copies to retain. Small: they exist only for forensic
+// inspection of a newer-build/older-reader collision, never for restore.
+const QUARANTINE_KEEP = 5;
+
 /**
  * Manages backup and recovery for state files
  */
@@ -196,6 +200,33 @@ export class StateBackupManager implements IService {
     const dest = path.join(this.backupDirPath, name);
     await fs.copyFile(this.stateFilePath, dest);
     logger.warn(`[StateManager] Quarantined newer-build state (v${fileVersion}) copy at ${dest}`);
+    // Quarantine files are deliberately excluded from cleanupOldBackups (they must never be
+    // restored into an older reader), so nothing else prunes them. Cap retention here so a
+    // machine that repeatedly runs an older build against newer state (rollback, bisect,
+    // flip-flopping installs) can't accumulate them without bound.
+    await this.pruneQuarantineFiles(QUARANTINE_KEEP);
+  }
+
+  /** Keep only the newest `keep` *.quarantine files; delete the rest. Best-effort. */
+  private async pruneQuarantineFiles(keep: number): Promise<void> {
+    try {
+      const entries = await fs.readdir(this.backupDirPath);
+      const quarantines: Array<{ name: string; mtime: number }> = [];
+      for (const entry of entries) {
+        if (!entry.endsWith('.quarantine')) continue;
+        try {
+          const stats = await fs.stat(path.join(this.backupDirPath, entry));
+          if (stats.isFile()) quarantines.push({ name: entry, mtime: stats.mtimeMs });
+        } catch { /* raced away — ignore */ }
+      }
+      if (quarantines.length <= keep) return;
+      quarantines.sort((a, b) => b.mtime - a.mtime);
+      for (const stale of quarantines.slice(keep)) {
+        try {
+          await fs.unlink(path.join(this.backupDirPath, stale.name));
+        } catch { /* already gone — ignore */ }
+      }
+    } catch { /* backup dir unreadable — nothing to prune */ }
   }
 
   /**
