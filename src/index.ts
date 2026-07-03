@@ -36,8 +36,33 @@ export type { ResearchObserver } from './core/interfaces/observer-interfaces.ts'
 export { normalizeUrl } from './utils/shared-links.ts';
 export { resetConfig, getConfig, setConfig, validateConfig } from './config.ts';
 
-// Programmatic SDK Exports
-export * from './sdk.ts';
+// Programmatic SDK Exports. Explicit list (not `export *`) so getSDKContainer —
+// @internal, test-only in src/sdk.ts, imported only by shutdown-perf.test.ts via a
+// direct relative path — is not re-published from the package's primary entry point.
+// (It remains reachable via the separate, intentional `@lincoln504/pi-research/sdk`
+// raw-module subpath in package.json exports, which this does not touch.)
+export {
+  initResearchSDK,
+  type ResearchSDKOptions,
+  repairJson,
+  exportKnowledge,
+  verifyUrl,
+  scrapeUrl,
+  runDeepResearch,
+  getLastRunMetrics,
+  getLastRunSummary,
+  getLastErrorReport,
+  getLastRunStats,
+  getSessionMetrics,
+  getResearchHealth,
+  runQuickResearch,
+  getResearchReports,
+  type ResearchRunResult,
+  runResearchDetailed,
+  type KnowledgeSearchResult,
+  searchKnowledge,
+  shutdownResearchSDK,
+} from './sdk.ts';
 export { HeadlessObserver, type HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 
 // Audit / metrics types for SDK consumers (getLastRunMetrics/getLastRunStats etc.)
