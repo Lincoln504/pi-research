@@ -9,7 +9,7 @@ vi.mock('../../src/utils/text-utils.ts', () => ({
   normalizeWorkspacePath: vi.fn((p: string) => p),
 }));
 
-import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, type Config as _Config, DEFAULTS } from '../../src/config';
+import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, parseDotEnv, type Config as _Config, DEFAULTS } from '../../src/config';
 import * as fs from 'node:fs';
 
 // Mock fs to avoid reading .env during tests
@@ -26,6 +26,38 @@ vi.mock('node:fs', async () => {
     closeSync: vi.fn(),
     statSync: vi.fn(() => ({ mtimeMs: Date.now() })),
   };
+});
+
+describe('parseDotEnv — the single canonical parser', () => {
+  it('strips a matched pair of surrounding double or single quotes', () => {
+    const out = parseDotEnv([
+      'PI_RESEARCH_MODEL="openai/gpt-4o"',
+      "PI_RESEARCH_PROVIDER='openai'",
+    ].join('\n'));
+    // Regression: the CLI's bridge parser stripped quotes but config's did not, so a quoted
+    // project-scoped value (only config's parser ever sees those) retained literal quotes.
+    expect(out.PI_RESEARCH_MODEL).toBe('openai/gpt-4o');
+    expect(out.PI_RESEARCH_PROVIDER).toBe('openai');
+  });
+
+  it('leaves unquoted, inner, and mismatched-quote values untouched', () => {
+    const out = parseDotEnv([
+      'A=plain',
+      'B=say "hi" there',      // inner quotes, not surrounding
+      'C="oops',               // only a leading quote
+      'D=#notacomment=x',      // # only starts a comment at line start
+    ].join('\n'));
+    expect(out.A).toBe('plain');
+    expect(out.B).toBe('say "hi" there');
+    expect(out.C).toBe('"oops');
+    expect(out.D).toBe('#notacomment=x');
+  });
+
+  it('ignores comments/blank lines and drops prototype-polluting keys', () => {
+    const out = parseDotEnv('# comment\n\n__proto__=evil\nK=v\n');
+    expect(out.K).toBe('v');
+    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+  });
 });
 
 describe('config (refactored)', () => {

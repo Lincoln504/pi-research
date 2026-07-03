@@ -35,7 +35,7 @@ import {
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
-import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey } from './config.ts';
+import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey, parseDotEnv } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
 // ---------------------------------------------------------------------------
@@ -138,29 +138,6 @@ function makeProgressObserver(): HeadlessObserverOptions {
 // Configuration bootstrap
 // ---------------------------------------------------------------------------
 
-/**
- * Parse a minimal KEY=VALUE dotenv file. Mirrors the parser in config.ts but is
- * self-contained here so the CLI can bridge auth vars into process.env without a
- * dependency on an unexported helper.
- */
-function parseDotEnv(content: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of content.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq < 1) continue;
-    const key = line.slice(0, eq).trim();
-    let val = line.slice(eq + 1).replace(/\r$/, '');
-    // Strip surrounding quotes.
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
-    if (key) out[key] = val;
-  }
-  return out;
-}
 
 /**
  * Bridge the CLI's config files into process.env for keys not already set in the

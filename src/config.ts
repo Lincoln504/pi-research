@@ -479,7 +479,15 @@ export function describeKnowledgeStoreMode(
   return { mode: cfg.KNOWLEDGE_STORE_MODE, origin, dbDir: getDbDir(cfg, cwd) };
 }
 
-function parseDotEnv(content: string): Record<string, string> {
+/**
+ * Parse a minimal KEY=VALUE dotenv file. The single canonical parser — the CLI's
+ * env bridge (bridgeConfigEnv) imports this too, so both paths agree on edge cases
+ * like surrounding-quote stripping. Previously the CLI kept a divergent copy that
+ * stripped quotes while this one did not; a quoted value on a project-scoped key
+ * (which only this parser ever sees, since the CLI bridge skips those) then retained
+ * its literal quote characters.
+ */
+export function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const raw of content.split('\n')) {
     const line = raw.trim();
@@ -487,7 +495,11 @@ function parseDotEnv(content: string): Record<string, string> {
     const eq = line.indexOf('=');
     if (eq < 1) continue;
     const key = line.slice(0, eq).trim();
-    const val = line.slice(eq + 1).replace(/\r$/, '');
+    let val = line.slice(eq + 1).replace(/\r$/, '');
+    // Strip a matched pair of surrounding quotes so KEY="value" yields value.
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
     if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     if (key) out[key] = val;
   }
