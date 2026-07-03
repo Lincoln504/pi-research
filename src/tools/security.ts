@@ -39,7 +39,7 @@ export function createSecuritySearchTool(options: {
       default: false,
     })),
     ecosystem: Type.Optional(Type.String({
-      description: 'Package ecosystem for OSV: npm, pip, maven, go, rust, cargo, etc.',
+      description: 'Package ecosystem (for OSV and GitHub package lookups): npm, pip, maven, go, rust, nuget, rubygems, composer, pub. Common aliases (pypi, cargo, golang, gem) are accepted and normalized per database.',
     })),
     githubRepo: Type.Optional(Type.String({
       description: 'GitHub repository for advisories: "owner/repo" format',

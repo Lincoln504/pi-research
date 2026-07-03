@@ -8,6 +8,7 @@
 
 import type { Vulnerability, OSVResult } from './types.ts';
 import type { OsvVulnerability, OsvQueryRequest } from './osv-types.ts';
+import { normalizeEcosystem } from './ecosystem.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { logger } from '../logger.ts';
 import { OSV_TIMEOUT_MS, DEFAULT_MAX_RETRIES, DEFAULT_INITIAL_DELAY_MS, DEFAULT_MAX_DELAY_MS } from '../constants.ts';
@@ -118,7 +119,7 @@ export async function searchOSV(
         if (options?.ecosystem === undefined || options.ecosystem === '') {
           return { vulns: [], skipped: true };
         }
-        const body: OsvQueryRequest = { package: { name: term, ecosystem: options.ecosystem } };
+        const body: OsvQueryRequest = { package: { name: term, ecosystem: normalizeEcosystem(options.ecosystem, 'osv') } };
         response = await fetchWithRetry(`${OSV_BASE_URL}/query`, {
           method: 'POST',
           headers: {

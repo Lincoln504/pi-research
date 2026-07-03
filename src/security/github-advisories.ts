@@ -13,6 +13,7 @@
 
 import type { Advisory, GitHubResult } from './types.ts';
 import type { GitHubAdvisoryRaw } from './github-advisory-types.ts';
+import { normalizeEcosystem } from './ecosystem.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -183,7 +184,7 @@ export async function searchGitHubAdvisories(
           // `affects` on a non-package phrase would just return nothing.
           const ecosystemParam =
             options?.ecosystem !== undefined && options.ecosystem !== ''
-              ? `&ecosystem=${encodeURIComponent(options.ecosystem)}`
+              ? `&ecosystem=${encodeURIComponent(normalizeEcosystem(options.ecosystem, 'github'))}`
               : '';
           const affectsParam = !/\s/.test(term) ? `&affects=${encodeURIComponent(term)}` : '';
           apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc${ecosystemParam}${affectsParam}`;
