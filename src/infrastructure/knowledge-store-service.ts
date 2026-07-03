@@ -125,7 +125,12 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         this._initializedMode = config.KNOWLEDGE_STORE_MODE;
         const embedderFactory = () => getEmbedder(config);
         const reconnectFactory = async () => {
-          clearEmbeddingInstance();
+          // MUST await: clearEmbeddingInstance() only nulls the cached instance AFTER its
+          // internal `await instance.dispose()` resolves. Without awaiting, getEmbedder(config)
+          // runs while the old instance is still cached and (for unchanged config) returns that
+          // same still-disposing instance — so the reconnect hands back the very embedder it
+          // was trying to replace on a leader handoff.
+          await clearEmbeddingInstance();
           return getEmbedder(config);
         };
 

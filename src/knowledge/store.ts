@@ -725,11 +725,15 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async exportForWeb(outputPath: string): Promise<void> {
+    // Reachable from the public SDK (exportKnowledge()) at any time — coordinate with
+    // close() like the other reads so a concurrent teardown can't free the native handle
+    // mid-query and surface a use-after-close to the caller.
+    return this.trackOperation('exportForWeb', undefined, async () => {
     const table = await this.getFreshTable();
     const scopeFilter = this.getScopeFilter();
 
     logger.info(`[store] Exporting knowledge store for web to: ${outputPath} (scope=${scopeFilter})`);
-    
+
     // 1. Fetch all synthesis-description entries
     // We only want the high-quality summaries and their vectors for semantic search in the UI.
     const results = await table
@@ -772,6 +776,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       logger.error(`[store] Failed to export knowledge store for web:`, err);
       throw err;
     }
+    });
   }
 
   async findByUrl(url: string): Promise<StoreDocument[]> {
