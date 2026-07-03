@@ -44,7 +44,7 @@ Ask in natural language — the tool understands the depth needed:
 - Unlimited search and scrape, for free — you only pay for LLM tokens.
 - Context-efficient — it returns a synthesized, cited report to the chat instead of dumping raw web content into the conversation.
 - Safe by design — web access runs inside a specialized, limited research agent with no filesystem or shell access.
-- Search a little or a lot — three depth levels in the pi tool (four via the SDK and standalone CLI, which add the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
+- Search a little or a lot — three depth levels in the pi tool (four via the SDK which adds the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
 
 ### Requirements / limitations
 
