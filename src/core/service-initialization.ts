@@ -25,7 +25,6 @@ export function registerCoreServices(container: ServiceContainer = getServiceCon
     ServiceNames.SCHEDULER,
     () => new SchedulerService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -37,7 +36,6 @@ export function registerCoreServices(container: ServiceContainer = getServiceCon
     ServiceNames.HEALTH_CHECK_CACHE,
     () => new HealthCheckService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -49,7 +47,7 @@ export function registerCoreServices(container: ServiceContainer = getServiceCon
     ServiceNames.PLANNING,
     () => new PlanningService(),
     {
-      lazyInitialization: false, // Planning service needs to be available early
+      // (Planning must be available early — it is eager-initialized via the eagerServices list below.)
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -89,7 +87,8 @@ export async function initializeCoreServices(ctx?: any, container: ServiceContai
     { name: ServiceNames.HEALTH_REGISTRY, label: 'Health Registry Service' },
   ];
 
-  // Services requiring eager initialization (marked with lazyInitialization: false)
+  // Services requiring eager initialization — proactively getService'd below so
+  // they are constructed at startup rather than on first use.
   const eagerServices = [
     { name: ServiceNames.PLANNING, label: 'Planning Service' },
   ];

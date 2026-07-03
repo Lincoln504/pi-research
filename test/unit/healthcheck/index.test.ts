@@ -109,7 +109,7 @@ describe('healthcheck', () => {
         isReady() { return true; },
         schedulerId: 'test',
       }),
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     registerService(
@@ -120,7 +120,7 @@ describe('healthcheck', () => {
         registerHealthChecks(registry);
         return registry;
       },
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     registerService(
@@ -141,7 +141,7 @@ describe('healthcheck', () => {
         },
         async getStore() { return {}; },
       }),
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     registerService(
@@ -158,7 +158,7 @@ describe('healthcheck', () => {
           return null;
         },
       }),
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
   });
 
@@ -240,7 +240,7 @@ describe('healthcheck', () => {
           return { countScoped: async () => ({ local: 0, global: 0, projects: 0 }) };
         },
       }),
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     const result = await runHealthCheck();
@@ -271,7 +271,7 @@ describe('healthcheck', () => {
           'Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828).'
         );
       },
-      { lazyInitialization: true, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     const result = await runHealthCheck();

@@ -143,19 +143,19 @@ describe('DeepResearchOrchestrator', () => {
     registerService(
       ServiceNames.PLANNING,
       () => mockPlanningService,
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     registerService(
       ServiceNames.RESEARCH_ORCHESTRATION,
       () => mockOrchestrationService,
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
 
     registerService(
       ServiceNames.RESEARCH_SYNTHESIS_SERVICE,
       () => mockSynthesisService,
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
   });
 

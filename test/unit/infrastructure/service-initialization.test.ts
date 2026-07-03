@@ -48,14 +48,19 @@ describe('Infrastructure Service Initialization', () => {
     }
   });
 
-  it('should register services with correct options', () => {
+  it('should register services with an options object (and no dead lazyInitialization flag)', () => {
     registerInfrastructureServices();
 
-    // Check a few specific services for correct lazyInitialization flag
     const processLifecycleCall = vi.mocked(coreRegistry.registerService).mock.calls.find(c => c[0] === ServiceNames.PROCESS_LIFECYCLE);
-    expect(processLifecycleCall![2]?.lazyInitialization).toBe(false);
-
     const knowledgeStoreCall = vi.mocked(coreRegistry.registerService).mock.calls.find(c => c[0] === ServiceNames.KNOWLEDGE_STORE);
-    expect(knowledgeStoreCall![2]?.lazyInitialization).toBe(true);
+
+    // Both are registered with real options; eager-vs-lazy is driven by the
+    // init-time eagerServices/criticalInfrastructure lists, not a per-registration
+    // flag — the removed lazyInitialization must not reappear here.
+    for (const call of [processLifecycleCall, knowledgeStoreCall]) {
+      expect(call).toBeDefined();
+      expect(call![2]).toBeDefined();
+      expect('lazyInitialization' in (call![2] as object)).toBe(false);
+    }
   });
 });

@@ -64,12 +64,6 @@ export type ServiceFactory<T extends IService> = () => T | Promise<T>;
  */
 export interface ServiceContainerOptions {
   /**
-   * Whether to initialize services lazily (on first access) or eagerly
-   * @default true (lazy initialization)
-   */
-  lazyInitialization?: boolean;
-
-  /**
    * Whether to allow overwriting existing services
    * @default false (service replacement is not allowed)
    */
@@ -112,7 +106,6 @@ export class ServiceContainer {
 
   constructor(options: ServiceContainerOptions = {}) {
     this.defaultOptions = {
-      lazyInitialization: options.lazyInitialization ?? true,
       allowOverwrite: options.allowOverwrite ?? false,
       enableLogging: options.enableLogging ?? true,
     };
@@ -537,7 +530,6 @@ export class ServiceContainer {
  * CLI mode typically uses this instance.
  */
 let globalServiceContainer = new ServiceContainer({
-  lazyInitialization: true,
   allowOverwrite: false,
   enableLogging: true,
 });

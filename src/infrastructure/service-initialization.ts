@@ -36,7 +36,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.PROCESS_LIFECYCLE,
     () => new ProcessLifecycleService(),
     {
-      lazyInitialization: false, // Core infrastructure
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -49,7 +48,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.STATE_PATH_CONFIGURATION,
     () => new StatePathConfiguration(process.env['PI_RESEARCH_STATE_DIR']),
     {
-      lazyInitialization: false, // Core infrastructure
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -62,12 +60,13 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.FILE_LOCK_SERVICE,
     async () => {
       const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, undefined, container);
+      const processLifecycle = await getService<ProcessLifecycleService>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
       return new FileLockService({
         lockFilePath: pathConfig.getLockFilePath(),
+        processLifecycle,
       });
     },
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -87,7 +86,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
       );
     },
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -100,7 +98,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.SCHEDULER_FACTORY,
     () => new SchedulerFactoryService(),
     {
-      lazyInitialization: false, // Always available
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -112,7 +109,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.STATE_MANAGER,
     () => new StateManagerService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -134,7 +130,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
       return new KnowledgeStoreService();
     },
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -146,7 +141,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.METRICS,
     () => new MetricsService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -166,7 +160,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
       return queue;
     },
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -182,7 +175,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
       return new GPUResourceService({ processLifecycle });
     },
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -198,7 +190,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
       return new StateSessionManager(processLifecycle);
     },
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -210,7 +201,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.STATE_BROWSER_MANAGER,
     () => new StateBrowserManager(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -222,7 +212,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.STATE_METRICS_COLLECTOR,
     () => new StateMetricsCollector(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -234,7 +223,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.STATE_VALIDATOR,
     () => new StateValidator(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -246,7 +234,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     ServiceNames.WORKER_POOL_MANAGER,
     () => new WorkerPoolManager(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },

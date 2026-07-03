@@ -48,7 +48,7 @@ describe('Service Registry Disposal Behavior', () => {
     registerService(
       'test-service',
       () => new MockService(),
-      { lazyInitialization: true }
+      {}
     );
 
     // Initialize the service
@@ -78,7 +78,7 @@ describe('Service Registry Disposal Behavior', () => {
     registerService(
       'test-service-2',
       () => new MockService(),
-      { lazyInitialization: true }
+      {}
     );
 
     // Initialize the service
@@ -103,7 +103,7 @@ describe('Service Registry Disposal Behavior', () => {
     registerService(
       'test-service-3',
       () => new MockService(),
-      { lazyInitialization: true }
+      {}
     );
 
     // First lifecycle: initialize and dispose
@@ -132,7 +132,7 @@ describe('Service Registry Disposal Behavior', () => {
     registerService(
       'test-service-4',
       () => new MockService(),
-      { lazyInitialization: true }
+      {}
     );
 
     // Initialize the service
@@ -169,8 +169,8 @@ describe('Service Registry Integration Test', () => {
 
   it('should simulate typical test lifecycle', async () => {
     // Simulate test setup (register services)
-    registerService('scheduler', () => new MockService(), { lazyInitialization: true });
-    registerService('state-manager', () => new MockService(), { lazyInitialization: true });
+    registerService('scheduler', () => new MockService(), {});
+    registerService('state-manager', () => new MockService(), {});
 
     // Simulate beforeAll: initialize services
     const scheduler1 = await getService<MockService>('scheduler');

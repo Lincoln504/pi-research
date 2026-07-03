@@ -93,7 +93,7 @@ describe('scrapers', () => {
         getSchedulerInstance() { return null; },
         schedulerId: 'test',
       }),
-      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+      { allowOverwrite: true, enableLogging: false }
     );
   });
 

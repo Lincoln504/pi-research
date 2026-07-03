@@ -26,7 +26,6 @@ export function registerOrchestrationServices(container: ServiceContainer = getS
     ServiceNames.RESEARCH_ORCHESTRATION,
     () => new ResearchOrchestrationService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -38,7 +37,6 @@ export function registerOrchestrationServices(container: ServiceContainer = getS
     ServiceNames.RESEARCH_SESSION_SERVICE,
     () => new ResearchSessionService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -50,7 +48,6 @@ export function registerOrchestrationServices(container: ServiceContainer = getS
     ServiceNames.RESEARCH_SYNTHESIS_SERVICE,
     () => new ResearchSynthesisService(),
     {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },
@@ -68,7 +65,6 @@ export function registerOrchestrationServices(container: ServiceContainer = getS
       return registry;
     },
     {
-      lazyInitialization: false, // Eagerly register checks
       allowOverwrite: false,
       enableLogging: true,
     },
