@@ -155,9 +155,15 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
   /**
    * Cleanup and reset services for the current research run
    */
-  async cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any): Promise<void> {
+  async cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any, config?: Config): Promise<void> {
     const targetId = researchId || sessionId;
     const container = tryGetServiceContainerFromCtx(ctx);
+    // Use the run's RESOLVED config when the caller has it — an SDK caller's
+    // options.config override (e.g. KNOWLEDGE_STORE_MODE:'none' to stay off the native
+    // vector stack) must govern this post-run FTS/optimize gate too. Falling back to a
+    // fresh getConfig(cwd) would ignore that override and either load the native stack on
+    // a platform that lacks it, or skip the rebuild a store-enabled run legitimately needs.
+    const resolvedConfig = config ?? getConfig(ctx?.cwd);
     
     // Cleanup session service
     try {
@@ -171,7 +177,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       // platform missing the native @lancedb binding, e.g. Intel macOS) merely
       // resolving the service loads the native vector stack and throws; gating it
       // lets the rest of cleanup proceed instead of jumping to the catch below.
-      if (getConfig(ctx?.cwd).KNOWLEDGE_STORE_MODE !== 'none') {
+      if (resolvedConfig.KNOWLEDGE_STORE_MODE !== 'none') {
         const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
         if (ksService && ksService.isReady()) {
           const store = await ksService.getStore();

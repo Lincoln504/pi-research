@@ -76,7 +76,7 @@ export interface IResearchSynthesisService extends IService {
 export interface IResearchOrchestration extends IService {
   resolveResearchModel(options: ResearchOptions): Promise<Model<any>>;
   runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string>;
-  cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any): Promise<void>;
+  cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any, config?: Config): Promise<void>;
   distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[], ctx?: any): Promise<Map<string, string[]>>;
   runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>, storeLinks?: Map<string, StoreUrlEntry[]>, ctx?: any): Promise<void>;
   runSearchBurst(queries: string[], config: Config, signal?: AbortSignal, onProgress?: (links: number) => void, ctx?: any): Promise<QueryResultWithError[]>;

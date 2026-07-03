@@ -119,7 +119,7 @@ export class DeepResearchOrchestrator {
     // its services from — otherwise it clears state on, and runs the knowledge-store
     // FTS/optimize pass against, the global container instead (see the finally below,
     // which already passes ctx).
-    await orchestrationService.cleanupResearchServices(undefined, researchId, ctx);
+    await orchestrationService.cleanupResearchServices(undefined, researchId, ctx, this.config);
     
     logger.log(`[DeepOrchestrator] Starting multi-round research (complexity ${complexity}) for: "${query}" (Run: ${researchId})`);
     metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(complexity) });
@@ -538,7 +538,7 @@ export class DeepResearchOrchestrator {
       // Mirrors QuickResearchOrchestrator's guarded cleanup.
       try {
         const orch = await this.getOrchestrationService();
-        await orch.cleanupResearchServices(undefined, researchId, ctx);
+        await orch.cleanupResearchServices(undefined, researchId, ctx, this.config);
       } catch (cleanupErr) {
         logger.warn('[DeepOrchestrator] Failed to cleanup research services:', cleanupErr);
       }

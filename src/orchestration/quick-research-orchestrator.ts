@@ -394,7 +394,7 @@ export class QuickResearchOrchestrator {
           // session) the run used — without it the container-local instances never get
           // cleared and reports accumulate toward MAX_SESSIONS eviction (matches the
           // DeepResearchOrchestrator cleanup call).
-          await orch.cleanupResearchServices(undefined, researchId, ctx);
+          await orch.cleanupResearchServices(undefined, researchId, ctx, this.config);
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to cleanup research services:', err);
         }
