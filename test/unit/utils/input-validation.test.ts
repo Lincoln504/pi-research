@@ -88,6 +88,22 @@ describe('validateQuery', () => {
     const result = validateQuery('How do I use "quotes" in this?');
     expect(result.isValid).toBe(true);
   });
+
+  it('should reject tag-internal slash-delimited event handlers', () => {
+    // Regression: the old boundary class [\s"'<] omitted '/', letting these through.
+    for (const q of ['<svg/onload=alert(1)>', '<img/onerror=alert(1)>']) {
+      const result = validateQuery(q);
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('dangerous');
+    }
+  });
+
+  it('should NOT false-positive on words ending in "on<digits>="', () => {
+    // The negative-lookbehind requires a non-word char before "on", so these are safe.
+    for (const q of ['pokemon2=red vs blue', 'compare season2= plot points']) {
+      expect(validateQuery(q).isValid).toBe(true);
+    }
+  });
 });
 
 

@@ -2,16 +2,17 @@
  * Minimal CVSS v3.0/v3.1 base-score calculator.
  *
  * Used to derive a qualitative severity + numeric base score from a CVSS vector STRING (OSV
- * `severity[]` entries carry a vector, not a number). Implements the official base-score equations
- * for both versions. The two are identical EXCEPT the changed-scope impact sub-score, which v3.1
- * revised (`(iss·0.9731 − 0.02)^13` vs v3.0's `(iss − 0.02)^15`); using the wrong one on a
- * changed-scope vector can cross a severity band (e.g. 6.9/MEDIUM vs 7.0/HIGH), so the formula is
- * selected from the version in the vector prefix. Returns null for a vector it cannot parse, a
- * non-v3 vector, or an incomplete base vector — callers then fall back to UNKNOWN rather than guess.
+ * `severity[]` entries carry a vector, not a number). Implements the official base-score equations,
+ * which are IDENTICAL across v3.0 and v3.1 — there is no version branch in Base scoring. (The
+ * `× 0.9731`/exponent-13 changed-scope variant belongs only to the v3.1 Environmental metric group,
+ * not to Base; applying it here would mis-band high-impact changed-scope vectors, e.g. reporting
+ * S:C/C:H/I:H/A:H as 7.0/HIGH instead of the correct 6.9/MEDIUM.) Returns null for a vector it
+ * cannot parse, a non-v3 vector, or an incomplete base vector — callers then fall back to UNKNOWN
+ * rather than guess.
  *
  * Only the BASE metric group is computed (temporal/environmental are ignored), which is what a
  * severity label reflects. Verified against the CVSS v3.1 specification examples (9.8, 7.8, 6.1, 5.9)
- * and the v3.1 changed-scope case (7.0/HIGH).
+ * and the changed-scope case S:C/C:H/I:H/A:H → 6.9/MEDIUM.
  */
 
 const AV: Readonly<Record<string, number>> = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };

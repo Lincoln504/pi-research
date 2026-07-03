@@ -40,7 +40,10 @@ export function validateQuery(query: string): { isValid: boolean; error?: string
   const dangerousPatterns = [
     /<script/i,
     /javascript:/i,
-    /(^|[\s"'<])on\w+\s*=/i, // Event handlers like onclick= (boundary-anchored so "pokemon2=" / "season2=" don't false-positive)
+    /(?<!\w)on\w+\s*=/i, // Event handlers like onclick= — a non-word boundary before `on` rejects
+                         // false positives ("pokemon2=", "season2=") while still catching tag-internal
+                         // slash-delimited handlers ("<svg/onload=", "<img/onerror=") the old [\s"'<]
+                         // class missed (it omitted `/`).
     /<iframe/i,
     /<object/i,
     /<embed/i,

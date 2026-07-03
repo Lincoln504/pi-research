@@ -355,6 +355,11 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   // validation below (new URL()).
   if (typeof url !== 'string' || url.trim().startsWith('[')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
+    // Also record the once-per-URL terminal tally so this URL shows up as "failed" in the
+    // run summary (urlsFailed derives from scrape_results_total{outcome:total_failure},
+    // NOT scrape_errors_total). Every other terminal outcome emits this; these early
+    // returns previously did not, so blocked/invalid URLs were invisible in the rollup.
+    metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
   }
 
@@ -364,6 +369,9 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     await validateUrlForSSRF(url);
   } catch (ssrfError) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'ssrf_blocked' });
+    // Once-per-URL terminal tally (see invalid_url_format above) so an SSRF-blocked URL
+    // is counted as failed in the run summary rather than vanishing from URL accounting.
+    metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
     errorTracker.trackError(ssrfError, {
       component: 'scrapers',
       operation: 'scrape',
