@@ -17,7 +17,7 @@ import { ensureBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getMaxWorke
 import { ensureBrowserInstalled } from './ensure-browser.ts';
 import { cleanupStaleProfiles } from './cleanup-utils.ts';
 import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
-import { setupMasterIpcErrorHandler } from './thread-worker-lifecycle.ts';
+import { setupMasterIpcErrorHandler, isBenignClusterIpcError } from './thread-worker-lifecycle.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
@@ -43,6 +43,12 @@ export class WorkerPoolManager implements IService {
     // shutdown already started AND finished while I was building the pool" —
     // exactly the window that let a freshly-built pool survive un-referenced.
     private generation: number = 0;
+    // Monotonic per-pool-INSTANCE token. Bumped every time a new FixedClusterPool is
+    // constructed (including a same-generation worker-count recreation, which `generation`
+    // does NOT track). Each pool's error/exit handlers capture the epoch they belong to and
+    // ignore events once it is superseded, so a trailing error from a destroyed pool's dying
+    // worker cannot inflate the live pool's health counter and trip a spurious auto-recovery.
+    private poolEpoch: number = 0;
     // FIX (#12): Flag to indicate a pool reset is in progress
     private _resetInProgress: boolean = false;
     // Handle for the schedulePoolReset() destroy timer, so shutdown() can cancel a pending
@@ -173,11 +179,24 @@ export class WorkerPoolManager implements IService {
                     );
                 }
 
+                // Identity token for THIS pool instance. The handlers below compare it against
+                // the live `this.poolEpoch` so a superseded pool's trailing events are ignored.
+                const myEpoch = ++this.poolEpoch;
                 this.pool = new FixedClusterPool(maxWorkers, workerPath, {
                     env: browserEnv,
                     // Prevent query leakage via process.argv in forked workers
                     workerOptions: { execArgv: [] },
                     errorHandler: (e: Error) => {
+                        // Ignore events from a pool that has since been replaced/destroyed — a
+                        // trailing error from an old pool's dying worker must not affect the live one.
+                        if (this.poolEpoch !== myEpoch) return;
+                        // A benign IPC teardown error (EPIPE/ECONNRESET/channel-closed) from a worker
+                        // that is shutting down is not a health signal; counting it toward the
+                        // consecutive-error threshold can trip auto-recovery on a healthy pool.
+                        if (isBenignClusterIpcError(e)) {
+                            logger.debug('[WorkerPoolManager] Ignoring benign cluster IPC error:', e);
+                            return;
+                        }
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
                         logger.error('[WorkerPoolManager] Cluster Error:', e);
@@ -191,8 +210,9 @@ export class WorkerPoolManager implements IService {
                         }
                     },
                     exitHandler: (code: number) => {
-                        // null exit code means the worker was killed intentionally (e.g. pool.destroy())
-                        if (code !== 0 && code !== null) {
+                        // null exit code means the worker was killed intentionally (e.g. pool.destroy()).
+                        // Ignore exits from a superseded pool instance (see errorHandler).
+                        if (code !== 0 && code !== null && this.poolEpoch === myEpoch) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {
