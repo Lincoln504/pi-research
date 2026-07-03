@@ -5,6 +5,7 @@ import {
   activateSlice,
   completeSlice,
   updateSliceTokens,
+  updateSliceStatus,
   clearCompletedResearchers,
   createMasterResearchPanel,
   _formatTokens,
@@ -89,6 +90,18 @@ describe('TUI Research Panel', () => {
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const out = createMasterResearchPanel('pi-session', getActivePanelsMock)({} as any, mockTheme).render(80).join('\n');
       expect(out).not.toContain(tok);
+    });
+
+    it('STILL shows the coordinator\'s live search-count status (regression: blanked by isPlanning)', () => {
+      // The coordinator's round-1 search count ("N results") is written to its slice status.
+      // isPlanning must suppress only the token FALLBACK, never the status — otherwise the
+      // user sees no count climbing in the coordinator box while it searches.
+      const state = createInitialPanelState('s', 'r', 'q', 'm');
+      addSlice(state, 'coord', 'coordinator');
+      updateSliceStatus(state, 'coord', '12 results');
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const out = createMasterResearchPanel('pi-session', getActivePanelsMock)({} as any, mockTheme).render(80).join('\n');
+      expect(out).toContain('12 results');
     });
   });
 

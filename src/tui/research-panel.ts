@@ -196,8 +196,13 @@ function renderPanelBlock(
         const tokens = slice?.tokens || 0;
         let raw = '';
 
-        // For non-eval columns: show token count or status, never eval's decorative text
-        if (slice?.status && !slice.completed && !slice.queued && !isPlanning) {
+        // Status ALWAYS shows (incl. the coordinator's round-1 search count "N results" and
+        // planning status) — it must NOT be gated by isPlanning. Only the token-count FALLBACK
+        // is suppressed for the coordinator column (it shows status/wave, not a token tally).
+        // Regression guard: keying isPlanning off sliceId==='coord' (0a9da110) had wrongly
+        // pulled the status branch under !isPlanning too, blanking the coordinator's live
+        // search count.
+        if (slice?.status && !slice.completed && !slice.queued) {
             raw = slice.status;
         } else if (!isPlanning && tokens > 0) {
             raw = formatTokens(tokens);
