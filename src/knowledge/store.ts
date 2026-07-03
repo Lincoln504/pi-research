@@ -598,16 +598,27 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
-    const table = await this.getFreshTable();
-    const scopeFilter = this.getScopeFilter();
-    return this.circuitBreaker.execute(() =>
-      this.withEmbedderReconnect(embedder =>
-        searchStore(table, embedder, query, this.getReranker.bind(this), options.limit ?? 5, scopeFilter)
-      )
-    );
+    // Coordinate with close(): register in activeWrites and skip cleanly if the store is
+    // closing, so a teardown (Ctrl+C / dispose) can't run db.close() while this query is
+    // executing against the connection (use-after-close on the native handle).
+    return this.trackOperation('search', [] as StoreDocument[], async () => {
+      const table = await this.getFreshTable();
+      const scopeFilter = this.getScopeFilter();
+      return this.circuitBreaker.execute(() =>
+        this.withEmbedderReconnect(embedder =>
+          searchStore(table, embedder, query, this.getReranker.bind(this), options.limit ?? 5, scopeFilter)
+        )
+      );
+    });
   }
 
   async deleteByUrl(url: string): Promise<void> {
+    // Coordinate the delete with close() (register in activeWrites, skip if closing) so a
+    // teardown can't run db.close() while this mutation executes against the connection.
+    return this.trackOperation('deleteByUrl', undefined, () => this.deleteByUrlInner(url));
+  }
+
+  private async deleteByUrlInner(url: string): Promise<void> {
     let retryCount = 0;
     const MAX_RETRIES = 5;
     const BASE_DELAY = 100;
@@ -644,6 +655,11 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async deleteByUrlAndType(url: string, ingestionType: string): Promise<void> {
+    // Coordinate with close() — see deleteByUrl.
+    return this.trackOperation('deleteByUrlAndType', undefined, () => this.deleteByUrlAndTypeInner(url, ingestionType));
+  }
+
+  private async deleteByUrlAndTypeInner(url: string, ingestionType: string): Promise<void> {
     let retryCount = 0;
     const MAX_RETRIES = 5;
     const BASE_DELAY = 100;
@@ -987,11 +1003,15 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async count(): Promise<number> {
     if (!this.db) return 0;
-    const table = await this.getFreshTable();
-    const scopeFilter = this.getScopeFilter();
-    const count = await table.countRows(scopeFilter);
-    metrics.setGauge('knowledge_store_total_documents', count);
-    return count;
+    // Track against close() — this read had no try/catch, so a teardown racing db.close()
+    // here would surface as an uncaught use-after-close. trackOperation makes close() wait.
+    return this.trackOperation('count', 0, async () => {
+      const table = await this.getFreshTable();
+      const scopeFilter = this.getScopeFilter();
+      const count = await table.countRows(scopeFilter);
+      metrics.setGauge('knowledge_store_total_documents', count);
+      return count;
+    });
   }
 
   /**
@@ -1045,7 +1065,11 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async clear(filter?: string): Promise<void> {
     if (!this.db) throw new Error('Store not open');
+    // Coordinate with close() — see deleteByUrl.
+    return this.trackOperation('clear', undefined, () => this.clearInner(filter));
+  }
 
+  private async clearInner(filter?: string): Promise<void> {
     let retryCount = 0;
     const MAX_RETRIES = 5;
     const BASE_DELAY = 100;

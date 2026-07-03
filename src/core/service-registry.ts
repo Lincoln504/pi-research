@@ -475,6 +475,17 @@ export class ServiceContainer {
     // Use the safe DAG disposal logic
     await this.disposeAll();
 
+    // Drain any disposal still in flight before clearing registrations. disposeAll()
+    // returns immediately (isDisposing guard) when ANOTHER caller's disposal is already
+    // running, so our await above may not have waited for it — and a concurrent
+    // disposeAll iterating this.services while we clear() would make its services.get()
+    // throw. Loop until no disposal promise remains (each clears _disposalPromise in its
+    // finally). Non-reentrant and terminating: no new disposal can start once we hold the
+    // sync path here with isDisposing still true.
+    while (this._disposalPromise) {
+      await this._disposalPromise.catch(() => { /* logged in _runDisposeAll */ });
+    }
+
     // Clear all registrations
     this.services.clear();
     this.dependencies.clear();
