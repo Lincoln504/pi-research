@@ -44,7 +44,7 @@ Ask in natural language — the tool understands the depth needed:
 - Unlimited search and scrape, for free — you only pay for LLM tokens.
 - Context-efficient — it returns a synthesized, cited report to the chat instead of dumping raw web content into the conversation.
 - Safe by design — web access runs inside a specialized, limited research agent with no filesystem or shell access.
-- Search a little or a lot — three depth levels in the pi tool (four via the SDK which adds the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
+- Search a little or a lot — three depth levels in the pi tool (four via the SDK and standalone CLI, which add the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
 
 ### Requirements / limitations
 
@@ -79,11 +79,8 @@ The first install pulls the stealth browser engine, which takes a few minutes.
 
 ### Stability (v1.x.x)
 
-v0.1.13 (April 20, 2026) was the last release before an extended break. Upstream
-pi/SDK API changes and a re-architecture around the stealth-browser stack left the
-extension non-functional for about eight weeks, until it stabilized in mid-June 2026.
-
-Channels (v1.0.0 is prepared but not yet published to npm — the latest published release is v0.1.13):
+v0.1.13 (April 2026) was the last release before a rebuild against current pi APIs
+and the stealth-browser stack. v1.0.0 is the first stable release since. Channels:
 
 - npm (`npm:@lincoln504/pi-research`) is the stable channel, kept current with breaking pi changes.
 - A git install is the development channel: latest commits, first to break.

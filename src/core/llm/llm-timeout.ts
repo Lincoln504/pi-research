@@ -22,7 +22,7 @@ import type { Config } from '../../config.ts';
  * minutes after the real call has already settled, which accumulates under batch
  * load. See {@link withTimeout} for the convenience wrapper that does this for you.
  */
-export function createCancelableTimeout(
+function createCancelableTimeout(
   ms: number,
   label: string,
 ): { promise: Promise<never>; cancel: () => void } {

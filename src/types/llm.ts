@@ -73,7 +73,7 @@ export type MessageContent = string | MessageBlock[];
  * Parse token usage from an unknown object
  * Returns a partial usage object with any fields that were present
  */
-export function parseTokenUsage(usage: unknown): Partial<TokenUsage> {
+function parseTokenUsage(usage: unknown): Partial<TokenUsage> {
   if (!usage || typeof usage !== 'object') {
     return {};
   }
@@ -107,7 +107,7 @@ export function parseTokenUsage(usage: unknown): Partial<TokenUsage> {
  * Calculate total tokens from usage object
  * Falls back to sum of individual components if totalTokens not provided
  */
-export function calculateTotalTokens(usage: Partial<TokenUsage>): number {
+function calculateTotalTokens(usage: Partial<TokenUsage>): number {
   if (usage.totalTokens !== undefined) {
     return usage.totalTokens;
   }

@@ -261,7 +261,7 @@ export function mapOsvItemToVulnerability(item: OsvVulnerability): Vulnerability
   };
 }
 
-export function mapOsvSeverity(severity?: string): string {
+function mapOsvSeverity(severity?: string): string {
   if (severity === undefined || severity === '') {
     return 'UNKNOWN';
   }

@@ -69,6 +69,7 @@ Research
 | `PI_RESEARCH_MAX_RESEARCHERS` (TUI) | `3` | 1–5 | Parallel researchers. |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` (TUI) `[project]` | `1` | 1–3 | Depth for `/research` and the CLI when `--depth` is omitted (1=normal, 2=deep, 3=ultra). |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` (TUI) | `2` | 0–99 | Scrape batches per researcher (0 = unlimited). |
+| `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Shared web-gathering calls per researcher (`search` + `security_search` + `stackexchange` + `youtube_transcript`). Local `grep` has its own separate budget. |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
@@ -121,6 +122,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_EMBEDDING_MODEL` (TUI) | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model. Changing it clears the store and starts fresh. |
 | `PI_RESEARCH_EMBEDDING_DEVICE` (TUI) | `auto` | auto · webgpu · cpu | Inference backend. `auto` probes WebGPU viability out-of-process and falls back to CPU; `cpu` forces CPU; `webgpu` forces the GPU path with no probe (advanced — can hard-crash on a software GPU). The TUI exposes only `auto` (as "GPU") and `cpu`. |
 | `PI_RESEARCH_CACHE_TTL_DAYS` (TUI) | `30` | 1–365 | How long cached findings are kept before eviction. |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS` | `0` | 0–3650 | Max age a cached scrape may be *served* at read time before it's treated as a miss and re-scraped fresh. `0` = disabled (serve at any age up to the TTL). Cache age is always surfaced to the model regardless. |
 | `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` | drop · backup · re-embed | What to do with stored data when the embedding model changes. |
 | `PI_RESEARCH_KNOWLEDGE_DIR` | _(auto)_ | — | Override the knowledge-store database directory. Default: `~/.pi/research/knowledge_db`. |
 | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model initialization timeout (first-time download can be slow). |

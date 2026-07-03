@@ -161,7 +161,7 @@ import { type Advisory } from './types.ts';
 /**
  * Extract affected packages from an advisory item
  */
-export function extractAffectedPackages(item: GitHubAdvisoryRaw): string[] {
+function extractAffectedPackages(item: GitHubAdvisoryRaw): string[] {
   const affectedPackages: string[] = [];
 
   // Check for vulnerabilities array

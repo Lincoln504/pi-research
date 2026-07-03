@@ -13,7 +13,7 @@ import * as http from 'node:http';
  * IMPORTANT: The socket timeout must be longer than the BrowserClient request timeout (120s)
  * to prevent premature socket closure when the browser is slow or the queue is deep.
  */
-export const clientAgent = new http.Agent({
+const clientAgent = new http.Agent({
     keepAlive: true,
     maxSockets: 100, // Allow up to 100 concurrent requests to the leader
     maxFreeSockets: 10,

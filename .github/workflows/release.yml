@@ -98,9 +98,27 @@ jobs:
       # store.initialize(), so without this a dropped binding would flake the release.
       - name: Ensure native bindings
         run: node scripts/ensure-native-deps.cjs
+      # ripgrep: mirror the CI unit-test environment (the SDK grep tool shells out to
+      # rg) so the unit suite runs identically here — no environment-driven flake.
+      - name: Install ripgrep
+        run: sudo apt-get install -y ripgrep
+      # This publish gate re-runs the SAME fast, deterministic blocking checks CI
+      # runs on every push to main (lint, prod-dep audit, both type-checks,
+      # architectural dep rules, unit suite, tarball manifest). The heavyweight
+      # cross-OS unit/integration matrix and the real-browser (Camoufox) suites live
+      # in ci.yml and gate main before a release tag is ever cut — main must be
+      # CI-green at the tagged commit. The test-install job above additionally packs
+      # and installs the real tarball in a clean project (mirrors CI's validate job).
       - run: npm run lint
+      # Production-dependency security gate — identical to the CI lint job. Blocks the
+      # publish on a moderate+ advisory in the SHIPPED tree; devDeps are excluded
+      # (frozen in the upstream pi-coding-agent shrinkwrap and never shipped).
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
       - run: npm run type-check
       - run: npm run type-check:tests
+      # Architectural dependency rules — mirrors the CI dep-graph job's gate.
+      - run: npm run deps:check
       - run: npm run test:unit
       - run: node scripts/verify-package.cjs manifest
 

@@ -26,7 +26,7 @@ export const FLASH_QUEUE_GAP_MS = 150;
 
 // ==================== Research Constraints ====================
 
-/** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange — shared web-API budget).
+/** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, youtube_transcript — shared web-API budget).
  *  This is the schema default; use getMaxGatheringCalls(config) for the configured value. */
 export const MAX_GATHERING_CALLS = 12;
 

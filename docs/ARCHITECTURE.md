@@ -125,9 +125,6 @@ Key files:
 - `src/infrastructure/browser/thread-worker-messaging.ts` — IPC protocol
 - `src/infrastructure/browser/config.ts` — pool configuration, binary path detection
 
-During CI, workers run in `FULL_MOCK_MODE` (`PI_RESEARCH_MOCK_SEARCH` +
-`PI_RESEARCH_MOCK_SCRAPE`) to avoid FixedClusterPool deadlocks in Vitest's fork context.
-
 ### Knowledge store and data handling
 
 The knowledge store is a local LanceDB vector table of past findings. It is optional

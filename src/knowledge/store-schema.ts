@@ -23,7 +23,7 @@ export const CURRENT_SCHEMA_VERSION = '4';
 /**
  * Create the knowledge store table schema
  */
-export function createStoreSchema(dim: number, modelName: string): Schema {
+function createStoreSchema(dim: number, modelName: string): Schema {
   return new Schema([
     new Field('vector', new FixedSizeList(dim, new Field('item', new Float32())), false),
     new Field('url', new Utf8(), false),

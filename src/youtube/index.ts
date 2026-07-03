@@ -29,7 +29,7 @@ export interface YoutubeTranscriptCommandOptions {
 }
 
 /** Build a knowledge-store-ready document: identifying header + full transcript. */
-export function buildTranscriptDocument(r: VideoTranscript): string {
+function buildTranscriptDocument(r: VideoTranscript): string {
   const header: string[] = [];
   if (r.title) header.push(`# ${r.title}`);
   if (r.author) header.push(`Channel: ${r.author}`);

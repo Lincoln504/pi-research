@@ -584,7 +584,7 @@ export function getFailedResearchers(piSessionId: string | undefined, researchId
 /**
  * Maximum allowed unique failed researchers
  */
-export const MAX_FAILED_RESEARCHERS = 2;
+const MAX_FAILED_RESEARCHERS = 2;
 
 /**
  * Check if research should stop due to too many unique failures

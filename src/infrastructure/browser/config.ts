@@ -282,7 +282,7 @@ export function isBrowserAvailable(): boolean {
  * Check whether search and scrape are mocked (used by tests that need real
  * browser behavior — mock mode short-circuits in runTask()).
  */
-export function isFullMockMode(): boolean {
+function isFullMockMode(): boolean {
     return process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
            process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
 }
