@@ -370,7 +370,8 @@ interface ResearchArgs {
 async function cmdResearch(args: ResearchArgs): Promise<number> {
   const det = detectCredentials();
   if (det.problem) {
-    toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
+    if (args.json) toStdout(pretty({ ok: false, error: det.problem, exitCode: EXIT.CONFIG }));
+    else toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
     return EXIT.CONFIG;
   }
 
@@ -381,7 +382,9 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
   try {
     query = validateAndSanitizeQuery(args.query);
   } catch (e) {
-    toStderr(`\nError: ${e instanceof Error ? e.message : String(e)}\n`);
+    const vmsg = e instanceof Error ? e.message : String(e);
+    if (args.json) toStdout(pretty({ ok: false, error: vmsg, exitCode: EXIT.USAGE }));
+    else toStderr(`\nError: ${vmsg}\n`);
     return EXIT.USAGE;
   }
 
@@ -436,7 +439,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
       toStdout(report.endsWith('\n') ? report : report + '\n');
     }
   } catch (err) {
-    exit = reportError(err, 'research');
+    exit = reportError(err, 'research', args.json);
   } finally {
     await safeShutdown();
   }
@@ -451,6 +454,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
 async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> {
   const det = detectCredentials();
   if (det.problem) {
+    if (json) { toStdout(pretty({ ok: false, error: det.problem, exitCode: EXIT.CONFIG })); return EXIT.CONFIG; }
     toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
     return EXIT.CONFIG;
   }
@@ -480,7 +484,7 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
     toStderr(`[pi-research] searching knowledge store (${queries.length} query/${queries.length === 1 ? '' : 's'})…\n`);
     result = await searchKnowledge(queries);
   } catch (err) {
-    return reportError(err, 'knowledge search');
+    return reportError(err, 'knowledge search', json);
   } finally {
     await safeShutdown();
   }
@@ -593,7 +597,7 @@ async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeConfig']>
 // ---------------------------------------------------------------------------
 
 /** Distinguish setup errors from runtime errors and print a clean, located message. */
-function reportError(err: unknown, what: string): number {
+function reportError(err: unknown, what: string, json?: boolean): number {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
 
@@ -608,22 +612,34 @@ function reportError(err: unknown, what: string): number {
     lower.includes('unauthorized') ||
     lower.includes('api key');
 
+  const isRateLimit = lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests');
+  const exitCode = isConfigError ? EXIT.CONFIG : EXIT.SOFTWARE;
+
+  // --json: emit a structured error on stdout so a machine consumer never has to
+  // special-case plain-text stderr. Mirrors the { ok: true, ... } success shape.
+  if (json) {
+    const payload: Record<string, unknown> = { ok: false, error: msg, exitCode };
+    if (process.env['PI_RESEARCH_DEBUG'] === 'true' && err instanceof Error && err.stack) {
+      payload['stack'] = err.stack;
+    }
+    toStdout(pretty(payload));
+    return exitCode;
+  }
+
   if (isConfigError) {
     toStderr(`\nError: pi-research ${what} failed: ${msg}\n\n${configBlock(detectCredentials())}\n`);
-    return EXIT.CONFIG;
+    return exitCode;
   }
-
   // Rate limits are operational, not fatal setup problems.
-  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) {
+  if (isRateLimit) {
     toStderr(`\nError: pi-research ${what} halted: provider rate limit reached. Wait a moment and retry.\n  ${msg}\n`);
-    return EXIT.SOFTWARE;
+    return exitCode;
   }
-
   toStderr(`\nError: pi-research ${what} failed: ${msg}\n`);
   if (process.env['PI_RESEARCH_DEBUG'] === 'true' && err instanceof Error && err.stack) {
     toStderr('\n' + err.stack + '\n');
   }
-  return EXIT.SOFTWARE;
+  return exitCode;
 }
 
 /**
