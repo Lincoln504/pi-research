@@ -24,7 +24,7 @@
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
-Research is broken into subtasks automatically, with each sub-researcher given a high quantity pool of sources to investigate. Then, evaluator decides whether the answer is complete or an additional round of research is needed. The final result is a synthesized, cited report.
+Research is broken into subtasks automatically, with each sub-researcher given a high volume sources to investigate. Then, evaluator decides whether the answer is complete or an additional round of research is needed. The final result is a synthesized, cited report.
 
 Ask in natural language — the tool understands the depth needed:
 
