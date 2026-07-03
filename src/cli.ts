@@ -696,16 +696,18 @@ COMMANDS
     --config <path>              Read additional config from this file.
     --json                       Emit a JSON object instead of a markdown report.
 
-  knowledge "<q1>" ["<q2>" ...]  Search local knowledge store before live research.
+  knowledge "<q1>" ["<q2>" ...]  Search local knowledge store before live research (up to 5 queries).
     --config <path>              Read additional config from this file.
     --json                       Emit a JSON object.
 
   knowledge-config [show]        Show the knowledge-store mode for this directory + its source.
+    --config <path>              Read additional config from this file.
     --json                       Emit a JSON object.
   knowledge-config set <mode>    Set the mode for THIS directory (none | project | global);
                                  persisted per-directory. Takes effect on the next run.
 
   status                         Show detected config, model/key, and readiness.
+    --config <path>              Read additional config from this file.
     --json                       Emit a JSON object.
 
   help, --help, -h               Show this help.
@@ -860,11 +862,24 @@ export function parseArgs(argv: string[]): ParsedArgs {
         const v = rest[++i];
         excludeTools = v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
       } else if (a === '--initial-links') {
-        // Consume until the next flag or end.
+        // Consume until the next flag or end. Validate each entry: these are templated
+        // verbatim into the researcher's "investigate these first" evidence block, so
+        // (like the query) they must be bounded and shape-checked — reject non-http(s)
+        // or oversized tokens and cap the count so a caller can't inject arbitrary
+        // instructions framed as trusted seed evidence or blow the prompt budget.
         let j = i + 1;
         while (j < rest.length && !rest[j]?.startsWith('--')) {
           const link = rest[j];
-          if (link) initialLinks.push(link);
+          if (link) {
+            if (link.length > 2048) throw new UsageError('--initial-links: each URL must be at most 2048 characters.');
+            let parsed: URL;
+            try { parsed = new URL(link); } catch { throw new UsageError(`--initial-links: "${link}" is not a valid URL.`); }
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+              throw new UsageError('--initial-links: only http(s) URLs are allowed.');
+            }
+            if (initialLinks.length >= 20) throw new UsageError('--initial-links: at most 20 URLs may be provided.');
+            initialLinks.push(link);
+          }
           j++;
         }
         i = j - 1;

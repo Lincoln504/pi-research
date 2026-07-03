@@ -60,6 +60,10 @@ const breaker = new CircuitBreaker({
     const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
     return (
       msg.includes('timeout') ||
+      // withTimeout() rejects with "...cancelled or timed out" (no contiguous "timeout"),
+      // so without this the breaker never counted a genuine YouTube hang toward its
+      // failure threshold and every researcher paid the full timeout during an outage.
+      msg.includes('timed out') ||
       msg.includes('network') ||
       msg.includes('econn') ||
       msg.includes('fetch failed') ||

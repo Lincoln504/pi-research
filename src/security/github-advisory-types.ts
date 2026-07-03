@@ -255,8 +255,11 @@ export function mapGitHubAdvisory(item: GitHubAdvisoryRaw): Advisory {
   const ghsaId = item.ghsa_id ?? item.id ?? '';
   const summary = item.summary ?? '';
   const description = item.description ?? '';
-  const severityRaw = item.severity ?? 'UNKNOWN';
-  const severity = severityRaw.toUpperCase();
+  // Guard the type: isGitHubAdvisoryRaw validates only that the value is an object, so a
+  // non-string severity (schema drift / numeric code) would throw on .toUpperCase() inside
+  // the unguarded items.map(), failing the whole term in Promise.allSettled and discarding
+  // every advisory for it.
+  const severity = typeof item.severity === 'string' ? item.severity.toUpperCase() : 'UNKNOWN';
   const published = item.published_at ?? '';
   const modified = item.updated_at ?? '';
   const cveId = item.cve_id ?? '';

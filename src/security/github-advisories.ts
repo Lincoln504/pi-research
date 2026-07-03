@@ -17,6 +17,7 @@ import { normalizeEcosystem } from './ecosystem.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
+import { logger } from '../logger.ts';
 import {
   isGitHubAdvisoryRaw,
   isArray,
@@ -77,6 +78,13 @@ export async function searchGitHubAdvisories(
 ): Promise<GitHubResult> {
   const startTime = Date.now();
   const maxResults = options?.maxResults ?? DEFAULT_MAX_RESULTS;
+  // GitHub caps per_page at 100 server-side and these paths do not follow the Link header,
+  // so a request for >100 silently returns ≤100 with no signal that more exist — a security
+  // tool must not imply completeness it didn't fetch. Clamp the page size and warn.
+  const perPage = Math.min(100, maxResults);
+  if (maxResults > 100) {
+    logger.warn(`[github-advisories] maxResults=${maxResults} exceeds GitHub's 100-per-page cap and these paths don't paginate; returning up to 100. Results may be incomplete.`);
+  }
   const advisories: Advisory[] = [];
   let error: string | undefined = undefined;
 
@@ -99,7 +107,7 @@ export async function searchGitHubAdvisories(
       if (!repoNameRe.test(owner!) || !repoNameRe.test(name!)) {
         throw new Error(`Invalid repo format: "${options.repo}". Owner and name may only contain letters, digits, '.', '_' and '-'.`);
       }
-      const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(name!)}/security-advisories?per_page=${maxResults}`;
+      const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(name!)}/security-advisories?per_page=${perPage}`;
 
       const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
         const resp = await fetch(url, {
@@ -169,7 +177,7 @@ export async function searchGitHubAdvisories(
         let endpointType: string;
 
         if (termUpper.startsWith('CVE-')) {
-          apiUrl = `${GITHUB_API_BASE}/advisories?cve_id=${encodeURIComponent(termUpper)}&per_page=${maxResults}`;
+          apiUrl = `${GITHUB_API_BASE}/advisories?cve_id=${encodeURIComponent(termUpper)}&per_page=${perPage}`;
           endpointType = 'cve_lookup';
         } else if (termUpper.startsWith('GHSA-')) {
           apiUrl = `${GITHUB_API_BASE}/advisories/${encodeURIComponent(term)}`;
@@ -187,7 +195,7 @@ export async function searchGitHubAdvisories(
               ? `&ecosystem=${encodeURIComponent(normalizeEcosystem(options.ecosystem, 'github'))}`
               : '';
           const affectsParam = !/\s/.test(term) ? `&affects=${encodeURIComponent(term)}` : '';
-          apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc${ecosystemParam}${affectsParam}`;
+          apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${perPage}&state=published&direction=desc${ecosystemParam}${affectsParam}`;
           endpointType = 'search';
         }
 

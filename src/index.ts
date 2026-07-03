@@ -623,8 +623,10 @@ export default async function (pi: ExtensionAPI) {
     }
   });
 
-  // Log health status at startup (non-blocking)
-  setTimeout(async () => {
+  // Log health status at startup (non-blocking). Track + unref the handle: unref() so a
+  // short `pi -p` run isn't held open up to 2s waiting on it, and clear it on shutdown so a
+  // fast reload/deactivate doesn't leave it pending to fire against disposed services.
+  const healthTimer = setTimeout(async () => {
     try {
       const health = await healthRegistry.runAll();
       const statusIcon = health.status === 'healthy' ? '[OK]' :
@@ -640,6 +642,8 @@ export default async function (pi: ExtensionAPI) {
       logger.warn('[pi-research] Startup health check failed (non-fatal):', error);
     }
   }, 2000);
+  if (healthTimer.unref) healthTimer.unref();
+  shutdownManager.register(async () => clearTimeout(healthTimer));
 
   logger.log('[pi-research] Extension loaded');
 }
