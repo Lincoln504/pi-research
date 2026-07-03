@@ -250,19 +250,65 @@ function notInstalled(): never {
 // Launch
 // ---------------------------------------------------------------------------
 
+/** True if a string carries cmd.exe metacharacters that shell:true would interpret. */
+function hasCmdMetachar(s: string): boolean {
+  return /[&|<>^"%()!]/.test(s);
+}
+
+/**
+ * Given a Windows .cmd/.bat shim, resolve the underlying `node <cli.mjs>` invocation
+ * so we can run it directly WITHOUT a shell. npm/pi place the package under
+ * <binDir>/node_modules/<PKG> next to the shim; as a fallback we parse the node_modules
+ * path the shim itself embeds. Returns null if we can't find the JS entry.
+ */
+function resolveWinShimToNode(shimPath: string): ResolvedEngine | null {
+  const fromLayout = engineFromPackageDir(join(dirname(shimPath), 'node_modules', ...PKG.split('/')));
+  if (fromLayout && fromLayout.argv[0] === process.execPath) return fromLayout;
+  try {
+    const content = readFileSync(shimPath, 'utf-8');
+    const m = content.match(/node_modules[\\/][^"\r\n]*?\.(?:mjs|cjs|js)\b/i);
+    if (m) {
+      const abs = resolve(dirname(shimPath), m[0]);
+      if (existsSync(abs)) return { argv: [process.execPath, abs], label: abs };
+    }
+  } catch { /* fall through to null */ }
+  return null;
+}
+
 function launch(engine: ResolvedEngine): void {
+  let target = engine.argv[0]!;
+  let runArgv = engine.argv.slice(1).concat(argv);
+  let useShell = false;
+
   // On Windows the resolved binary may be an npm batch shim (pi-research.cmd) found
-  // via PATH/PATHEXT for a global install. Since the Node CVE-2024-27980 fix,
-  // spawning a .cmd/.bat WITHOUT shell:true throws EINVAL — which would make the
-  // research skill non-functional for the documented `npm install -g` path. Run
-  // batch shims through the shell so cmd.exe executes them.
-  const target = engine.argv[0]!;
-  const isWinBatchShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(target);
-  const child = spawn(target, engine.argv.slice(1).concat(argv), {
+  // via PATH/PATHEXT for a global install. Since the Node CVE-2024-27980 fix, spawning
+  // a .cmd/.bat WITHOUT shell:true throws EINVAL — but shell:true routes the (untrusted)
+  // research query through cmd.exe, where an unescaped `&`/`|`/`%VAR%`/`^` is a command-
+  // injection vector. So prefer running the shim's underlying `node <cli.mjs>` directly
+  // (no shell); only fall back to the shell for a shim we can't bypass, and then only
+  // when the args are metacharacter-free — otherwise refuse rather than run unsafely.
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(target)) {
+    const direct = resolveWinShimToNode(target);
+    if (direct) {
+      target = direct.argv[0]!;
+      runArgv = direct.argv.slice(1).concat(argv);
+    } else if (argv.some(hasCmdMetachar)) {
+      process.stderr.write(
+        '\nError: cannot safely pass this query to the Windows pi-research.cmd shim — it ' +
+        'contains shell metacharacters (& | < > ^ " % ( ) !).\nSet PI_RESEARCH_BIN to the ' +
+        "engine's node CLI (…\\dist\\cli.mjs) or PI_RESEARCH_PATH to its package dir, then re-run.\n",
+      );
+      process.exit(EXIT.CONFIG);
+    } else {
+      useShell = true;
+    }
+  }
+
+  const child = spawn(target, runArgv, {
     stdio: 'inherit',
     env: process.env,
     windowsHide: true,
-    ...(isWinBatchShim ? { shell: true } : {}),
+    ...(useShell ? { shell: true } : {}),
   });
 
   child.on('error', (err) => {
