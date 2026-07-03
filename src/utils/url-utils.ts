@@ -20,7 +20,7 @@ import { logger } from '../logger.ts';
  *   aggressive fallback, so a trailing one here is far more likely genuine).
  * The loop is bounded to defend against pathological input (ReDoS-free).
  */
-function stripTrailingLlmPunctuation(input: string): string {
+export function stripTrailingLlmPunctuation(input: string): string {
   let s = input;
   for (let i = 0; i < 25 && s.length > 0; i++) {
     const last = s[s.length - 1]!;

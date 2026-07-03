@@ -1,6 +1,7 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
+import { stripTrailingLlmPunctuation } from './url-utils.ts';
 
 /**
  * Text Utilities
@@ -267,11 +268,16 @@ export function parseCitations(report: string): Citation[] {
     // Group 1: URL, Group 2: optional source tag contents, Group 3: description.
     const inlineMatch = /^(https?:\/\/[^\s\n]+)(?:\s+\[Source:\s*([^\]]*)\])?(?:\s*[—–-]\s*([^\n]*))?/.exec(firstLine);
     if (inlineMatch) {
-      url = inlineMatch[1]!.trim().replace(/[*_~`]+$/, '').replace(/[,.)]+$/, '');
+      // Balance-aware trailing-punctuation strip (shared with normalizeUrl): a BLIND
+      // ')' strip here truncated balanced-paren URLs — e.g. Wikipedia's
+      // "…/Python_(programming_language)" — before normalizeUrl ever saw them, shipping
+      // a broken 404 in the CITED LINKS section. stripTrailingLlmPunctuation removes a
+      // ')' only when unbalanced and preserves unreserved trailing '_'/'~'.
+      url = stripTrailingLlmPunctuation(inlineMatch[1]!.trim());
       source = (inlineMatch[2]?.trim() || '');
       desc = (inlineMatch[3]?.trim() || '').replace(/[*_~`]+$/, '');
     } else {
-      const candidateUrl = firstLine.split(/\s+/)[0]!.trim().replace(/[*_~`]+$/, '').replace(/[,.)]+$/, '');
+      const candidateUrl = stripTrailingLlmPunctuation(firstLine.split(/\s+/)[0]!.trim());
       if (!candidateUrl.startsWith('http')) continue;
       url = candidateUrl;
     }

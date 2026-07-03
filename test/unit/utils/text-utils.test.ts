@@ -281,6 +281,20 @@ describe('text-utils', () => {
       expect(result[0]!.url).toBe('https://example.com');
     });
 
+    it('preserves a balanced trailing paren but strips an unbalanced one (regression: Wikipedia disambiguation URLs)', () => {
+      const report = [
+        'CITED LINKS',
+        '[1] https://en.wikipedia.org/wiki/Python_(programming_language) — the language',
+        '[2] https://example.com/page) — trailing paren from prose "(see https://example.com/page)"',
+      ].join('\n');
+      const urls = parseCitations(report).map((c) => c.url);
+      // The balanced paren is part of the URL and must survive; the unbalanced one is stripped.
+      expect(urls).toEqual([
+        'https://en.wikipedia.org/wiki/Python_(programming_language)',
+        'https://example.com/page',
+      ]);
+    });
+
     it('parses bold **[N]** format', () => {
       const report = `CITED LINKS\n**[1]** https://example.com — Bold citation\n`;
       const result = parseCitations(report);
