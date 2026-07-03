@@ -170,10 +170,16 @@ export async function disposeCoreServices(container: ServiceContainer = getServi
   try {
     // Clear embedding server registration before parallel disposal so the
     // EmbeddingServer can deregister itself while the StateManager is still alive.
+    // Use tryGet, not getService: on a teardown that follows a partial/failed init
+    // (e.g. STATE_MANAGER itself failed to initialize and _doInit's catch calls shutdown),
+    // getService would CONSTRUCT-and-initialize a fresh StateManager just to dispose it —
+    // a shutdown-resurrection. Only touch an already-live instance.
     try {
-      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
-      await stateManager.clearEmbeddingServer();
-      logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
+      const stateManager = container.tryGet<IStateManager>(ServiceNames.STATE_MANAGER);
+      if (stateManager) {
+        await stateManager.clearEmbeddingServer();
+        logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
+      }
     } catch {
       // Non-fatal: embedding server state will be cleaned up on next startup via PID check
     }

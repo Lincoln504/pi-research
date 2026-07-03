@@ -430,7 +430,11 @@ export async function runDeepResearch(
     result = synthesisService.appendMetadata(result, globalModel!.id);
 
     const completedAt = Date.now();
-    metrics.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
+    // Emit into the per-run registry directly: this runs AFTER runWithRunRegistry's ALS scope
+    // has closed, so metrics.observe() would fall back to session scope and accumulate
+    // unbounded across calls (a long-lived SDK/benchmark process). runRegistry.observe() lands
+    // it in this run's snapshot, matching the tool path's run-scoped emission.
+    runRegistry.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
     _lastRunSummary = {
       runId: researchId, startedAt: researchStart, completedAt,
       durationMs: completedAt - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
@@ -441,7 +445,8 @@ export async function runDeepResearch(
     return result;
   } catch (err) {
     const completedAt = Date.now();
-    metrics.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
+    // Per-run scope (see the success path above) — avoids unbounded session-scope accumulation.
+    runRegistry.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
     _lastRunSummary = {
       runId: researchId, startedAt: researchStart, completedAt,
       durationMs: completedAt - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
