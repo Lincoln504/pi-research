@@ -99,6 +99,10 @@ export class ServiceContainer {
   private services: Map<string, ServiceRegistration<any>> = new Map();
   private dependencies: Map<string, Set<string>> = new Map();
   public isDisposing: boolean = false;
+  // The single in-flight disposeAll() run, so concurrent disposeAll()/reset() calls
+  // coalesce onto (and AWAIT) it rather than a second caller observing "disposed" while
+  // teardown is still running, or reset() throwing mid-disposal.
+  private _disposalPromise: Promise<void> | null = null;
   public isReady: boolean = false;
   public cwd: string = process.cwd();
   public config: any = null;
@@ -326,10 +330,17 @@ export class ServiceContainer {
    * have been successfully torn down.
    */
   async disposeAll(): Promise<void> {
-    if (this.isDisposing) {
-      return;
-    }
+    // Synchronous re-entrancy guard: isDisposing is set as _runDisposeAll's first
+    // statement (before any await), so a service whose dispose() re-enters disposeAll()
+    // gets a safe no-op instead of recursing. Also publish the in-flight run as
+    // _disposalPromise so reset() (a separate, non-re-entrant caller) can AWAIT the
+    // teardown instead of throwing on the race — the Windows CI teardown fix.
+    if (this.isDisposing) return;
+    this._disposalPromise = this._runDisposeAll().finally(() => { this._disposalPromise = null; });
+    return this._disposalPromise;
+  }
 
+  private async _runDisposeAll(): Promise<void> {
     this.isDisposing = true;
     if (this.defaultOptions.enableLogging) {
       logger.log('[ServiceContainer] Disposing all services (DAG-ordered teardown)...');
@@ -448,8 +459,13 @@ export class ServiceContainer {
    * This is primarily used for testing to ensure clean state between test runs
    */
   async reset(): Promise<void> {
-    if (this.isDisposing) {
-      throw new Error('Cannot reset container while disposing');
+    // If a disposal is already in flight (e.g. a test's un-awaited shutdown, or a
+    // concurrent teardown), WAIT for it rather than throwing — reset()'s contract is to
+    // end up disposed+cleared, which the in-flight disposal is already doing. This fixed
+    // a Windows-only CI teardown race that surfaced as unhandled
+    // "Cannot reset container while disposing" rejections from an afterEach.
+    if (this._disposalPromise) {
+      await this._disposalPromise.catch(() => { /* disposal errors are logged in _runDisposeAll */ });
     }
 
     if (this.defaultOptions.enableLogging) {

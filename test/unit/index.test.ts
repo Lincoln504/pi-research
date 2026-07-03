@@ -94,9 +94,12 @@ describe('extension entrypoint', () => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    // Reset service container after each test to ensure clean state
-    resetServiceContainer();
+  afterEach(async () => {
+    // Reset service container after each test to ensure clean state. MUST be awaited:
+    // a fire-and-forget reset can overlap the next test and (before the container
+    // learned to wait out an in-flight disposal) surfaced as unhandled
+    // "Cannot reset container while disposing" rejections on the Windows CI leg.
+    await resetServiceContainer();
   });
 
   it('registers research tool', async () => {

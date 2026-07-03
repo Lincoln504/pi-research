@@ -160,6 +160,21 @@ describe('Service Registry Disposal Behavior', () => {
     expect(service2).not.toBe(service1);
     expect(service2.initialized).toBe(true);
   });
+
+  it('reset() waits out an in-flight disposal instead of throwing (Windows CI teardown race)', async () => {
+    // Regression: reset() used to throw "Cannot reset container while disposing" when a
+    // disposal was still running (MockService.dispose takes ~5ms). A test's fire-and-forget
+    // resetServiceContainer() in afterEach then produced an unhandled rejection that failed
+    // the Windows unit-test leg. reset() must now JOIN the in-flight disposal and resolve.
+    registerService('race-svc', () => new MockService(), {});
+    const svc = await getService<MockService>('race-svc');
+
+    const disposing = disposeAllServices(); // in flight, NOT awaited
+    await expect(resetServiceContainer()).resolves.toBeUndefined(); // must not reject
+    await disposing;
+
+    expect(svc.disposed).toBe(true);
+  });
 });
 
 describe('Service Registry Integration Test', () => {
