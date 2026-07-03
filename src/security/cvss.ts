@@ -43,9 +43,8 @@ export function severityFromScore(score: number): string {
  * parseable, complete v3 base vector.
  */
 export function scoreCvss3(vector: string): { score: number; severity: string } | null {
-  const versionMatch = typeof vector === 'string' ? /^CVSS:3\.([01])\//i.exec(vector) : null;
-  if (!versionMatch) return null;
-  const isV31 = versionMatch[1] === '1';
+  // Accept only complete v3.0 / v3.1 base vectors. The Base formula is identical across both.
+  if (typeof vector !== 'string' || !/^CVSS:3\.[01]\//i.test(vector)) return null;
 
   const metrics: Record<string, string> = {};
   for (const part of vector.split('/').slice(1)) {
@@ -67,12 +66,14 @@ export function scoreCvss3(vector: string): { score: number; severity: string } 
   }
 
   const iss = 1 - (1 - c!) * (1 - i!) * (1 - a!);
-  // Changed-scope impact differs between versions; base and unchanged-scope impact are identical.
+  // The CVSS v3.0 and v3.1 BASE impact formulas are identical for both scopes — the `× 0.9731`
+  // multiplier / exponent-13 variant belongs ONLY to the v3.1 Environmental (ModifiedImpact)
+  // metric group, never to Base scoring. Applying it here mis-scored high-impact changed-scope
+  // vectors across a severity band (e.g. S:C/C:H/I:H/A:H → 7.0/HIGH instead of the correct
+  // 6.9/MEDIUM). There is no version branch in Base scoring.
   const impact = scope === 'U'
     ? 6.42 * iss
-    : isV31
-      ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss * 0.9731 - 0.02, 13)
-      : 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15);
+    : 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15);
   const exploitability = 8.22 * av! * ac! * pr! * ui!;
 
   let score: number;
