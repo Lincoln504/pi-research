@@ -34,6 +34,12 @@ export interface JsonRepairOptions {
   maxTokens?: number;
   /** Thinking level for the repair pass (default 'off' — repair emits JSON, not reasoning). */
   thinkingLevel?: ModelThinkingLevel;
+  /** Usage sink invoked once per billed LLM attempt with the raw usage object from
+   *  the response. Lets callers attribute the repair pass's tokens/cost to the run
+   *  (metrics + observer) exactly as they do for the primary call. Every attempt that
+   *  returns a response was billed, so this fires on each attempt regardless of whether
+   *  the salvaged JSON ultimately validates. */
+  onUsage?: (rawUsage: unknown) => void;
 }
 
 /**
@@ -106,6 +112,14 @@ Return ONLY the valid JSON object. No prose before or after.`;
         }, maxTokens, thinkingLevel)),
         llmTimeout, `agentic-repair-${serviceName}`,
       );
+
+      // Attribute the (billed) repair attempt's usage before any text-extraction or
+      // validation can `continue` past it — every returned response was paid for.
+      try {
+        options.onUsage?.((response as { usage?: unknown }).usage);
+      } catch (usageErr) {
+        logger.debug(`[${serviceName}] onUsage sink threw (ignored):`, usageErr);
+      }
 
       let responseText: string;
       try {

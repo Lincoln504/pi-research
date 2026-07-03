@@ -88,4 +88,26 @@ describe('repairJsonWithLlm', () => {
 
     expect(result).toEqual({ foo: 'fixed', bar: 42 }); // Coerced to number
   });
+
+  it('invokes onUsage with the billed usage on a single-attempt repair', async () => {
+    mockCompleter.mockResolvedValue({
+      ...baseMessage,
+      content: [{ type: 'text', text: '{"foo":"ok","bar":1}' }],
+      stopReason: 'stop'
+    });
+    const onUsage = vi.fn();
+    await repairJsonWithLlm('{"foo":', mockCompleter, auth, { model: stubModel, schema, onUsage });
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledWith(baseMessage.usage);
+  });
+
+  it('invokes onUsage on EVERY billed attempt, including a schema-retry (regression: repair spend was uncounted)', async () => {
+    mockCompleter
+      .mockResolvedValueOnce({ ...baseMessage, content: [{ type: 'text', text: '{"foo":"x"}' }], stopReason: 'stop' }) // missing bar → schema fail → retry
+      .mockResolvedValueOnce({ ...baseMessage, content: [{ type: 'text', text: '{"foo":"x","bar":2}' }], stopReason: 'stop' });
+    const onUsage = vi.fn();
+    const res = await repairJsonWithLlm('bad', mockCompleter, auth, { model: stubModel, schema, onUsage });
+    expect(res).toEqual({ foo: 'x', bar: 2 });
+    expect(onUsage).toHaveBeenCalledTimes(2);
+  });
 });

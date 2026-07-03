@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PlanningService, isRetriableLlmError } from '../../../src/core/planning-service.ts';
+import { PlanningService, isRetriableLlmError, salvageReportText } from '../../../src/core/planning-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -584,6 +584,25 @@ describe('PlanningService', () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson()));
       await service.updatePlanForRound(BASE_OPTIONS);
       expect(service.getCurrentPlan('test-session')).not.toBeNull();
+    });
+  });
+
+  describe('salvageReportText', () => {
+    it('returns "" for too-short scraps so the reports-based fallback takes over', () => {
+      expect(salvageReportText('too short')).toBe('');
+      expect(salvageReportText('   ')).toBe('');
+    });
+
+    it('suppresses a truncated/garbled JSON envelope rather than shipping it as the report', () => {
+      const brokenEnvelope = '{"action":"synthesize","content":"The answer is ' + 'x'.repeat(80);
+      expect(salvageReportText(brokenEnvelope)).toBe('');
+      const brokenWithResearchers = '{"researchers":[{"name":"' + 'y'.repeat(80);
+      expect(salvageReportText(brokenWithResearchers)).toBe('');
+    });
+
+    it('preserves genuine prose (a model that answered in text instead of JSON)', () => {
+      const prose = 'This is a legitimate research report written as prose, well over the fifty character floor.';
+      expect(salvageReportText(prose)).toBe(prose);
     });
   });
 });

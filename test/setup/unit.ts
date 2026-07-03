@@ -4,6 +4,8 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { afterEach } from 'vitest';
+import { metrics } from '../../src/utils/metrics.ts';
 
 // Global test configuration
 process.env['NODE_ENV'] = 'test';
@@ -29,3 +31,11 @@ process.env['PI_RESEARCH_LOG_PATH'] = path.join(os.tmpdir(), 'pi-research-test',
 // The pi-research extension registers signal handlers (SIGINT, SIGTERM, SIGHUP)
 // which can cause warnings when tests load the extension multiple times.
 process.setMaxListeners(20);
+
+// Defensive metric isolation: the exported `metrics` singleton's SESSION registry is a
+// process-global that code-under-test emits into. Cross-file determinism currently holds
+// only because vitest uses forks + isolate (a fresh module registry per file). Reset the
+// session registry after every test so a future isolate:false / shared-pool change can't
+// make session-metric assertions non-deterministic. Run registries are per-call (scoped by
+// runWithRunRegistry) and are unaffected by this.
+afterEach(() => { metrics.clearSession(); });

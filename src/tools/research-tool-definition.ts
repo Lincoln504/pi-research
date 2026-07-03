@@ -320,8 +320,10 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               clearSteeringMessages(piSessionId);
             };
             
-            // Stub for stopObserverWaveAnimation
-            panelState = { totalTokens: 0, totalCost: 0 };
+            // Minimal stub — only stopObserverWaveAnimation touches panelState in the
+            // headless path (it clears wave fields). Run totals come from the metrics
+            // registry, so no token/cost state is needed here.
+            panelState = {};
             observerState = {};
           }
 
@@ -367,16 +369,25 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               // Stop wave animation
               if (observerState && panelState) stopObserverWaveAnimation(observerState, panelState);
 
-              // Append unified research summary (stats + errors)
+              // Append unified research summary (stats + errors). Tokens/cost are read
+              // from the run-scoped metrics registry — the single source of truth that
+              // is populated identically in TUI and headless mode (the old panelState
+              // tally was TUI-only and stayed 0 for every headless/SDK/print-mode run,
+              // and even in TUI omitted coordinator+evaluator spend). extractRunStats
+              // returns null only when nothing meaningful ran → 0.
+              const runSnapshot = runRegistry.getSnapshot();
+              const runStats = extractRunStats(runSnapshot);
+              const runTokens = runStats?.tokens ?? 0;
+              const runCost = runStats?.cost ?? 0;
               const errorReport = sessionTracker.getReport();
-              const resultWithSummaries = appendResearchSummary(result, runRegistry.getSnapshot(), errorReport);
+              const resultWithSummaries = appendResearchSummary(result, runSnapshot, errorReport);
 
               let finalResult = resultWithSummaries;
               const exportCfg = getConfig(ctx.cwd, iface);
               if (exportCfg.RESEARCH_REPORT_EXPORT_ENABLED) {
                 const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd, exportCfg.RESEARCH_REPORT_EXPORT_DIR);
                 if (exportPath) {
-                  finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState?.totalCost ?? 0);
+                  finalResult = appendExportMessage(resultWithSummaries, exportPath, runCost);
                 }
               }
 
@@ -384,7 +395,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
               finalResult = synthesisService.appendMetadata(finalResult, selectedModel!.id);
 
-              return { result: finalResult, tokens: panelState?.totalTokens ?? 0, researchId };
+              return { result: finalResult, tokens: runTokens, researchId };
             } catch (error) {
               if (aborted?.aborted || internalAbort.signal.aborted) {
                 return { result: 'Research cancelled.', tokens: 0, researchId };
@@ -407,7 +418,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
           snapshot: runRegistry.getSnapshot(),
         });
 
-        return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens } };
+        return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens, researchId: researchRunResult.researchId } };
       } catch (error) {
         if (aborted?.aborted || internalAbort.signal.aborted) {
           metrics.recordRunSummary({

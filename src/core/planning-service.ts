@@ -19,8 +19,7 @@ import { logger } from '../logger.ts';
 import { completeSimple } from './llm/pi-ai-completion.ts';
 import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
-import { extractUsage } from '../types/llm.ts';
-import { metrics } from '../utils/metrics.ts';
+import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { normalizeCitations } from '../utils/citation-utils.ts';
 import { repairJsonWithLlm } from './llm/agentic-repair.ts';
 import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
@@ -90,6 +89,24 @@ function isDegradableLlmError(error: unknown, signal?: AbortSignal): boolean {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
   if (message.includes('timed out')) return true;
   return isRetriableLlmError(error, signal);
+}
+
+/**
+ * Salvage raw evaluator text as report content when JSON parse AND agentic repair
+ * both fail. A truncated/garbled JSON envelope must NOT be shipped verbatim as the
+ * final report (the user would see raw `{"action":"synthesize","content":"...` cut
+ * off mid-string). Returning '' here lets the orchestrator's reports-based fallback
+ * synthesis take over. Genuine prose (a model that answered in text instead of JSON)
+ * is preserved — only JSON-envelope-looking blobs and too-short scraps are rejected.
+ */
+export function salvageReportText(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length <= 50) return '';
+  // Looks like a (broken) JSON envelope rather than a report — suppress it.
+  if (trimmed.startsWith('{') && /"(?:action|content|researchers)"\s*:/.test(trimmed)) {
+    return '';
+  }
+  return raw;
 }
 
 /**
@@ -315,15 +332,7 @@ export class PlanningService implements IPlanningService {
       );
 
       // Track usage once, on the successful attempt (failed attempts throw before here).
-      const rawUsage = (response as any).usage;
-      if (rawUsage) {
-        const { tokens, cost } = extractUsage(model, rawUsage);
-        if (tokens > 0 || cost > 0) {
-          metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
-          metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
-          observer?.onTokensConsumed?.(tokens, cost);
-        }
-      }
+      recordLlmUsage(model, (response as any).usage, { component: 'coordinator', complexity, observer });
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;
@@ -343,6 +352,7 @@ export class PlanningService implements IPlanningService {
                 signal,
                 maxTokens: config.PLANNING_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
+                onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'coordinator', complexity, observer }),
             }
         );
         if (repaired) {
@@ -532,15 +542,7 @@ export class PlanningService implements IPlanningService {
       );
 
       // Track usage once, on the successful attempt (failed attempts throw before here).
-      const rawUsage = (response as any).usage;
-      if (rawUsage) {
-        const { tokens, cost } = extractUsage(model, rawUsage);
-        if (tokens > 0 || cost > 0) {
-          metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
-          metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
-          observer?.onTokensConsumed?.(tokens, cost);
-        }
-      }
+      recordLlmUsage(model, (response as any).usage, { component: 'evaluator', complexity, observer });
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;
@@ -560,6 +562,7 @@ export class PlanningService implements IPlanningService {
                 signal,
                 maxTokens: config.SYNTHESIS_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
+                onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'evaluator', complexity, observer }),
             }
         );
         if (repaired) {
@@ -581,14 +584,14 @@ export class PlanningService implements IPlanningService {
         // Round budget (maxRounds) still bounds this, so it cannot loop indefinitely.
         if (mustSynthesize) {
           logger.warn('[PlanningService] Failed to generate valid evaluation on the final round; synthesizing from raw text');
-          const safeContent = responseText.length > 50 ? responseText : '';
+          const safeContent = salvageReportText(responseText);
           plan = { action: 'synthesize', content: safeContent, researchers: [] };
         } else if (previousPlan?.researchers && previousPlan.researchers.length > 0) {
           logger.warn('[PlanningService] Evaluation unparseable mid-research; continuing the prior agenda rather than synthesizing early');
           plan = { action: 'delegate', content: '', researchers: previousPlan.researchers };
         } else {
           logger.warn('[PlanningService] Evaluation unparseable and no prior agenda to continue; falling back to synthesize');
-          const safeContent = responseText.length > 50 ? responseText : '';
+          const safeContent = salvageReportText(responseText);
           plan = { action: 'synthesize', content: safeContent, researchers: [] };
         }
       }

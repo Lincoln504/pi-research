@@ -33,7 +33,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { completeSimple } from '../core/llm/pi-ai-completion.ts';
 import type { Model } from '@earendil-works/pi-ai';
-import { extractUsage } from '../types/llm.ts';
+import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { withTimeout } from '../core/llm/llm-timeout.ts';
@@ -466,14 +466,7 @@ export async function runBackgroundExtraction(
       );
 
       // Track token and cost metrics for the background synthesis call
-      const rawUsage = (response as any).usage;
-      if (rawUsage) {
-        const { tokens, cost } = extractUsage(model, rawUsage);
-        if (tokens > 0 || cost > 0) {
-          metrics.increment('llm_tokens_total', tokens, { component: 'knowledge_search' });
-          metrics.increment('llm_cost_total', cost, { component: 'knowledge_search' });
-        }
-      }
+      recordLlmUsage(model, (response as any).usage, { component: 'knowledge_search' });
 
       responseText = validateAndExtractText(response, 'Knowledge Extraction');
       break;
@@ -525,6 +518,7 @@ export async function runBackgroundExtraction(
       // at repairJsonWithLlm's smaller default (16384). Mirrors the planning-service repairs.
       maxTokens,
       thinkingLevel,
+      onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'knowledge_search' }),
     },
   );
 
@@ -615,14 +609,7 @@ export async function triageRelevantUrls(
         'knowledge-relevance-triage',
       );
 
-      const rawUsage = (response as any).usage;
-      if (rawUsage) {
-        const { tokens, cost } = extractUsage(model, rawUsage);
-        if (tokens > 0 || cost > 0) {
-          metrics.increment('llm_tokens_total', tokens, { component: 'knowledge_triage' });
-          metrics.increment('llm_cost_total', cost, { component: 'knowledge_triage' });
-        }
-      }
+      recordLlmUsage(model, (response as any).usage, { component: 'knowledge_triage' });
 
       responseText = validateAndExtractText(response, 'Knowledge Triage');
       break;
