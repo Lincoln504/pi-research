@@ -427,8 +427,8 @@ describe('capResearcherQueries', () => {
     expect(total).toBeLessThanOrEqual(20);
   });
 
-  it('enforces hard cap of 60 for level 2 across multiple researchers', () => {
-    // Three researchers with 25 each = 75 total, over the 60 cap
+  it('enforces hard cap of 45 for level 2 across multiple researchers', () => {
+    // Three researchers with 25 each = 75 total, over the 45 cap
     const researchers = [
       makeResearcher('1', 25),
       makeResearcher('2', 25),
@@ -437,23 +437,17 @@ describe('capResearcherQueries', () => {
     const plan = { action: 'delegate' as const, researchers, allQueries: [] };
     const result = capResearcherQueries(plan, 2, svc);
     const total = result.researchers!.reduce((sum, r) => sum + r.queries.length, 0);
-    expect(total).toBeLessThanOrEqual(60);
+    expect(total).toBeLessThanOrEqual(45);
   });
 
-  it('enforces hard cap of 150 for level 3 across multiple researchers', () => {
-    // Five researchers with 40 each = 200 total, but per-researcher cap of 30 brings it to 150 first
-    // Use 5 researchers with 31 each: per-researcher cap → 30 each = 150 total, at the cap boundary
-    // Use 5 researchers with 35 each: after per-cap → 30 each = 150, at boundary
-    // To force global trimming use fewer researchers with no per-researcher violation
-    // Level 3 per-researcher budget = 30; hard cap = 150 = 5*30, so per-researcher cap alone may handle it
-    // Construct a case with under-budget but total over cap: not possible since 5*30=150
-    // Instead use researcher count over team limit but that is not validated here
-    // A simpler path: manually set queries at 29 each for 6 researchers (174 total)
+  it('enforces hard cap of 100 for level 3 across multiple researchers', () => {
+    // Six researchers with 29 each = 174 total, over the 100 hard cap. Each is under the
+    // per-researcher budget, so the global round trim is what brings the total down to the cap.
     const researchers = Array.from({ length: 6 }, (_, i) => makeResearcher(String(i + 1), 29));
     const plan = { action: 'delegate' as const, researchers, allQueries: [] };
     const result = capResearcherQueries(plan, 3, svc);
     const total = result.researchers!.reduce((sum, r) => sum + r.queries.length, 0);
-    expect(total).toBeLessThanOrEqual(150);
+    expect(total).toBeLessThanOrEqual(100);
   });
 
   it('filters out a researcher with an empty queries array', () => {
