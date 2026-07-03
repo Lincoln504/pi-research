@@ -23,6 +23,7 @@ import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
 import { createStoreTable, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
 import { addDocumentsToStore, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
+import { isEmbedderUnreachable } from './embedder-utils.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import { normalizeWorkspacePath } from '../utils/text-utils.ts';
@@ -44,17 +45,6 @@ export interface StoreOptions {
   ttlDays?: number;
 }
 
-function isEmbedderUnreachable(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  // ECONNREFUSED: the leader's HTTP endpoint is gone (a dead/stepped-down leader, or an
-  // assertServing() refusal after this process stepped down). "embedder poisoned": an
-  // in-flight/queued embed that was fast-failed when the leader poisoned its queue on a
-  // permanently-hung inference — that rejection carries NO ECONNREFUSED, so it must be
-  // matched explicitly or the caller would fail hard instead of reconnecting to the
-  // freshly-elected leader.
-  return msg.includes('ECONNREFUSED') || msg.includes('embedder poisoned');
-}
-
 export class KnowledgeStore implements IKnowledgeStore {
   readonly name = ServiceNames.KNOWLEDGE_STORE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
@@ -68,6 +58,11 @@ export class KnowledgeStore implements IKnowledgeStore {
   private manifestPath: string;
   private isClosing = false;
   private activeWrites = new Set<Promise<any>>();
+  // Set when getFreshTable() had to fall back to the existing cached handle after a
+  // transient re-open failure (i.e. this.table may NOT reflect the latest committed
+  // version). The FTS skip-guard consults this to fail SAFE — rebuild rather than trust
+  // a version() read off a possibly-stale snapshot and wrongly skip needed indexing.
+  private tableHandleStale = false;
   // LanceDB table version at the last successful FTS rebuild. rebuildFtsIndex() skips
   // when the version is unchanged: a research run that committed no new transactions
   // would otherwise create a fresh FTS index (and a new table version) on every cleanup,
@@ -491,6 +486,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     if (!this.db) throw new Error('Store not open');
     try {
       this.table = await this.db.openTable(this.tableName);
+      this.tableHandleStale = false;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // If the table genuinely no longer exists (dropped/renamed by another
@@ -502,10 +498,36 @@ export class KnowledgeStore implements IKnowledgeStore {
       }
       if (!this.table) throw err;
       // Transient (lock/IO) refresh failure: keep using the existing handle, but
-      // log at WARN so the degraded path is visible rather than silent.
+      // log at WARN so the degraded path is visible rather than silent, and mark the
+      // handle stale so version-based skip guards fail safe (rebuild, don't skip).
+      this.tableHandleStale = true;
       logger.warn(`[store] Failed to refresh table handle, using existing: ${msg}`);
     }
     return this.table!;
+  }
+
+  /**
+   * Run a table operation under the same close-coordination guard addDocuments uses:
+   * register into activeWrites BEFORE checking isClosing (so close() can't observe an
+   * empty set and tear down the connection mid-flight), and skip cleanly if the store
+   * is already closing. Compaction (optimize/rebuildFtsIndex) runs in the background
+   * right after a run completes — exactly when a Ctrl+C-driven close() is most likely
+   * to race it — so both must be tracked, not just writes.
+   */
+  private async trackOperation<T>(label: string, whenClosing: T, fn: () => Promise<T>): Promise<T> {
+    let resolveWrite!: () => void;
+    const writePromise = new Promise<void>((resolve) => { resolveWrite = resolve; });
+    this.activeWrites.add(writePromise);
+    try {
+      if (this.isClosing) {
+        logger.debug(`[store] Skipping ${label} — store is closing`);
+        return whenClosing;
+      }
+      return await fn();
+    } finally {
+      this.activeWrites.delete(writePromise);
+      resolveWrite();
+    }
   }
 
   async addDocuments(docs: StoreDocument[]): Promise<void> {
@@ -766,6 +788,18 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async rebuildFtsIndex(): Promise<boolean> {
+    return this.trackOperation('FTS index rebuild', false, () => this._rebuildFtsIndex());
+  }
+
+  private async _rebuildFtsIndex(): Promise<boolean> {
+    // Serialize under the same cross-process lock optimize() uses. rebuildFtsIndex and
+    // optimize are a matched pair that both commit new manifest versions; two processes
+    // finishing runs against a shared store could otherwise race two createIndex() calls,
+    // wasting a full rebuild (LanceDB's optimistic commit surfaces the loser as a conflict).
+    return this.options.withLock ? this.options.withLock(() => this._rebuildFtsIndexInner()) : this._rebuildFtsIndexInner();
+  }
+
+  private async _rebuildFtsIndexInner(): Promise<boolean> {
     const table = await this.getFreshTable();
     try {
       const count = await table.countRows();
@@ -780,7 +814,11 @@ export class KnowledgeStore implements IKnowledgeStore {
       // re-ingest (delete N + add N) that changes the indexed row set — the case that would
       // otherwise silently leave new content out of the keyword/BM25 index.
       const version = await table.version();
-      if (this.lastFtsVersion === version) {
+      // Only trust the skip when we hold a genuinely fresh handle. If getFreshTable
+      // fell back to a stale cached handle, version() may read an old snapshot that
+      // happens to equal lastFtsVersion — skipping a rebuild that new content needs.
+      // Fail safe: rebuild.
+      if (!this.tableHandleStale && this.lastFtsVersion === version) {
         logger.debug(`[store] Skipping FTS index rebuild (table version unchanged at ${version})`);
         return false;
       }
@@ -828,10 +866,10 @@ export class KnowledgeStore implements IKnowledgeStore {
    * Returns true if optimize ran, false if it was skipped (closing/disabled).
    */
   async optimize(options: { cleanupOlderThan?: Date; deleteUnverified?: boolean } = {}): Promise<boolean> {
-    if (this.isClosing) {
-      logger.debug('[store] Skipping optimize — store is closing');
-      return false;
-    }
+    return this.trackOperation('optimize', false, () => this._optimize(options));
+  }
+
+  private async _optimize(options: { cleanupOlderThan?: Date; deleteUnverified?: boolean } = {}): Promise<boolean> {
     if (this.options.knowledgeMode === 'none') return false;
 
     const run = async (): Promise<boolean> => {
@@ -846,7 +884,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         // rebuilds + re-optimizes (the disk-bloat regression). A stale baseline (index not
         // current, or never built) is left untouched so the next rebuild still detects the
         // pending change.
-        const wasFtsIndexCurrent = this.lastFtsVersion !== null && this.lastFtsVersion === await table.version();
+        const wasFtsIndexCurrent = !this.tableHandleStale && this.lastFtsVersion !== null && this.lastFtsVersion === await table.version();
         // cleanupOlderThan defaults to now: prune every prunable old version. The
         // current version is always retained, and (with deleteUnverified=false)
         // physical files inside LanceDB's safety window are kept regardless.

@@ -1,4 +1,5 @@
 import { normalizeUrl, validateUrl } from '../utils/url-utils.ts';
+import { isEmbedderUnreachable } from './embedder-utils.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { Chunker } from './chunker.ts';
@@ -19,16 +20,6 @@ interface WriterQueueOptions {
     addDocuments: (docs: StoreDocument[]) => Promise<void>;
   };
   chunker: Chunker | null;
-}
-
-function isEmbedderUnreachable(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  // ECONNREFUSED: the embedding leader's HTTP endpoint is gone (dead/stepped-down leader,
-  // or an assertServing() refusal). "embedder poisoned": a queued/in-flight embed that was
-  // fast-failed when the leader poisoned its queue on a permanently-hung inference — that
-  // rejection carries no ECONNREFUSED, so match it explicitly so the ingest retries against
-  // the freshly-elected leader instead of being dropped.
-  return msg.includes('ECONNREFUSED') || msg.includes('embedder poisoned');
 }
 
 function isNoSpace(err: unknown): boolean {

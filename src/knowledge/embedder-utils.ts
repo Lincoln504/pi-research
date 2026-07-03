@@ -22,6 +22,43 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMess
 }
 
 /**
+ * Detect whether an embedding call failed because the embedding *leader* is
+ * transiently gone — a dead/stepped-down leader, a poisoned queue, or a
+ * connection that was reset when the leader tore down its HTTP server. In every
+ * case a fresh leader is immediately electable, so the caller should reconnect
+ * and retry rather than drop the work.
+ *
+ * Signatures, and why each must be matched:
+ *   - "ECONNREFUSED"        the leader's HTTP endpoint is gone (dead/stepped-down
+ *                           leader, or an assertServing() refusal after step-down).
+ *   - "embedder poisoned"   an in-flight/queued embed fast-failed when the leader
+ *                           poisoned its queue on a permanently-hung inference;
+ *                           this rejection carries NO ECONNREFUSED.
+ *   - ECONNRESET / "socket hang up" / "aborted" / "other side closed":
+ *                           the leader closed the connection mid-request during an
+ *                           ORDINARY shutdown — EmbeddingServer.shutdown() calls
+ *                           closeAllConnections() not just on the poison path but on
+ *                           normal leadership loss and process teardown. Without these,
+ *                           a document in flight during a leader handoff is silently
+ *                           dropped instead of retried against the new leader.
+ *
+ * Pure string/code matching — safe to call from native-import-free modules.
+ */
+export function isEmbedderUnreachable(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  const msg = err instanceof Error ? err.message : String(err);
+  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ECONNABORTED') return true;
+  return (
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('embedder poisoned') ||
+    msg.includes('socket hang up') ||
+    msg.includes('other side closed') ||
+    /\baborted\b/i.test(msg)
+  );
+}
+
+/**
  * Detect whether an error indicates the native ML/vector stack is unavailable on
  * this platform — i.e. a prebuilt native binding is genuinely missing, not a
  * transient/logic failure. This is the case on platforms the upstream packages
