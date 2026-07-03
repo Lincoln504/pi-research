@@ -197,16 +197,14 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       logger.debug('[ResearchOrchestrationService] Service cleanup failed:', _err);
     }
     
-    // Clear synthesis reports
-    try {
-      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-      if (synthesisService && targetId) {
-        synthesisService.clearReports(targetId);
-      }
-    } catch (_err) {
-      logger.debug('[ResearchOrchestrationService] ResearchSynthesisService not available for cleanup');
-    }
-    
+    // NOTE: synthesis reports are intentionally NOT cleared here. This cleanup runs in
+    // the orchestrator's own finally, i.e. INSIDE the run() call — clearing here erased
+    // the per-researcher reports before the SDK's runDeepResearch() promise even resolved,
+    // making getResearchReports()/runResearchDetailed().reports always return an empty Map.
+    // Retention is bounded instead by ResearchSynthesisService's MAX_SESSIONS LRU cap, its
+    // designed backstop; reports for a completed run linger only until evicted or the SDK
+    // reads them. See getResearchReports() in sdk.ts.
+
     // Clear planning state
     const planningService = tryGetService<IPlanningService>(ServiceNames.PLANNING, container);
     if (planningService && targetId) {

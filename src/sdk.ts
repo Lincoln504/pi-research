@@ -56,6 +56,10 @@ let globalApiKey: string | undefined = undefined;
 let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
 let _lastSessionId: string | null = null;
+// The researchId of the most recent runDeepResearch call. Per-researcher reports are
+// stored keyed by researchId (not sessionId), so getResearchReports() must look them up
+// by this value — sessionId is a distinct random UUID that was never a report key.
+let _lastResearchId: string | null = null;
 // Per-run metrics summary captured by the most recent runDeepResearch call, so
 // consumers (e.g. audit harnesses) can read pi-research's internal telemetry —
 // latency, scrape/search counts, tokens, cost, tool usage — after each run.
@@ -273,7 +277,10 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     // dispose), don't let it mask the root-cause init error the caller needs —
     // log it and re-throw the original.
     try {
-      await shutdownResearchSDK();
+      // Call the raw teardown directly, NOT the public shutdownResearchSDK(): we are
+      // inside _doInit and _initPromise still points at this very (rejecting) promise, so
+      // the public path's await-init guard would deadlock awaiting itself.
+      await _doShutdown();
     } catch (cleanupErr) {
       logger.error('[SDK] Cleanup after failed init also errored:', cleanupErr);
     }
@@ -391,6 +398,7 @@ export async function runDeepResearch(
   const researchId = `sdk-${Date.now()}`;
   const sessionId = randomUUID();
   _lastSessionId = sessionId;
+  _lastResearchId = researchId;
   const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, undefined, globalContainer);
   
   const researchStart = Date.now();
@@ -539,15 +547,20 @@ export async function runQuickResearch(
 
 /**
  * Retrieve all researcher reports gathered during the most recent runDeepResearch() call.
- * Reports are keyed by researcher ID. Pass the sessionId returned from runDeepResearch to
- * access reports from a specific run; omit to use the last run's session.
+ * Reports are keyed by researcher ID (e.g. "1.researcher-0"). Pass the runId returned from
+ * runResearchDetailed() to target a specific run; omit to use the last run.
+ *
+ * Reports are looked up by researchId — the same key they were stored under — not by the
+ * sessionId (a distinct random UUID). Read them before the next runDeepResearch() call:
+ * retention is bounded by the synthesis service's LRU, so a much later read may find a run
+ * evicted.
  */
-export async function getResearchReports(sessionId?: string): Promise<Map<string, string>> {
+export async function getResearchReports(researchId?: string): Promise<Map<string, string>> {
   if (!globalContainer) throw new Error('SDK not initialized');
-  const sid = sessionId ?? _lastSessionId;
-  if (!sid) return new Map();
+  const id = researchId ?? _lastResearchId;
+  if (!id) return new Map();
   const synthesis = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
-  return synthesis.getAllReports(sid);
+  return synthesis.getAllReports(id);
 }
 
 /**
@@ -672,6 +685,15 @@ export async function shutdownResearchSDK(): Promise<void> {
   if (!isInitialized && !_initPromise && !globalContainer) {
     return;
   }
+  // If an initialization is still in flight, let it settle before tearing down. The
+  // early-return above only fires when nothing exists yet; once _initPromise is set,
+  // isInitialized is still false, so without this a shutdown racing an un-awaited init
+  // would dispose/reset the very container initializeCoreServices is still populating.
+  // (_doInit's own failure cleanup calls _doShutdown() directly, so it never re-enters
+  // here and cannot deadlock awaiting its own promise.)
+  if (_initPromise) {
+    await _initPromise.catch(() => { /* init failed; fall through to clean up partial state */ });
+  }
   // Coalesce concurrent/overlapping shutdowns onto a single teardown so the
   // container is disposed and globals wiped exactly once.
   if (_shutdownPromise) return _shutdownPromise;
@@ -734,6 +756,7 @@ async function _doShutdown(): Promise<void> {
   globalContainer = null;
   globalConfig = null;
   _lastSessionId = null;
+  _lastResearchId = null;
   _lastRunSummary = null;
   _lastErrorReport = null;
 
