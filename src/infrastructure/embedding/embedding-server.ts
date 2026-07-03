@@ -484,12 +484,19 @@ export class EmbeddingServer implements IEmbedder {
 
           switch (req.url) {
             case '/embed': {
+              // Refuse once stepped down (leader lost / queue poisoned) — the in-process
+              // embed()/embedMany() already guard, but the HTTP path (the actual REMOTE
+              // client route) bypassed it and would re-acquire the GPU in a non-leader
+              // process, breaking the single-GPU-context invariant. The ECONNREFUSED
+              // message drives the client to reconnect to the new leader.
+              this.assertServing();
               const result = await this.queue.enqueue(() => this.embedder.embed(data.text as string));
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ data: Array.from(result) }));
               break;
             }
             case '/embedMany': {
+              this.assertServing();
               const results = await this.queue.enqueue(() => this.embedder.embedMany(data.texts as string[]));
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ results: results.map(r => Array.from(r)) }));

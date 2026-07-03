@@ -24,7 +24,23 @@ const fs: typeof FsType = createRequire(import.meta.url)('node:fs');
  * Maps session IDs to capture state, with a global flag as fallback.
  */
 const sessionCaptureStates = new Map<string, boolean>();
+// Active UNKEYED captures (captureStdio called without a sessionId — e.g. the outer
+// research run's runCapturingStderr). Tracked as a depth counter separate from the keyed
+// map so that ending a keyed capture (which recomputes the global flag) cannot clear the
+// flag while an unkeyed capture is still active — otherwise a later capture would treat
+// stdout/stderr as un-patched, save the still-patched writers as "originals", and on a
+// LIFO-violating restore leave them permanently diverted.
+let unkeyedCaptureDepth = 0;
 let isAnyLoggerCapturingOutput = false;
+
+/**
+ * Recompute the global "is anything capturing" flag from BOTH the keyed sessions and
+ * the unkeyed-capture depth, so neither scheme can clobber the other's state.
+ */
+function recomputeGlobalCapturing(): void {
+  isAnyLoggerCapturingOutput =
+    unkeyedCaptureDepth > 0 || Array.from(sessionCaptureStates.values()).some(v => v);
+}
 
 /**
  * Check if a session is currently capturing output
@@ -44,8 +60,8 @@ export function setSessionCapturing(sessionId: string, capturing: boolean): void
   if (capturing) {
     isAnyLoggerCapturingOutput = true;
   } else {
-    // Update global flag based on all sessions
-    isAnyLoggerCapturingOutput = Array.from(sessionCaptureStates.values()).some(v => v);
+    // Recompute from all sessions AND active unkeyed captures.
+    recomputeGlobalCapturing();
   }
 }
 
@@ -177,6 +193,7 @@ export async function captureStdio<T>(
   if (sessionId) {
     setSessionCapturing(sessionId, true);
   } else {
+    unkeyedCaptureDepth++;
     isAnyLoggerCapturingOutput = true;
   }
 
@@ -371,7 +388,8 @@ export async function captureStdio<T>(
     if (sessionId) {
       setSessionCapturing(sessionId, false);
     } else {
-      isAnyLoggerCapturingOutput = false;
+      unkeyedCaptureDepth = Math.max(0, unkeyedCaptureDepth - 1);
+      recomputeGlobalCapturing();
     }
 
     // Restore FD 2

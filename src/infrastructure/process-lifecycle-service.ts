@@ -123,7 +123,13 @@ export class ProcessLifecycleService implements IProcessLifecycle {
           // On Linux this usually means the process just exited between the signal and the read.
           return false;
         }
-        return actualStartTime === expectedStartTime;
+        // Allow ±1s slack. The macOS/BSD fallback derives start time as
+        // floor(Date.now()/1000) - `ps etimes` (elapsed whole seconds); both terms are
+        // independently quantized, so the SAME process can compute start times 1s apart
+        // across two reads. A strict === there makes a live lock/leader owner read as
+        // dead → the lock is reclaimed from under a live writer (lost update). PID reuse
+        // within a 1s window at the identical PID is not a realistic false-match.
+        return Math.abs(actualStartTime - expectedStartTime) <= 1;
       }
       
       return true;

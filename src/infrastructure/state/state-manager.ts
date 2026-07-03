@@ -356,7 +356,16 @@ export class StateManager {
         // fs.rename fails on Windows if target exists (NTFS). Fall back to copy+delete.
         if (process.platform === 'win32') {
           await fs.copyFile(tempFilePath, this.stateFilePath);
-          await fs.unlink(tempFilePath);
+          // copyFile succeeded → the state IS persisted. Make the temp-file removal
+          // best-effort: a transient AV lock on the temp would otherwise throw here and
+          // fall through to the catch below, reporting "Failed to write state" (status:
+          // error) for a write that actually succeeded — a caller that retries/aborts on
+          // the false failure would act wrongly.
+          const tmp = tempFilePath;
+          tempFilePath = null;
+          await fs.unlink(tmp).catch((err) => {
+            logger.warn('[StateManager] Failed to remove temp file after copy fallback (write succeeded):', err);
+          });
         } else {
           throw renameErr;
         }
