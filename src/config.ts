@@ -279,19 +279,25 @@ function sleepSync(ms: number): void {
 }
 
 /**
- * Save the centralized project settings registry.
+ * Atomically read-modify-write the centralized project settings registry under a file lock.
+ *
+ * The lock, the READ, and the WRITE all happen inside one critical section. A previous design
+ * read the registry OUTSIDE the lock (in saveConfig) and only locked the write, so two concurrent
+ * local writes — e.g. `knowledge-config set` invoked in parallel across several directories —
+ * could both read the same pre-change snapshot and clobber each other's entry (a lost update).
+ * `mutate` receives the latest on-disk registry and edits it in place.
  */
-function saveProjectSettingsRegistry(registry: Record<string, Record<string, string>>): void {
+function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<string, string>>) => void): void {
   const registryPath = getProjectSettingsRegistryPath();
   const dir = path.dirname(registryPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  
+
   const lockPath = `${registryPath}.lock`;
   let lockFd: number | null = null;
   const maxRetries = 100;
-  
+
   try {
     for (let i = 0; i < maxRetries; i++) {
       try {
@@ -307,28 +313,41 @@ function saveProjectSettingsRegistry(registry: Record<string, Record<string, str
               continue;
             }
           } catch { /* ignore */ }
-          
+
           sleepSync(50);
           continue;
         }
         throw err;
       }
     }
-    
-    if (lockFd !== null) {
-      // Atomic write: a bare writeFileSync could be truncated by a crash/ENOSPC mid-write,
-      // leaving invalid JSON that loadProjectSettingsRegistry silently resets to {} — wiping
-      // every workspace's saved settings. Write a temp then rename (atomic on the same FS).
-      const tmpPath = `${registryPath}.tmp.${process.pid}.${Date.now()}`;
-      try {
-        fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
-        fs.renameSync(tmpPath, registryPath);
-      } catch (writeErr) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-        throw writeErr;
-      }
-    } else {
+
+    if (lockFd === null) {
       throw new Error(`Failed to acquire lock for project settings registry after ${maxRetries} retries. Aborting to prevent data corruption.`);
+    }
+
+    // Read the LATEST registry inside the lock so a concurrent writer's change is never lost.
+    let registry: Record<string, Record<string, string>> = {};
+    try {
+      if (fs.existsSync(registryPath)) {
+        registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+      }
+    } catch (readErr) {
+      logger.warn('[config] Failed to read project settings registry (starting fresh):', readErr);
+      registry = {};
+    }
+
+    mutate(registry);
+
+    // Atomic write: a bare writeFileSync could be truncated by a crash/ENOSPC mid-write,
+    // leaving invalid JSON that loadProjectSettingsRegistry silently resets to {} — wiping
+    // every workspace's saved settings. Write a temp then rename (atomic on the same FS).
+    const tmpPath = `${registryPath}.tmp.${process.pid}.${Date.now()}`;
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, registryPath);
+    } catch (writeErr) {
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      throw writeErr;
     }
   } catch (err) {
     // Rethrow so the caller (saveConfig → /research-config) surfaces the failure instead of
@@ -547,8 +566,12 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
       );
       if (Object.keys(legacyLocal).length > 0 && JSON.stringify(existingLocal) !== JSON.stringify(legacyLocal)) {
         logger.info(`[config] Migrating legacy .pi-research.env settings from ${cwd} to central registry...`);
+        // Persist under the registry lock, reading the latest on-disk state so a concurrent
+        // write isn't lost; also reflect the merge in the in-memory `registry` used just below.
         registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyLocal };
-        saveProjectSettingsRegistry(registry);
+        updateProjectSettingsRegistry((disk) => {
+          disk[normalizedCwd] = { ...disk[normalizedCwd], ...legacyLocal };
+        });
       }
     } catch (err) {
       logger.warn(`[config] Failed to load legacy settings for ${cwd}:`, err);
@@ -637,7 +660,6 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
 
   if (scope === 'local') {
     // CENTRALIZED PROJECT STORAGE
-    const registry = loadProjectSettingsRegistry();
     const normalizedCwd = normalizeWorkspacePath(cwd);
     // The per-directory registry must hold ONLY genuine per-directory overrides. Persist just the
     // key(s) the caller actually changed, merged onto any existing entry — never the full local-key
@@ -648,8 +670,11 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     const toWrite = changedKeys
       ? Object.fromEntries(Object.entries(newValues).filter(([k]) => changedKeys.includes(k)))
       : newValues;
-    registry[normalizedCwd] = { ...(registry[normalizedCwd] ?? {}), ...toWrite };
-    saveProjectSettingsRegistry(registry);
+    // Read-merge-write under one lock so a concurrent local write to another directory
+    // isn't lost (the merge onto the existing entry happens against the latest on-disk state).
+    updateProjectSettingsRegistry((registry) => {
+      registry[normalizedCwd] = { ...(registry[normalizedCwd] ?? {}), ...toWrite };
+    });
 
     logger.debug(`[config] Saved project settings for ${normalizedCwd} to central registry.`);
     return;
