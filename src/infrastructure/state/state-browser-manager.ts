@@ -54,30 +54,6 @@ export class StateBrowserManager implements IService {
     return state;
   }
 
-  /**
-   * Check if a process is alive and optionally verify scheduler ID
-   * @param state The current state
-   * @param pid The process ID to check
-   * @param expectedSchedulerId Optional scheduler ID to verify
-   * @param isPidAlive Function to check if PID is alive
-   * @returns true if process is alive and scheduler ID matches (if provided)
-   */
-  isPidAlive(
-    state: SingletonState,
-    pid: number,
-    expectedSchedulerId: string | undefined,
-    isPidAlive: (pid: number) => boolean
-  ): boolean {
-    const alive = isPidAlive(pid);
-    if (!alive) return false;
-
-    if (expectedSchedulerId) {
-      return state.browserServer?.schedulerId === expectedSchedulerId;
-    }
-
-    return true;
-  }
-
   async initialize(): Promise<void> {
     if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
       return;

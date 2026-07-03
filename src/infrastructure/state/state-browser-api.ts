@@ -59,29 +59,4 @@ export class StateBrowserApi {
     });
   }
 
-  /**
-   * Check if a process is alive with optional scheduler ID verification
-   * @param pid The process ID to check
-   * @param expectedSchedulerId Optional scheduler ID to verify
-   * @param readState Function to read state (can skip lock)
-   * @param isPidAlive Function to check if PID is alive
-   * @param skipLock Whether to skip lock when reading state
-   * @returns true if process is alive and scheduler ID matches (if provided)
-   */
-  async isPidAlive(
-    pid: number,
-    expectedSchedulerId: string | undefined,
-    readState: () => Promise<SingletonState>,
-    isPidAlive: (pid: number) => boolean
-  ): Promise<boolean> {
-    const alive = isPidAlive(pid);
-    if (!alive) return false;
-
-    if (expectedSchedulerId) {
-      const state = await readState();
-      return this.browserManager.isPidAlive(state, pid, expectedSchedulerId, isPidAlive);
-    }
-
-    return true;
-  }
 }
