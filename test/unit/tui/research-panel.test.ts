@@ -66,6 +66,32 @@ describe('TUI Research Panel', () => {
     });
   });
 
+  describe('coordinator column identified by slice id, not label text', () => {
+    it('still shows a token count for a researcher whose label contains "planning"', () => {
+      // Regression: the coordinator column (which hides its token count) used to be
+      // detected by matching "planning"/"complexity" in the label. In quick mode the slice
+      // id/label is the query itself, so a query like "urban planning news" wrongly blanked
+      // that column. It is now keyed off the stable 'coord' slice id.
+      const state = createInitialPanelState('s', 'r', 'q', 'm');
+      addSlice(state, 'r1', 'researching: urban planning news');
+      updateSliceTokens(state, 'r1', 5000, 0);
+      const tok = _formatTokens(5000);
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const out = createMasterResearchPanel('pi-session', getActivePanelsMock)({} as any, mockTheme).render(80).join('\n');
+      expect(out).toContain(tok);
+    });
+
+    it('blanks the token count only for the coordinator column (id "coord")', () => {
+      const state = createInitialPanelState('s', 'r', 'q', 'm');
+      addSlice(state, 'coord', 'coordinator');
+      updateSliceTokens(state, 'coord', 5000, 0);
+      const tok = _formatTokens(5000);
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const out = createMasterResearchPanel('pi-session', getActivePanelsMock)({} as any, mockTheme).render(80).join('\n');
+      expect(out).not.toContain(tok);
+    });
+  });
+
   describe('wave animation', () => {
     const renderHeader = (isSearching: boolean): string => {
       const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');

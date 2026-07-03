@@ -80,9 +80,12 @@ function renderPanelBlock(
     const la = sa.label.toLowerCase();
     const lb = sb.label.toLowerCase();
 
-    // Priority 1: Planning/Coordinator
-    const isPlanA = la.includes('plan') || la.includes('coord');
-    const isPlanB = lb.includes('plan') || lb.includes('coord');
+    // Priority 1: Coordinator — key off the stable slice id, NOT a label substring.
+    // In quick mode the slice id is the query-derived label, and a researcher's specialist
+    // label can contain "plan"/"coord" (e.g. "Urban Planning Specialist"); matching the
+    // label text would wrongly sort such a column into the coordinator's leading slot.
+    const isPlanA = a === 'coord';
+    const isPlanB = b === 'coord';
     if (isPlanA && !isPlanB) return -1;
     if (!isPlanA && isPlanB) return 1;
 
@@ -186,7 +189,10 @@ function renderPanelBlock(
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
-        const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
+        // Identify the coordinator column by its stable slice id, not a label substring:
+        // "planning"/"complexity" in the (possibly query-derived, in quick mode) label would
+        // false-positive and blank out a real column's tokens/cost/status.
+        const isPlanning = sliceId === 'coord';
         const tokens = slice?.tokens || 0;
         let raw = '';
 
@@ -222,7 +228,7 @@ function renderPanelBlock(
         const display = truncateToWidth('...', w);
         costStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
       } else {
-        const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
+        const isPlanning = sliceId === 'coord'; // coordinator column shows no per-column cost (see token row)
         const cost = slice?.cost || 0;
         const raw = (isPlanning || cost === 0) ? '' : formatCost(cost);
         const display = truncateToWidth(raw, w);
