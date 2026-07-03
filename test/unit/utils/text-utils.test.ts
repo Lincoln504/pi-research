@@ -220,6 +220,36 @@ describe('text-utils', () => {
       expect(result[1]!.url).toBe('https://other.org');
     });
 
+    it('preserves URLs containing digits-then-dot (regression: bracket [N] form)', () => {
+      // The old split delimiter matched any "N." run — inside URLs too — truncating
+      // report-2024.pdf → "report-", /v2.0/ → "/v", and shredding IP literals entirely.
+      const report = [
+        'CITED LINKS',
+        '[1] https://example.com/report-2024.pdf — annual report',
+        '[2] https://blog.example.com/v2.0/changes — changelog',
+        '[3] https://192.168.1.10/advisory — internal advisory',
+      ].join('\n');
+      const urls = parseCitations(report).map((c) => c.url);
+      expect(urls).toEqual([
+        'https://example.com/report-2024.pdf',
+        'https://blog.example.com/v2.0/changes',
+        'https://192.168.1.10/advisory',
+      ]);
+    });
+
+    it('preserves digits-then-dot URLs in the numbered "N." marker form too', () => {
+      const report = [
+        'CITED LINKS',
+        '1. https://example.com/report-2024.pdf',
+        '2. https://192.168.1.10/advisory',
+      ].join('\n');
+      const urls = parseCitations(report).map((c) => c.url);
+      expect(urls).toEqual([
+        'https://example.com/report-2024.pdf',
+        'https://192.168.1.10/advisory',
+      ]);
+    });
+
     it('drops a malformed/truncated URL fragment instead of emitting garbage (regression: "https://www")', () => {
       // A soft-wrapped URL leaves "https://www" on the first line of a citation.
       const report = [

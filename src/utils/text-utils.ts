@@ -236,13 +236,19 @@ export function parseCitations(report: string): Citation[] {
   const section = report.slice(headerIdx);
 
   const citations: Citation[] = [];
-  // Match [N] or N. or **[N]** or **N.** with optional whitespace
-  const blocks = section.split(/(?:\*\*|)\s*(?:\[\d+\]|\d+\.)\s*(?:\*\*|)/).slice(1);
+  // Match a list marker [N] or N. (optionally **-wrapped) ONLY at the start of a line.
+  // Entries in the CITED LINKS section are always line-leading, so anchoring to line
+  // start (^ with the `m` flag) is loss-free — and critically it stops the bare "N."
+  // form from matching a digits-then-dot run INSIDE a URL (e.g. `report-2024.pdf`,
+  // `/v2.0/`, or an IP literal `192.168.1.10`), which previously truncated or dropped
+  // those citations. The split and the parallel number-capture regex MUST stay
+  // structurally identical so blocks[i] and writtenNumbers[i] remain index-aligned.
+  const blocks = section.split(/^[^\S\n]*(?:\*\*)?[^\S\n]*(?:\[\d+\]|\d+\.)[^\S\n]*(?:\*\*)?/m).slice(1);
   // Capture the written number for each delimiter in parallel, using a SEPARATE global+capturing
   // regex (adding a capture group to the split pattern above would inject the captures into the
   // split output and break block indexing). blocks[i] is the content after delimiter i, so
   // writtenNumbers[i] is blocks[i]'s label — used to remap inline [N] by label, not position.
-  const writtenNumbers = [...section.matchAll(/(?:\*\*|)\s*(?:\[(\d+)\]|(\d+)\.)\s*(?:\*\*|)/g)]
+  const writtenNumbers = [...section.matchAll(/^[^\S\n]*(?:\*\*)?[^\S\n]*(?:\[(\d+)\]|(\d+)\.)[^\S\n]*(?:\*\*)?/gm)]
     .map(m => parseInt(m[1] ?? m[2] ?? '', 10));
 
   for (let bi = 0; bi < blocks.length; bi++) {
