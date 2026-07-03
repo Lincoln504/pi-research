@@ -375,7 +375,11 @@ async function fetchPaginated(
 ): Promise<Vulnerability[]> {
   const allVulnerabilities: Vulnerability[] = [];
   const maxPages = options?.maxPages ?? 5;
-  const pageSize = Math.min(20, maxResults);
+  // Scale the page size to the caller's request (bounded by NVD 2.0's 2000 resultsPerPage
+  // ceiling), mirroring the GitHub-advisories client. The prior hard cap of 20 silently
+  // truncated any request for >20×maxPages results; a larger page also means FEWER requests
+  // for the same total, which is friendlier to NVD's aggressive rate limit, not worse.
+  const pageSize = Math.min(MAX_RESULTS_PER_PAGE, maxResults);
   const signal = options?.signal;
   let startIndex = 0;
   let totalPagesFetched = 0;

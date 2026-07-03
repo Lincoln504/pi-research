@@ -86,6 +86,11 @@ export function isPoolShutdownError(error: unknown): boolean {
 
 // Session-scoped circuit breaker storage to support concurrent research runs
 const sessionCircuitBreakers = new Map<string, CircuitBreaker>();
+// Hard cap so a cleanup path that ever skips clearSessionCircuitBreaker (e.g. an earlier
+// throw in the cleanup closure) can't grow the map unboundedly over a long-lived TUI
+// process with many sessions. Far above any realistic concurrent-session count. Mirrors
+// the MAX_PATTERNS bound in error-tracker.ts.
+const MAX_SESSION_BREAKERS = 256;
 
 /**
  * Default circuit breaker configuration
@@ -118,6 +123,11 @@ const DEFAULT_BREAKER_CONFIG: any = {
 export function getBrowserCircuitBreaker(sessionId: string): CircuitBreaker {
     let breaker = sessionCircuitBreakers.get(sessionId);
     if (!breaker) {
+        // Evict the oldest (insertion-order) entry when at the cap before inserting.
+        if (sessionCircuitBreakers.size >= MAX_SESSION_BREAKERS) {
+            const oldest = sessionCircuitBreakers.keys().next().value;
+            if (oldest !== undefined) sessionCircuitBreakers.delete(oldest);
+        }
         breaker = new CircuitBreaker({ ...DEFAULT_BREAKER_CONFIG, name: `BrowserPool-${sessionId}` });
         sessionCircuitBreakers.set(sessionId, breaker);
     }
