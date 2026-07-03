@@ -74,6 +74,32 @@ describe('Research Panel State - Status Flashing', () => {
     expect(state.slices.get('generic')?.status).toBe('idle');
   });
 
+  it('an explicit clear cancels the pending pop so the NEXT status shows immediately (not queued behind a stale timer)', () => {
+    // Regression: a fast tool sequence pops 'search', then the done:search clear
+    // (status=undefined) direct-writes, then the next tool pops 'scrape'. Without
+    // cancelling the first (still-armed) timer, 'scrape' gets queued and only
+    // appears ~1s late when the stale timer fires — a flickering/laggy label.
+    const state = createInitialPanelState('session1', 'research1', 'query', 'model');
+    addSlice(state, 'researcher-1', '1');
+    const onUpdate = vi.fn();
+
+    updateSliceStatus(state, 'researcher-1', 'search', onUpdate);
+    expect(state.slices.get('researcher-1')?.status).toBe('search');
+
+    // Tool finishes quickly, well before FLASH_STATUS_DURATION_MS.
+    vi.advanceTimersByTime(FLASH_STATUS_DURATION_MS / 4);
+    updateSliceStatus(state, 'researcher-1', undefined, onUpdate); // done: clear
+    expect(state.slices.get('researcher-1')?.status).toBeUndefined();
+
+    // Next tool starts immediately — its status must be shown NOW, not queued.
+    updateSliceStatus(state, 'researcher-1', 'scrape', onUpdate);
+    expect(state.slices.get('researcher-1')?.status).toBe('scrape');
+
+    // And the original timer must not later resurrect a stale/queued status.
+    vi.advanceTimersByTime(FLASH_STATUS_DURATION_MS + 300);
+    expect(state.slices.get('researcher-1')?.status).toBeUndefined();
+  });
+
   it('should NOT flash status for core agents (coord/eval)', () => {
     const state = createInitialPanelState('session1', 'research1', 'query', 'model');
     addSlice(state, 'coord', 'coordinator');

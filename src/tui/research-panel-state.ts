@@ -252,6 +252,25 @@ function clearSliceFlash(researchId: string, sliceId: string): void {
   run.delete(sliceId);
 }
 
+/**
+ * Cancel any in-flight or queued status "pop" for a slice, WITHOUT touching its
+ * color flash or removing the slice's flash record. Call this on an explicit status
+ * clear (status === undefined) that bypasses the timed-pop queue — otherwise a
+ * still-armed flashStatus() timer from the just-cleared status survives the clear,
+ * and the next flashStatus() for a NEW status sees that stale timer as "still
+ * active" and queues instead of showing immediately; when the stale timer fires it
+ * pops the queued status late, disconnected from when its tool started (a
+ * flickering/laggy label, worst on deep-mode's several concurrent researcher boxes).
+ */
+function clearSliceStatusFlash(researchId: string, sliceId: string): void {
+  const flash = flashStateByRun.get(researchId)?.get(sliceId);
+  if (!flash) return;
+  if (flash.statusTimeout) clearTimeout(flash.statusTimeout);
+  flash.statusTimeout = null;
+  flash.activeStatus = null;
+  flash.statusQueue.length = 0;
+}
+
 // ---------------------------------------------------------------------------
 // Slice lifecycle
 // ---------------------------------------------------------------------------
@@ -316,6 +335,10 @@ export function updateSliceStatus(state: ResearchPanelState, id: string, status:
   if (status && isResearcher) {
     flashStatus(state, id, status, onUpdate);
   } else {
+    // Explicit clear (or a coord/eval persistent write) bypasses the timed-pop
+    // queue. For a researcher slice, cancel any pending flashStatus() timer for
+    // THIS slice so a stale timer can't delay-pop a status queued after this clear.
+    if (isResearcher) clearSliceStatusFlash(state.researchId, id);
     slice.status = status;
     if (onUpdate) onUpdate();
   }
