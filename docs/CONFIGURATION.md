@@ -133,7 +133,7 @@ API keys (all optional)
 | `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI mode (not needed when using pi's own auth). Provider is required alongside the key. |
 | `STACKEXCHANGE_API_KEY` | Raises the Stack Exchange tool's limit from 300/day to 10,000/day. Obtain at <https://stackapps.com/apps/oauth>. |
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
-| `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. |
+| `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. Recommended when using severity-filtered security searches: those issue a second (CVSS v2) NVD query to catch v2-only CVEs, which roughly doubles request time against the 6 s/request unauthenticated throttle. |
 
 Diagnostics & platform
 

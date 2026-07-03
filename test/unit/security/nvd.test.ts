@@ -192,4 +192,84 @@ describe('NVD Client', () => {
     expect(url).toContain('cvssV3Severity=CRITICAL');
     expect(url).toContain('hasKev');
   });
+
+  // A CVE carrying ONLY a v2 score is invisible to a cvssV3Severity-filtered query.
+  // The supplemental v2 pass recovers it, without re-banding dual-rated CVEs.
+  describe('v2-only severity recovery', () => {
+    const v2Only = (id: string, sev: string) => ({
+      cve: { id, metrics: { cvssMetricV2: [{ cvssData: { baseScore: 7.5 }, baseSeverity: sev }] } },
+    });
+    const v3 = (id: string, sev: string, score: number) => ({
+      cve: { id, metrics: { cvssMetricV31: [{ cvssData: { baseScore: score, baseSeverity: sev } }] } },
+    });
+    // A CVE that carries BOTH a v3 and a v2 rating.
+    const dualRated = (id: string) => ({
+      cve: {
+        id,
+        metrics: {
+          cvssMetricV31: [{ cvssData: { baseScore: 9.8, baseSeverity: 'CRITICAL' } }],
+          cvssMetricV2: [{ cvssData: { baseScore: 7.5 }, baseSeverity: 'HIGH' }],
+        },
+      },
+    });
+    // Route by which severity param the URL carries.
+    const routeBySeverityParam = (v3Vulns: unknown[], v2Vulns: unknown[]) =>
+      vi.mocked(fetch).mockImplementation(async (url) => {
+        const u = String(url);
+        const vulns = u.includes('cvssV2Severity=') ? v2Vulns : u.includes('cvssV3Severity=') ? v3Vulns : [];
+        return { ok: true, json: async () => ({ totalResults: vulns.length, vulnerabilities: vulns }) } as Response;
+      });
+
+    it('issues a cvssV2Severity supplemental query for a HIGH search', async () => {
+      routeBySeverityParam([], [v2Only('CVE-V2-1', 'HIGH')]);
+      const p = searchNVD(['term'], { severity: 'HIGH' });
+      await vi.runAllTimersAsync();
+      await p;
+      const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+      expect(urls.some(u => u.includes('cvssV2Severity=HIGH'))).toBe(true);
+      expect(urls.some(u => u.includes('cvssV3Severity=HIGH'))).toBe(true);
+    });
+
+    it('recovers a v2-only CVE the v3 query cannot see', async () => {
+      routeBySeverityParam([], [v2Only('CVE-V2-ONLY', 'HIGH')]);
+      const p = searchNVD(['term'], { severity: 'HIGH' });
+      await vi.runAllTimersAsync();
+      const result = await p;
+      expect(result.vulnerabilities.map(v => v.id)).toContain('CVE-V2-ONLY');
+    });
+
+    it('does NOT re-band a dual-rated CVE — v3=CRITICAL leaks into neither the HIGH v2 pass', async () => {
+      // The dual-rated CVE has v2=HIGH, so a naive v2 pass would wrongly admit it
+      // into a HIGH search even though its authoritative v3 rating is CRITICAL.
+      routeBySeverityParam([v3('CVE-REAL-HIGH', 'HIGH', 7.8)], [dualRated('CVE-DUAL')]);
+      const p = searchNVD(['term'], { severity: 'HIGH' });
+      await vi.runAllTimersAsync();
+      const result = await p;
+      const ids = result.vulnerabilities.map(v => v.id);
+      expect(ids).toContain('CVE-REAL-HIGH');
+      expect(ids).not.toContain('CVE-DUAL'); // filtered out of the v2 pass (has a v3 metric)
+    });
+
+    it('skips the v2 pass entirely for CRITICAL (v2 has no CRITICAL band)', async () => {
+      routeBySeverityParam([v3('CVE-CRIT', 'CRITICAL', 9.8)], [v2Only('CVE-SHOULD-NOT-APPEAR', 'HIGH')]);
+      const p = searchNVD(['term'], { severity: 'CRITICAL' });
+      await vi.runAllTimersAsync();
+      const result = await p;
+      const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+      expect(urls.some(u => u.includes('cvssV2Severity='))).toBe(false);
+      expect(result.vulnerabilities.map(v => v.id)).not.toContain('CVE-SHOULD-NOT-APPEAR');
+    });
+
+    it('degrades to v3 results when the v2 supplemental query fails', async () => {
+      vi.mocked(fetch).mockImplementation(async (url) => {
+        if (String(url).includes('cvssV2Severity=')) throw new Error('v2 endpoint boom');
+        return { ok: true, json: async () => ({ totalResults: 1, vulnerabilities: [v3('CVE-V3-OK', 'HIGH', 7.7)] }) } as Response;
+      });
+      const p = searchNVD(['term'], { severity: 'HIGH' });
+      for (let i = 0; i < 6; i++) await vi.runAllTimersAsync(); // let v2 retries exhaust
+      const result = await p;
+      expect(result.vulnerabilities.map(v => v.id)).toContain('CVE-V3-OK');
+      expect(result.error).toBeUndefined(); // supplemental failure is not a term failure
+    });
+  });
 });

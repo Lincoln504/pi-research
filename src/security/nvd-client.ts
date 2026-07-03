@@ -234,27 +234,55 @@ function parseNVDEntry(nvdEntry: NVDEntry, options: SearchOptions | undefined): 
   };
 }
 
-function parseNVDResponse(data: unknown, options: SearchOptions | undefined): Vulnerability[] {
-  if (!isNVDApiResponse(data)) {
+function extractNVDEntries(data: unknown): NVDEntry[] {
+  if (!isNVDApiResponse(data) || !Array.isArray(data.vulnerabilities)) {
     return [];
   }
-
-  if (Array.isArray(data.vulnerabilities)) {
-    return data.vulnerabilities
-      .filter(isNVDEntry)
-      .map((entry) => parseNVDEntry(entry, options));
-  }
-
-  return [];
+  return data.vulnerabilities.filter(isNVDEntry);
 }
 
-function buildURL(term: string, options: SearchOptions | undefined, maxResults: number, startIndex: number = 0): string {
+/**
+ * True if a CVE carries a v3.1, v3.0, or v4.0 score. The v2 supplemental query
+ * admits ONLY entries where this is false — the genuinely v2-only population that
+ * the primary cvssV3Severity query cannot see — so a dual-rated CVE is never
+ * re-admitted under a possibly-different v2 band than its authoritative v3/v4 one.
+ */
+function hasNewerCvssMetric(metrics: Metrics | undefined): boolean {
+  return (
+    (metrics?.cvssMetricV31?.length ?? 0) > 0 ||
+    (metrics?.cvssMetricV30?.length ?? 0) > 0 ||
+    (metrics?.cvssMetricV40?.length ?? 0) > 0
+  );
+}
+
+/**
+ * Which CVSS-severity query parameter to filter on. NVD 2.0's cvssV2Severity and
+ * cvssV3Severity params only match a CVE that carries a metric of that specific
+ * version — a CVE with no v3 score structurally cannot satisfy cvssV3Severity=X.
+ * So a severity-filtered search must issue separate v3- and v2-filtered requests
+ * and merge client-side (see searchSingleTerm) to also see CVEs that carry only a
+ * v2 score (mostly pre-~2021). Default 'v3' preserves the original behavior.
+ *
+ * No 'v4' arm: today every v4-rated CVE also carries a v3.1 score, so a
+ * cvssV4Severity pass would add a full extra request (tripling latency under the
+ * shared rate limiter) for zero net coverage — and cvssV4Severity may not even be
+ * a supported NVD 2.0 query param. Add a 'v4' arm here if that ever changes.
+ */
+type SeverityQueryVersion = 'v3' | 'v2';
+
+function buildURL(
+  term: string,
+  options: SearchOptions | undefined,
+  maxResults: number,
+  startIndex: number = 0,
+  severityVersion: SeverityQueryVersion = 'v3',
+): string {
   const params = new URLSearchParams();
 
   params.append('keywordSearch', term);
 
   if (options?.severity) {
-    params.append('cvssV3Severity', options.severity);
+    params.append(severityVersion === 'v2' ? 'cvssV2Severity' : 'cvssV3Severity', options.severity);
   }
   if (options?.includeExploited) {
     params.append('hasKev', '');
@@ -338,10 +366,12 @@ function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
   });
 }
 
-async function searchSingleTerm(
+async function fetchPaginated(
   term: string,
   options: SearchOptions | undefined,
   maxResults: number,
+  severityVersion: SeverityQueryVersion,
+  admitEntry: (entry: NVDEntry) => boolean = () => true,
 ): Promise<Vulnerability[]> {
   const allVulnerabilities: Vulnerability[] = [];
   const maxPages = options?.maxPages ?? 5;
@@ -352,7 +382,7 @@ async function searchSingleTerm(
 
   while (totalPagesFetched < maxPages && allVulnerabilities.length < maxResults) {
     if (signal?.aborted) break; // stop paginating promptly on cancel
-    const url = buildURL(term, options, pageSize, startIndex);
+    const url = buildURL(term, options, pageSize, startIndex, severityVersion);
 
     await nvdRateLimiter.acquire(signal);
 
@@ -367,25 +397,26 @@ async function searchSingleTerm(
       break;
     }
 
-    const vulnerabilities = parseNVDResponse(data, options);
-    
-    if (vulnerabilities.length === 0) {
+    // The RAW fetched count drives the "NVD has nothing left" stop decision; the
+    // admission filter only decides what's KEPT. If a page returns 20 raw matches
+    // but the v2-only filter admits 0 (all also had v3), that must NOT look like
+    // exhaustion and truncate pagination — later pages may hold real v2-only rows.
+    const rawEntries = extractNVDEntries(data);
+    const admitted = rawEntries.filter(admitEntry).map((entry) => parseNVDEntry(entry, options));
+
+    if (rawEntries.length === 0) {
       metrics.increment('nvd_cache_misses_total', 1, { term });
-    } else {
-      metrics.increment('nvd_cache_hits_total', 1, { term });
-    }
-    
-    if (vulnerabilities.length === 0) {
       break;
     }
-    
-    allVulnerabilities.push(...vulnerabilities);
-    
+    metrics.increment('nvd_cache_hits_total', 1, { term });
+
+    allVulnerabilities.push(...admitted);
+
     const responseData = data as Record<string, unknown> | undefined;
     if (responseData?.['totalResults'] !== undefined && typeof responseData['totalResults'] === 'number' && startIndex + pageSize >= responseData['totalResults']) {
       break;
     }
-    
+
     startIndex += pageSize;
     totalPagesFetched++;
   }
@@ -394,6 +425,48 @@ async function searchSingleTerm(
   metrics.observe('nvd_pagination_pages_fetched', totalPagesFetched);
 
   return allVulnerabilities.slice(0, maxResults);
+}
+
+/**
+ * CVSS v2 has no CRITICAL band (it tops out at HIGH, ≥7.0) — cvssV2Severity only
+ * accepts LOW/MEDIUM/HIGH — so a CRITICAL (or unset) search has nothing meaningful
+ * to ask the v2-filtered endpoint.
+ */
+function shouldSupplementWithV2(options: SearchOptions | undefined): boolean {
+  return options?.severity !== undefined && options.severity !== 'CRITICAL';
+}
+
+async function searchSingleTerm(
+  term: string,
+  options: SearchOptions | undefined,
+  maxResults: number,
+): Promise<Vulnerability[]> {
+  const primary = await fetchPaginated(term, options, maxResults, 'v3');
+
+  if (!shouldSupplementWithV2(options)) {
+    return primary;
+  }
+
+  try {
+    // Supplemental pass: recover CVEs that carry ONLY a CVSS v2 score and are thus
+    // invisible to the cvssV3Severity-filtered query above. Admit only entries with
+    // no v3/v4 metric so the two result sets are disjoint by construction.
+    const v2Only = await fetchPaginated(
+      term,
+      options,
+      maxResults,
+      'v2',
+      (entry) => !hasNewerCvssMetric(entry.cve.metrics),
+    );
+    // `primary` first: a no-op given the disjoint construction, but if any entry
+    // unexpectedly appears in both, the v3/v4-authoritative record wins the dedup.
+    return deduplicateVulnerabilities([primary, v2Only]).slice(0, maxResults);
+  } catch (err) {
+    // A supplemental-fetch failure must NOT fail the term — degrade to v3 results.
+    const errorType = err instanceof Error ? err.name : 'unknown';
+    metrics.increment('nvd_search_errors_total', 1, { error_type: 'v2_supplement_failed', cause: errorType });
+    return primary;
+  }
 }
 
 function deduplicateVulnerabilities(vulnerabilityArrays: Vulnerability[][]): Vulnerability[] {
