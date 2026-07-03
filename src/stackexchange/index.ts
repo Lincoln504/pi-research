@@ -168,8 +168,10 @@ async function executeSearch(
   const site = (params['site'] as string | undefined) ?? config.defaultSite;
   const limit = Math.min((params['limit'] as number | undefined) ?? 10, 100);
   // Cap the LLM-supplied page count so a large value can't fan out into a quota-burning
-  // paging storm against the rate-limited API (mirrors the `limit` clamp).
-  const maxPages = Math.max(1, Math.min(10, (params['maxPages'] as number | undefined) ?? 5));
+  // paging storm against the rate-limited API (mirrors the `limit` clamp). Only the upper
+  // bound is imposed — a 0/negative value still means "no pages" (loop runs zero times),
+  // preserving the pre-cap behavior.
+  const maxPages = Math.min(10, (params['maxPages'] as number | undefined) ?? 5);
   const tagsInput = params['tags'] as string | null;
   // Convert tags: "tag1,tag2" is converted to semicolon-separated for API
   const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0).join(';') : undefined;

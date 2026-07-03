@@ -849,7 +849,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     YOUTUBE_TRANSCRIPT_MAX_VIDEOS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS', DEFAULTS.YOUTUBE_TRANSCRIPT_MAX_VIDEOS, 1, 5, true),
     YOUTUBE_TRANSCRIPT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS', DEFAULTS.YOUTUBE_TRANSCRIPT_TIMEOUT_MS, 5000, 120000),
     YOUTUBE_TRANSCRIPT_LANG: parseEnvString(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG', DEFAULTS.YOUTUBE_TRANSCRIPT_LANG)!,
-    YOUTUBE_QUERY_EVERY_N: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N', DEFAULTS.YOUTUBE_QUERY_EVERY_N, 1, 100),
+    YOUTUBE_QUERY_EVERY_N: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N', DEFAULTS.YOUTUBE_QUERY_EVERY_N, 1, 100, true),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS, 2000, 120000),
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),
@@ -942,7 +942,10 @@ export function validateConfig(config: Config): void {
 // Helpers
 function parseEnvNumber(env: Record<string, string | undefined>, key: string, def: number, min?: number, max?: number, integer = false): number {
   const v = env[key];
-  if (v === undefined || v === '') return def;
+  // Trim before the empty check so a whitespace-only value falls back to the default
+  // (Number('') is 0, not NaN, so without this a "   " value would silently resolve to 0
+  // and bypass the invalid-number warning below).
+  if (v === undefined || v.trim() === '') return def;
   // Number() (not parseFloat) so trailing garbage is REJECTED rather than silently
   // truncated — parseFloat('10abc') === 10, which let a typo'd knob pass as a wrong value.
   let n = Number(v.trim());

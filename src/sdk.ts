@@ -410,8 +410,7 @@ export async function runDeepResearch(
   const sessionId = randomUUID();
   _lastSessionId = sessionId;
   _lastResearchId = researchId;
-  const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, undefined, globalContainer);
-  
+
   const researchStart = Date.now();
   const depth = options.depth ?? 1;
   const depthLabel = depth === 0 ? 'quick' : `deep-${depth}`;
@@ -428,6 +427,12 @@ export async function runDeepResearch(
   const runTracker = new ErrorTracker();
 
   try {
+    // Resolve the orchestrator INSIDE the try: getService() can throw (container
+    // disposal race with shutdown, or an unregistered service), and if that throw
+    // escaped before the finally below, _isRunning would latch true forever — every
+    // later run would then wrongly report "already in progress" even across a full
+    // shutdown+init cycle. Keeping it in the try guarantees the finally always clears it.
+    const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, undefined, globalContainer);
     let result = await runWithRunRegistry(runRegistry, () => runWithTracker(runTracker, () => orchestrator.runResearch({
       ...options,
       ctx: createMockContext(sessionId),
