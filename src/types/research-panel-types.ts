@@ -21,6 +21,10 @@ export interface SliceState {
   status?: string; // Optional status message like "Searching..."
   /** Active flash color — set by flashSlice, cleared by timeout. Always present. */
   flash: 'green' | 'red' | null;
+  /** Terminal outcome: true if this researcher failed (retries exhausted / no links).
+   *  Rendered distinctly (error color + "failed" marker) so a failed researcher is not
+   *  visually identical to a successful one — a completed slice is otherwise drawn muted. */
+  failed?: boolean;
 }
 
 export interface ResearchProgress {
@@ -35,8 +39,6 @@ export interface ResearchPanelState {
   /** Alias for sessionId — used by the orchestrator */
   researchId: string;
   query: string;
-  totalTokens: number;
-  totalCost: number;
   slices: Map<string, SliceState>;
   modelName: string;
   /** True when the research is actively searching (queueing/executing search tool) */

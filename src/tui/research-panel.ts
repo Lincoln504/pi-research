@@ -89,9 +89,10 @@ function renderPanelBlock(
     if (isPlanA && !isPlanB) return -1;
     if (!isPlanA && isPlanB) return 1;
 
-    // Priority 3: Eval (Last)
-    const isEvalA = la === 'eval';
-    const isEvalB = lb === 'eval';
+    // Priority 3: Eval (Last) — key off the stable slice id, not the label text, so a
+    // quick-mode run whose query is literally "eval" isn't sorted/rendered as the eval box.
+    const isEvalA = a === 'eval';
+    const isEvalB = b === 'eval';
     if (isEvalA && !isEvalB) return 1;
     if (!isEvalA && isEvalB) return -1;
 
@@ -139,12 +140,13 @@ function renderPanelBlock(
 
       const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
-      const isEval = labelStr.toLowerCase() === 'eval';
+      // Key the decorative eval box off the stable slice id, not label text (a quick-mode
+      // query literally "eval" would otherwise render as the evaluator's box).
+      const isEval = sliceId === 'eval';
 
       // Determine right border character based on if next column is eval
       const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
-      const nextSlice = nextSliceId ? state.slices.get(nextSliceId) : null;
-      const nextIsEval = nextSlice?.label.toLowerCase() === 'eval';
+      const nextIsEval = nextSliceId === 'eval';
 
       // Top Border with Label
       const labelPadding = 2; // Spaces around label
@@ -202,7 +204,11 @@ function renderPanelBlock(
         // Regression guard: keying isPlanning off sliceId==='coord' (0a9da110) had wrongly
         // pulled the status branch under !isPlanning too, blanking the coordinator's live
         // search count.
-        if (slice?.status && !slice.completed && !slice.queued) {
+        if (slice?.completed && slice?.failed) {
+            // Persistent terminal marker — NOT gated on !completed like the status branch,
+            // so a failed researcher stays visibly failed instead of muted-like-a-success.
+            raw = 'failed';
+        } else if (slice?.status && !slice.completed && !slice.queued) {
             raw = slice.status;
         } else if (!isPlanning && tokens > 0) {
             raw = formatTokens(tokens);
@@ -215,7 +221,7 @@ function renderPanelBlock(
       const rightWall12 = isEval ? '┊' : (nextIsEval ? '┊' : '│');
       rightRawRows[1]!.push(tokenStr + rightWall12);
       const f1 = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
-      rightColors[1]!.push(f1 || (slice?.completed ? 'muted' : 'text'));
+      rightColors[1]!.push(f1 || (slice?.failed ? 'error' : slice?.completed ? 'muted' : 'text'));
 
       // Cost Row (row 2)
       let costStr: string;
@@ -241,7 +247,7 @@ function renderPanelBlock(
       }
       rightRawRows[2]!.push(costStr + rightWall12);
       const f2 = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
-      rightColors[2]!.push(f2 || (slice?.completed ? 'muted' : 'text'));
+      rightColors[2]!.push(f2 || (slice?.failed ? 'error' : slice?.completed ? 'muted' : 'text'));
 
       // Bottom Border
       let bottomContent;
@@ -264,8 +270,7 @@ function renderPanelBlock(
   // Final Assembly
   const blockResult: string[] = [];
   const firstSliceId = visibleSliceIds[0];
-  const firstSlice = firstSliceId ? state.slices.get(firstSliceId) : null;
-  const startsWithEval = firstSlice?.label.toLowerCase() === 'eval';
+  const startsWithEval = firstSliceId === 'eval';
 
   const leftChars = startsWithEval ? ['╭', '┊', '┊', '╰'] : ['┌', '│', '│', '└'];
 

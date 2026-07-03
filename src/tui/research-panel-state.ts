@@ -345,14 +345,16 @@ export function updateSliceStatus(state: ResearchPanelState, id: string, status:
 }
 
 /**
- * Mark researcher as complete
+ * Mark researcher as complete. Pass `failed = true` to give it a terminal failed
+ * outcome (rendered distinctly from a successful completion).
  */
-export function completeSlice(state: ResearchPanelState, id: string): void {
+export function completeSlice(state: ResearchPanelState, id: string, failed = false): void {
   const slice = state.slices.get(id);
   if (slice) {
     slice.completed = true;
     slice.queued = false;
     slice.flash = null;
+    if (failed) slice.failed = true;
     clearSliceFlash(state.researchId, id);
   }
 }
@@ -396,8 +398,6 @@ export function createInitialPanelState(sessionId: string, researchId: string, q
     sessionId,
     researchId,
     query,
-    totalTokens: 0,
-    totalCost: 0,
     slices: new Map(),
     modelName,
   };

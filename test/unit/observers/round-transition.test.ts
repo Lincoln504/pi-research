@@ -103,4 +103,53 @@ describe('multi-round TUI box lifecycle', () => {
     expect(panelState.slices.get('r3')!.completed).toBe(false);
     expect(activeNonCompleted(panelState)).toEqual(['r3']);
   });
+
+  describe('researcher terminal outcomes', () => {
+    it('onResearcherFailure gives the slice a terminal failed outcome (not indistinguishable from success)', () => {
+      const { panelState, obs } = makeObserver();
+      obs.onPlanningStart!(1);
+      obs.onPlanningSuccess!({ action: 'delegate', researchers: [{}], title: 'T' } as never);
+      obs.onResearcherStart!('r1', 'R1', 'g', 1);
+      obs.onResearcherFailure!('r1', 'boom');
+      const slice = panelState.slices.get('r1')!;
+      expect(slice.completed).toBe(true);
+      expect(slice.failed).toBe(true);
+    });
+
+    it('onResearcherComplete completes the slice WITHOUT the failed flag', () => {
+      const { panelState, obs } = makeObserver();
+      obs.onPlanningStart!(1);
+      obs.onPlanningSuccess!({ action: 'delegate', researchers: [{}], title: 'T' } as never);
+      obs.onResearcherStart!('r1', 'R1', 'g', 1);
+      obs.onResearcherComplete!('r1', 'report');
+      const slice = panelState.slices.get('r1')!;
+      expect(slice.completed).toBe(true);
+      expect(slice.failed).toBeFalsy();
+    });
+  });
+
+  describe('quick-mode single-slice lifecycle', () => {
+    it('search completion does NOT complete the quick slice; the researcher finishing does', () => {
+      const { panelState, obs } = makeObserver();
+      obs.onStart!('some quick query', 0); // complexity 0 == quick mode
+      const label = [...panelState.slices.keys()][0]!;
+      obs.onSearchStart!(['q']);
+      obs.onSearchComplete!(5);
+      // Regression: onSearchComplete used to complete the quick slice, muting it and
+      // swallowing the scrape-phase flashes.
+      expect(panelState.slices.get(label)!.completed).toBe(false);
+      obs.onResearcherComplete!('quick', 'report');
+      expect(panelState.slices.get(label)!.completed).toBe(true);
+      expect(panelState.slices.get(label)!.failed).toBeFalsy();
+    });
+
+    it('a quick-mode failure marks the single slice failed', () => {
+      const { panelState, obs } = makeObserver();
+      obs.onStart!('some quick query', 0);
+      const label = [...panelState.slices.keys()][0]!;
+      obs.onResearcherFailure!('quick', 'boom');
+      expect(panelState.slices.get(label)!.completed).toBe(true);
+      expect(panelState.slices.get(label)!.failed).toBe(true);
+    });
+  });
 });

@@ -403,9 +403,17 @@ export class DeepResearchOrchestrator {
       // evaluator again when the loop ended because maxRounds was hit without
       // the evaluator explicitly choosing to synthesize.
       logger.log(`[DeepOrchestrator] Final synthesis ${this.elapsed()}`);
-      observer?.onRoundStart?.(maxRounds + 1); // Progress indicator for synthesis
-      observer?.onEvaluationStart?.(maxRounds);
-      observer?.onEvaluationProgress?.('evaluating');
+      // Only spin up the evaluation-phase UI when we still have to CALL the evaluator
+      // (loop ended on maxRounds). If the evaluator already chose to synthesize inside
+      // the loop, its eval slice was completed at that point (onEvaluationDecision) and
+      // its decision is final — re-adding a fresh 'eval' box here would leave a
+      // perpetually-"evaluating" slice that nothing ever completes, and re-emit
+      // start/progress after the decision. Symmetric with the decision guard below.
+      if (loopSynthesisPlan === null) {
+        observer?.onRoundStart?.(maxRounds + 1); // Progress indicator for synthesis
+        observer?.onEvaluationStart?.(maxRounds);
+        observer?.onEvaluationProgress?.('evaluating');
+      }
 
       // One final check for new steering messages before synthesis. Done for BOTH
       // exit paths: a message arriving after the evaluator chose 'synthesize' (the

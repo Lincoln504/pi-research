@@ -110,9 +110,9 @@ export function createResearchObserver(
     },
 
     onPlanningTokens: (tokens, cost) => {
-      panelState.totalCost += cost;
+      // Per-slice display only. Run totals are owned by the metrics registry
+      // (see research-tool-definition.ts → extractRunStats), not panelState.
       updateSliceTokens(panelState, 'coord', tokens, cost);
-      panelState.totalTokens += tokens;
       debouncedRefresh();
     },
 
@@ -231,7 +231,12 @@ export function createResearchObserver(
 
       if (sliceId) {
         updateSliceStatus(panelState, sliceId, `${count} results`, debouncedRefresh);
-        completeSlice(panelState, sliceId);
+        // In quick mode the single researcher keeps working (scraping) after search
+        // completes — completing its slice here would mute it and swallow the per-URL
+        // scrape flashes/status pops the wiring exists to show. Only the coordinator's
+        // round-1 search box is genuinely done at this point; the quick slice is
+        // completed later by onResearcherComplete/onResearcherFailure.
+        if (sliceId === 'coord') completeSlice(panelState, sliceId);
       }
       debouncedRefresh();
     },
@@ -307,9 +312,8 @@ export function createResearchObserver(
         }
       }
       if (tokens !== undefined && cost !== undefined) {
-        panelState.totalCost += cost;
+        // Per-slice display only; run totals live in the metrics registry.
         updateSliceTokens(panelState, sliceId, tokens, cost);
-        panelState.totalTokens += tokens;
       }
       debouncedRefresh();
     },
@@ -340,8 +344,10 @@ export function createResearchObserver(
           progressCredits.set(id, unitsPerResearcher);
         }
       }
-      updateSliceStatus(panelState, sliceId, 'failed', debouncedRefresh);
-      completeSlice(panelState, sliceId);
+      // Terminal failed outcome — completeSlice(failed) marks it so the render draws it
+      // distinctly (error color + "failed"), rather than the transient status field which
+      // a completed slice suppresses (making a failure look identical to a success).
+      completeSlice(panelState, sliceId, true);
       debouncedRefresh();
     },
 
@@ -371,9 +377,8 @@ export function createResearchObserver(
     },
 
     onEvaluationTokens: (tokens, cost) => {
-      panelState.totalCost += cost;
+      // Per-slice display only; run totals live in the metrics registry.
       updateSliceTokens(panelState, 'eval', tokens, cost);
-      panelState.totalTokens += tokens;
       debouncedRefresh();
     },
 

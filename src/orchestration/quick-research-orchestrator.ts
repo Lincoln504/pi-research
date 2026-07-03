@@ -362,6 +362,11 @@ export class QuickResearchOrchestrator {
           }
 
           metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'success' });
+          // Complete the researcher slice before the run-level onComplete. Quick mode
+          // never emitted this, so its single box was only ever completed as a side
+          // effect of onSearchComplete — leaving it stuck when the researcher answered
+          // without searching. Now the lifecycle mirrors deep mode.
+          observer?.onResearcherComplete?.('quick', result);
           observer?.onComplete?.(result);
           return result;
         } catch (error) {
@@ -374,6 +379,11 @@ export class QuickResearchOrchestrator {
           const aborted = signal?.aborted === true;
           metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: aborted ? 'cancelled' : 'error' });
           metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: aborted ? 'cancelled' : 'error' });
+          // Mark the researcher slice failed for a genuine fault (not a user cancel, which
+          // is not a failure). Deep mode fails its slices via onResearcherFailure too.
+          if (!aborted) {
+            observer?.onResearcherFailure?.('quick', error instanceof Error ? error.message : String(error));
+          }
           observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
           throw error;
         }
