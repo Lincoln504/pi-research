@@ -167,7 +167,9 @@ async function executeSearch(
   const query = params['query'] as string | undefined;
   const site = (params['site'] as string | undefined) ?? config.defaultSite;
   const limit = Math.min((params['limit'] as number | undefined) ?? 10, 100);
-  const maxPages = (params['maxPages'] as number | undefined) ?? 5;
+  // Cap the LLM-supplied page count so a large value can't fan out into a quota-burning
+  // paging storm against the rate-limited API (mirrors the `limit` clamp).
+  const maxPages = Math.max(1, Math.min(10, (params['maxPages'] as number | undefined) ?? 5));
   const tagsInput = params['tags'] as string | null;
   // Convert tags: "tag1,tag2" is converted to semicolon-separated for API
   const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0).join(';') : undefined;
@@ -181,6 +183,12 @@ async function executeSearch(
   const pageSize = Math.min(30, limit); // Up to 30 per page
   
   for (let page = 1; page <= maxPages && allQuestions.length < limit; page++) {
+    // Stop paging once cancelled: the API is rate-limited (a shared per-window quota),
+    // so continuing to fetch pages for an abandoned run burns quota that a live run
+    // needs. Return whatever earlier pages already produced (graceful, matches the
+    // per-page-failure behavior below).
+    if (signal?.aborted) break;
+
     // Build query parameters with pagination
     const queryParams = {
       order: 'desc' as const,
@@ -298,7 +306,10 @@ async function executeUser(
   });
 
   const response = await client.request<User>(
-    { method: 'GET', endpoint: `/users/${id}`, params: userParams },
+    // Escape the LLM-supplied id in the path (consistent with executeGet) — it is
+    // host-confined to the StackExchange API base, but an unescaped id could otherwise
+    // inject extra path/query segments.
+    { method: 'GET', endpoint: `/users/${encodeURIComponent(String(id))}`, params: userParams },
     signal,
   );
 

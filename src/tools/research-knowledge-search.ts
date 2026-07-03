@@ -865,7 +865,11 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         // ----------------------------------------------------------
         const { model, error: modelError } = resolveSynthesisModel(ctx, config);
         if (modelError || !model) {
-          return missResult(modelError || 'no_model');
+          // Use a FIXED metric reason: modelError is a raw error string (stack fragments /
+          // model ids), and passing it as the { status } label would explode metric label
+          // cardinality (one unbounded time-series per distinct error text). Log the detail.
+          if (modelError) logger.warn(`[research-knowledge-search] Synthesis model resolution failed: ${modelError}`);
+          return missResult('no_model');
         }
 
         const authResult = await safeGetApiKeyAndHeaders(ctx.modelRegistry, model);

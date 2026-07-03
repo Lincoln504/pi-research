@@ -156,7 +156,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     clearTimeout(timeoutId);
     controller.abort();
   };
-  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  if (signal) {
+    // Honor a signal that is ALREADY aborted on entry — addEventListener alone never
+    // fires for a pre-aborted signal, so a fetch dispatched after cancellation would
+    // otherwise run to its full timeout instead of failing fast.
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
 
   const fetchStart = Date.now();
   try {

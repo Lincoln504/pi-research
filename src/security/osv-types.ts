@@ -195,7 +195,10 @@ export function mapOsvItemToVulnerability(item: OsvVulnerability): Vulnerability
 
         if (affectedEntry.ranges !== undefined) {
           for (const range of affectedEntry.ranges) {
-            const events: OsvRangeEvent[] = range.events;
+            // Guard against a malformed range missing `events` (upstream validation only
+            // checks the vuln `id`): an unguarded events.find() would throw a TypeError,
+            // fail the whole term in Promise.allSettled, and discard all its vulns.
+            const events: OsvRangeEvent[] = Array.isArray(range.events) ? range.events : [];
 
             const introducedEvent: OsvRangeEvent | undefined = events.find(
               (e: OsvRangeEvent) => e.introduced !== undefined,
