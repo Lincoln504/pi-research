@@ -919,6 +919,19 @@ export class UsageError extends Error {}
 // Main
 // ---------------------------------------------------------------------------
 
+// Flush stdout+stderr before exiting so buffered output (e.g. --json into a pipe) is not
+// truncated. Uses process.exit() (not exitCode) so native handles (WASM threads, LanceDB)
+// don't keep the loop alive after work is done. Module-scoped so BOTH the entry-point and
+// the signal handler drain the same way — the signal path previously called process.exit()
+// directly and could truncate output on Ctrl-C mid-write.
+const flushAndExit = (code: number): void => {
+  process.stdout.write('', () => {
+    process.stderr.write('', () => {
+      process.exit(code);
+    });
+  });
+};
+
 async function main(argv: string[]): Promise<number> {
   // Register signal handlers so SIGINT/SIGTERM always trigger SDK shutdown
   // before the process exits. safeShutdown() is idempotent — safe to call
@@ -929,8 +942,9 @@ async function main(argv: string[]): Promise<number> {
     _signalCleanupDone = true;
     toStderr(`\n[pi-research] ${sig} — cleaning up…\n`);
     // Fire-and-forget: we can't await here, but safeShutdown swallows errors
-    // and the finally blocks in each command handler also call it.
-    void safeShutdown().finally(() => process.exit(EXIT.SOFTWARE));
+    // and the finally blocks in each command handler also call it. Drain via
+    // flushAndExit (not a bare process.exit) so buffered stdout isn't truncated.
+    void safeShutdown().finally(() => flushAndExit(EXIT.SOFTWARE));
   };
   process.once('SIGINT', () => onSignal('SIGINT'));
   process.once('SIGTERM', () => onSignal('SIGTERM'));
@@ -1007,17 +1021,8 @@ const _isMain = (() => {
 
 if (_isMain) {
   // Top-level entry. Never let an unhandled rejection escape — print a clean error.
-  // Use process.exit() (not process.exitCode) so WASM threads, LanceDB handles,
-  // and other native resources do not keep the event loop alive after work is done.
-  // Flush both streams first to avoid truncating buffered output.
-  const flushAndExit = (code: number) => {
-    process.stdout.write('', () => {
-      process.stderr.write('', () => {
-        process.exit(code);
-      });
-    });
-  };
-
+  // flushAndExit (module-scoped above) drains both streams before process.exit() so
+  // buffered output isn't truncated and native handles don't keep the loop alive.
   main(process.argv)
     .then(flushAndExit)
     .catch((err) => {
