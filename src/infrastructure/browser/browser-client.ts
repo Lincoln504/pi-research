@@ -59,6 +59,10 @@ export class BrowserClient implements IScheduler {
             const timer = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
+                    // Remove the outer-signal abort listener on timeout too. Without this,
+                    // a long-lived run signal shared across many client requests accumulates
+                    // one never-removed listener per timed-out request for the run's duration.
+                    abortCleanup?.();
                     controller.abort();
                     const error = new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`);
                     errorTracker.trackError(error, {

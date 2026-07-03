@@ -310,6 +310,12 @@ export class WorkerPoolManager implements IService {
      */
     private schedulePoolReset(): void {
         if (this.isShuttingDown) return;
+        // Single-shot: poolifier fires BOTH errorHandler and exitHandler for the same
+        // pool failure, and each call would overwrite this._resetTimer — orphaning the
+        // first timer so shutdown() can no longer clear it (it then fires late and
+        // re-destroys an already-dead pool or races a rebuilt one). Bail if a reset is
+        // already pending; the flag is cleared once the reset completes.
+        if (this._resetInProgress) return;
         const deadPool = this.pool;
         // FIX (#12): Don't nullify pool immediately — mark it as dead but keep the
         // reference so ensurePool() doesn't create a duplicate while the old one

@@ -113,7 +113,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
       result = { results: searchResult.results, duration: Date.now() - startTime, jitter: searchResult.jitter };
     } else if (type === 'scrape') {
       if (!url) throw new Error('Scrape task requires a URL');
-      const scrapeResult = await executeScrapeTask(getContext(), url);
+      const scrapeResult = await executeScrapeTask(getContext(), url, abortController.signal);
       result = { ...scrapeResult, duration: Date.now() - startTime };
     } else if (type === 'healthcheck') {
       const healthResult = await executeHealthCheck(getContext(), initMs);
@@ -129,6 +129,14 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     return result;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
+
+    // A deliberate task-timeout abort closes the page, so the in-flight op rejects with
+    // 'Target closed' — which shouldResetBrowser() would otherwise read as a browser
+    // crash and needlessly tear down the whole (healthy) browser. Report the timeout and
+    // leave the browser intact.
+    if (abortController.signal.aborted) {
+      return { error: `Task timed out after ${taskTimeoutMs}ms`, duration: Date.now() - startTime };
+    }
 
     // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
     if (shouldResetBrowser(errMsg)) {

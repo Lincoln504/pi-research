@@ -276,6 +276,12 @@ export class BrowserTaskScheduler implements IScheduler {
                 timeoutPromise
             ]);
         } catch (error) {
+            // Pool-shutdown/destroy mid-scrape is expected teardown (quit/SIGTERM), not a
+            // fault — demote to DEBUG and don't inflate the error metric/tracker (mirrors runSearch).
+            if (isPoolShutdownError(error)) {
+                logger.debug(`[BrowserTaskScheduler] Scrape abandoned during shutdown: "${url}"`);
+                throw error;
+            }
             metrics.increment('browser_scrape_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
                 component: 'browser-manager',
@@ -331,6 +337,12 @@ export class BrowserTaskScheduler implements IScheduler {
                 timeoutPromise
             ]) as { success: boolean; error?: string };
         } catch (error) {
+            // Pool-shutdown/destroy mid-healthcheck is expected teardown, not a fault —
+            // demote to DEBUG and don't inflate the error metric/tracker (mirrors runSearch).
+            if (isPoolShutdownError(error)) {
+                logger.debug(`[BrowserTaskScheduler] Healthcheck abandoned during shutdown`);
+                throw error;
+            }
             metrics.increment('browser_healthcheck_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
                 component: 'browser-manager',

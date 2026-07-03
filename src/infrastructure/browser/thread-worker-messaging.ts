@@ -239,12 +239,26 @@ export async function executeSearchTask(
  */
 export async function executeScrapeTask(
   _context: any,
-  url: string
+  url: string,
+  signal?: AbortSignal
 ): Promise<{ contentType: string; html?: string; buffer?: Buffer; jitter: number }> {
   const page = await createPageSafe(_context);
   const SCRAPE_TIMEOUT = parseInt(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] || '15000', 10);
   page.setDefaultTimeout(SCRAPE_TIMEOUT);
   page.setDefaultNavigationTimeout(SCRAPE_TIMEOUT);
+
+  // Bind the task-timeout signal to this page: page.setDefaultTimeout only bounds
+  // Playwright's action/navigation verbs, NOT Response reads — a large/slow PDF's
+  // response.body() (or a slowloris trickle) has no ceiling and would pin the poolifier
+  // worker slot indefinitely past the task deadline. Closing the page on abort rejects
+  // any in-flight body()/content()/goto with 'Target closed', which the catch below
+  // handles, freeing the slot at the deadline. Fire-and-forget close; { once } so the
+  // listener is auto-removed.
+  const onAbort = () => { page.close().catch(() => {}); };
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
 
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
@@ -402,6 +416,8 @@ export async function executeScrapeTask(
   } catch (error) {
     await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
     throw error;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
