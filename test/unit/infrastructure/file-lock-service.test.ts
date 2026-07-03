@@ -4,6 +4,38 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { FileLockService } from '../../../src/infrastructure/file-lock-service.ts';
+import type { IProcessLifecycle } from '../../../src/core/interfaces/process-interfaces.ts';
+
+/**
+ * Minimal IProcessLifecycle stub — only the two methods FileLockService calls are
+ * meaningful; the rest throw so an unexpected code path fails loudly. No real
+ * ps/powershell is ever spawned, keeping the suite hermetic and cross-platform.
+ */
+function makeStubLifecycle(opts: {
+  ownStartTime?: number | null;
+  isAlive: (pid: number, expectedStartTime?: number | null) => boolean;
+  onIsAlive?: () => void;
+}): IProcessLifecycle {
+  const notImpl = () => { throw new Error('not implemented in stub'); };
+  return {
+    async isProcessAlive(pid: number, expectedStartTime?: number | null): Promise<boolean> {
+      opts.onIsAlive?.();
+      return opts.isAlive(pid, expectedStartTime);
+    },
+    async getCurrentProcessStartTime(): Promise<number | null> {
+      return opts.ownStartTime ?? null;
+    },
+    isProcessAliveSync: notImpl,
+    isPidAlive: notImpl,
+    getCurrentPid: () => process.pid,
+    getProcessStartTime: notImpl,
+    waitForProcessTermination: notImpl,
+    isCurrentProcess: notImpl,
+    getProcessInfo: notImpl,
+    name: 'process-lifecycle',
+    lifecycle: 0,
+  } as unknown as IProcessLifecycle;
+}
 
 describe('FileLockService', () => {
   let tmpDir: string;
@@ -284,6 +316,112 @@ describe('FileLockService', () => {
       await service.initialize();
 
       await expect(service.acquireLock()).rejects.toThrow('Failed to acquire lock');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // PID + start-time (PID-reuse-safe) liveness
+  // ---------------------------------------------------------------------------
+
+  describe('PID+start-time liveness (processLifecycle wired)', () => {
+    it('records our own startTime in the lock content when it resolves', async () => {
+      const lifecycle = makeStubLifecycle({ ownStartTime: 123456, isAlive: () => true });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle });
+      await service.initialize();
+      await service.acquireLock();
+
+      const parsed = JSON.parse((await fs.readFile(lockFilePath, 'utf-8')).trim()) as { uuid: string; pid: number; startTime?: number };
+      expect(parsed.startTime).toBe(123456);
+      await service.releaseLock();
+    });
+
+    it('OMITS startTime when our own lookup fails (writes a legacy-shape lock)', async () => {
+      const lifecycle = makeStubLifecycle({ ownStartTime: null, isAlive: () => true });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle });
+      await service.initialize();
+      await service.acquireLock(); // must not throw despite the null start time
+
+      const parsed = JSON.parse((await fs.readFile(lockFilePath, 'utf-8')).trim()) as { uuid: string; pid: number; startTime?: number };
+      expect('startTime' in parsed).toBe(false);
+      await service.releaseLock();
+    });
+
+    it('reclaims a FRESH foreign-PID lock that is alive but start-time differs (PID reuse) — the bare check cannot', async () => {
+      // A FOREIGN pid that is alive NOW (bare kill(0) succeeds) but whose real start
+      // time differs from the one recorded in the lock — i.e. that PID was recycled
+      // by an unrelated process. Fresh mtime, so only the start-time mismatch can
+      // justify reclaim; a bare process.kill(pid,0) check would wrongly see "alive".
+      const FOREIGN = 424242;
+      const RECORDED = 999_000; // stale start time written into the lock
+      const REAL_NOW = 111_222;  // the recycled process's actual start time
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: crypto.randomUUID(), pid: FOREIGN, startTime: RECORDED }), 'utf-8');
+
+      const lifecycle = makeStubLifecycle({
+        ownStartTime: 111,
+        // Bare check (no expected) → pid is live; PID+startTime check → only the REAL
+        // start time matches, and RECORDED != REAL_NOW, so the owner reads as dead.
+        isAlive: (_pid, expected) => (expected === undefined || expected === null) ? true : expected === REAL_NOW,
+      });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle, lockTimeout: 2000, lockRetryDelay: 5 });
+      await service.initialize();
+
+      await expect(service.acquireLock()).resolves.toBeUndefined();
+      const parsed = JSON.parse((await fs.readFile(lockFilePath, 'utf-8')).trim()) as { uuid: string };
+      expect(parsed.uuid).toBe(service.getLockUuid());
+      await service.releaseLock();
+    });
+
+    it('reclaims a FRESH same-PID lock whose recorded start-time differs from ours (our PID was recycled)', async () => {
+      // The lock's pid equals our current pid, but its recorded start time is not
+      // ours — a predecessor process held our PID and died. The start-time-aware
+      // self short-circuit must treat this as dead, not "our own live lock".
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: crypto.randomUUID(), pid: process.pid, startTime: 777_000 }), 'utf-8');
+      const lifecycle = makeStubLifecycle({ ownStartTime: 111, isAlive: () => true });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle, lockTimeout: 2000, lockRetryDelay: 5 });
+      await service.initialize();
+
+      await expect(service.acquireLock()).resolves.toBeUndefined();
+      const parsed = JSON.parse((await fs.readFile(lockFilePath, 'utf-8')).trim()) as { uuid: string };
+      expect(parsed.uuid).toBe(service.getLockUuid());
+      await service.releaseLock();
+    });
+
+    it('falls back to a bare-PID check for a legacy lock (no startTime) — dead PID reclaimed', async () => {
+      const deadPid = 2147483646;
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: crypto.randomUUID(), pid: deadPid }), 'utf-8');
+      const lifecycle = makeStubLifecycle({
+        ownStartTime: 111,
+        isAlive: (pid) => pid !== deadPid, // bare check (no expectedStartTime) → dead
+      });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle, lockTimeout: 2000, lockRetryDelay: 5 });
+      await service.initialize();
+
+      await expect(service.acquireLock()).resolves.toBeUndefined();
+      await service.releaseLock();
+    });
+
+    it('memoizes the contended-owner check — one liveness call per episode, NOT per retry tick', async () => {
+      // A live owner with a fresh lock is waited out until timeout. Across the many
+      // retry ticks the owner never changes, so its (pid,startTime) liveness must be
+      // checked exactly once — the regression guard against a ps/powershell storm.
+      let calls = 0;
+      const FOREIGN = 424242; // foreign pid → the processLifecycle path (not the self short-circuit)
+      const RECORDED = 555;
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: crypto.randomUUID(), pid: FOREIGN, startTime: RECORDED }), 'utf-8');
+      const lifecycle = makeStubLifecycle({
+        ownStartTime: 111,
+        isAlive: () => true, // always alive → never reclaimed → loop churns to timeout
+        onIsAlive: () => { calls++; },
+      });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle, lockTimeout: 200, lockRetryDelay: 5 });
+      await service.initialize();
+      // Ignore any liveness call made by cleanupStaleLocksOnStartup during init;
+      // we're measuring the acquire() retry loop's per-episode memoization.
+      calls = 0;
+
+      await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
+      // Many ticks happened (200ms / 5ms ≈ 40), but the stable owner is checked once.
+      expect(calls).toBe(1);
     });
   });
 

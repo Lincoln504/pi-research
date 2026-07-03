@@ -14,6 +14,7 @@ import { metrics } from '../utils/metrics.ts';
 import type { IService } from '../core/service-registry.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
+import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
 
 /**
  * Global storage for tracking lock ownership within the same async execution flow.
@@ -43,6 +44,13 @@ export interface FileLockOptions {
    * only reclaimed in the rare PID-reuse case. Default: max(120s, 4×stale).
    */
   liveOwnerStaleThreshold?: number;
+  /**
+   * Process lifecycle service, used for PID+start-time (PID-reuse-safe) liveness
+   * checks. Optional for backward compatibility with direct construction (tests,
+   * not-yet-wired call sites): when omitted, liveness falls back to the pre-existing
+   * bare `process.kill(pid, 0)` check.
+   */
+  processLifecycle?: IProcessLifecycle;
 }
 
 /**
@@ -62,6 +70,7 @@ export class FileLockService implements IService {
   private readonly lockRetryDelay: number;
   private readonly lockStaleThreshold: number;
   private readonly liveOwnerStaleThreshold: number;
+  private readonly processLifecycle: IProcessLifecycle | null;
 
   // Lock tracking
   private lockHandle: fs.FileHandle | null = null;
@@ -69,6 +78,11 @@ export class FileLockService implements IService {
   private queue: Promise<void> = Promise.resolve();
   private resolveTurn: (() => void) | null = null;
   private lockCount: number = 0;
+  // Our own process start time, resolved ONCE in initialize() (may shell out on
+  // macOS/Windows) and embedded into every lock we write, so a peer can detect
+  // PID reuse. Null when unavailable (no processLifecycle, or lookup failed) —
+  // then lock content omits startTime and readers treat us as a legacy owner.
+  private ownStartTime: number | null = null;
 
   constructor(options: FileLockOptions) {
     this.lockFilePath = options.lockFilePath;
@@ -78,6 +92,7 @@ export class FileLockService implements IService {
     this.lockStaleThreshold = options.lockStaleThreshold ?? 15000;
     this.liveOwnerStaleThreshold =
       options.liveOwnerStaleThreshold ?? Math.max(120000, this.lockStaleThreshold * 4);
+    this.processLifecycle = options.processLifecycle ?? null;
   }
 
   /**
@@ -90,10 +105,36 @@ export class FileLockService implements IService {
    *                             Stealing it would let two writers run the same
    *                             read-modify-write and lose an update.
    */
-  private _shouldReclaim(pid: number | null, lockAge: number): boolean {
-    if (!this._isOwnerAlive(pid)) return true;
+  private async _shouldReclaim(
+    pid: number | null,
+    startTime: number | null,
+    lockAge: number,
+    memo?: Map<string, boolean>,
+  ): Promise<boolean> {
+    if (!(await this._resolveOwnerAlive(pid, startTime, memo))) return true;
     if (pid === null) return lockAge > this.lockStaleThreshold;
     return lockAge > this.liveOwnerStaleThreshold;
+  }
+
+  /**
+   * Liveness of a contended owner, memoized per acquire() episode. The memo (keyed
+   * by pid:startTime) ensures the PID+start-time check — which may spawn a ps/powershell
+   * subprocess on macOS/Windows — runs at most ONCE per distinct owner per episode,
+   * not once per ~100ms retry tick. A change of owner mid-episode has a different
+   * (pid,startTime) key, so it naturally busts the cache and forces a fresh check.
+   */
+  private async _resolveOwnerAlive(
+    pid: number | null,
+    startTime: number | null,
+    memo?: Map<string, boolean>,
+  ): Promise<boolean> {
+    if (!memo) return this._isOwnerAlive(pid, startTime);
+    const key = `${pid ?? 'null'}:${startTime ?? 'null'}`;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
+    const alive = await this._isOwnerAlive(pid, startTime);
+    memo.set(key, alive);
+    return alive;
   }
 
   async initialize(): Promise<void> {
@@ -108,6 +149,18 @@ export class FileLockService implements IService {
       await fs.mkdir(lockDir, { recursive: true, mode: 0o700 });
     } catch (err) {
       logger.warn(`[FileLockService] Failed to create lock directory: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Resolve our own start time ONCE, here — never on the hot write path. The
+    // lookup may shell out on macOS/Windows; getCurrentProcessStartTime() also
+    // caches internally, so this is belt-and-suspenders keeping _makeLockContent
+    // fully synchronous. Null on failure → lock content omits startTime.
+    if (this.processLifecycle) {
+      try {
+        this.ownStartTime = await this.processLifecycle.getCurrentProcessStartTime();
+      } catch {
+        this.ownStartTime = null;
+      }
     }
 
     // Clean up any stale locks on initialization (fire and forget)
@@ -134,9 +187,11 @@ export class FileLockService implements IService {
       const stats = await fs.stat(this.lockFilePath);
       const lockAge = Date.now() - stats.mtimeMs;
       const parsed = this._parseLockContent(rawContent);
-      const ownerAlive = this._isOwnerAlive(parsed?.pid ?? null);
+      // One-shot memo dedupes the two liveness lookups below (log line + decision).
+      const memo = new Map<string, boolean>();
+      const ownerAlive = await this._resolveOwnerAlive(parsed?.pid ?? null, parsed?.startTime ?? null, memo);
 
-      if (this._shouldReclaim(parsed?.pid ?? null, lockAge)) {
+      if (await this._shouldReclaim(parsed?.pid ?? null, parsed?.startTime ?? null, lockAge, memo)) {
         logger.log(
           `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old, owner alive: ${ownerAlive})`
         );
@@ -203,6 +258,10 @@ export class FileLockService implements IService {
 
     const startTime = Date.now();
     let contentionCount = 0;
+    // One entry per distinct (pid,startTime) owner seen during THIS acquireLock()
+    // call, so a live contended owner waited out across many ~100ms retry ticks is
+    // liveness-checked once, not once per tick (no ps/powershell storm on non-Linux).
+    const contendedOwnerAliveMemo = new Map<string, boolean>();
 
     try {
       for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
@@ -277,7 +336,7 @@ export class FileLockService implements IService {
                 // stole the lock from a live writer stalled >15s mid-fsync. A live
                 // owner holding a fresh lock is genuine contention — handled by the
                 // surrounding retry loop / timeout, not by stealing.
-                if (this._shouldReclaim(parsed?.pid ?? null, lockAge)) {
+                if (await this._shouldReclaim(parsed?.pid ?? null, parsed?.startTime ?? null, lockAge, contendedOwnerAliveMemo)) {
                   const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
                   try {
                     await fs.rename(this.lockFilePath, trashPath);
@@ -438,24 +497,36 @@ export class FileLockService implements IService {
    * Encode the lock file content with owner identity for liveness checks.
    */
   private _makeLockContent(): string {
-    return JSON.stringify({ uuid: this.lockUuid, pid: process.pid });
+    const content: { uuid: string; pid: number; startTime?: number } = {
+      uuid: this.lockUuid,
+      pid: process.pid,
+    };
+    // Omit (don't null) when unknown, so a legacy reader and a "couldn't resolve"
+    // writer both collapse to the same startTime-absent case.
+    if (this.ownStartTime !== null) content.startTime = this.ownStartTime;
+    return JSON.stringify(content);
   }
 
   /**
    * Parse lock file content — handles both legacy bare-UUID and new JSON format.
-   * Returns null if content is empty or unparseable.
+   * Returns null if content is empty or unparseable. A missing/non-number startTime
+   * (legacy lock, or a writer that couldn't resolve its own) parses to null.
    */
-  private _parseLockContent(content: string): { uuid: string; pid: number | null } | null {
+  private _parseLockContent(content: string): { uuid: string; pid: number | null; startTime: number | null } | null {
     const trimmed = content.trim();
     if (!trimmed) return null;
     try {
-      const parsed = JSON.parse(trimmed) as { uuid?: string; pid?: number };
+      const parsed = JSON.parse(trimmed) as { uuid?: string; pid?: number; startTime?: number };
       if (typeof parsed.uuid === 'string') {
-        return { uuid: parsed.uuid, pid: typeof parsed.pid === 'number' ? parsed.pid : null };
+        return {
+          uuid: parsed.uuid,
+          pid: typeof parsed.pid === 'number' ? parsed.pid : null,
+          startTime: typeof parsed.startTime === 'number' ? parsed.startTime : null,
+        };
       }
     } catch {
       // Legacy format: bare UUID string
-      return { uuid: trimmed, pid: null };
+      return { uuid: trimmed, pid: null, startTime: null };
     }
     return null;
   }
@@ -463,16 +534,36 @@ export class FileLockService implements IService {
   /**
    * Check whether the process that wrote the lock file is still alive.
    * Returns true (assume alive) if we cannot determine liveness.
+   *
+   * With processLifecycle wired AND a startTime recorded in the lock, this is a
+   * PID-reuse-safe check: a recycled PID whose start time differs from the lock's
+   * reads as dead. Without either (no DI, or a legacy/unknown-startTime lock) it
+   * degrades to a bare signal(0) check — the exact pre-fix behavior, no subprocess.
    */
-  private _isOwnerAlive(pid: number | null): boolean {
-    if (pid === null) return true; // Legacy lock — can't check, assume alive
-    if (pid === process.pid) return true; // Our own PID
-    try {
-      process.kill(pid, 0);
+  private async _isOwnerAlive(pid: number | null, startTime: number | null): Promise<boolean> {
+    if (pid === null) return true; // Legacy/unparseable lock — can't check, assume alive
+    if (pid === process.pid) {
+      // Same PID as us. Normally that means it's our own lock — but if the lock
+      // carries a start time that differs from ours, this PID was RECYCLED and the
+      // lock belongs to a dead predecessor, not us. Only assume "alive" when the
+      // start times agree (or either is unknown).
+      if (startTime !== null && this.ownStartTime !== null) return startTime === this.ownStartTime;
       return true;
-    } catch {
-      return false;
     }
+    if (!this.processLifecycle) {
+      // Not wired for DI (e.g. a bare `new FileLockService(...)`): preserve the
+      // original signal(0)-only behavior exactly.
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    }
+    if (startTime === null) {
+      // Legacy lock (no startTime) or the peer's own start-time lookup failed:
+      // can't assert PID identity, so bare-PID path. isProcessAlive() with no
+      // expectedStartTime is signal(0)-only — no subprocess.
+      return this.processLifecycle.isProcessAlive(pid);
+    }
+    // PID-reuse-safe. May shell out on macOS/Windows — the hot contention path
+    // reaches this only through the per-episode memo (_resolveOwnerAlive).
+    return this.processLifecycle.isProcessAlive(pid, startTime);
   }
 
   /**

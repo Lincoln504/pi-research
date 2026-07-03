@@ -14,6 +14,7 @@ import { metrics } from '../../utils/metrics.ts';
 import { getService, tryGetService, getServiceContainer } from '../../core/service-registry.ts';
 import type { ServiceContainer } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
+import type { IProcessLifecycle } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import type { StatePathConfiguration } from '../state/state-path-configuration.ts';
@@ -53,6 +54,7 @@ async function getBrowserInitLock(container: ServiceContainer): Promise<FileLock
     if (lock) return lock;
 
     const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, undefined, container);
+    const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
     const lockFilePath = path.join(pathConfig.getLockDirPath(), 'browser-init.lock');
 
     lock = new FileLockService({
@@ -61,6 +63,7 @@ async function getBrowserInitLock(container: ServiceContainer): Promise<FileLock
         lockRetries: 600,
         lockRetryDelay: 100,
         lockStaleThreshold: 60000, // 60s stale threshold (must be <= lockTimeout)
+        processLifecycle,
     });
 
     await lock.initialize();

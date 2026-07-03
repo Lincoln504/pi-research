@@ -8,7 +8,7 @@
 import { ServiceLifecycle, getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
 import { logger } from '../logger.ts';
-import type { IEmbedder, IKnowledgeStore, IKnowledgeStoreService, IWriterQueue } from '../core/service-interfaces.ts';
+import type { IEmbedder, IKnowledgeStore, IKnowledgeStoreService, IWriterQueue, IProcessLifecycle } from '../core/service-interfaces.ts';
 import { FileLockService } from './file-lock-service.ts';
 import { StatePathConfiguration } from './state/state-path-configuration.ts';
 import * as path from 'node:path';
@@ -138,9 +138,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         if (!this._initLock) {
           // Increase threshold to 60s because createKnowledgeStoreComponents retries for ~15-20s total
           // and we want to avoid lock theft during this critical initialization phase.
-          this._initLock = new FileLockService({ 
+          const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
+          this._initLock = new FileLockService({
             lockFilePath: lockPath,
-            lockStaleThreshold: 60000
+            lockStaleThreshold: 60000,
+            processLifecycle,
           });
           await this._initLock.initialize();
         }
