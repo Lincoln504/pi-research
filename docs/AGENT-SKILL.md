@@ -26,8 +26,9 @@ The agent matches the `description` in `SKILL.md` and shells out to the launcher
 `run.mjs` carries no dependencies; it locates the installed engine (PATH /
 `node_modules` / `~/.pi/bin` / `PI_RESEARCH_PATH`) and exits with an actionable
 message — including config-file locations — if the package, a model, or an API key
-is missing. It exposes three subcommands: `research "<query>"` (live research),
-`knowledge "<query>"` (search past findings), and `status` (inspect detection/config).
+is missing. It exposes four subcommands: `research "<query>"` (live research),
+`knowledge "<query>"` (search past findings), `knowledge-config [set <mode>]`
+(show/set the per-directory knowledge-store mode), and `status` (inspect detection/config).
 
 ### Installation flow
 

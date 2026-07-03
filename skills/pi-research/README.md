@@ -15,7 +15,8 @@ Two capabilities, invoked as shell subcommands:
 - `knowledge "<query>"` — search a local database of previously researched
   findings before doing live research (instant, free, opt-in).
 
-Plus `status` to inspect detection/config without running research.
+Plus `knowledge-config [set <none|project|global>]` to show or set the per-directory
+knowledge-store mode, and `status` to inspect detection/config without running research.
 
 ### How it works
 

@@ -89,7 +89,7 @@ v0.1.13 (April 20, 2026) was the last release before an extended break. Upstream
 pi/SDK API changes and a re-architecture around the stealth-browser stack left the
 extension non-functional for about eight weeks, until it stabilized in mid-June 2026.
 
-From v1.0.0 on:
+Channels (v1.0.0 is prepared but not yet published to npm — the latest published release is v0.1.13):
 
 - npm (`npm:@lincoln504/pi-research`) is the stable channel, kept current with breaking pi changes.
 - A git install is the development channel: latest commits, first to break.

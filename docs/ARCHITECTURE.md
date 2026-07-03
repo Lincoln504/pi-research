@@ -71,8 +71,9 @@ round 1's researchers (`distributeSearchResults`), so in deep mode the researche
 themselves do not call `search`.
 
 LLM-call conventions. Coordinator, evaluator, synthesis, JSON-repair, and
-knowledge-extraction calls go through `completeSimple` + `buildSafeOptions`
-(`src/core/llm/llm-utils.ts`); researcher sub-agents go through `createAgentSession`.
+knowledge-extraction calls go through `completeSimple` (`src/core/llm/pi-ai-completion.ts`)
+with `buildSafeOptions` (`src/core/llm/llm-utils.ts`); researcher sub-agents go through
+`createAgentSession`.
 Two conventions apply:
 
 - Thinking is off by default. These calls emit structured JSON or cited reports, so a
@@ -181,8 +182,8 @@ Services that hold resources implement `dispose()`; the registry disposes them i
 reverse dependency order. Resolving through the registry (rather than direct imports)
 enforces lifecycle discipline (init → use → dispose) and lets tests swap in mocks.
 
-- Core (`src/core/`): `PlanningService`, `SchedulerService`
-- Infrastructure (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`
+- Core (`src/core/`): `PlanningService`, `SchedulerService`, `HealthCheckService`
+- Infrastructure (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `MetricsService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService` (plus `WriterQueue`, defined in `src/knowledge/` and registered here)
 - Orchestration (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`
 
 Cross-session, cross-process state (active sessions, browser status, metrics) lives in
@@ -191,9 +192,10 @@ with file-based locking (`FileLockService`).
 
 ### TUI
 
-The live progress panel uses `@earendil-works/pi-tui`. Terminal state (keyboard
-protocol, mouse tracking, bracketed paste) and stdio capture are handled by
-`src/tui/utils/` to guarantee a clean exit.
+The live progress panel uses `@earendil-works/pi-tui`, which handles terminal state
+(keyboard protocol, mouse tracking, bracketed paste). stdio capture (to keep stray
+output from corrupting the panel and to guarantee a clean exit) lives in
+`src/utils/stdio-capture.ts`.
 
 ### Project structure
 
