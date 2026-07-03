@@ -820,8 +820,10 @@ export class KnowledgeStore implements IKnowledgeStore {
    * Defaults are conservative for a possibly-shared store: deleteUnverified stays
    * false so files younger than LanceDB's in-flight-transaction window are never
    * removed, and the call is wrapped in withLock (when provided) so a concurrent
-   * process isn't mid-write. The /knowledge-store optimize path can opt into
-   * aggressive cleanup once the user confirms no other instance is running.
+   * process isn't mid-write. The `deleteUnverified`/`cleanupOlderThan` options are a
+   * reserved knob for a future maintenance path that could reclaim aggressively once
+   * the caller guarantees no other instance is running; no command exposes it today,
+   * so every production call uses the conservative defaults.
    *
    * Returns true if optimize ran, false if it was skipped (closing/disabled).
    */
