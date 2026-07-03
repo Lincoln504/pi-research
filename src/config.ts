@@ -583,7 +583,7 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
 /**
  * Write config back to env file.
  */
-export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cwd: string = process.cwd()): void {
+export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cwd: string = process.cwd(), changedKeys?: string[]): void {
   // ALL keys — canonical env var name → value
   // Note: PI_RESEARCH_CACHE_TTL_DAYS is the canonical name (matches .env.example).
   // PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS is accepted at read-time for backward compat.
@@ -639,9 +639,18 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     // CENTRALIZED PROJECT STORAGE
     const registry = loadProjectSettingsRegistry();
     const normalizedCwd = normalizeWorkspacePath(cwd);
-    registry[normalizedCwd] = newValues;
+    // The per-directory registry must hold ONLY genuine per-directory overrides. Persist just the
+    // key(s) the caller actually changed, merged onto any existing entry — never the full local-key
+    // set. Writing every LOCAL_SCOPE_KEY here (all resolved to their current values) would freeze
+    // the OTHER local key for this directory (e.g. changing KNOWLEDGE_STORE_MODE would pin
+    // DEFAULT_RESEARCH_DEPTH at whatever it resolved to now), silently decoupling it from later
+    // machine-wide default changes. Callers pass `changedKeys` to scope the write.
+    const toWrite = changedKeys
+      ? Object.fromEntries(Object.entries(newValues).filter(([k]) => changedKeys.includes(k)))
+      : newValues;
+    registry[normalizedCwd] = { ...(registry[normalizedCwd] ?? {}), ...toWrite };
     saveProjectSettingsRegistry(registry);
-    
+
     logger.debug(`[config] Saved project settings for ${normalizedCwd} to central registry.`);
     return;
   }

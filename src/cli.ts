@@ -558,7 +558,9 @@ async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeConfig']>
   if (kc.action === 'set') {
     const before = getConfig(cwd, 'cli').KNOWLEDGE_STORE_MODE;
     const cfg = { ...getConfig(cwd, 'cli'), KNOWLEDGE_STORE_MODE: kc.mode! };
-    saveConfig(cfg, 'local', cwd); // per-directory registry write
+    // Persist ONLY the knowledge-store mode for this directory — not the whole local-key set —
+    // so an unrelated per-directory DEFAULT_RESEARCH_DEPTH isn't frozen as a side effect.
+    saveConfig(cfg, 'local', cwd, ['PI_RESEARCH_KNOWLEDGE_STORE_MODE']); // per-directory registry write
     resetConfig();                 // drop the cached config so `after` re-resolves from disk
     const info = describeKnowledgeStoreMode(cwd, 'cli');
     // The write always persists to the registry, but a real env var out-ranks the registry, so

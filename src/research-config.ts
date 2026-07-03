@@ -359,7 +359,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 
             if (changed) {
               try {
-                saveConfig(config, scope, cwd);
+                // For a per-directory (local) write, persist ONLY the key that changed so the
+                // sibling local key isn't frozen as a side effect. Both local-scope ids
+                // (DEFAULT_RESEARCH_DEPTH, KNOWLEDGE_STORE_MODE) map to PI_RESEARCH_<id>.
+                saveConfig(config, scope, cwd, scope === 'local' ? [`PI_RESEARCH_${id}`] : undefined);
                 resetConfig();
               } catch (e: unknown) {
                 ctx.ui.notify(`Failed to save: ${e instanceof Error ? e.message : String(e)}`, 'error');

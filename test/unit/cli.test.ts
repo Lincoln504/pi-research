@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync, execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -473,6 +473,31 @@ describe('CLI subprocess — knowledge-config (hermetic per-directory scoping)',
       const after = showJson(c);
       expect(after.mode).toBe('global'); // registry beats the config.env machine-wide default
       expect(after.origin).toBe('this directory (project settings)');
+    } finally {
+      rmSync(path.join(researchDir, 'config.env'), { force: true });
+    }
+  });
+
+  it('persists ONLY the changed key — does not freeze DEFAULT_RESEARCH_DEPTH for the directory', () => {
+    // Setting the knowledge-store mode must NOT also pin the sibling local-scope key
+    // (DEFAULT_RESEARCH_DEPTH) into the registry. If it did, the directory would be silently
+    // decoupled from a later machine-wide default change. Guards the wholesale-write regression.
+    const researchDir = path.join(home, '.pi', 'research');
+    mkdirSync(researchDir, { recursive: true });
+    writeFileSync(path.join(researchDir, 'config.env'), 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH=2\n');
+    try {
+      const f = mkdir('depth-scope');
+      const set = runIn(f, ['knowledge-config', 'set', 'project']);
+      expect(set.status).toBe(0);
+
+      const registry = JSON.parse(readFileSync(path.join(stateDir, 'project-settings.json'), 'utf-8'));
+      const entry = Object.values(registry).find(
+        (v: any) => v?.PI_RESEARCH_KNOWLEDGE_STORE_MODE === 'project',
+      ) as Record<string, string> | undefined;
+      expect(entry).toBeDefined();
+      // The mode is written; the depth is NOT (it keeps inheriting from config.env).
+      expect(entry!.PI_RESEARCH_KNOWLEDGE_STORE_MODE).toBe('project');
+      expect(entry!.PI_RESEARCH_DEFAULT_RESEARCH_DEPTH).toBeUndefined();
     } finally {
       rmSync(path.join(researchDir, 'config.env'), { force: true });
     }
