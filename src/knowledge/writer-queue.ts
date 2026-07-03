@@ -22,6 +22,11 @@ interface WriterQueueOptions {
   chunker: Chunker | null;
 }
 
+/** Bounded window for draining the writer queue during dispose/shutdown. Kept well
+ *  under the global SHUTDOWN_TIMEOUT_MS (8s) so LanceDB close and the browser orphan
+ *  sweep still get their share of the teardown budget. */
+const DRAIN_DISPOSE_TIMEOUT_MS = 5_000;
+
 function isNoSpace(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException)?.code;
   const msg = err instanceof Error ? err.message : String(err);
@@ -49,7 +54,11 @@ export class WriterQueue implements IWriterQueue {
   }
 
   async dispose(): Promise<void> {
-    await this.drain();
+    // Bound the drain so a large burst enqueued right before shutdown (or a hung
+    // embed) can't consume the whole global SHUTDOWN_TIMEOUT_MS budget — which is
+    // shared with LanceDB close and the browser orphan sweep. On timeout we proceed
+    // and account for the un-persisted items rather than hanging teardown.
+    await this.drain(DRAIN_DISPOSE_TIMEOUT_MS);
     this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 
@@ -200,7 +209,7 @@ export class WriterQueue implements IWriterQueue {
     await this.options.store.addDocuments(docs);
   }
 
-  async drain(): Promise<void> {
+  async drain(timeoutMs?: number): Promise<void> {
     // FIX (#7): Atomically check state AND register the resolver inside the
     // Promise constructor to prevent the race where process() finishes between
     // the check and new Promise().
@@ -209,7 +218,35 @@ export class WriterQueue implements IWriterQueue {
         resolve();
         return;
       }
-      this.drainResolvers.push(resolve);
+      // Optional bounded drain: if the queue doesn't empty within timeoutMs, resolve
+      // anyway so a caller (shutdown) isn't held hostage by a slow/hung embed. Items
+      // still queued at the deadline are counted as dropped (best-effort — a few may
+      // still land as process() finishes, so the metric is a conservative upper bound).
+      // These are re-scrapable cache entries, not primary user data.
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      this.drainResolvers.push(done);
+      if (timeoutMs && timeoutMs > 0) {
+        timer = setTimeout(() => {
+          const remaining = this.queue.length + (this.processing ? 1 : 0);
+          logger.warn(`[writer-queue] drain timed out after ${timeoutMs}ms with ~${remaining} item(s) not yet persisted; proceeding with shutdown.`);
+          if (remaining > 0) {
+            metrics.increment('knowledge_ingest_dropped_total', remaining, { reason: 'drain_timeout' });
+          }
+          // Detach our resolver so a later process() completion doesn't call it again
+          // (harmless via the settled guard, but keeps drainResolvers from leaking).
+          const idx = this.drainResolvers.indexOf(done);
+          if (idx !== -1) this.drainResolvers.splice(idx, 1);
+          done();
+        }, timeoutMs);
+        timer.unref?.();
+      }
     });
   }
 }

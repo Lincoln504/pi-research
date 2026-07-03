@@ -32,6 +32,8 @@ export const ConfigSchema = Type.Object({
   DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
   /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
   MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
+  /** Max shared web-gathering calls per researcher (search + security_search + stackexchange + youtube_transcript). Default 12. */
+  MAX_GATHERING_CALLS: Type.Number({ minimum: 1, maximum: 100, default: 12 }),
   /** Number of parallel browser pool workers (default: 4, range: 1-10) */
   WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
   /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
@@ -49,6 +51,10 @@ export const ConfigSchema = Type.Object({
   SCRAPE_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 15000 }),
   /** How long to keep documents in the knowledge store before eviction (default: 30 days) */
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: Type.Number({ minimum: 1, maximum: 365, default: 30 }),
+  /** Max age (days) a cached document may be served at read time; 0 (default) disables the
+   *  read-time gate — eviction (KNOWLEDGE_STORE_CACHE_TTL_DAYS) still bounds the worst case.
+   *  Set >0 for time-sensitive research to force a fresh scrape of anything older than this. */
+  KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS: Type.Number({ minimum: 0, maximum: 3650, default: 0 }),
   /** Timeout for embedding model initialization (default: 300000ms) */
   EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 10000, maximum: 600000, default: 300000 }),
   /** Max fraction of context window to use for initial scrape context (default: 0.15) */
@@ -200,6 +206,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_MAX_RETRIES',
   'PI_RESEARCH_RETRY_DELAY_MS',
   'PI_RESEARCH_MAX_SCRAPE_BATCHES',
+  'PI_RESEARCH_MAX_GATHERING_CALLS',
   'PI_RESEARCH_WORKER_THREADS',
   'PI_RESEARCH_WORKER_CONCURRENCY',
   'PI_RESEARCH_EMBEDDING_MODEL',
@@ -207,6 +214,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS',
   'PI_RESEARCH_SCRAPE_TIMEOUT_MS',
   'PI_RESEARCH_CACHE_TTL_DAYS',
+  'PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS',
   'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
   'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE',
   'PI_RESEARCH_MAX_CONCURRENT_SCRAPES',
@@ -632,6 +640,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS: String(config.TUI_REFRESH_DEBOUNCE_MS),
     PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: String(config.DEFAULT_RESEARCH_DEPTH),
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
+    PI_RESEARCH_MAX_GATHERING_CALLS: String(config.MAX_GATHERING_CALLS),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
     PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
     PI_RESEARCH_KNOWLEDGE_STORE_MODE: config.KNOWLEDGE_STORE_MODE,
@@ -639,6 +648,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
     PI_RESEARCH_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+    PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS: String(config.KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS),
     PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
@@ -829,6 +839,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS, 100, 10000),
     DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH, 1, 3, true),
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES, 0, 99, true),
+    MAX_GATHERING_CALLS: parseEnvNumber(e, 'PI_RESEARCH_MAX_GATHERING_CALLS', DEFAULTS.MAX_GATHERING_CALLS, 1, 100, true),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS, 1, 10, true),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY, 1, 10, true),
     KNOWLEDGE_STORE_MODE: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', ['none', 'project', 'global'] as const, 'global'),
@@ -842,6 +853,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
       e['PI_RESEARCH_CACHE_TTL_DAYS'] !== undefined
         ? parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS, 1, 365)
         : parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS, 1, 365),
+    KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS', DEFAULTS.KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS, 0, 3650),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS, 10000, 600000),
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING, 0.05, 1.0),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE, 500, 10000),

@@ -26,8 +26,26 @@ export const FLASH_QUEUE_GAP_MS = 150;
 
 // ==================== Research Constraints ====================
 
-/** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, grep — shared budget) */
+/** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange — shared web-API budget).
+ *  This is the schema default; use getMaxGatheringCalls(config) for the configured value. */
 export const MAX_GATHERING_CALLS = 12;
+
+/** Maximum local grep (ripgrep) calls per researcher. grep is local/free and does not hit
+ *  rate-limited web APIs, so it has its own generous budget instead of sharing the gathering
+ *  pool — but it is still bounded to prevent a pathological search loop. */
+export const MAX_GREP_CALLS = 30;
+
+/**
+ * Get the maximum gathering calls from config (env/config-file driven, mirrors getMaxScrapeBatches).
+ * Not surfaced in the TUI — advanced knob only.
+ */
+export function getMaxGatheringCalls(config?: Config): number {
+  try {
+    return (config || getConfig()).MAX_GATHERING_CALLS;
+  } catch {
+    return MAX_GATHERING_CALLS; // Fallback to default
+  }
+}
 
 /**
  * Get the maximum scrape batches from config.

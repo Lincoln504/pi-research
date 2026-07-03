@@ -9,7 +9,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { searchSecurityDatabases } from '../security/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
-import { MAX_GATHERING_CALLS } from '../constants.ts';
+import { getMaxGatheringCalls } from '../constants.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { SecuritySearchParams } from '../security/types.ts';
 
@@ -57,7 +57,7 @@ export function createSecuritySearchTool(options: {
       'Available for looking up CVE IDs, package vulnerabilities, or security advisories.',
       'Supports databases: NVD (340k+ CVEs), CISA KEV (actively exploited), GitHub Advisories (open source), OSV (packages).',
       'Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
-      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
+      `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls()} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
     ],
     parameters: SecuritySearchParamsSchema,
     executionMode: 'parallel',

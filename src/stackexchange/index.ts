@@ -200,6 +200,10 @@ async function executeSearch(
       pagesize: pageSize,
       page,
       site,
+      // Include the question body inline. SE quota is charged per request, not per
+      // filter, so this enriches each result at zero extra quota cost and the table
+      // renderer already displays q.body when present.
+      filter: Filters.WITH_BODY,
     };
 
     const searchParams = buildSearchQuery(queryParams);

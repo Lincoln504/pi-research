@@ -9,7 +9,7 @@ import { createGrepToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Value } from 'typebox/value';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
-import { MAX_GATHERING_CALLS } from '../constants.ts';
+import { MAX_GREP_CALLS } from '../constants.ts';
 
 export function createGrepTool(options: {
   tracker: ToolUsageTracker;
@@ -26,7 +26,7 @@ export function createGrepTool(options: {
       'Available for fast recursive text search in codebases.',
       'Pattern supports regex. Use glob to scope to file types (e.g., "**/*.ts").',
       'Options: ignoreCase, literal (disable regex), context (lines around match), limit (max matches).',
-      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools.`,
+      `Local code search — it does NOT consume your web-gathering budget (limit: ${MAX_GREP_CALLS} calls).`,
     ],
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       if (!Value.Check(sdkGrep.parameters, params)) {

@@ -9,7 +9,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { stackexchangeCommand } from '../stackexchange/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
-import { MAX_GATHERING_CALLS } from '../constants.ts';
+import { getMaxGatheringCalls } from '../constants.ts';
 
 export function createStackexchangeTool(options: {
   ctx: ExtensionContext;
@@ -63,7 +63,7 @@ export function createStackexchangeTool(options: {
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',
       'Use tags to filter by specific topics.',
       'Use maxPages parameter to control pagination for search results (default: 5 pages).',
-      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
+      `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls()} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
     ],
     parameters: StackExchangeParamsSchema,
     executionMode: 'parallel',

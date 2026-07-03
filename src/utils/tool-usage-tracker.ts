@@ -7,11 +7,11 @@
  */
 
 import { logger } from '../logger.ts';
-import { MAX_GATHERING_CALLS, getMaxScrapeBatches } from '../constants.ts';
+import { MAX_GATHERING_CALLS, MAX_GREP_CALLS, getMaxGatheringCalls, getMaxScrapeBatches } from '../constants.ts';
 import type { Config } from '../config.ts';
 
 export interface ToolLimits {
-  // Combined gathering limit (search, security_search, stackexchange, grep, youtube_transcript)
+  // Combined gathering limit (search, security_search, stackexchange, youtube_transcript)
   gathering?: number;
   // Scrape limit
   scrape?: number;
@@ -19,6 +19,8 @@ export interface ToolLimits {
   search?: number;
   // youtube_transcript is capped at one call per researcher
   youtube_transcript?: number;
+  // grep is local/free ripgrep — its own generous budget, not the shared gathering pool
+  grep?: number;
   // read tool (default pi file read) has no limit
   read?: number;
 }
@@ -42,7 +44,9 @@ export class ToolUsageTracker {
    * Get category for a tool
    */
   private getCategory(toolName: string): string {
-    const gatheringTools = ['search', 'security_search', 'stackexchange', 'grep', 'youtube_transcript'];
+    // grep is intentionally NOT here: it is local/free ripgrep, not a rate-limited web
+    // API, so it gets its own dedicated budget instead of competing for the gathering pool.
+    const gatheringTools = ['search', 'security_search', 'stackexchange', 'youtube_transcript'];
     if (gatheringTools.includes(toolName)) {
       return 'gathering';
     }
@@ -132,6 +136,11 @@ export class ToolUsageTracker {
             `Continue with your other gathering tools (search, scrape) and proceed to synthesis.`;
     }
 
+    if (toolName === 'grep') {
+      return `CODE SEARCH LIMIT REACHED: You have used all ${this.limits.grep ?? MAX_GREP_CALLS} local code-search calls. ` +
+        `Proceed with your other tools (search, scrape) and move toward synthesis.`;
+    }
+
     if (category === 'scrape') {
       const limit = catLimit ?? getMaxScrapeBatches();
       const effectiveText = limit > 99 ? 'unlimited' : `${limit} batch${limit === 1 ? '' : 'es'}`;
@@ -183,10 +192,11 @@ export class ToolUsageTracker {
  */
 export function createDefaultToolLimits(config?: Config): ToolLimits {
   return {
-    gathering: MAX_GATHERING_CALLS,
+    gathering: getMaxGatheringCalls(config),
     scrape: getMaxScrapeBatches(config),
     search: 1,
     youtube_transcript: 1,
+    grep: MAX_GREP_CALLS,
     read: undefined,
   };
 }

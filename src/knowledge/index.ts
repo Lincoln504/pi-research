@@ -74,6 +74,7 @@ export async function createKnowledgeStoreComponents(
         workspace,
         knowledgeMode: config.KNOWLEDGE_STORE_MODE,
         ttlDays: config.KNOWLEDGE_STORE_CACHE_TTL_DAYS,
+        maxServeAgeDays: config.KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS,
       });
 
       const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);

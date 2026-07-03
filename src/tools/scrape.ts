@@ -215,7 +215,12 @@ export function createScrapeTool(options: {
                 const advisoryHint = cacheHit.description && cacheHit.description !== cacheHit.text
                   ? `> **Advisory Hint (from previous session):** ${cacheHit.description}\n\n`
                   : '';
-                cachedResults.push({ url, markdown: advisoryHint + cacheHit.text });
+                // Surface cache age so the model never treats stale cached text as
+                // current. For time-sensitive claims it can re-scrape for fresh data.
+                const ageNote = typeof cacheHit.ageDays === 'number'
+                  ? `> **Cache note:** served from the local knowledge store, last updated ~${cacheHit.ageDays} day(s) ago. Re-scrape if you need current data for time-sensitive claims.\n\n`
+                  : '';
+                cachedResults.push({ url, markdown: ageNote + advisoryHint + cacheHit.text });
                 options.onUrlScrapeResult?.(url, true);
                 const idx = urlsToFetch.indexOf(url);
                 if (idx !== -1) urlsToFetch.splice(idx, 1);

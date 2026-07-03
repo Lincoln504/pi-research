@@ -43,6 +43,11 @@ export interface StoreOptions {
   knowledgeMode: 'none' | 'project' | 'global';
   /** Cache TTL in days for automatic eviction */
   ttlDays?: number;
+  /** Max age (in days) a cached document may be served at read time. 0 (default)
+   *  disables the read-time gate, preserving prior behaviour — eviction (ttlDays)
+   *  still bounds the worst case. Set >0 for time-sensitive research to force a
+   *  fresh scrape of anything older than this window. */
+  maxServeAgeDays?: number;
 }
 
 export class KnowledgeStore implements IKnowledgeStore {
@@ -783,7 +788,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     return this.findDocumentsByUrl(url);
   }
 
-  async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null> {
+  async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any>; ageDays?: number } | null> {
     // Runs mid-research (scrape cache lookup); coordinate with close() so a teardown
     // can't free the native handle while this query is in flight.
     return this.trackOperation('rebuildDocument', null, async () => {
@@ -809,13 +814,29 @@ export class KnowledgeStore implements IKnowledgeStore {
     }
 
     const r = results[0];
+    // Read-time freshness. The stored timestamp (ms) is otherwise discarded here;
+    // compute the row's age so we can (a) optionally treat an over-age row as a
+    // cache miss and (b) surface the age to callers so it never reaches the model
+    // as timeless/authoritative content.
+    const rawAgeMs = Date.now() - Number(r.timestamp);
+    // Guard against a missing/corrupt timestamp: Math.max does NOT sanitize NaN, and an
+    // undefined ageDays cleanly omits the age label rather than surfacing "~NaN day(s)".
+    const hasAge = Number.isFinite(rawAgeMs);
+    const ageMs = hasAge ? Math.max(0, rawAgeMs) : 0;
+    const ageDays = hasAge ? Math.floor(ageMs / 86_400_000) : undefined;
+    const maxServeAgeDays = this.options.maxServeAgeDays ?? 0;
+    if (maxServeAgeDays > 0 && hasAge && ageMs > maxServeAgeDays * 86_400_000) {
+      metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'stale' });
+      logger.log(`[store] Cache stale for ${url} (${ageDays}d > ${maxServeAgeDays}d serve limit) — treating as miss`);
+      return null;
+    }
     try {
       const metadata = JSON.parse(r.metadata as string);
       const description: string | null = typeof metadata.description === 'string' ? metadata.description : null;
       const textToReturn = (r.content as string) || (r.text as string) || description || '';
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'hit' });
-      logger.log(`[store] Cache hit: synthesis-description for ${url} (${textToReturn.length} chars)`);
-      return { text: textToReturn, description, metadata };
+      logger.log(`[store] Cache hit: synthesis-description for ${url} (${textToReturn.length} chars, ~${ageDays ?? '?'}d old)`);
+      return { text: textToReturn, description, metadata, ageDays };
     } catch {
       logger.debug(`[store] Parse error reading cached content for ${url}`);
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'parse_error' });

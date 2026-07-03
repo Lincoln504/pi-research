@@ -7,16 +7,19 @@ vi.mock('../../../src/logger.ts', () => ({
 
 vi.mock('../../../src/constants.ts', () => ({
   MAX_GATHERING_CALLS: 10,
+  MAX_GREP_CALLS: 30,
+  getMaxGatheringCalls: vi.fn(() => 10),
   getMaxScrapeBatches: vi.fn(() => 2),
 }));
 
 describe('ToolUsageTracker', () => {
   describe('createDefaultToolLimits', () => {
-    it('returns gathering=10, scrape=2, search=1, read=undefined', () => {
+    it('returns gathering=10, scrape=2, search=1, grep=30, read=undefined', () => {
       const limits = createDefaultToolLimits();
       expect(limits.gathering).toBe(10);
       expect(limits.scrape).toBe(2);
       expect(limits.search).toBe(1);
+      expect(limits.grep).toBe(30);
       expect(limits.read).toBeUndefined();
     });
   });
@@ -28,13 +31,20 @@ describe('ToolUsageTracker', () => {
       tracker = new ToolUsageTracker({ gathering: 5 });
     });
 
-    it('search, security_search, stackexchange, grep all share gathering category', () => {
+    it('search, security_search, stackexchange share the gathering category', () => {
       tracker.recordCall('search');
       tracker.recordCall('security_search');
       tracker.recordCall('stackexchange');
+      expect(tracker.getCallCount('search')).toBe(3);
+      expect(tracker.getCallCount('security_search')).toBe(3);
+    });
+
+    it('grep is its own category, NOT part of gathering (local/free)', () => {
+      tracker.recordCall('search');
       tracker.recordCall('grep');
-      expect(tracker.getCallCount('search')).toBe(4);
-      expect(tracker.getCallCount('security_search')).toBe(4);
+      // gathering only counts the search call; grep is tracked separately
+      expect(tracker.getCallCount('search')).toBe(1);
+      expect(tracker.getCallCount('grep')).toBe(1);
     });
 
     it('scrape is its own category separate from gathering', () => {
@@ -47,17 +57,26 @@ describe('ToolUsageTracker', () => {
     it('allows calls within category limit and increments counter', () => {
       const tracker = new ToolUsageTracker({ gathering: 2 });
       expect(tracker.recordCall('search')).toBe(true);
-      expect(tracker.recordCall('grep')).toBe(true);
+      expect(tracker.recordCall('security_search')).toBe(true);
       expect(tracker.getCallCount('search')).toBe(2);
     });
 
     it('blocks and does NOT increment when category limit is reached', () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('search');
-      const allowed = tracker.recordCall('grep');
+      const allowed = tracker.recordCall('security_search');
       expect(allowed).toBe(false);
-      // category total is 1 (from the search call); blocked grep was not counted
-      expect(tracker.getCallCount('grep')).toBe(1);
+      // category total is 1 (from the search call); blocked security_search was not counted
+      expect(tracker.getCallCount('security_search')).toBe(1);
+    });
+
+    it('grep has its own budget and is not blocked by the gathering limit', () => {
+      const tracker = new ToolUsageTracker({ gathering: 1, grep: 2 });
+      tracker.recordCall('search'); // gathering now full
+      expect(tracker.recordCall('grep')).toBe(true);
+      expect(tracker.recordCall('grep')).toBe(true);
+      expect(tracker.recordCall('grep')).toBe(false); // grep's own limit hit
+      expect(tracker.getCallCount('grep')).toBe(2);
     });
 
     it('blocks on tool-specific limit independently of category limit', () => {
@@ -93,7 +112,7 @@ describe('ToolUsageTracker', () => {
       const tracker = new ToolUsageTracker({ gathering: 10 });
       tracker.recordCall('search');
       tracker.recordCall('security_search');
-      tracker.recordCall('grep');
+      tracker.recordCall('stackexchange');
       expect(tracker.getCallCount('search')).toBe(3);
     });
 
@@ -143,10 +162,11 @@ describe('ToolUsageTracker', () => {
       expect(msg).toContain('10 gathering calls');
     });
 
-    it('returns GATHERING LIMIT REACHED for grep', () => {
-      const tracker = new ToolUsageTracker({ gathering: 5 });
+    it('returns CODE SEARCH LIMIT REACHED for grep (its own budget)', () => {
+      const tracker = new ToolUsageTracker({ gathering: 5, grep: 30 });
       const msg = tracker.getLimitMessage('grep');
-      expect(msg).toContain('GATHERING LIMIT REACHED');
+      expect(msg).toContain('CODE SEARCH LIMIT REACHED');
+      expect(msg).toContain('30');
     });
   });
 

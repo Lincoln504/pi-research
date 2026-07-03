@@ -257,7 +257,8 @@ export async function rebuildDocuments(
       }
 
       const provenance = provenanceByUrl.get(url) || 'unknown';
-      const header = `\n---\n### Source: ${url}\n#### Provenance: ${provenance}\n`;
+      const ageLine = typeof rebuilt.ageDays === 'number' ? `#### Cache age: ~${rebuilt.ageDays} day(s) old\n` : '';
+      const header = `\n---\n### Source: ${url}\n#### Provenance: ${provenance}\n${ageLine}`;
       const docText = rebuilt.text || '';
       const entry = header + docText;
 

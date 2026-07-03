@@ -696,21 +696,25 @@ describe('Extended Tools Integration', () => {
         tracker 
       });
 
-      // Call 1 - grep (allowed)
-      const allowed1 = tracker.recordCall('grep');
+      // Call 1 - search (allowed)
+      const allowed1 = tracker.recordCall('search');
       expect(allowed1).toBe(true);
-      
+
       // Call 2 - stackexchange (allowed)
       const allowed2 = tracker.recordCall('stackexchange');
       expect(allowed2).toBe(true);
-      
+
       // Call 3 - security search (allowed)
       const allowed3 = tracker.recordCall('security_search');
       expect(allowed3).toBe(true);
 
-      // Call 4 should be blocked because limit is reached
-      const allowed4 = tracker.recordCall('grep');
+      // Call 4 (another gathering tool) should be blocked because the shared limit is reached
+      const allowed4 = tracker.recordCall('stackexchange');
       expect(allowed4).toBe(false);
+
+      // grep is a SEPARATE budget — an exhausted gathering pool must not block it
+      const grepAllowed = tracker.recordCall('grep');
+      expect(grepAllowed).toBe(true);
     });
 
     it('should track usage correctly across multiple tool types', async () => {
@@ -749,9 +753,9 @@ describe('Extended Tools Integration', () => {
     });
 
     it('should reset limits correctly', async () => {
-      const tracker = new ToolUsageTracker({ gathering: 2 });
+      const tracker = new ToolUsageTracker({ grep: 2 });
       void createGrepTool({ tracker });
-      
+
       // Use up limit
       tracker.recordCall('grep');
       tracker.recordCall('grep');
