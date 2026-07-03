@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Limitless research and knowledge store — for [pi](https://github.com/earendil-works/pi), agent skill, or SDK.</strong>
+  <strong>Limitless research and knowledge store — for pi, agent skill, or SDK.</strong>
 </p>
 
 <p align="center">
