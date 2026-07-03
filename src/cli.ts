@@ -33,6 +33,7 @@ import {
   type KnowledgeSearchResult,
 } from './sdk.ts';
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
+import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
@@ -396,6 +397,17 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
     return EXIT.CONFIG;
   }
 
+  // Apply the same length/whitespace/dangerous-content gate the pi tool path enforces.
+  // The CLI (and the skill launcher that forwards to it) otherwise reached the orchestrator
+  // with an unbounded or whitespace-only query — parseArgs only rejects a fully empty one.
+  let query: string;
+  try {
+    query = validateAndSanitizeQuery(args.query);
+  } catch (e) {
+    toStderr(`\nError: ${e instanceof Error ? e.message : String(e)}\n`);
+    return EXIT.USAGE;
+  }
+
   const depth: 0 | 1 | 2 | 3 =
     (args.depth ?? getConfig(process.cwd(), 'cli').DEFAULT_RESEARCH_DEPTH) as 0 | 1 | 2 | 3;
   // An explicit --model wins over configured/PI_RESEARCH_MODEL for this run.
@@ -419,7 +431,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
       ignoreGlobalConfig: true,
     });
 
-    let report = await runDeepResearch(args.query, {
+    let report = await runDeepResearch(query, {
       depth,
       observer,
       ...(args.excludeTools ? { excludeTools: args.excludeTools } : {}),
