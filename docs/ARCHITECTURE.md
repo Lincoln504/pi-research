@@ -84,10 +84,23 @@ Two conventions apply:
   report. A mid-round evaluation that cannot be parsed continues the existing agenda
   rather than finalizing early, so a parse failure never truncates a run.
 
-### Research tools
+### Tool inventory
 
-Each researcher has a fixed tool set and a shared budget of 12 gathering calls per phase
-(`MAX_GATHERING_CALLS`).
+This is the canonical list of every tool the system exposes, on both surfaces.
+
+**Host-facing tools** — registered with the pi session (`src/index.ts`) for the calling
+agent to invoke:
+
+| Tool | Purpose |
+|------|---------|
+| `research` | Run a full multi-source research session and return the cited Markdown report |
+| `research_knowledge_search` | Instant local search of the knowledge store — checked before live research; always registered, reports why when the store is disabled |
+| `health` | Verify system status (browser pool, knowledge store, GPU lock); optional liveness probe |
+
+**Researcher-agent tools** — the fixed set each researcher sub-agent works with
+(`src/tools/index.ts`). `search`, `security_search`, `stackexchange`, and
+`youtube_transcript` share a budget of 12 gathering calls per phase
+(`MAX_GATHERING_CALLS`); `scrape` and local `grep` have their own budgets:
 
 | Tool | Quick | Deep | Backend |
 |------|-------|------|---------|
@@ -102,7 +115,9 @@ Each researcher has a fixed tool set and a shared budget of 12 gathering calls p
 In deep research `search` is excluded — the coordinator runs the search burst and hands
 out URLs directly. In quick research `grep` is excluded — the single session is not
 expected to traverse a local codebase. Researchers cannot write files, run shell
-commands, or reach the network outside these tools.
+commands, or reach the network outside these tools. Individual researcher tools can be
+disabled per run with `PI_RESEARCH_DISABLED_TOOLS`
+(see [CONFIGURATION.md](CONFIGURATION.md)).
 
 ### Browser infrastructure
 
