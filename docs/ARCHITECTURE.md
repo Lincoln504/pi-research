@@ -25,8 +25,8 @@ pi CLI
    in-session, the calling agent picks the depth (1–3) from the user's wording and the
    task's complexity, guided by the tool's usage prompt (`src/prompts/research-tool-usage.md`).
    CLI and SDK callers pass the depth explicitly.
-2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below). The TUI and agent
-   skill are restricted to levels 1–3.
+2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below). The pi extension's
+   tool and the TUI are restricted to levels 1–3; the CLI, SDK, and agent skill can pass 0.
 3. On the deep path the coordinator plans the research tracks and runs one initial
    search burst, then hands each researcher a set of result URLs to start from.
 4. Researchers scrape and read those pages through the scrape tooling and return cited
@@ -154,7 +154,8 @@ WriterQueue (async, non-blocking)
 Key files: `src/knowledge/store.ts` (LanceDB operations), `embedder.ts` (model load +
 batched inference), `writer-queue.ts` (async writes + content-hash dedup), `chunker.ts`
 (chunking), `webgpu-viability.ts` (out-of-process GPU probe + cached verdict),
-`migration.ts` (model-change migration: drop / backup / re-embed).
+`migration.ts` (migration strategy types — the drop / backup / re-embed logic
+itself lives in `store.ts`).
 
 The store needs native ONNX-runtime and LanceDB bindings. On platforms with no prebuilt
 binary — notably Intel macOS (`darwin-x64`) — it is absent: the health check reports it
