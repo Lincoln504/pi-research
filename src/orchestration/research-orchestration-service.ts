@@ -358,8 +358,9 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
             logger.debug(`[ResearchOrchestrationService] Researcher ${id} cancelled (aborted).`);
           } else {
             logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
-            // Record failure for stopping logic
-            recordResearcherFailure(sessionId, researchId, id);
+            // Record failure (with its root cause) for stopping logic and for the
+            // zero-report failure surfaced at synthesis time.
+            recordResearcherFailure(sessionId, researchId, id, errMsg);
             // Notify observer
             observer?.onResearcherFailure?.(id, errMsg);
           }

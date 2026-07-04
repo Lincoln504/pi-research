@@ -281,6 +281,16 @@ describe('SDK Lifecycle', () => {
       }
     });
 
+    it('an explicit model option pins RESEARCH_MODEL for the whole run (researchers included)', async () => {
+      // Regression: researchers/synthesis resolve through config.RESEARCH_MODEL,
+      // which used to outrank the explicit option — `--model X` with a configured
+      // model Y ran the coordinator on X and the researchers on Y.
+      await initSDK({ config: { RESEARCH_MODEL: 'cfg-provider/cfg-model' } });
+      await runDeepResearch('q');
+      const passed = mockDeepRun.mock.calls[0]![0] as any;
+      expect(passed.config.RESEARCH_MODEL).toBe('test-provider/test-model'); // from STUB_MODEL, not the config
+    });
+
     it('forwards the SDK-global config (from initResearchSDK) into runResearch', async () => {
       await initSDK({ config: { KNOWLEDGE_STORE_MODE: 'none', MAX_SCRAPE_BATCHES: 7 } });
       await runDeepResearch('q');

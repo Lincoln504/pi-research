@@ -153,7 +153,17 @@ export function constructMinimalModel(provider: string, modelId: string, _apiKey
     provider,
     id: modelId,
     name: modelId,
-    api: provider === 'openai' ? 'openai-completions' : (provider + '-conversations' as any),
+    // Map to a REAL pi-ai api id — "<provider>-conversations" is not one, and a
+    // keyed no-registry setup would pass pre-flight then die on the first call.
+    // Unknown providers default to the OpenAI-compatible protocol, which is what
+    // virtually every third-party endpoint (openrouter, groq, cerebras, …) speaks.
+    api: ({
+      openai: 'openai-completions',
+      anthropic: 'anthropic-messages',
+      google: 'google-generative-ai',
+      gemini: 'google-generative-ai',
+      mistral: 'mistral-conversations',
+    } as Record<string, string>)[provider] ?? 'openai-completions',
     baseUrl: '', // Provider-specific base URLs are handled by pi-ai internal registry
     reasoning: false,
     input: ['text'],

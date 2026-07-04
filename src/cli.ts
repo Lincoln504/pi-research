@@ -237,9 +237,14 @@ function fileExists(p: string): boolean {
  * OPENAI_API_KEY. File presence alone is neither necessary (keys can live in
  * models.json / env with no auth.json) nor sufficient (auth.json can be `{}`).
  */
-function piKeysAvailable(piAuthPresent: boolean): boolean {
+function piKeysAvailable(piAuthPresent: boolean, provider?: string): boolean {
   try {
-    return safeGetAvailable(buildModelRegistry(undefined, undefined)).length > 0;
+    const available = safeGetAvailable(buildModelRegistry(undefined, undefined));
+    if (!provider) return available.length > 0;
+    // Provider known (from the configured provider/model-id): keys must exist
+    // for THAT provider — a key for some other provider would pass pre-flight
+    // and then die on the first LLM call ("No API key found for <provider>").
+    return available.some((m) => m.provider === provider);
   } catch {
     // Cannot inspect (e.g. malformed models.json) — fall back to file
     // presence: pre-flight must never block a possibly-working setup; the run
@@ -269,7 +274,6 @@ function detectCredentials(): CredentialDetection {
   const paths = resolvedConfigPaths();
   const piAuthPresent = fileExists(paths.piAuth);
   const piModelsPresent = fileExists(paths.piModels);
-  const piKeysUsable = piKeysAvailable(piAuthPresent);
 
   const apiKey = process.env['PI_RESEARCH_API_KEY'];
   const providerEnv = process.env['PI_RESEARCH_PROVIDER'];
@@ -281,6 +285,9 @@ function detectCredentials(): CredentialDetection {
   // Provider is either explicit, or inferred from a "provider/id" model string.
   const provider =
     providerEnv ?? (model && model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined);
+  // Provider-aware when the configured model names one: a key for a DIFFERENT
+  // provider must not greenlight this run.
+  const piKeysUsable = piKeysAvailable(piAuthPresent, provider);
 
   // --- Explicit API-key path -------------------------------------------------
   if (apiKey) {
@@ -787,8 +794,12 @@ function reportError(err: unknown, what: string, json?: boolean): number {
     lower.includes('unauthorized') ||
     lower.includes('api key');
 
+  // Rate limits win over config-shaped matches: a provider 429 often mentions
+  // "api key" in its body (e.g. "rate limit exceeded for this api key"), and
+  // classifying that as a setup problem sends the user to reconfigure a
+  // perfectly working key instead of waiting out the limit.
   const isRateLimit = lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests');
-  const exitCode = isConfigError ? EXIT.CONFIG : EXIT.SOFTWARE;
+  const exitCode = isConfigError && !isRateLimit ? EXIT.CONFIG : EXIT.SOFTWARE;
 
   // --json: emit a structured error on stdout so a machine consumer never has to
   // special-case plain-text stderr. Mirrors the { ok: true, ... } success shape.
@@ -801,13 +812,13 @@ function reportError(err: unknown, what: string, json?: boolean): number {
     return exitCode;
   }
 
-  if (isConfigError) {
-    toStderr(`\nError: pi-research ${what} failed: ${msg}\n\n${configBlock(detectCredentials())}\n`);
-    return exitCode;
-  }
-  // Rate limits are operational, not fatal setup problems.
+  // Rate limits are operational, not fatal setup problems — checked FIRST.
   if (isRateLimit) {
     toStderr(`\nError: pi-research ${what} halted: provider rate limit reached. Wait a moment and retry.\n  ${msg}\n`);
+    return exitCode;
+  }
+  if (isConfigError) {
+    toStderr(`\nError: pi-research ${what} failed: ${msg}\n\n${configBlock(detectCredentials())}\n`);
     return exitCode;
   }
   toStderr(`\nError: pi-research ${what} failed: ${msg}\n`);

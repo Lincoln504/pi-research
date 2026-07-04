@@ -482,11 +482,22 @@ describe('CLI subprocess — model required with pi credentials', () => {
   });
 
   it('setting PI_RESEARCH_MODEL makes detection ready again', () => {
-    const r = run(['status', '--json'], { PI_RESEARCH_MODEL: 'some-provider/some-model' });
+    // Model provider must match the authed provider (openai here): detection
+    // is provider-aware, so an arbitrary provider would rightly stay not-ready.
+    const r = run(['status', '--json'], { PI_RESEARCH_MODEL: 'openai/gpt-4o' });
     const out = JSON.parse(r.stdout);
     expect(out.ready).toBe(true);
-    expect(out.credentials.model).toBe('some-provider/some-model');
+    expect(out.credentials.model).toBe('openai/gpt-4o');
     expect(out.credentials.modelFrom).toBe('PI_RESEARCH_MODEL');
+  });
+
+  it('a key for a DIFFERENT provider does not greenlight the configured model', () => {
+    // auth.json has an openai entry; the model names a provider with no key
+    // anywhere. Pre-flight must say not-ready instead of passing and dying on
+    // the first LLM call with "No API key found".
+    const r = run(['status', '--json'], { PI_RESEARCH_MODEL: 'keyless-provider/some-model' });
+    const out = JSON.parse(r.stdout);
+    expect(out.ready).toBe(false);
   });
 });
 

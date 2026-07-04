@@ -69,7 +69,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     // use), recording under ctx.sessionId would file this no-links skip under a
     // different id than shouldStopResearch() checks, so the fast-stop guard would
     // under-count exactly the broad-search-failure case it exists to catch.
-    recordResearcherFailure(sessionId, researchId, id);
+    recordResearcherFailure(sessionId, researchId, id, 'no initial search results or historical links (search produced nothing usable)');
     metrics.increment('researcher_skipped_total', 1, { mode: 'deep', complexity: String(complexity), reason: 'no_initial_links' });
     observer?.onResearcherFailure?.(id, 'No initial search results or historical links available');
     return;

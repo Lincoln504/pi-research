@@ -26,6 +26,8 @@ const MAX_STEERING_MESSAGE_LENGTH = 2000;
 interface PiSessionState {
   /** Map of research run ID → array of failed researcher IDs */
   failures: Map<string, string[]>;
+  /** Map of research run ID → (researcher ID → first failure reason) */
+  failureReasons: Map<string, Map<string, string>>;
   /** Ordered list of research run IDs for TUI stacking (Index 0 = oldest/bottom-most) */
   order: string[];
   /** Registry of panel states for each research run */
@@ -70,6 +72,7 @@ function getPiState(piSessionId: string | undefined): PiSessionState {
   if (!state) {
     state = {
       failures: new Map(),
+      failureReasons: new Map(),
       order: [],
       panels: new Map(),
       aborts: new Map(),
@@ -392,6 +395,7 @@ export function refreshAllSessions(piSessionId: string | undefined): void {
         for (const id of state.order) {
           if (!validIds.includes(id)) {
             state.failures.delete(id);
+            state.failureReasons.delete(id);
             state.panels.delete(id);
           }
         }
@@ -454,6 +458,7 @@ export function startResearchSession(piSessionId: string | undefined, customRese
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
   state.failures.set(researchId, []);
+  state.failureReasons.set(researchId, new Map());
   return researchId;
 }
 
@@ -501,6 +506,7 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
   if (!state) return;
 
   state.failures.delete(researchId);
+  state.failureReasons.delete(researchId);
   state.panels.delete(researchId);
   state.aborts.delete(researchId);
 
@@ -525,6 +531,7 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
     } else {
       // Clear research-specific state but preserve the session and steering
       state.failures.clear();
+      state.failureReasons.clear();
       state.aborts.clear();
     }
   }
@@ -563,12 +570,28 @@ export function isBottomMostSession(piSessionId: string | undefined, researchId:
 /**
  * Record a researcher failure
  */
-export function recordResearcherFailure(piSessionId: string | undefined, researchId: string, researcherId: string): void {
+export function recordResearcherFailure(piSessionId: string | undefined, researchId: string, researcherId: string, reason?: string): void {
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
   const failures = state.failures.get(researchId) || [];
   failures.push(researcherId);
   state.failures.set(researchId, failures);
+  if (reason) {
+    const reasons = state.failureReasons.get(researchId) ?? new Map<string, string>();
+    // Keep the FIRST reason per researcher — the root cause; retries repeat it.
+    if (!reasons.has(researcherId)) reasons.set(researcherId, reason);
+    state.failureReasons.set(researchId, reasons);
+  }
+}
+
+/**
+ * Get the recorded failure reason per failed researcher (first failure wins).
+ */
+export function getResearcherFailureReasons(piSessionId: string | undefined, researchId: string): Record<string, string> {
+  const sid = normalizeSessionId(piSessionId);
+  const state = getPiState(sid);
+  const reasons = state.failureReasons.get(researchId);
+  return reasons ? Object.fromEntries(reasons) : {};
 }
 
 /**
@@ -610,9 +633,18 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
   // search engine blocking" here mis-sends the user to debug their network; the
   // readiness probes do not even run a search, so a failure is not evidence of bot
   // blocking.
+  // Lead with the RECORDED errors when we have them — the actual root cause
+  // (e.g. a provider 429) beats generic guidance every time.
+  const state = getPiState(sid);
+  const reasons = state.failureReasons.get(researchId);
+  const recorded = reasons && reasons.size > 0
+    ? ['Recorded errors:', ...[...reasons].map(([id, r]) => `• researcher ${id}: ${r}`), '']
+    : [];
+
   return [
     `Research stopped: ${count} researcher(s) did not return a usable report: ${failed.join(', ')}.`,
     '',
+    ...recorded,
     'Most likely cause — the research model could not produce grounded results:',
     '• Try a more capable research model. Very small or "thinking-only" models often',
     '  emit no final text after their tool calls, which fails every researcher.',

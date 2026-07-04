@@ -9,7 +9,7 @@ import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session-state.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons } from './session-state.ts';
 import { MAX_EXTRA_ROUNDS_WITH_STEERING } from '../constants.ts';
 import {
   getMaxRounds,
@@ -486,7 +486,22 @@ export class DeepResearchOrchestrator {
               logger.warn(`[DeepOrchestrator] LLM returned empty synthesis for ${researchId}, building fallback from ${synthesisService.getReportCount(researchId)} reports`);
               result = synthesisService.buildFallbackSynthesis(researchId, this.currentRound);
           } else {
-              result = 'Research completed but no summary was generated.';
+              // ZERO reports were collected — the run produced nothing groundable.
+              // With the default single-researcher plan the fast-stop threshold
+              // (MAX_FAILED_RESEARCHERS = 2) never trips, so a lone researcher that
+              // exhausts its retries (e.g. a provider rate limit) used to land here
+              // and return a hollow "no summary was generated" string on the SUCCESS
+              // path — exit 0. That is a FAILED run: throw, and surface the recorded
+              // root causes so the user sees the 429/model error, not a shrug.
+              const failedIds = getFailedResearchers(this.options.sessionId, researchId);
+              const reasons = getResearcherFailureReasons(this.options.sessionId, researchId);
+              const causes = failedIds
+                .map((id) => `researcher ${id}: ${reasons[id] ?? 'no usable report'}`)
+                .join('; ');
+              throw new Error(
+                'Research produced no report — no source material was collected' +
+                (causes ? `. Causes: ${causes}` : '.')
+              );
           }
       }
 

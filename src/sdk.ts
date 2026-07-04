@@ -236,6 +236,19 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
   let parsedProvider = options.provider || process.env['PI_RESEARCH_PROVIDER'];
 
+  // An EXPLICIT model option must govern the entire run — coordinator (via
+  // ctx.model) AND researchers/synthesis (which resolve through
+  // RESEARCH_MODEL, where config would otherwise outrank the option and split
+  // the run across two models, with the report metadata naming the wrong one).
+  // Pin the config to the explicit choice. No-op when the option was itself
+  // seeded from the config (the CLI does that).
+  if (options.model) {
+    const explicit = typeof options.model === 'string'
+      ? options.model
+      : `${(options.model as Model<any>).provider}/${(options.model as Model<any>).id}`;
+    globalConfig = { ...globalConfig, RESEARCH_MODEL: explicit };
+  }
+
   // Infer provider from the effective model if not explicitly provided. The
   // effective model is the explicit option first, else the configured
   // RESEARCH_MODEL — the same precedence the resolve below uses.

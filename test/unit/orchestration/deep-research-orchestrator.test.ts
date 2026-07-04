@@ -47,6 +47,8 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   consumeQueuedMessages: vi.fn(() => []),
   getActiveSteeringMessages: vi.fn(() => []),
   getActiveSessionCount: vi.fn(() => 1),
+  getFailedResearchers: vi.fn(() => ['1']),
+  getResearcherFailureReasons: vi.fn(() => ({ '1': 'HTTP 429 rate_limit_error from provider' })),
 }));
 
 describe('DeepResearchOrchestrator', () => {
@@ -203,6 +205,19 @@ describe('DeepResearchOrchestrator', () => {
     expect(result).toBe('Multi-round result');
     expect(mockPlanningService.generatePlan).toHaveBeenCalled();
     expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
+  });
+
+  it('throws (not hollow success) when synthesis is empty and ZERO reports were collected', async () => {
+    // Regression: the default depth-1 plan is a SINGLE researcher, and the
+    // fast-stop threshold (MAX_FAILED_RESEARCHERS = 2) never trips for one
+    // failure — a lone researcher that exhausted its retries (e.g. a provider
+    // 429) used to reach forced synthesis with zero reports and return
+    // 'Research completed but no summary was generated.' as SUCCESS (exit 0).
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: '' });
+    mockSynthesisService.hasReports.mockReturnValue(false);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await expect(orchestrator.run()).rejects.toThrow(/produced no report.*HTTP 429 rate_limit_error/s);
   });
 
   it('should handle immediate synthesis request', async () => {
