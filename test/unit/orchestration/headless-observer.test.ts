@@ -382,4 +382,18 @@ describe('makeSafeObserver', () => {
     const tagged = makeSafeObserver({ tag: 'x', onStart: vi.fn() });
     expect((tagged as any).tag).toBe('x');
   });
+
+  it('works with a frozen observer (proxy invariants must not fire at property access)', async () => {
+    const { makeSafeObserver } = await import('../../../src/orchestration/headless-observer.ts');
+    const onStart = vi.fn(() => { throw new Error('display bug'); });
+    const frozen = Object.freeze({ onStart, onComplete: (r: string) => `saw ${r}` });
+    const safe = makeSafeObserver(frozen);
+
+    // Proxying a frozen object directly makes the engine throw TypeError at the
+    // ACCESS (non-writable non-configurable own property may not be replaced by
+    // a wrapper) — both lines below would fail with the naive implementation.
+    expect(() => (safe as any).onStart('q', 1)).not.toThrow();
+    expect(onStart).toHaveBeenCalledWith('q', 1);
+    expect((safe as any).onComplete('done')).toBe('saw done');
+  });
 });

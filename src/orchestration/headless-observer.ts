@@ -24,16 +24,23 @@ export type { HeadlessObserverOptions };
  * rejections never become unhandled.
  */
 export function makeSafeObserver<T extends object>(observer: T): T {
-  return new Proxy(observer, {
-    get(target, prop) {
-      // Guard the ACCESS too, and resolve getters against the target (not the
-      // proxy): an observer exposing a method via an accessor that touches a
-      // private field would otherwise throw at `observer?.onX?.(...)` property
-      // access — outside the call-site try/catch below — which is exactly the
-      // failure this wrapper exists to absorb.
+  // Proxy a FRESH empty object and close over the real observer instead of
+  // proxying the observer directly: a `get` trap on the observer itself may
+  // not substitute a wrapper for a non-writable non-configurable own data
+  // property (Proxy invariant), so a frozen observer — a common defensive
+  // pattern for SDK callback bags — would make the engine throw TypeError at
+  // the property ACCESS, outside every try/catch. An empty target has no own
+  // properties, so no invariant can ever bind the trap.
+  return new Proxy({} as T, {
+    get(_target, prop) {
+      // Guard the ACCESS too, and resolve getters against the observer (not
+      // the proxy): an observer exposing a method via an accessor that touches
+      // a private field would otherwise throw at `observer?.onX?.(...)`
+      // property access — outside the call-site try/catch below — which is
+      // exactly the failure this wrapper exists to absorb.
       let value: unknown;
       try {
-        value = Reflect.get(target, prop, target);
+        value = Reflect.get(observer, prop, observer);
       } catch (err) {
         logger.warn(`[observer] Ignored error reading observer.${String(prop)}:`, err);
         return undefined;
@@ -41,7 +48,7 @@ export function makeSafeObserver<T extends object>(observer: T): T {
       if (typeof value !== 'function') return value;
       return (...args: unknown[]) => {
         try {
-          const out = value.apply(target, args);
+          const out = value.apply(observer, args);
           if (out && typeof (out as Promise<unknown>).then === 'function') {
             return (out as Promise<unknown>).catch((err: unknown) => {
               logger.warn(`[observer] Ignored rejection from observer.${String(prop)}:`, err);
@@ -53,6 +60,17 @@ export function makeSafeObserver<T extends object>(observer: T): T {
           return undefined;
         }
       };
+    },
+    has(_target, prop) {
+      try {
+        return Reflect.has(observer, prop);
+      } catch {
+        return false;
+      }
+    },
+    // Keep `instanceof` transparent (legal on an extensible target).
+    getPrototypeOf() {
+      return Reflect.getPrototypeOf(observer);
     },
   }) as T;
 }
