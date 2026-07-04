@@ -64,7 +64,7 @@ const ResearchKnowledgeSearchParams = Type.Object({
     minItems: 1,
     maxItems: 5,
     description:
-      'Search queries for the knowledge database (1-5 queries).',
+      'Search queries for the knowledge store (1-5 queries).',
   }),
 });
 
@@ -116,7 +116,7 @@ const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
 
 /**
  * System string returned when the answer is NOT found in the research
- * knowledge database. The exact phrasing is critical — the main pi agent
+ * knowledge store. The exact phrasing is critical — the main pi agent
  * reads this as a signal to pivot to live web research.
  */
 export const RESEARCH_KNOWLEDGE_MISS_STRING =
@@ -783,10 +783,10 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
     name: 'research_knowledge_search',
     label: 'Research Knowledge Search',
     description:
-      'Search the research knowledge database for previously investigated information. ' +
+      'Search the research knowledge store for previously investigated information. ' +
       'Check this first for a web-research question, before the live `research` tool — ' +
       'it is a local, instant lookup. Go to live research only if it returns a partial or no answer.',
-    promptSnippet: 'Search research knowledge database',
+    promptSnippet: 'Search research knowledge store',
     promptGuidelines: [
       'Check `research_knowledge_search` first for research tasks, before `research`.',
       'A bare "research X" request still starts here: check what is known, then go live only if needed.',

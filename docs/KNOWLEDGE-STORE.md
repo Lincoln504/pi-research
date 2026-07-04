@@ -184,12 +184,12 @@ rather than leaving the store in a broken state. Changing the model from the
 
 From `/research-config`:
 
-- Database Status — entry counts (project and user), the active embedding model
+- Store Status — entry counts (project and user), the active embedding model
   and device, and the on-disk path.
 - Clear Project Store / Clear User Store — permanently delete the
   project-scoped or global rows (shown according to the current mode).
-- Run Diagnostics — exercises the browser pool, GPU/embedding, and database
-  connectivity, and reports the store's health state.
+- Run Health Check — exercises the browser pool, GPU/embedding, and knowledge
+  store connectivity, and reports the store's health state.
 
 The store grows copy-on-write (each run appends a version), so it is compacted
 automatically after any run that changed the stored data — stale versions and

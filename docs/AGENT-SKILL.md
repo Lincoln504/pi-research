@@ -94,7 +94,7 @@ npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status   # verify the engine is detected
 ```
 
-![One-command health and readiness diagnostics](media/06-health-check.gif)
+![One-command health and readiness check](media/06-health-check.gif)
 
 Once installed, ask the agent to research something — its skill system activates
 pi-research automatically. The in-package readme (`skills/pi-research/README.md`) and

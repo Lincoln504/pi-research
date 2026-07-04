@@ -653,7 +653,7 @@ export interface KnowledgeSearchResult {
 }
 
 /**
- * Search the research knowledge database for previously investigated information.
+ * Search the research knowledge store for previously investigated information.
  *
  * This is the SDK equivalent of the `research_knowledge_search` pi tool. It runs
  * the same pipeline (vector search → document rebuild → background-LLM synthesis)

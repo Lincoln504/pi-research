@@ -33,7 +33,7 @@ vi.mock('../../src/tools/research-knowledge-search.ts', () => ({
   createResearchKnowledgeSearchTool: vi.fn(() => ({
     name: 'research_knowledge_search',
     execute: mockKnowledgeExecute,
-    description: 'Search the research knowledge database',
+    description: 'Search the research knowledge store',
   })),
 }));
 

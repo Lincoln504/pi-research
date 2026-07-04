@@ -211,15 +211,15 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // ── Actions ──
     {
       id: 'ACTION_HEALTH',
-      label: 'Run Diagnostics',
-      description: 'Test browser pool, GPU, and database connectivity.',
+      label: 'Run Health Check',
+      description: 'Test browser pool, GPU, and knowledge store connectivity.',
       currentValue: 'run',
       values: ['run'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'ACTION_KNOWLEDGE_STATUS',
-        label: 'Database Status',
+        label: 'Store Status',
         description: 'Show entry counts, disk usage, and the active embedding model.',
         currentValue: 'run',
         values: ['run'],

@@ -42,9 +42,9 @@ the [knowledge store doc](KNOWLEDGE-STORE.md).
 The Embedding Model, Embedding Device, and Cache Retention rows appear
 only when Knowledge Mode is not `none`.
 
-The menu also offers actions that are not settings: Run Diagnostics (health
-check), Database Status, Clear Project / User Store, Session Metrics,
-Clear Debug Logs, and Install / Remove in External Agents (the coding-agent
+The menu also offers actions that are not settings: Run Health Check, Store
+Status, Clear Project / User Store, Session Metrics, Clear Debug Logs, and
+Install / Remove in External Agents (the coding-agent
 skill installer). Browser worker count is deliberately not in the menu — it is
 CPU/RAM-sensitive and set only via `PI_RESEARCH_WORKER_THREADS`.
 

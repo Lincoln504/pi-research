@@ -12,7 +12,7 @@ Two capabilities, invoked as shell subcommands:
 
 - `research "<query>"` — live multi-agent web research (search + stealth
   scraping + security databases + Stack Exchange). Returns a cited Markdown report.
-- `knowledge "<query>"` — search a local database of previously researched
+- `knowledge "<query>"` — search the local knowledge store of previously researched
   findings before doing live research (instant, free; the store is on by
   default in `global` mode and can be scoped or disabled via `knowledge-config`).
 

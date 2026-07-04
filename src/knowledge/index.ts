@@ -108,7 +108,7 @@ export async function createKnowledgeStoreComponents(
 }
 
 /**
- * Force delete the entire knowledge database directory.
+ * Force delete the entire knowledge store directory.
  * Used for system-level clearing or recovery from corruption.
  */
 export async function forceDeleteKnowledgeStore(config?: Config, workspace?: string): Promise<void> {
