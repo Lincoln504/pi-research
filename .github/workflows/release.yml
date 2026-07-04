@@ -6,7 +6,7 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 env:
@@ -123,7 +123,7 @@ jobs:
       - run: node scripts/verify-package.cjs manifest
 
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Publish to npm
         run: npm publish --provenance --access public

@@ -80,7 +80,15 @@ export async function setupLifecycle(): Promise<TestContext> {
     logger.log('[test] Service Registry initialized for integration tests');
   } catch (err) {
     logger.error('[test] Failed to initialize Service Registry:', err);
-    // Don't throw here, let individual tests fail if they need services
+    // Fail loud: a half-initialized service container produces confusing false
+    // greens (tests run against missing/broken services). Surface the failure
+    // here in beforeAll so the whole file fails clearly instead.
+    throw new Error(
+      `[test] Service Registry initialization failed — integration tests cannot run reliably: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      { cause: err },
+    );
   }
   
   return {

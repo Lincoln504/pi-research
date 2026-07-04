@@ -189,6 +189,46 @@ describe('FileLockService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Stale-lock cleanup — UUID-change race guard (lost-update protection)
+  // ---------------------------------------------------------------------------
+
+  describe('stale-lock cleanup race guard', () => {
+    it('restores — does NOT delete — a lock whose UUID changed between read and reclaim', async () => {
+      // A peer may reclaim a stale lock DURING the liveness lookup and overwrite
+      // it with its own fresh UUID before our cleanup unlinks it. Cleanup must
+      // detect the change (rename-to-trash + UUID re-verify) and RESTORE the
+      // peer's live lock rather than delete it — otherwise it reopens the
+      // lost-update window two writers can hit. Regression guard for the guard
+      // added alongside the bare-unlink -> trash-verify change.
+      const uuidA = crypto.randomUUID();
+      const uuidB = crypto.randomUUID();
+      const foreignDeadPid = 424242;
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: uuidA, pid: foreignDeadPid }), 'utf-8');
+      const stale = new Date(Date.now() - 40_000);
+      await fs.utimes(lockFilePath, stale, stale);
+
+      const lifecycle = makeStubLifecycle({ isAlive: () => false });
+      service = new FileLockService({ lockFilePath, processLifecycle: lifecycle });
+
+      // Inject the race: at the instant cleanup decides to reclaim, a peer has
+      // already overwritten the stale lock with its own live one (uuidB).
+      (service as any)._shouldReclaim = async () => {
+        await fs.writeFile(lockFilePath, JSON.stringify({ uuid: uuidB, pid: foreignDeadPid }), 'utf-8');
+        return true;
+      };
+
+      await service.initialize(); // runs cleanupStaleLocksOnStartup()
+
+      // The peer's live lock (uuidB) survives at the original path — not deleted.
+      const content = await fs.readFile(lockFilePath, 'utf-8');
+      expect(JSON.parse(content.trim()).uuid).toBe(uuidB);
+      // No trash leftovers remain in the lock directory.
+      const leftovers = (await fs.readdir(tmpDir)).filter((f) => f.includes('.trash.'));
+      expect(leftovers).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Non-owner release is a no-op
   // ---------------------------------------------------------------------------
 

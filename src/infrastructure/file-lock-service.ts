@@ -195,8 +195,25 @@ export class FileLockService implements IService {
         logger.log(
           `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old, owner alive: ${ownerAlive})`
         );
-        await fs.unlink(this.lockFilePath);
-        logger.log('[FileLockService] Stale lock removed');
+        // The liveness lookups above can take long enough for another process to
+        // reclaim the stale lock and write its own fresh one at this path. A bare
+        // unlink here would delete that live lock. Rename-to-trash and re-verify
+        // the UUID matches what we decided on — same guard as the contended path.
+        const expectedUuid = parsed?.uuid ?? '';
+        const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
+        try {
+          await fs.rename(this.lockFilePath, trashPath);
+          const trashContent = await fs.readFile(trashPath, 'utf-8');
+          const trashParsed = this._parseLockContent(trashContent);
+          if ((trashParsed?.uuid ?? '') !== expectedUuid) {
+            // Lock changed hands mid-check — restore it and back off.
+            try { await fs.link(trashPath, this.lockFilePath); } catch { /* ignore */ }
+            await fs.unlink(trashPath);
+            return;
+          }
+          await fs.unlink(trashPath);
+          logger.log('[FileLockService] Stale lock removed');
+        } catch { /* best-effort startup cleanup; acquire() handles contention */ }
       }
     } catch (error: unknown) {
       // ENOENT is expected (no lock file exists)

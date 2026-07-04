@@ -250,9 +250,11 @@ function notInstalled(): never {
 // Launch
 // ---------------------------------------------------------------------------
 
-/** True if a string carries cmd.exe metacharacters that shell:true would interpret. */
+/** True if a string carries cmd.exe metacharacters that shell:true would interpret.
+ * Includes \r\n: quote state does not survive a line break in the /c command string,
+ * so an embedded newline acts as a command separator. */
 function hasCmdMetachar(s: string): boolean {
-  return /[&|<>^"%()!]/.test(s);
+  return /[&|<>^"%()!\r\n]/.test(s);
 }
 
 /**

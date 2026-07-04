@@ -6,13 +6,15 @@
  * which are IDENTICAL across v3.0 and v3.1 — there is no version branch in Base scoring. (The
  * `× 0.9731`/exponent-13 changed-scope variant belongs only to the v3.1 Environmental metric group,
  * not to Base; applying it here would mis-band high-impact changed-scope vectors, e.g. reporting
- * S:C/C:H/I:H/A:H as 7.0/HIGH instead of the correct 6.9/MEDIUM.) Returns null for a vector it
+ * the changed-scope vector AV:P/AC:H/PR:H/UI:N/S:C/C:H/I:H/A:H as 7.0/HIGH instead of 6.9/MEDIUM.)
+ * Returns null for a vector it
  * cannot parse, a non-v3 vector, or an incomplete base vector — callers then fall back to UNKNOWN
  * rather than guess.
  *
  * Only the BASE metric group is computed (temporal/environmental are ignored), which is what a
  * severity label reflects. Verified against the CVSS v3.1 specification examples (9.8, 7.8, 6.1, 5.9)
- * and the changed-scope case S:C/C:H/I:H/A:H → 6.9/MEDIUM.
+ * and the changed-scope case AV:P/AC:H/PR:H/UI:N/S:C/C:H/I:H/A:H → 6.9/MEDIUM (the shorthand
+ * S:C/C:H/I:H/A:H alone, with default AV:N/AC:L/PR:N/UI:N, actually scores 10.0/CRITICAL).
  */
 
 const AV: Readonly<Record<string, number>> = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };

@@ -102,12 +102,17 @@ function _registerSignalHandlers(): void {
     process.env['PI_PROCESS_EXITING'] = '1';
 
     logger.warn(`[SDK] Received ${signal} — shutting down gracefully...`);
-    // Fire-and-forget shutdown; force-exit after a hard deadline.
-    shutdownResearchSDK().catch(err => logger.error('[SDK] Signal shutdown error:', err));
-    setTimeout(() => {
+    // Fire-and-forget shutdown; force-exit after a hard deadline. The timer is
+    // cleared once shutdown settles so an embedded host that keeps its event
+    // loop alive past our teardown isn't hard-killed 15s later.
+    const forceExitTimer = setTimeout(() => {
       logger.error(`[SDK] Forced exit after ${signal} (shutdown timed out)`);
       process.exit(1);
-    }, 15000).unref();
+    }, 15000);
+    forceExitTimer.unref();
+    shutdownResearchSDK()
+      .catch(err => logger.error('[SDK] Signal shutdown error:', err))
+      .finally(() => clearTimeout(forceExitTimer));
   };
 
   // Store named refs so we can remove only our handlers without nuking the host's.

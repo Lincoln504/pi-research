@@ -39,7 +39,9 @@ function resolveCamoufoxBin() {
   try {
     const pkgDir = path.dirname(require.resolve('camoufox-js/package.json', { paths: [projectRoot] }));
     const binDir = path.join(pkgDir, '..', '.bin');
-    const bin = path.join(binDir, 'camoufox-js');
+    // On Windows the executable is the .cmd shim; the extensionless file is a sh
+    // script that only runs via PATHEXT luck. Mirror src ensure-browser.ts.
+    const bin = path.join(binDir, isWindows ? 'camoufox-js.cmd' : 'camoufox-js');
     if (existsSync(bin)) return bin;
   } catch (_) { /* fall through */ }
   return null;

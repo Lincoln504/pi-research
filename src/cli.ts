@@ -699,31 +699,31 @@ COMMANDS
     --model <provider/id>        Override the model for this run.
     --exclude-tools <a,b>        Disable internal tools (e.g. security_search,stackexchange).
     --initial-links <url ...>    Seed URLs to investigate first; requires a query (-- ends options).
-    --config <path>              Read additional config from this file.
+    --config <path>              Use this config file instead of the base config.env.
     --json                       Emit a JSON object instead of a markdown report.
 
   knowledge "<q1>" ["<q2>" ...]  Search local knowledge store before live research (up to 5 queries).
-    --config <path>              Read additional config from this file.
+    --config <path>              Use this config file instead of the base config.env.
     --json                       Emit a JSON object.
 
   knowledge-config [show]        Show the knowledge-store mode for this directory + its source.
-    --config <path>              Read additional config from this file.
+    --config <path>              Use this config file instead of the base config.env.
     --json                       Emit a JSON object.
   knowledge-config set <mode>    Set the mode for THIS directory (none | project | global);
                                  persisted per-directory. Takes effect on the next run.
 
   status                         Show detected config, model/key, and readiness.
-    --config <path>              Read additional config from this file.
+    --config <path>              Use this config file instead of the base config.env.
     --json                       Emit a JSON object.
 
   help, --help, -h               Show this help.
 
 CONFIGURE
-  Credentials are read in this order (later entries win):
+  Credentials are resolved in this order (first match wins):
 
-    base config:  ${p.configEnv}
-    cli overlay:  ${p.cliIfaceEnv}   (optional; this CLI / agent skill only)
     env vars:     PI_RESEARCH_API_KEY  PI_RESEARCH_PROVIDER  PI_RESEARCH_MODEL
+    cli overlay:  ${p.cliIfaceEnv}   (optional; this CLI / agent skill only)
+    base config:  ${p.configEnv}
     pi auth:      ${p.piAuth}
     pi models:    ${p.piModels}
 
