@@ -1,6 +1,8 @@
 ## Configuration
 
-The skill drives the **pi-research** engine, which needs a model + API key.
+The skill drives the **pi-research** engine, which needs an explicitly configured
+model (`PI_RESEARCH_MODEL`) + API key — it runs only on that configured model and
+never follows the model selected inside the pi extension.
 Run `node "<SKILL_DIR>/scripts/run.mjs" status` to print what's detected and where
 to configure (no research runs).
 
@@ -13,7 +15,8 @@ to configure (no research runs).
    export PI_RESEARCH_MODEL=openai/gpt-4o    # provider/model-id
    ```
 2. **Global config** `~/.pi/research/config.env` (same KEY=VALUE keys; read at startup).
-3. **pi auth** (if you use `pi`): `~/.pi/agent/auth.json` + `~/.pi/agent/models.json`.
+3. **pi auth** (if you use `pi`): the API key comes from `~/.pi/agent/auth.json`
+   automatically — `PI_RESEARCH_MODEL` must still be set (env or `config.env`).
 
 Real env vars always win. Optional CLI-only overlay `~/.pi/research/cli.env` layers
 over `config.env` for the CLI only. Precedence:
@@ -23,7 +26,7 @@ over `config.env` for the CLI only. Precedence:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_MODEL` | session model | Model override for all research sub-tasks. |
+| `PI_RESEARCH_MODEL` | _(required)_ | The `provider/model-id` all research runs on. |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | `1` | Default depth (1–3) when `--depth` omitted. |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5). |
 | `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher timeout (180000–1800000). |

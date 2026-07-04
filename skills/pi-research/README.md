@@ -39,8 +39,8 @@ model/key is missing.
 ### Prerequisites
 
 - Node.js >= 22.19.0
-- `pi-research` installed somewhere the launcher can find it, and a model +
-  API key configured. See [`references/configuration.md`](references/configuration.md).
+- `pi-research` installed somewhere the launcher can find it, and a configured
+  model (`PI_RESEARCH_MODEL`) + API key. See [`references/configuration.md`](references/configuration.md).
 
 ```bash
 npm install -g @lincoln504/pi-research

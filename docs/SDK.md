@@ -13,6 +13,11 @@ run the `pi` extension, which keeps its own private copy your scripts can't impo
 npm install @lincoln504/pi-research
 ```
 
+Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
+(env or `~/.pi/research/config.env`). The SDK never follows the model selected
+inside the pi extension; only when neither is set does it fall back to the first
+available model in your pi registry.
+
 `src/sdk.ts` is a library for scripts, CI, and custom tooling. It is configured
 from code, not from a global overlay file — there is no `sdk.env`. It reads the
 base `~/.pi/research/config.env` as a baseline, and everything is
@@ -83,7 +88,7 @@ extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLE
 
 | Option | Description |
 |--------|-------------|
-| `model` | `"provider/id"` string or a `Model` object. Omit to use the first available pi model. |
+| `model` | `"provider/id"` string or a `Model` object. Omit to use the configured `PI_RESEARCH_MODEL`; only when neither is set does the SDK fall back to the first available pi model. |
 | `apiKey` / `provider` | Explicit credentials (provider required with apiKey). |
 | `config` | `Partial<Config>` overrides, applied over the base/defaults. |
 | `ignoreGlobalConfig` | Skip `config.env` entirely — defaults + `process.env` + `config` only. |

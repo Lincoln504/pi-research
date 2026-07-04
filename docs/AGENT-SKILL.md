@@ -10,7 +10,8 @@ pi-research software.
 Already running the `pi` extension (`pi install npm:@lincoln504/pi-research`)? You
 already have the engine — install the skill into your other agents with
 `/research-config` → Install in External Agents (see [Installation flow](#installation-flow))
-and skip the rest.
+and skip the install commands below. The model step still applies to you: the
+skill runs on its own configured `PI_RESEARCH_MODEL`, not your pi session's model.
 
 For standalone use without pi, install the engine globally, then link the skill into
 every coding agent detected on this machine:
@@ -23,6 +24,18 @@ pi-research skill install                # link the skill into Claude, Codex, Op
 `skill install` targets only agents already set up under `$HOME`, never overwrites a
 different skill in the slot, and records what it created so `pi-research skill uninstall`
 removes exactly that. Run `pi-research skill status` to see where it is installed.
+
+Then configure the model research runs on — the skill and standalone CLI use only
+this explicitly configured model (they never follow the model selected inside the
+pi extension) and refuse to start without one:
+
+```sh
+# ~/.pi/research/config.env  (or export as an env var)
+PI_RESEARCH_MODEL=provider/model-id
+```
+
+If you use `pi`, the API key comes from its auth storage automatically; otherwise
+also set `PI_RESEARCH_API_KEY`. See [Configuration](CONFIGURATION.md).
 
 On Windows, run `pi-research` from `cmd` or use `pi-research.cmd`: PowerShell's default
 execution policy (`Restricted`) blocks npm's `.ps1` shims ("running scripts is
@@ -114,8 +127,8 @@ Manual. Symlink the directory into any agent's skills folder yourself:
 ### Prerequisites
 
 - Node.js >= 22.19.0
-- `pi-research` installed where the launcher can find it, plus a model + API key.
-  See [Configuration](CONFIGURATION.md).
+- `pi-research` installed where the launcher can find it, plus a configured model
+  (`PI_RESEARCH_MODEL`) + API key. See [Configuration](CONFIGURATION.md).
 
 ```bash
 npm install -g @lincoln504/pi-research

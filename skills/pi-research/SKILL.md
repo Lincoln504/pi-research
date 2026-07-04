@@ -2,7 +2,7 @@
 name: pi-research
 description: "Multi-agent web research for any coding agent. Use for anything requiring current information from the internet — news, trends, product/service/company facts, statistics, people, places, events, APIs, library behavior, or 'what is X / how does X work' questions. Also use to search a local knowledge store of previously researched findings before doing live research. Powered by the pi-research engine (search, stealth scraping, security databases, Stack Exchange). Not for reading local files, running project commands, or analyzing this repository's own source."
 license: MIT
-metadata: { "author": "Lincoln Deen", "version": "1.0.2", "package": "@lincoln504/pi-research", "engine": "pi-research-sdk", "openclaw": { "requires": { "bins": ["node"] } } }
+metadata: { "author": "Lincoln Deen", "version": "1.0.3", "package": "@lincoln504/pi-research", "engine": "pi-research-sdk", "openclaw": { "requires": { "bins": ["node"] } } }
 allowed-tools: Bash(node:*)
 ---
 
@@ -91,9 +91,12 @@ On exit 78 the engine prints exact configure locations to stderr — relay verba
 ```
 config file:  ~/.pi/research/config.env
 env vars:     PI_RESEARCH_API_KEY  PI_RESEARCH_PROVIDER  PI_RESEARCH_MODEL
-pi auth:      ~/.pi/agent/auth.json
+pi auth:      ~/.pi/agent/auth.json   (supplies the API key only)
 pi models:    ~/.pi/agent/models.json
 ```
+
+`PI_RESEARCH_MODEL` (a `provider/model-id`) is always required — pi auth supplies
+only the key, and the skill never uses the model selected inside the pi extension.
 
 Run `status` for the resolved paths on this machine. Full reference:
 [`references/configuration.md`](references/configuration.md).
