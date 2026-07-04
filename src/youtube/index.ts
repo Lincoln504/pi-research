@@ -121,10 +121,14 @@ function formatResults(results: VideoTranscript[], rejected: string[]): string {
     if (r.lang) meta.push(`Language: ${r.lang}`);
     if (typeof r.charCount === 'number') meta.push(`${r.charCount.toLocaleString()} chars`);
     if (meta.length) md += `**${meta.join(' · ')}**\n`;
-    // Exact, copy-ready citation string so the report cites the real video title
-    // and channel rather than a paraphrase (the watch URL is not identifiable).
+    // Exact, copy-ready citation string. It MUST lead with the watch URL: a
+    // title-only citation cannot be matched to a source by the synthesis
+    // citation pipeline (parseCitations extracts URLs), so the transcript's
+    // provenance would silently drop out of the final report's CITED LINKS.
+    // The title/channel follows so the report names the real video, not a
+    // paraphrase (the watch URL alone is not human-identifiable).
     if (r.title) {
-      md += `**Cite as:** '${r.title}'${r.author ? ` by ${r.author}` : ''}\n`;
+      md += `**Cite as:** ${r.url} — '${r.title}'${r.author ? ` by ${r.author}` : ''}\n`;
     }
     md += `\n${r.text}\n\n---\n\n`;
   }

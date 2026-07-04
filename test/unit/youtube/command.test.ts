@@ -69,7 +69,10 @@ describe('youtube/command', () => {
     expect(text).toContain('Channel: Chan');
     expect(text).toContain('Duration: 1:05');
     expect(text).toContain('transcript text');
-    expect(text).toContain("**Cite as:** 'Good' by Chan");
+    // The Cite-as line must LEAD with the watch URL: a title-only citation is
+    // invisible to the synthesis citation pipeline (URLs are what it extracts),
+    // which silently drops the transcript's provenance from the final report.
+    expect(text).toContain("**Cite as:** https://youtu.be/aaaaaaaaaaa — 'Good' by Chan");
     expect(text).toContain('## Unavailable (1)');
     expect(text).toContain('No captions/transcript available');
     expect(res.details).toMatchObject({ requested: 2, fetched: 1, failed: 1 });

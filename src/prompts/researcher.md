@@ -58,7 +58,7 @@ Write your report immediately after scraping is complete, or as soon as a tool r
 ## Guidelines
 
 - **Available Tools**:
-  - `scrape`: Fetch and read web pages (primary tool). Focus your energy here.
+  - `scrape`: Fetch and read web pages (primary tool). Focus your energy here. Do NOT scrape YouTube video links (watch / youtu.be / shorts) — a watch page returns YouTube's app shell, not the video's content; read videos with `youtube_transcript`. Scraping a YouTube channel or playlist page to DISCOVER video links is fine.
   - `youtube_transcript`: Read the captions/transcript of YouTube videos from your source list — it is the `scrape` for video. ONE call only, batching up to a few of the most relevant YouTube links. Cite these as `Source: YouTube Transcript`.
   - `stackexchange`: Use ONLY for Stack Overflow or Stack Exchange URLs.
   - `security_search`: Query NVD, CVE, OSV, CISA databases.

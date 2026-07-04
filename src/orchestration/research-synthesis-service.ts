@@ -12,7 +12,7 @@
 import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks, type GlobalCitation } from '../utils/citation-utils.ts';
 import { lastCitedLinksHeaderIndex } from '../utils/text-utils.ts';
-import { getScrapedLinks, normalizeUrl } from '../utils/shared-links.ts';
+import { getScrapedLinks, isTranscribedLink, normalizeUrl } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
@@ -188,9 +188,17 @@ export class ResearchSynthesisService implements IService {
     if (globalCitations.length === 0) {
       const scraped = getScrapedLinks(sessionId);
       if (scraped.length > 0) {
-        globalCitations = scraped.map((url, i) => ({ id: i + 1, url, description: '', source: 'Scrape' }));
+        // Label per actual provenance: the pool also contains transcript watch
+        // URLs the youtube_transcript tool registered — calling those "Scrape"
+        // misattributes the report's real source material.
+        globalCitations = scraped.map((url, i) => ({
+          id: i + 1,
+          url,
+          description: '',
+          source: isTranscribedLink(sessionId, url) ? 'YouTube Transcript' : 'Scrape',
+        }));
         logger.warn(
-          `[ResearchSynthesisService] No citations parsed from reports; rebuilt ${scraped.length} source(s) from scrape provenance.`,
+          `[ResearchSynthesisService] No citations parsed from reports; rebuilt ${scraped.length} source(s) from scrape/transcript provenance.`,
         );
       }
     }

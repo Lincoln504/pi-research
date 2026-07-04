@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ResearchSynthesisService } from '../../../src/orchestration/research-synthesis-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
-import { registerScrapedLinks, clearAllSharedLinks } from '../../../src/utils/shared-links.ts';
+import { registerScrapedLinks, registerTranscribedLinks, clearAllSharedLinks } from '../../../src/utils/shared-links.ts';
 
 // Suppress logger output during tests
 import { vi } from 'vitest';
@@ -183,6 +183,23 @@ describe('ResearchSynthesisService', () => {
       expect(result).toContain('CITED LINKS');
       expect(result).toContain('https://provenance.org/a');
       expect(result).toContain('https://provenance.org/b');
+    });
+
+    it('labels transcript-sourced URLs "YouTube Transcript" (not "Scrape") in the provenance fallback', () => {
+      // Log-verified failure (Jul 4 Lebanon run): the researcher's CITED LINKS
+      // block was unparseable, and the fallback relabeled the transcript's watch
+      // URL — the report's actual source material — as [Source: Scrape].
+      service.storeReport('test-session', '1.A', 'A transcript-grounded report with an unparseable citation block.');
+      registerScrapedLinks('test-session', ['https://provenance.org/page', 'https://www.youtube.com/watch?v=KVEXmiAL2Q0']);
+      registerTranscribedLinks('test-session', ['https://www.youtube.com/watch?v=KVEXmiAL2Q0']);
+
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      const lines = result.split('\n');
+      const ytIdx = lines.findIndex((l) => l.includes('watch?v=KVEXmiAL2Q0'));
+      const pageIdx = lines.findIndex((l) => l.includes('provenance.org/page'));
+      expect(ytIdx).toBeGreaterThan(-1);
+      expect(lines.slice(ytIdx, ytIdx + 2).join('\n')).toContain('YouTube Transcript');
+      expect(lines.slice(pageIdx, pageIdx + 2).join('\n')).toContain('Scrape');
     });
 
     it('appends an explicit no-sources note when neither citations nor scrape provenance exist', () => {

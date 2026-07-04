@@ -20,7 +20,7 @@ import { Value } from 'typebox/value';
 import { youtubeTranscriptCommand } from '../youtube/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { cacheScrapedContent, registerScrapedLinks, registerResearcherScrapes } from '../utils/shared-links.ts';
+import { cacheScrapedContent, registerScrapedLinks, registerTranscribedLinks, registerResearcherScrapes } from '../utils/shared-links.ts';
 import { type Config, getConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -64,7 +64,7 @@ export function createYoutubeTranscriptTool(options: {
       'You may call this tool only ONCE, so choose the videos carefully before calling.',
       'Pass full watch URLs, youtu.be links, or shorts/embed/live links. Non-YouTube links are ignored.',
       'Videos without captions, or that are private/age-restricted, are reported as unavailable — the rest still succeed.',
-      "When you cite a YouTube source in CITED LINKS, use the video's ACTUAL title and channel (both shown in this tool's output) as the description — e.g. \"'<exact title>' by <channel>\". Do NOT paraphrase or invent a title; the watch URL alone is not human-identifiable.",
+      "When you cite a YouTube source in CITED LINKS, the entry's link MUST be the video's watch URL (shown in this tool's output) — a title-only entry loses the source from the final report. Put the video's ACTUAL title and channel in the Description — e.g. \"'<exact title>' by <channel>\". Do NOT paraphrase or invent a title.",
     ],
     parameters: YoutubeParamsSchema,
     executionMode: 'parallel',
@@ -139,6 +139,10 @@ export function createYoutubeTranscriptTool(options: {
 
         if (researchId && cachedUrls.length > 0) {
           registerScrapedLinks(researchId, cachedUrls);
+          // Record the provenance subset: if the researcher's CITED LINKS block is
+          // unparseable, the synthesis fallback rebuilds sources from the link pool
+          // and must label these "YouTube Transcript", not "Scrape".
+          registerTranscribedLinks(researchId, cachedUrls);
           options.updateGlobalLinks?.(cachedUrls);
           if (options.researcherId) {
             registerResearcherScrapes(researchId, options.researcherId, cachedUrls);

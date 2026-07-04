@@ -17,6 +17,11 @@ const sessionLinks = new Map<string, Set<string>>();
 const sessionScrapedContent = new Map<string, Map<string, string>>();
 // Per-researcher scrape tracking: researchId → researcherId → Set<normalizedUrl>
 const researcherScrapes = new Map<string, Map<string, Set<string>>>();
+// URLs whose content came from a YouTube TRANSCRIPT (not a page scrape). The
+// transcript tool registers its watch URLs in the same sessionLinks pool so the
+// post-round writer and citation fallback see them; this subset lets the
+// fallback label them "YouTube Transcript" instead of "Scrape".
+const transcribedUrls = new Map<string, Set<string>>();
 
 // FIX (Issue 12): Track creation timestamps for orphaned-entry cleanup.
 const sessionTimestamps = new Map<string, number>();
@@ -38,6 +43,7 @@ function startCleanupTimer(): void {
         sessionScrapedContent.delete(researchId);
         sessionTimestamps.delete(researchId);
         researcherScrapes.delete(researchId);
+        transcribedUrls.delete(researchId);
         cleaned++;
       }
     }
@@ -112,6 +118,23 @@ export function getScrapedLinks(researchId: string): string[] {
 }
 
 /**
+ * Mark links as sourced from a YouTube transcript (call IN ADDITION to
+ * registerScrapedLinks — this only records the provenance subset).
+ */
+export function registerTranscribedLinks(researchId: string, links: string[]) {
+    if (!transcribedUrls.has(researchId)) {
+        transcribedUrls.set(researchId, new Set());
+    }
+    const pool = transcribedUrls.get(researchId)!;
+    links.forEach(l => pool.add(normalizeUrl(l)));
+}
+
+/** Whether a URL's content came from a YouTube transcript in this session. */
+export function isTranscribedLink(researchId: string, url: string): boolean {
+    return transcribedUrls.get(researchId)?.has(normalizeUrl(url)) ?? false;
+}
+
+/**
  * Deduplicate a list of candidate URLs against already scraped links.
  */
 export function deduplicateUrls(urls: string[], researchId: string): { kept: string[], duplicates: string[] } {
@@ -140,6 +163,7 @@ export function cleanupSharedLinks(researchId: string) {
     sessionScrapedContent.delete(researchId);
     sessionTimestamps.delete(researchId);
     researcherScrapes.delete(researchId);
+    transcribedUrls.delete(researchId);
     logger.debug(`[Shared Links] Cleaned up session: ${researchId}`);
 }
 
@@ -156,6 +180,7 @@ export function clearAllSharedLinks(): void {
     sessionScrapedContent.clear();
     sessionTimestamps.clear();
     researcherScrapes.clear();
+    transcribedUrls.clear();
     logger.debug('[Shared Links] All global state cleared');
 }
 

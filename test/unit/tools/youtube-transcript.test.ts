@@ -15,10 +15,12 @@ vi.mock('../../../src/youtube/index.ts', () => ({
 
 const cacheScrapedContent = vi.fn();
 const registerScrapedLinks = vi.fn();
+const registerTranscribedLinks = vi.fn();
 const registerResearcherScrapes = vi.fn();
 vi.mock('../../../src/utils/shared-links.ts', () => ({
   cacheScrapedContent: (...a: unknown[]) => cacheScrapedContent(...a),
   registerScrapedLinks: (...a: unknown[]) => registerScrapedLinks(...a),
+  registerTranscribedLinks: (...a: unknown[]) => registerTranscribedLinks(...a),
   registerResearcherScrapes: (...a: unknown[]) => registerResearcherScrapes(...a),
 }));
 
@@ -115,6 +117,8 @@ describe('tools/youtube-transcript', () => {
 
     expect(cacheScrapedContent).toHaveBeenCalledWith('res-123', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', expect.stringContaining('transcript body'));
     expect(registerScrapedLinks).toHaveBeenCalledWith('res-123', ['https://www.youtube.com/watch?v=dQw4w9WgXcQ']);
+    // Provenance subset: the synthesis fallback labels these "YouTube Transcript".
+    expect(registerTranscribedLinks).toHaveBeenCalledWith('res-123', ['https://www.youtube.com/watch?v=dQw4w9WgXcQ']);
     expect(registerResearcherScrapes).toHaveBeenCalledWith('res-123', '1.1', ['https://www.youtube.com/watch?v=dQw4w9WgXcQ']);
   });
 
