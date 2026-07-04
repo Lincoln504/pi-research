@@ -13,9 +13,61 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Gate the ENTIRE release on the full CI workflow (ci.yml — the cross-OS unit +
+  # integration matrix and the real-Camoufox suites) having SUCCEEDED for this exact
+  # commit. ci.yml runs on the branch push; this release runs on the tag push — the
+  # two fire in parallel, so without this gate a publish could race ahead of (or
+  # ignore a failure in) the heavyweight matrix. Fails CLOSED: if CI never succeeds,
+  # times out, or can't be found, the release stops. Uses only preinstalled gh + jq.
+  require-ci-green:
+    name: Require CI green on this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Wait for the CI workflow to succeed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Release tag ${GITHUB_REF_NAME} points at commit ${SHA}."
+          echo "Requiring workflow 'ci.yml' to have SUCCEEDED for this commit before publishing."
+          deadline=$(( $(date +%s) + 60*60 ))
+          while :; do
+            # Newest ci.yml run for this exact commit. ci.yml runs on branch pushes
+            # (tags are excluded there), so the run is the one from the branch that
+            # carried this commit to main.
+            run_json="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=1" 2>/dev/null || echo '{}')"
+            status="$(printf '%s' "$run_json" | jq -r '.workflow_runs[0].status // "missing"')"
+            concl="$(printf '%s' "$run_json"  | jq -r '.workflow_runs[0].conclusion // ""')"
+            url="$(printf '%s' "$run_json"    | jq -r '.workflow_runs[0].html_url // ""')"
+            case "$status" in
+              completed)
+                if [ "$concl" = "success" ]; then
+                  echo "CI succeeded for ${SHA}: ${url}"
+                  exit 0
+                fi
+                echo "CI concluded '${concl}' for ${SHA}: ${url}"
+                echo "Refusing to publish a commit that is not CI-green."
+                exit 1
+                ;;
+              missing) echo "…no ci.yml run for ${SHA} yet; waiting." ;;
+              *)       echo "…ci.yml status '${status}' for ${SHA}; waiting." ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "Timed out after 60m waiting for CI on ${SHA}. Failing closed."
+              exit 1
+            fi
+            sleep 20
+          done
+
   test-install:
     name: Test packed tarball install
     runs-on: ubuntu-latest
+    needs: require-ci-green
     steps:
       - uses: actions/checkout@v7
 
@@ -115,9 +167,10 @@ jobs:
       # runs on every push to main (lint, prod-dep audit, both type-checks,
       # architectural dep rules, unit suite, tarball manifest). The heavyweight
       # cross-OS unit/integration matrix and the real-browser (Camoufox) suites live
-      # in ci.yml and gate main before a release tag is ever cut — main must be
-      # CI-green at the tagged commit. The test-install job above additionally packs
-      # and installs the real tarball in a clean project (mirrors CI's validate job).
+      # in ci.yml; the require-ci-green job above BLOCKS this whole release until that
+      # workflow has succeeded for the tagged commit, so the two no longer race. The
+      # test-install job additionally packs and installs the real tarball in a clean
+      # project (mirrors CI's validate job).
       - run: npm run lint
       # Production-dependency security gate — identical to the CI lint job. Blocks the
       # publish on a moderate+ advisory in the SHIPPED tree; devDeps are excluded

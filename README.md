@@ -57,30 +57,15 @@ Ask in natural language — the tool understands the depth needed:
 
 ### Install
 
-Install the front-end you want.
-
-pi extension
-
 ```bash
 pi install npm:@lincoln504/pi-research
 ```
 
-Standalone CLI / agent skill
-
-```bash
-npm install -g @lincoln504/pi-research
-```
+See [Agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md) for standalone (no pi extension) installation.
 
 Then configure a model and key — set `PI_RESEARCH_MODEL` (e.g. `openai/gpt-4o`) plus `PI_RESEARCH_API_KEY` and `PI_RESEARCH_PROVIDER`, either as environment variables or in `~/.pi/research/config.env`. See [Configuration](docs/CONFIGURATION.md). (The pi extension needs no key — it uses pi's own auth.)
 
-See [Agent skill](docs/AGENT-SKILL.md) for details.
-
 The first install pulls the stealth browser engine, which takes a few minutes.
-
-On Windows, run the CLI from `cmd` or use `pi-research.cmd` — stock PowerShell
-execution policy (`Restricted`) blocks npm's `.ps1` shims with a "running
-scripts is disabled" error. Alternatively run
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
 
 ### Stability (v1.x.x)
 

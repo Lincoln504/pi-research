@@ -4,6 +4,15 @@ The programmatic SDK for scripts, CI, and custom tooling. For configuration — 
 layering model, the TUI settings, and every environment variable — see
 [CONFIGURATION.md](CONFIGURATION.md).
 
+### Install
+
+Install it as a dependency of your project so the imports resolve — even if you already
+run the `pi` extension, which keeps its own private copy your scripts can't import:
+
+```bash
+npm install @lincoln504/pi-research
+```
+
 `src/sdk.ts` is a library for scripts, CI, and custom tooling. It is configured
 from code, not from a global overlay file — there is no `sdk.env`. It reads the
 base `~/.pi/research/config.env` as a baseline, and everything is

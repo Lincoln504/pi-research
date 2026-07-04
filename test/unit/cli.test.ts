@@ -183,6 +183,42 @@ describe('parseArgs — knowledge-config', () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseArgs — skill
+// ---------------------------------------------------------------------------
+
+describe('parseArgs — skill', () => {
+  it('bare `skill` defaults to the status action', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'skill']);
+    expect(r.command).toBe('skill');
+    expect(r.skill).toEqual({ action: 'status', json: false, dryRun: false, copy: false });
+  });
+
+  it('each explicit action is parsed', () => {
+    for (const action of ['status', 'install', 'uninstall'] as const) {
+      const r = parseArgs(['node', 'cli.mjs', 'skill', action]);
+      expect(r.skill).toEqual({ action, json: false, dryRun: false, copy: false });
+    }
+  });
+
+  it('carries --json, --dry-run and --copy flags', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'skill', 'install', '--copy', '--dry-run', '--json']);
+    expect(r.skill).toEqual({ action: 'install', json: true, dryRun: true, copy: true });
+  });
+
+  it('unknown action → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'skill', 'reinstall'])).toThrow(UsageError);
+  });
+
+  it('extra positional after the action → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'skill', 'install', 'claude'])).toThrow(UsageError);
+  });
+
+  it('unknown flag → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'skill', '--force'])).toThrow(UsageError);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // parseArgs — research
 // ---------------------------------------------------------------------------
 
@@ -392,6 +428,89 @@ describe('CLI subprocess — status', () => {
     expect(parsed).toHaveProperty('ready');
     expect(parsed).toHaveProperty('credentials');
     expect(parsed).toHaveProperty('paths');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subprocess — skill install/uninstall end-to-end against an isolated HOME.
+// Exercises the real installer through the CLI (dynamic import + manifest +
+// symlink), never touching the developer's ~/.claude or ~/.pi. The symlink
+// target is the repo's own skills/ dir; uninstall removes only the link.
+// ---------------------------------------------------------------------------
+
+describe('CLI subprocess — skill (hermetic agent-skill install)', () => {
+  let home: string;
+  let work: string;
+  // Clean env: drop ambient PI_RESEARCH_* and pin HOME so the manifest
+  // (~/.pi/research) and agent dirs (~/.claude …) resolve inside the sandbox.
+  const env = (): Record<string, string> => {
+    const base: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
+    }
+    return { ...base, HOME: home, USERPROFILE: home };
+  };
+  const run = (args: string[]) =>
+    spawnSync(process.execPath, [CLI, ...args], { cwd: work, encoding: 'utf-8', env: env(), timeout: 20_000 });
+  const byTool = (results: Array<{ tool: string; status: string }>, tool: string) =>
+    results.find((r) => r.tool === tool);
+
+  beforeAll(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), 'pir-skill-home-'));
+    work = mkdtempSync(path.join(os.tmpdir(), 'pir-skill-work-'));
+  });
+  afterAll(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('status --json lists the three target agents, none installed, in an empty HOME', () => {
+    const r = run(['skill', 'status', '--json']);
+    expect(r.status).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out).toMatchObject({ command: 'skill', action: 'status' });
+    expect(out.agents.map((a: { id: string }) => a.id).sort()).toEqual(['claude', 'codex', 'openclaw']);
+    for (const a of out.agents) {
+      expect(a.present).toBe(false);
+      expect(a.installed).toBe('none');
+    }
+  });
+
+  it('install with no agents present is a no-op that still exits 0 with a note', () => {
+    const r = run(['skill', 'install', '--json']);
+    expect(r.status).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.results).toEqual([]);
+    expect(out.note).toMatch(/no supported coding agents/i);
+  });
+
+  it('install → status → uninstall round-trips for a detected agent (Claude)', () => {
+    // The installer only targets agents whose root config dir already exists;
+    // simulate a Claude setup by creating ~/.claude.
+    mkdirSync(path.join(home, '.claude'), { recursive: true });
+    const skillPath = path.join(home, '.claude', 'skills', 'pi-research');
+
+    // dry-run plans but must not touch the filesystem.
+    const dry = JSON.parse(run(['skill', 'install', '--dry-run', '--json']).stdout);
+    expect(byTool(dry.results, 'claude')?.status).toBe('planned');
+    expect(existsSync(skillPath)).toBe(false);
+
+    // real install creates the link and the SKILL.md resolves through it.
+    const inst = run(['skill', 'install', '--json']);
+    expect(inst.status).toBe(0);
+    expect(byTool(JSON.parse(inst.stdout).results, 'claude')?.status).toBe('installed');
+    expect(existsSync(path.join(skillPath, 'SKILL.md'))).toBe(true);
+
+    const claude = JSON.parse(run(['skill', 'status', '--json']).stdout)
+      .agents.find((a: { id: string }) => a.id === 'claude');
+    expect(claude.present).toBe(true);
+    expect(claude.installed).toMatch(/^owned-(symlink|copy)$/);
+
+    // uninstall removes exactly what install created.
+    const un = run(['skill', 'uninstall', '--json']);
+    expect(un.status).toBe(0);
+    expect(byTool(JSON.parse(un.stdout).results, 'claude')?.status).toBe('removed');
+    expect(existsSync(skillPath)).toBe(false);
   });
 });
 

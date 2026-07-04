@@ -599,6 +599,115 @@ async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeConfig']>
 }
 
 // ---------------------------------------------------------------------------
+// skill subcommand
+// ---------------------------------------------------------------------------
+
+/**
+ * skill subcommand: install / uninstall / inspect the pi-research Agent Skill in
+ * the coding agents on this machine (Claude, OpenAI Codex CLI, OpenClaw). This is
+ * the CLI equivalent of the pi extension's `/research-config → Install in External
+ * Agents`, for standalone users who installed the engine with `npm install -g` and
+ * never open the interactive pi extension. It drives the SAME skill-installer
+ * library the TUI uses, so the guarantees are identical: only agents whose config
+ * dir already exists are targeted, a foreign skill already in the slot is never
+ * clobbered, and every link/copy is manifest-tracked so uninstall removes exactly
+ * what was created.
+ */
+async function cmdSkill(s: NonNullable<ParsedArgs['skill']>): Promise<number> {
+  const {
+    installSkill, uninstallSkill, skillInstallCandidates, skillUninstallCandidates,
+    detectHarnesses, SKILL_AGENT_TARGETS,
+  } = await import('./skill-install/skill-installer.ts');
+  const isTarget = (id: string): boolean =>
+    (SKILL_AGENT_TARGETS as readonly string[]).includes(id);
+
+  if (s.action === 'status') {
+    const agents = detectHarnesses().filter((d) => isTarget(d.id));
+    if (s.json) {
+      toStdout(pretty({
+        command: 'skill', action: 'status',
+        agents: agents.map((d) => ({ id: d.id, label: d.label, present: d.present, installed: d.installed, path: d.absSkillPath })),
+      }));
+      return EXIT.OK;
+    }
+    toStdout(`pi-research agent skill — install status\n\n`);
+    for (const d of agents) {
+      const state = !d.present ? 'agent not detected'
+        : d.installed === 'none' ? 'not installed'
+        : d.installed === 'foreign' ? 'a different skill occupies this slot — left untouched'
+        : `installed (${d.installed === 'owned-copy' ? 'copy' : 'symlink'})`;
+      const loc = d.installed === 'owned-symlink' || d.installed === 'owned-copy' ? `  → ${d.absSkillPath}` : '';
+      toStdout(`  ${d.label.padEnd(18)} ${state}${loc}\n`);
+    }
+    toStdout(`\ninstall:   ${BINARY_NAME} skill install\nuninstall: ${BINARY_NAME} skill uninstall\n`);
+    return EXIT.OK;
+  }
+
+  if (s.action === 'install') {
+    const candidates = skillInstallCandidates();
+    if (candidates.length === 0) {
+      const note = 'No supported coding agents detected under $HOME (looked for Claude, OpenAI Codex CLI, OpenClaw). Set one up first, then re-run.';
+      if (s.json) { toStdout(pretty({ command: 'skill', action: 'install', dryRun: !!s.dryRun, results: [], note })); return EXIT.OK; }
+      toStderr(`\n[pi-research] ${note}\n`);
+      return EXIT.OK;
+    }
+    let results;
+    try {
+      results = installSkill(candidates.map((d) => d.id), { dryRun: s.dryRun, copy: s.copy });
+    } catch (err) {
+      return reportError(err, 'skill install', s.json);
+    }
+    if (s.json) {
+      toStdout(pretty({ command: 'skill', action: 'install', dryRun: !!s.dryRun, results }));
+    } else {
+      toStdout(`pi-research agent skill — ${s.dryRun ? 'install (dry run)' : 'install'}\n\n`);
+      for (const r of results) toStdout(`  ${r.tool.padEnd(10)} ${describeInstall(r)}\n`);
+      toStdout(`\nThe skill activates automatically — ask the agent to research something.\n`);
+    }
+    return results.some((r) => r.status === 'error') ? EXIT.SOFTWARE : EXIT.OK;
+  }
+
+  // uninstall
+  const candidates = skillUninstallCandidates();
+  if (candidates.length === 0) {
+    const note = 'No pi-research skill installs found to remove.';
+    if (s.json) { toStdout(pretty({ command: 'skill', action: 'uninstall', dryRun: !!s.dryRun, results: [], note })); return EXIT.OK; }
+    toStdout(`\n[pi-research] ${note}\n`);
+    return EXIT.OK;
+  }
+  const results = uninstallSkill(candidates.map((d) => d.id), { dryRun: s.dryRun });
+  if (s.json) {
+    toStdout(pretty({ command: 'skill', action: 'uninstall', dryRun: !!s.dryRun, results }));
+  } else {
+    toStdout(`pi-research agent skill — ${s.dryRun ? 'uninstall (dry run)' : 'uninstall'}\n\n`);
+    for (const r of results) toStdout(`  ${r.tool.padEnd(10)} ${describeUninstall(r)}\n`);
+  }
+  return results.some((r) => r.status === 'error') ? EXIT.SOFTWARE : EXIT.OK;
+}
+
+function describeInstall(r: { status: string; type?: string; path: string; message?: string }): string {
+  switch (r.status) {
+    case 'installed': return `${r.type === 'copy' ? 'copied' : 'symlinked'} → ${r.path}`;
+    case 'already-installed': return `already installed → ${r.path}`;
+    case 'planned': return `would ${r.type === 'copy' ? 'copy' : 'symlink'} → ${r.path}`;
+    case 'skipped-foreign': return 'a different skill occupies this slot — left untouched';
+    case 'error': return `failed: ${r.message ?? 'unknown error'}`;
+    default: return r.status;
+  }
+}
+
+function describeUninstall(r: { status: string; path: string; message?: string }): string {
+  switch (r.status) {
+    case 'removed': return `removed → ${r.path}`;
+    case 'planned': return `would remove → ${r.path}`;
+    case 'not-present': return 'nothing installed';
+    case 'skipped-foreign': return 'not ours — left untouched';
+    case 'error': return `failed: ${r.message ?? 'unknown error'}`;
+    default: return r.status;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Error reporting & shutdown
 // ---------------------------------------------------------------------------
 
@@ -682,6 +791,7 @@ interface ParsedArgs {
   knowledge?: { queries: string[]; json?: boolean };
   knowledgeConfig?: { action: 'show' | 'set'; mode?: 'none' | 'project' | 'global'; json?: boolean };
   status?: { json?: boolean };
+  skill?: { action: 'install' | 'uninstall' | 'status'; json?: boolean; dryRun?: boolean; copy?: boolean };
   configPath?: string;
   json?: boolean;
 }
@@ -715,6 +825,12 @@ COMMANDS
   status                         Show detected config, model/key, and readiness.
     --config <path>              Use this config file instead of the base config.env.
     --json                       Emit a JSON object.
+
+  skill [status]                 Show where the agent skill is installed across your coding agents.
+  skill install                  Install the skill into detected agents (Claude, Codex, OpenClaw).
+    --copy | --dry-run | --json  Copy instead of symlink; plan only; JSON output.
+  skill uninstall                Remove the skill from agents where pi-research installed it.
+    --dry-run | --json           Plan only; JSON output.
 
   help, --help, -h               Show this help.
 
@@ -837,6 +953,34 @@ export function parseArgs(argv: string[]): ParsedArgs {
       return out;
     }
     throw new UsageError(`unknown knowledge-config action "${action}". Use: show | set <none|project|global>.`);
+  }
+
+  if (cmd === 'skill') {
+    let json = false;
+    let dryRun = false;
+    let copy = false;
+    const positional: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === '--json') json = true;
+      else if (a === '--dry-run') dryRun = true;
+      else if (a === '--copy') copy = true;
+      else if (a?.startsWith('--')) {
+        throw new UsageError(`unknown option for skill: ${a}`);
+      } else if (a !== undefined) {
+        positional.push(a);
+      }
+    }
+    const action = positional[0] ?? 'status';
+    if (action !== 'install' && action !== 'uninstall' && action !== 'status') {
+      throw new UsageError(`unknown skill action "${action}". Use: status | install | uninstall.`);
+    }
+    if (positional.length > 1) {
+      throw new UsageError(`unexpected argument "${positional[1]}" after "skill ${action}".`);
+    }
+    out.command = 'skill';
+    out.skill = { action, json, dryRun, copy };
+    return out;
   }
 
   if (cmd === 'research') {
@@ -1001,6 +1145,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdKnowledge(parsed.knowledge!.queries, parsed.knowledge!.json);
     case 'knowledge-config':
       return cmdKnowledgeConfig(parsed.knowledgeConfig!);
+    case 'skill':
+      return cmdSkill(parsed.skill!);
     case 'research':
       return cmdResearch(parsed.research!);
     default:

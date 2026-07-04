@@ -5,6 +5,29 @@ so any skills-compatible coding agent (Claude, OpenAI Codex CLI, OpenClaw, and
 others using the same `SKILL.md` directory model) can run web research through the
 pi-research software.
 
+### Install
+
+Already running the `pi` extension (`pi install npm:@lincoln504/pi-research`)? You
+already have the engine — install the skill into your other agents with
+`/research-config` → Install in External Agents (see [Installation flow](#installation-flow))
+and skip the rest.
+
+For standalone use without pi, install the engine globally, then link the skill into
+every coding agent detected on this machine:
+
+```bash
+npm install -g @lincoln504/pi-research   # the engine (puts `pi-research` on PATH)
+pi-research skill install                # link the skill into Claude, Codex, OpenClaw
+```
+
+`skill install` targets only agents already set up under `$HOME`, never overwrites a
+different skill in the slot, and records what it created so `pi-research skill uninstall`
+removes exactly that. Run `pi-research skill status` to see where it is installed.
+
+On Windows, run `pi-research` from `cmd` or use `pi-research.cmd`: PowerShell's default
+execution policy (`Restricted`) blocks npm's `.ps1` shims ("running scripts is
+disabled"); or run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
 ![Installing the research skill into external agents](media/05-agent-skill.gif)
 
 ### How it works
@@ -49,6 +72,11 @@ Install in External Agents. The installer:
 3. Records what it created in a manifest, so Remove from External Agents
    removes only its own links. Stale links are also garbage-collected on startup and
    on `npm uninstall`.
+
+Standalone (no pi extension). `pi-research skill install` and `pi-research skill uninstall`
+do exactly the same from the CLI — same agent detection, same manifest, same
+never-clobber-a-foreign-skill guarantee — for people who installed the engine with
+`npm install -g` and never open the interactive extension.
 
 **OpenClaw without `pi`**
 
