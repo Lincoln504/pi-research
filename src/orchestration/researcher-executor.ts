@@ -264,9 +264,14 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       const timeoutPromise = new Promise<void>((_, reject) => {
         timeoutId = setTimeout(() => {
           const msg = `Researcher ${id} (${researcherConfig.name}) timed out after ${config.RESEARCHER_TIMEOUT_MS}ms`;
+          // Reject FIRST, abort as fire-and-forget cleanup: session.abort() awaits the
+          // in-flight request, which is the very thing that is stuck (e.g. a provider
+          // retry loop against an exhausted quota) — gating the rejection on it settling
+          // makes the timeout ineffective exactly when it is needed.
           session.abort().catch((err) => {
             logger.warn('[ResearcherExecutor] Failed to abort timed-out researcher session:', err);
-          }).finally(() => reject(new Error(msg)));
+          });
+          reject(new Error(msg));
         }, config.RESEARCHER_TIMEOUT_MS);
       });
 
@@ -375,9 +380,23 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       }
     } finally {
       subscription();
-      await session.abort().catch((err) => {
-        logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id}:`, err);
-      });
+      // Bounded: after a timeout, session.abort() awaits the very in-flight request
+      // that is stuck (e.g. a provider retry loop against an exhausted quota) and may
+      // never settle — never let per-attempt cleanup hang the retry loop on it. The
+      // retry builds a fresh session; the abandoned abort keeps draining in the
+      // background and its session dies with the run's teardown.
+      await Promise.race([
+        session.abort().catch((err) => {
+          logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id}:`, err);
+        }),
+        new Promise<void>((resolve) => {
+          const t = setTimeout(() => {
+            logger.warn(`[ResearcherExecutor] Researcher ${id} session abort did not settle within 10s; continuing cleanup`);
+            resolve();
+          }, 10_000);
+          t.unref?.();
+        }),
+      ]);
       sessionService?.unregisterSession(researchId, id);
 
       // Restore the default thinking label now that the researcher is done.

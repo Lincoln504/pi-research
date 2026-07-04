@@ -257,6 +257,38 @@ describe('runResearcher', () => {
     });
   });
 
+  // ── Timeout ─────────────────────────────────────────────────────────────────
+
+  describe('researcher timeout', () => {
+    it('times out even when the in-flight prompt AND session.abort() never settle', async () => {
+      // Regression: the timeout used to reject only in session.abort().finally(),
+      // so a hung abort (in-flight request stuck in a provider retry loop, e.g.
+      // quota exhaustion) made the timeout ineffective and the researcher ran
+      // forever. The rejection must fire unconditionally; cleanup's own await on
+      // abort is bounded by a 10s grace.
+      vi.useFakeTimers();
+      try {
+        mockPrompt.mockImplementation(() => new Promise(() => { /* never settles */ }));
+        mockAbort.mockImplementation(() => new Promise<void>(() => { /* never settles */ }));
+
+        const run = runResearcher(makeOptions({
+          researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 0 } as any,
+        }));
+        const expectation = expect(run).rejects.toThrow(/timed out after/);
+
+        // Fire the researcher timeout, then the bounded abort-settle grace in cleanup.
+        await vi.advanceTimersByTimeAsync(SYSTEM_CONFIG.RESEARCHER_TIMEOUT_MS + 1);
+        await vi.advanceTimersByTimeAsync(10_001);
+
+        await expectation;
+        expect(mockAbort).toHaveBeenCalled();
+        expect(mockUnregister).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   // ── Grounding gate ──────────────────────────────────────────────────────────
 
   describe('grounding gate (scrape enabled, zero successful scrapes)', () => {

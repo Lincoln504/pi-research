@@ -269,9 +269,13 @@ export class QuickResearchOrchestrator {
           const timeoutPromise = new Promise<void>((_, reject) => {
               timeoutId = setTimeout(() => {
                   const msg = `Quick research timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`;
+                  // Reject FIRST, abort as fire-and-forget cleanup — see researcher-executor:
+                  // abort() awaits the stuck in-flight request, so gating the rejection on it
+                  // settling disables the timeout exactly when it is needed.
                   session.abort().catch((err) => {
                       logger.warn('[QuickOrchestrator] Failed to abort timed-out session:', err);
-                  }).finally(() => reject(new Error(msg)));
+                  });
+                  reject(new Error(msg));
               }, this.config.RESEARCHER_TIMEOUT_MS);
           });
 
