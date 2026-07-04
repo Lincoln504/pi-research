@@ -23,7 +23,7 @@ import {
 } from '@earendil-works/pi-tui';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
 import { normalizeSessionId } from './orchestration/session-state.ts';
-import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
+import { getConfig, saveConfig, resetConfig, getDbDir, getGlobalEnvFilePath } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService, tryGetServiceContainerFromCtx } from './core/service-registry.ts';
 import { ServiceNames, IKnowledgeStoreService } from './core/service-interfaces.ts';
@@ -647,6 +647,19 @@ async function installSkillAction(ctx: ExtensionContext, pi: ExtensionAPI): Prom
       }
     }
     lines.push('', 'The skill activates automatically — just ask the agent to pi-research something.');
+
+    // The skill runs only on an explicitly configured model (it never follows the
+    // pi session model) — if none is configured yet, say so right here, at the
+    // moment of install, mirroring the CLI's `skill install` output.
+    const skillModel = process.env['PI_RESEARCH_MODEL'] ?? getConfig(ctx.cwd, 'cli').RESEARCH_MODEL;
+    if (!skillModel) {
+      lines.push(
+        '',
+        '**Required:** set `PI_RESEARCH_MODEL=provider/model-id` in ' +
+        `\`${getGlobalEnvFilePath()}\` (or as an env var) — the skill runs only on ` +
+        'this configured model, not your pi session model.'
+      );
+    }
 
     pi.sendMessage({ customType: 'skill-install-result', content: lines.join('\n'), display: true });
     if (ctx.hasUI) {

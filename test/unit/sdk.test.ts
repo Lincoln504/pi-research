@@ -186,6 +186,16 @@ describe('SDK Lifecycle', () => {
   });
 
   describe('initResearchSDK', () => {
+    it('consults the configured RESEARCH_MODEL when no model option is given', async () => {
+      // Regression: the resolver used to see only options.model, so a configured
+      // RESEARCH_MODEL governed the researchers/synthesis while the session model
+      // (ctx.model → coordinator/planning) silently fell back to the registry's
+      // first authed entry — a split-brain run on two models. Seeding must make
+      // the session-model resolution look up the CONFIGURED spec in the registry.
+      await initResearchSDK({ config: { RESEARCH_MODEL: 'cfg-provider/cfg-model' } as any });
+      expect(mockModelRegistryInstance.find).toHaveBeenCalledWith('cfg-provider', 'cfg-model');
+    });
+
     it('registers core, infrastructure, and orchestration services', async () => {
       await initSDK();
       expect(registerCoreServices).toHaveBeenCalledOnce();
@@ -245,6 +255,30 @@ describe('SDK Lifecycle', () => {
       await initSDK();
       const result = await runDeepResearch('q');
       expect(result).toBe('deep result');
+    });
+
+    it('uses a Model OBJECT passed to initResearchSDK as-is for the session model', async () => {
+      // Regression: the resolve call narrowed options.model with
+      // `typeof === 'string' ? … : undefined`, so a Model object was silently
+      // DROPPED and the session ran on whatever the registry fallback picked.
+      // With the default single-entry mock registry the fallback coincidentally
+      // resolves back to STUB_MODEL, so point every registry lookup at a DIFFERENT
+      // model for this test — the assertion below then discriminates: the old code
+      // would pass `decoy`, only pass-through-as-is yields the STUB_MODEL reference.
+      const decoy = { id: 'decoy-model', provider: 'test-provider' };
+      mockModelRegistryInstance.getAll.mockReturnValue([decoy]);
+      mockModelRegistryInstance.getAvailable.mockReturnValue([decoy]);
+      mockModelRegistryInstance.find.mockReturnValue(decoy);
+      try {
+        await initSDK(); // initSDK passes STUB_MODEL (an object)
+        await runDeepResearch('q');
+        const passed = mockDeepRun.mock.calls[0]![0] as any;
+        expect(passed.model).toBe(STUB_MODEL);
+      } finally {
+        mockModelRegistryInstance.getAll.mockReturnValue([STUB_MODEL]);
+        mockModelRegistryInstance.getAvailable.mockReturnValue([STUB_MODEL]);
+        mockModelRegistryInstance.find.mockReturnValue(STUB_MODEL);
+      }
     });
 
     it('forwards the SDK-global config (from initResearchSDK) into runResearch', async () => {

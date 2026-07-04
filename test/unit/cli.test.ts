@@ -432,6 +432,59 @@ describe('CLI subprocess — status', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Subprocess — a configured model is REQUIRED on the pi-credentials path.
+// The standalone CLI / agent skill never follow the model selected inside the
+// pi extension; with auth.json present but no PI_RESEARCH_MODEL the run must
+// fail fast (exit 78, pre-flight) instead of silently picking the registry's
+// first authed model.
+// ---------------------------------------------------------------------------
+
+describe('CLI subprocess — model required with pi credentials', () => {
+  let home: string;
+  const env = (extra: Record<string, string> = {}): Record<string, string> => {
+    const base: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
+    }
+    return { ...base, HOME: home, USERPROFILE: home, ...extra };
+  };
+  const run = (args: string[], extra?: Record<string, string>) =>
+    spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf-8', env: env(extra), timeout: 20_000 });
+
+  beforeAll(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), 'pir-model-home-'));
+    mkdirSync(path.join(home, '.pi', 'agent'), { recursive: true });
+    writeFileSync(path.join(home, '.pi', 'agent', 'auth.json'), '{}\n', 'utf-8');
+  });
+  afterAll(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('research fails fast with exit 78 when auth.json exists but no model is configured', () => {
+    const r = run(['research', 'some topic']);
+    expect(r.status).toBe(EXIT.CONFIG);
+    expect(r.stderr).toContain('no research model is configured');
+    expect(r.stderr).toContain('PI_RESEARCH_MODEL');
+  });
+
+  it('status --json reports ready:false with the model problem', () => {
+    const r = run(['status', '--json']);
+    expect(r.status).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.ready).toBe(false);
+    expect(out.credentials.problem).toMatch(/no research model is configured/i);
+  });
+
+  it('setting PI_RESEARCH_MODEL makes detection ready again', () => {
+    const r = run(['status', '--json'], { PI_RESEARCH_MODEL: 'some-provider/some-model' });
+    const out = JSON.parse(r.stdout);
+    expect(out.ready).toBe(true);
+    expect(out.credentials.model).toBe('some-provider/some-model');
+    expect(out.credentials.modelFrom).toBe('PI_RESEARCH_MODEL');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Subprocess — skill install/uninstall end-to-end against an isolated HOME.
 // Exercises the real installer through the CLI (dynamic import + manifest +
 // symlink), never touching the developer's ~/.claude or ~/.pi. The symlink
@@ -450,8 +503,8 @@ describe('CLI subprocess — skill (hermetic agent-skill install)', () => {
     }
     return { ...base, HOME: home, USERPROFILE: home };
   };
-  const run = (args: string[]) =>
-    spawnSync(process.execPath, [CLI, ...args], { cwd: work, encoding: 'utf-8', env: env(), timeout: 20_000 });
+  const run = (args: string[], extra?: Record<string, string>) =>
+    spawnSync(process.execPath, [CLI, ...args], { cwd: work, encoding: 'utf-8', env: { ...env(), ...extra }, timeout: 20_000 });
   const byTool = (results: Array<{ tool: string; status: string }>, tool: string) =>
     results.find((r) => r.tool === tool);
 
@@ -511,6 +564,24 @@ describe('CLI subprocess — skill (hermetic agent-skill install)', () => {
     expect(un.status).toBe(0);
     expect(byTool(JSON.parse(un.stdout).results, 'claude')?.status).toBe('removed');
     expect(existsSync(skillPath)).toBe(false);
+  });
+
+  it('install points at the required model config when none is set', () => {
+    // The sandbox HOME has no config.env and PI_RESEARCH_* is stripped, so the
+    // install output must carry the model-configuration note (and the JSON form
+    // must report modelConfigured:false). ~/.claude exists from the round-trip
+    // test above, so the install actually proceeds.
+    const human = run(['skill', 'install', '--dry-run']);
+    expect(human.status).toBe(0);
+    expect(human.stdout).toContain('PI_RESEARCH_MODEL=provider/model-id');
+    expect(human.stdout).toContain('runs only on this configured model');
+
+    const json = JSON.parse(run(['skill', 'install', '--dry-run', '--json']).stdout);
+    expect(json.modelConfigured).toBe(false);
+
+    // With a model configured the note disappears.
+    const configured = run(['skill', 'install', '--dry-run'], { PI_RESEARCH_MODEL: 'prov/id' });
+    expect(configured.stdout).not.toContain('PI_RESEARCH_MODEL=provider/model-id');
   });
 });
 

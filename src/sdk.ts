@@ -144,10 +144,14 @@ function _removeSignalHandlers(): void {
  * Options for initializing the Research SDK
  */
 export interface ResearchSDKOptions {
-  /** 
+  /**
    * The LLM model to use for coordination, planning, and evaluation.
-   * If a string, it must match "provider/id" (e.g. "openai/gpt-4o").
-   * If omitted, the first available model in pi's configuration will be used.
+   * If a string, it must match "provider/id" (e.g. "openai/gpt-4o"); a Model
+   * object is used as-is. If omitted, the configured RESEARCH_MODEL
+   * (PI_RESEARCH_MODEL / config.env, or the `config` option) is used; only
+   * when neither is set does the SDK fall back to the first available model
+   * in pi's configuration. The SDK never follows the model selected
+   * interactively inside the pi extension.
    */
   model?: string | Model<any>;
   
@@ -232,15 +236,18 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
   let parsedProvider = options.provider || process.env['PI_RESEARCH_PROVIDER'];
 
-  // Infer provider from model if not explicitly provided
-  if (!parsedProvider && options.model) {
-    if (typeof options.model === 'string') {
-      const slashIdx = options.model.indexOf('/');
+  // Infer provider from the effective model if not explicitly provided. The
+  // effective model is the explicit option first, else the configured
+  // RESEARCH_MODEL — the same precedence the resolve below uses.
+  const effectiveModel = options.model ?? globalConfig.RESEARCH_MODEL;
+  if (!parsedProvider && effectiveModel) {
+    if (typeof effectiveModel === 'string') {
+      const slashIdx = effectiveModel.indexOf('/');
       if (slashIdx > 0) {
-        parsedProvider = options.model.slice(0, slashIdx);
+        parsedProvider = effectiveModel.slice(0, slashIdx);
       }
-    } else if ((options.model as any).provider) {
-      parsedProvider = (options.model as any).provider;
+    } else if ((effectiveModel as any).provider) {
+      parsedProvider = (effectiveModel as any).provider;
     }
   }
 
@@ -252,8 +259,23 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   globalRegistry = sharedBuildModelRegistry(globalApiKey, parsedProvider);
 
   try {
-    // Resolve model using unified logic.
-    globalModel = resolveModel(globalRegistry, typeof options.model === 'string' ? options.model : undefined, parsedProvider, globalApiKey);
+    // Resolve the model. Precedence: explicit option (a Model object is used
+    // as-is; it need not exist in the registry) → configured RESEARCH_MODEL →
+    // provider default → registry fallback. Seeding the resolver with the
+    // configured model is what keeps the coordinator (which runs on ctx.model)
+    // on the SAME model as the researchers/synthesis (which read
+    // RESEARCH_MODEL themselves) — without it a configured model would govern
+    // only the sub-agents and planning would silently run on the fallback.
+    if (effectiveModel && typeof effectiveModel === 'object' && (effectiveModel as any).id) {
+      globalModel = effectiveModel as Model<any>;
+    } else {
+      globalModel = resolveModel(
+        globalRegistry,
+        typeof effectiveModel === 'string' ? effectiveModel : undefined,
+        parsedProvider,
+        globalApiKey
+      );
+    }
 
     // Use the global container to ensure internal services can resolve dependencies
     globalContainer = getServiceContainer();

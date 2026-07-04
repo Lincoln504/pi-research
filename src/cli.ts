@@ -302,7 +302,27 @@ function detectCredentials(): CredentialDetection {
 
   // --- pi auth storage path --------------------------------------------------
   if (piAuthPresent) {
-    // The SDK will resolve a model from the registry (models.json + PI_RESEARCH_MODEL).
+    // Keys come from auth.json, but the MODEL must be configured explicitly:
+    // the standalone CLI / agent skill run only on the configured model — they
+    // never follow the model selected inside the pi extension, and silently
+    // falling back to the registry's first authed entry picks a model nobody
+    // chose. Fail fast here (pre-flight, before any SDK init).
+    if (!model) {
+      return {
+        source: 'pi-config',
+        apiKeyConfigured: true,
+        provider,
+        model,
+        modelFrom,
+        piAuthPresent,
+        piModelsPresent,
+        problem:
+          'pi credentials were found (auth.json), but no research model is configured. ' +
+          'The standalone CLI / agent skill run only on an explicitly configured model — they do not ' +
+          'follow the model selected inside the pi extension. Set PI_RESEARCH_MODEL to a ' +
+          '"provider/model-id" (in the environment, or in config.env / cli.env below).',
+      };
+    }
     return {
       source: 'pi-config',
       apiKeyConfigured: true, // key lives in auth.json; SDK reads it
@@ -348,8 +368,8 @@ function configBlock(det: CredentialDetection, extraNote?: string): string {
   lines.push('Detected:');
   lines.push(`  • credential source:  ${det.source}`);
   lines.push(`  • api key configured: ${det.apiKeyConfigured}`);
-  lines.push(`  • provider:           ${det.provider ?? '(unset)'}`);
-  lines.push(`  • model:              ${det.model ?? '(unset)'}  [from: ${det.modelFrom}]`);
+  lines.push(`  • provider:           ${det.provider ?? '(unset — inferred from a provider/model-id model)'}`);
+  lines.push(`  • model:              ${det.model ? `${det.model}  [from: ${det.modelFrom}]` : '(not set — set PI_RESEARCH_MODEL, required)'}`);
   lines.push(`  • pi auth.json:       ${det.piAuthPresent ? 'present' : 'absent'}`);
   lines.push(`  • pi models.json:     ${det.piModelsPresent ? 'present' : 'absent'}`);
   if (extraNote) lines.push(`  • note:               ${extraNote}`);
@@ -657,12 +677,23 @@ async function cmdSkill(s: NonNullable<ParsedArgs['skill']>): Promise<number> {
     } catch (err) {
       return reportError(err, 'skill install', s.json);
     }
+    // The skill runs only on an explicitly configured model — if none is set yet,
+    // say so right here, at the moment of install (mirrors the TUI install action).
+    const skillModel =
+      process.env['PI_RESEARCH_MODEL'] ?? getConfig(process.cwd(), 'cli').RESEARCH_MODEL;
     if (s.json) {
-      toStdout(pretty({ command: 'skill', action: 'install', dryRun: !!s.dryRun, results }));
+      toStdout(pretty({ command: 'skill', action: 'install', dryRun: !!s.dryRun, results, modelConfigured: Boolean(skillModel) }));
     } else {
       toStdout(`pi-research agent skill — ${s.dryRun ? 'install (dry run)' : 'install'}\n\n`);
       for (const r of results) toStdout(`  ${r.tool.padEnd(10)} ${describeInstall(r)}\n`);
       toStdout(`\nThe skill activates automatically — ask the agent to research something.\n`);
+      if (!skillModel) {
+        toStdout(
+          `\nRequired: set PI_RESEARCH_MODEL=provider/model-id in ${resolvedConfigPaths().configEnv}\n` +
+          `(or as an env var) — the skill runs only on this configured model, not your pi\n` +
+          `session model. Verify with: ${BINARY_NAME} status\n`
+        );
+      }
     }
     return results.some((r) => r.status === 'error') ? EXIT.SOFTWARE : EXIT.OK;
   }
@@ -847,6 +878,10 @@ CONFIGURE
     base config:  ${p.configEnv}
     pi auth:      ${p.piAuth}
     pi models:    ${p.piModels}
+
+  A model is REQUIRED: set PI_RESEARCH_MODEL to a "provider/model-id". This CLI and
+  the agent skill run only on that configured model — they do not follow the model
+  selected inside the pi extension.
 
   The pi extension has its own optional overlay file:
     pi extension: ${p.piIfaceEnv}
