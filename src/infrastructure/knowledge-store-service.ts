@@ -298,6 +298,10 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     return this._cwd;
   }
 
+  getDisabledReason(): 'mode' | 'native' | null {
+    return this._disabledReason;
+  }
+
   /**
    * Check if the embedder is initialized
    */

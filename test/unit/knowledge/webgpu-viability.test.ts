@@ -128,10 +128,15 @@ describe('resolveEmbeddingDevice', () => {
     expect(spawnMock).toHaveBeenCalledTimes(2);
   });
 
-  it('auto -> cpu when the probe hangs past the timeout', async () => {
+  it('auto -> cpu when the probe hangs past the timeout, and caches CPU', async () => {
     setScenario({ hang: true });
     const { resolveEmbeddingDevice } = await load();
     expect(await resolveEmbeddingDevice('auto', MODEL, 50)).toBe('cpu');
+    // A hang is cached as CPU on purpose: GPU behaviour is deterministic per host, so
+    // re-probing every start would just re-stall. The verdict is persisted so the next
+    // init reads it instead of re-hanging (PI_RESEARCH_WEBGPU_REPROBE=1 overrides).
+    const v = JSON.parse(fs.readFileSync(verdictFile(), 'utf8'));
+    expect(v.viable).toBe(false);
   });
 
   it('auto -> cpu when the probe process errors (spawn failure)', async () => {

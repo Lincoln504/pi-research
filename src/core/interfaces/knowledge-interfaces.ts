@@ -137,6 +137,12 @@ export interface IKnowledgeStoreService extends IService {
   isReady(): boolean;
   /** The working directory this service initialized against (from ctx.cwd). */
   getCwd(): string;
+  /**
+   * Why the store is DISABLED, if it is: 'native' (no ML/vector native stack on this
+   * platform — permanent), 'mode' (Knowledge Mode is/was `none` — revivable), or null
+   * (not disabled). Lets an observer report the accurate reason without forcing init.
+   */
+  getDisabledReason(): 'mode' | 'native' | null;
   getDevice(): string | null;
   getStore(): Promise<IKnowledgeStore | null>;
   getEmbedder(): Promise<IEmbedder | null>;

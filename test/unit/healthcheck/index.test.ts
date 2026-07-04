@@ -3,7 +3,7 @@ import { runHealthCheck, registerHealthChecks, isBusyPoolHealthFailure } from '.
 import { HealthCheckRegistry } from '../../../src/healthcheck/registry.ts';
 import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
-import { registerService, resetServiceContainer, ServiceLifecycle } from '../../../src/core/service-registry.ts';
+import { registerService, resetServiceContainer, getService, ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import { getConfig } from '../../../src/config.ts';
 
@@ -310,6 +310,46 @@ describe('healthcheck', () => {
     expect(ks?.healthy).toBe(true);
     expect(String(ks?.diagnostic?.['status'])).toBe('ready (idle)');
     expect(factory).not.toHaveBeenCalled();
+    expect(result.status).not.toBe('unhealthy');
+  });
+
+  it('idle path labels a MODE-disabled store "disabled" — never a native-platform failure', async () => {
+    // A store DISABLED for reason 'mode' (Knowledge Mode was none) is revivable and
+    // says nothing about the platform. The idle path must not mislabel it as
+    // "native stack unavailable" on a perfectly capable host (the A1 diagnostic bug).
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => {
+        // Mirror the real service: initialize() self-sets DISABLED, which the
+        // registry preserves (service-registry.ts:528) instead of forcing INITIALIZED.
+        const svc: any = {
+          name: 'knowledge-store',
+          lifecycle: ServiceLifecycle.DISABLED,
+          getDisabledReason: () => 'mode',
+          isReady: () => false,
+          getCwd: () => process.cwd(),
+          async initialize() { svc.lifecycle = ServiceLifecycle.DISABLED; },
+          async dispose() {},
+        };
+        return svc;
+      },
+      { allowOverwrite: true, enableLogging: false }
+    );
+    // Resolve so tryGet() sees the (disabled) instance — a real store gets resolved by first use.
+    await getService(ServiceNames.KNOWLEDGE_STORE);
+
+    const result = await runHealthCheck(); // non-forced -> idle path
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    expect(String(ks?.diagnostic?.['status'])).toBe('disabled');
     expect(result.status).not.toBe('unhealthy');
   });
 

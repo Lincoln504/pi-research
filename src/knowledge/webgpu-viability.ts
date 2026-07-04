@@ -107,7 +107,11 @@ function probeScriptPath(): string | null {
  * non-zero exit does not imply failure. The sentinel is written synchronously
  * before exit; a real compute crash (SIGSEGV on a software GPU) kills the child
  * before the sentinel is ever produced. Timeout, spawn failure, or missing
- * script => false (the safe CPU direction). NEVER throws.
+ * script => false (the safe CPU direction). A timeout is treated as a negative
+ * (cached CPU) on purpose: GPU behaviour is deterministic per host, so a hang
+ * would otherwise recur — and re-stall — on every start; the 30s cap is ~10x a
+ * real cached-model WebGPU init, so a false timeout on a capable host is unlikely
+ * (and PI_RESEARCH_WEBGPU_REPROBE=1 recovers it). NEVER throws.
  */
 function runProbe(model: string, cacheDir: string, timeoutMs: number): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
@@ -228,7 +232,9 @@ export async function resolveEmbeddingDevice(
     logger.info('[embedder] Probing WebGPU viability in a disposable child process...');
     const cacheDir = getModelCacheDir();
     // runProbe never throws and writeVerdict swallows its own errors, so this
-    // promise never rejects — no poisoned-memo concern.
+    // promise never rejects — no poisoned-memo concern. The verdict is written
+    // INSIDE the memoized promise so it persists even if the awaiting caller is torn
+    // down before the probe settles — the expensive probe is paid at most once.
     _probeInFlight = {
       signature,
       promise: (async () => {

@@ -95,10 +95,17 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       if (getConfig(idleCwd).KNOWLEDGE_STORE_MODE === 'none') {
         return { healthy: true, diagnostic: { status: 'disabled in config' } };
       }
-      // A store that already resolved-then-disabled (native stack absent) reports
-      // its permanent capability gap; an unresolved store is simply idle.
+      // A store that resolved-then-disabled reports WHY, accurately: 'native' is a
+      // permanent platform capability gap; 'mode' is a revivable Knowledge-Mode=none
+      // (which may have since been re-enabled — it re-initializes on next real use).
+      // Never claim "native unavailable" for a mode-disable on a perfectly capable host.
       if (existing?.lifecycle === ServiceLifecycle.DISABLED) {
-        return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
+        const reason = existing.getDisabledReason();
+        return { healthy: true, diagnostic: {
+          status: reason === 'native'
+            ? 'disabled (native embedding/vector stack unavailable on this platform)'
+            : 'disabled',
+        } };
       }
       const status = existing?.lifecycle === ServiceLifecycle.INITIALIZING ? 'initializing' : 'ready (idle)';
       return { healthy: true, diagnostic: { status } };
