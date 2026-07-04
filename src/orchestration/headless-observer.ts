@@ -12,6 +12,51 @@ import type { ResearchPlan } from '../core/interfaces/research-plan-types.ts';
 
 export type { HeadlessObserverOptions };
 
+/**
+ * Wrap an observer so a throwing (or rejecting) callback can never corrupt a
+ * research run. Observer methods are fire-and-forget notifications, but the
+ * orchestrators invoke them inline at load-bearing points (researcher
+ * completion, evaluation decisions, synthesis start) — an exception from
+ * user-supplied SDK/TUI observer code would otherwise surface as a *research*
+ * failure. HeadlessObserver already isolates its own onProgress callback; this
+ * extends the same isolation to raw ResearchObserver implementations. Sync
+ * throws are logged and swallowed; returned promises get a .catch so
+ * rejections never become unhandled.
+ */
+export function makeSafeObserver<T extends object>(observer: T): T {
+  return new Proxy(observer, {
+    get(target, prop) {
+      // Guard the ACCESS too, and resolve getters against the target (not the
+      // proxy): an observer exposing a method via an accessor that touches a
+      // private field would otherwise throw at `observer?.onX?.(...)` property
+      // access — outside the call-site try/catch below — which is exactly the
+      // failure this wrapper exists to absorb.
+      let value: unknown;
+      try {
+        value = Reflect.get(target, prop, target);
+      } catch (err) {
+        logger.warn(`[observer] Ignored error reading observer.${String(prop)}:`, err);
+        return undefined;
+      }
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        try {
+          const out = value.apply(target, args);
+          if (out && typeof (out as Promise<unknown>).then === 'function') {
+            return (out as Promise<unknown>).catch((err: unknown) => {
+              logger.warn(`[observer] Ignored rejection from observer.${String(prop)}:`, err);
+            });
+          }
+          return out;
+        } catch (err) {
+          logger.warn(`[observer] Ignored error from observer.${String(prop)}:`, err);
+          return undefined;
+        }
+      };
+    },
+  }) as T;
+}
+
 export class HeadlessObserver implements ResearchObserver {
   constructor(private options: HeadlessObserverOptions = {}) {}
 

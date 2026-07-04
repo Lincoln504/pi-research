@@ -251,6 +251,8 @@ async function fetchOne(
           // 404 (removed) returns HTML that parseJson3 yields '' for, which would
           // be misreported below as a bot-protection/PoToken failure.
           if (!response.ok) {
+            // Drain before throwing so the error body doesn't pin its socket.
+            void response.body?.cancel()?.catch(() => { /* best-effort */ });
             throw new Error(`HTTP ${response.status} from timedtext endpoint`);
           }
           const body = await response.text();

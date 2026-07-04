@@ -343,3 +343,43 @@ describe('HeadlessObserver', () => {
     });
   });
 });
+
+describe('makeSafeObserver', () => {
+  // The orchestrators wrap every resolved observer with this: raw
+  // ResearchObserver implementations (SDK consumers, the TUI) get the same
+  // throw-isolation HeadlessObserver applies to its own onProgress.
+  it('swallows a sync throw from an observer method and returns undefined', async () => {
+    const { makeSafeObserver } = await import('../../../src/orchestration/headless-observer.ts');
+    const raw = {
+      onStart: vi.fn(() => { throw new Error('display bug'); }),
+      onComplete: vi.fn((r: string) => `saw ${r}`),
+    };
+    const safe = makeSafeObserver(raw);
+
+    expect(() => (safe as any).onStart('q', 1)).not.toThrow();
+    expect(raw.onStart).toHaveBeenCalledWith('q', 1);
+    // Non-throwing methods pass through with `this` and return value intact.
+    expect((safe as any).onComplete('done')).toBe('saw done');
+  });
+
+  it('attaches a catch to a rejecting async observer method (no unhandled rejection)', async () => {
+    const { makeSafeObserver } = await import('../../../src/orchestration/headless-observer.ts');
+    const raw = {
+      onSynthesisStart: vi.fn(async () => { throw new Error('async display bug'); }),
+    };
+    const safe = makeSafeObserver(raw);
+
+    await expect((safe as any).onSynthesisStart()).resolves.toBeUndefined();
+    expect(raw.onSynthesisStart).toHaveBeenCalled();
+  });
+
+  it('leaves non-function properties and instanceof intact (proxy transparency)', async () => {
+    const { makeSafeObserver } = await import('../../../src/orchestration/headless-observer.ts');
+    const obs = new HeadlessObserver({});
+    const safe = makeSafeObserver(obs);
+    expect(safe instanceof HeadlessObserver).toBe(true);
+
+    const tagged = makeSafeObserver({ tag: 'x', onStart: vi.fn() });
+    expect((tagged as any).tag).toBe('x');
+  });
+});

@@ -499,6 +499,31 @@ describe('CLI subprocess — model required with pi credentials', () => {
     const out = JSON.parse(r.stdout);
     expect(out.ready).toBe(false);
   });
+
+  // --model pre-flight participation. The whitespace-only query is the hermetic
+  // probe: query validation (exit 64) runs AFTER credential pre-flight (exit 78),
+  // so exit 64 proves the pre-flight passed without starting a real run.
+  it('an explicit --model satisfies the model-required pre-flight on its own', () => {
+    // Regression: cmdResearch used to run detectCredentials() before ever
+    // consulting args.model, so a valid key + `--model` still died with
+    // "no research model is configured".
+    const r = run(['research', '   ', '--model', 'openai/gpt-4o']);
+    expect(r.status).toBe(EXIT.USAGE); // got past pre-flight, failed on the query
+    expect(r.stderr).not.toContain('no research model is configured');
+  });
+
+  it('provider-aware pre-flight keys off the --model provider, not the configured one', () => {
+    // A keyless provider on the FLAG must fail pre-flight even though a valid
+    // openai key exists…
+    const bad = run(['research', '   ', '--model', 'keyless-provider/some-model']);
+    expect(bad.status).toBe(EXIT.CONFIG);
+    // …and a keyed provider on the flag must pass pre-flight even when the
+    // CONFIGURED model names a keyless provider (the flag outranks it).
+    const good = run(['research', '   ', '--model', 'openai/gpt-4o'], {
+      PI_RESEARCH_MODEL: 'keyless-provider/some-model',
+    });
+    expect(good.status).toBe(EXIT.USAGE);
+  });
 });
 
 // ---------------------------------------------------------------------------

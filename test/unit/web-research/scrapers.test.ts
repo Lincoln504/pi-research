@@ -176,6 +176,41 @@ describe('scrapers', () => {
       expect(result.error).toContain('Browser also blocked');
     });
 
+    it('aborts a chunked over-limit body at the 25MB cap instead of buffering it all (streaming cap)', async () => {
+      // Regression: the 25MB gate used to be a Content-Length pre-screen plus a
+      // post-arrayBuffer() check — a chunked response with no length header was
+      // fully buffered (unbounded memory) before any size check ran. The body
+      // must now be read through a hard cap that cancels the stream on breach.
+      const CHUNK = new Uint8Array(1024 * 1024); // 1MB
+      const TOTAL_CHUNKS = 100; // 100MB on offer
+      let pulls = 0;
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls++;
+          if (pulls > TOTAL_CHUNKS) controller.close();
+          else controller.enqueue(CHUNK);
+        },
+        cancel() { cancelled = true; },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: (name: string) => (name === 'content-type' ? 'text/html' : null) }, // no content-length
+        body,
+        arrayBuffer: async () => { throw new Error('must not be called — streaming path required'); },
+      }));
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
+      vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser layer skipped'));
+
+      const result = await scrapeSingle('https://huge-site.org/endless');
+
+      expect(result.success).toBe(false);
+      // The stream was cut off at the cap, not drained: ≤27 pulls (~25MB + slack), not 100.
+      expect(pulls).toBeLessThanOrEqual(27);
+      expect(cancelled).toBe(true);
+    });
+
     it('fails when content is too short (stub detection)', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,

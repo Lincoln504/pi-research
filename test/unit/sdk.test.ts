@@ -124,6 +124,8 @@ vi.mock('../../src/config.ts', () => ({
   })),
   setConfig: vi.fn(),
   validateConfig: vi.fn(),
+  // _doShutdown clears the module-level config cache so re-init reads fresh config.
+  resetConfig: vi.fn(),
 }));
 
 // ─── Imports ──────────────────────────────────────────────────────────────────
@@ -194,6 +196,16 @@ describe('SDK Lifecycle', () => {
       // the session-model resolution look up the CONFIGURED spec in the registry.
       await initResearchSDK({ config: { RESEARCH_MODEL: 'cfg-provider/cfg-model' } as any });
       expect(mockModelRegistryInstance.find).toHaveBeenCalledWith('cfg-provider', 'cfg-model');
+    });
+
+    it('shutdown clears the module-level config cache so a re-init reads fresh config', async () => {
+      // The cache outlives every SDK global; without this a shutdown →
+      // env/config-file change → re-init cycle silently reuses stale config.
+      const { resetConfig } = await import('../../src/config.ts');
+      vi.mocked(resetConfig).mockClear();
+      await initSDK();
+      await shutdownResearchSDK();
+      expect(resetConfig).toHaveBeenCalled();
     });
 
     it('registers core, infrastructure, and orchestration services', async () => {

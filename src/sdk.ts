@@ -30,7 +30,7 @@ import type {
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
-import { getConfig, createConfig, validateConfig, type Config } from './config.ts';
+import { getConfig, createConfig, validateConfig, resetConfig, type Config } from './config.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from './utils/metrics.ts';
 import type { IMetricsSnapshot, RunSummary } from './utils/metrics.ts';
 import { extractRunStats, type ResearchStats } from './utils/metrics-summary.ts';
@@ -833,6 +833,12 @@ async function _doShutdown(): Promise<void> {
   _lastResearchId = null;
   _lastRunSummary = null;
   _lastErrorReport = null;
+  // The module-level config cache survives the globals above. Without this, a
+  // shutdown → env/config-file change → re-init cycle in one process silently
+  // reuses the first init's config. (The CLI/skill are unaffected — they pass
+  // ignoreGlobalConfig and their own config — but the SDK contract is that a
+  // fresh init reads fresh config.)
+  resetConfig();
 
   // Remove signal handlers — caller is shutting down cooperatively.
   _removeSignalHandlers();

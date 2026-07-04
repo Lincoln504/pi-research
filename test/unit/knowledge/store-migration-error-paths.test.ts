@@ -152,7 +152,7 @@ describe('KnowledgeStore Migration Error Paths', () => {
     }
   });
 
-  it('migrationReEmbed failure falls back to drop strategy', async () => {
+  it('migrationReEmbed failure falls back to BACKUP strategy (fresh table; old data preserved in backup dir)', async () => {
     store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'model-b',
@@ -169,12 +169,55 @@ describe('KnowledgeStore Migration Error Paths', () => {
     const originalEmbedMany = mockEmbedder.embedMany;
     mockEmbedder.embedMany = vi.fn().mockRejectedValue(new Error('Embedding failed'));
 
-    // Should NOT throw because it falls back to drop
+    // Should NOT throw because it falls back to backup (fresh table)
     await store.initialize();
-    
-    // Should have dropped and recreated (0 documents)
+
+    // Fresh table after backup fallback (0 documents); the old rows live on in
+    // a *_backup_* directory rather than being dropped.
     expect(await store.count()).toBe(0);
+    const backupDirs = fs.readdirSync(testDbDir).filter((d) => d.includes('_backup_'));
+    expect(backupDirs.length).toBeGreaterThan(0);
 
     mockEmbedder.embedMany = originalEmbedMany;
+  });
+
+  it('backup migration failure ABORTS the open — never escalates to a data-destroying drop', async () => {
+    // Regression: the fallback ladder used to escalate backup→drop, so a
+    // (possibly transient) backup failure under the DEFAULT strategy silently
+    // wiped every row. A failed backup must abort; the store stays on the old
+    // model and the next open() retries.
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-b',
+      migrationStrategy: 'backup' });
+
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store1.initialize();
+    await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+    await store1.close();
+
+    // Fail only the backup dir rename (transient IO error); manifest renames
+    // must keep working.
+    const actualRename = (await vi.importActual('node:fs/promises') as any).rename;
+    vi.mocked(fsPromises.rename).mockImplementation(async (src: any, dest: any) => {
+      if (String(dest).includes('_backup_')) {
+        throw new Error('EIO: transient rename failure');
+      }
+      return actualRename(src, dest);
+    });
+
+    await expect(store.initialize()).rejects.toThrow(/migration failed/i);
+
+    vi.mocked(fsPromises.rename).mockImplementation(actualRename);
+
+    // The data survived: reopening under the ORIGINAL model still sees the row.
+    const reopened = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await reopened.initialize();
+    expect(await reopened.count()).toBe(1);
+    await reopened.close();
   });
 });

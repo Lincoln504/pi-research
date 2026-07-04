@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-research-orchestrator.ts';
 import { resetServiceContainer, registerService, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+import { getFailedResearchers, getResearcherFailureReasons } from '../../../src/orchestration/session-state.ts';
 
 // Mock the service registry
 vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {
@@ -47,8 +48,10 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   consumeQueuedMessages: vi.fn(() => []),
   getActiveSteeringMessages: vi.fn(() => []),
   getActiveSessionCount: vi.fn(() => 1),
-  getFailedResearchers: vi.fn(() => ['1']),
-  getResearcherFailureReasons: vi.fn(() => ({ '1': 'HTTP 429 rate_limit_error from provider' })),
+  // Default: NO failed researchers — matches runs that never delegated (e.g.
+  // immediate synthesis). The hollow-run tests override these per-test.
+  getFailedResearchers: vi.fn(() => []),
+  getResearcherFailureReasons: vi.fn(() => ({})),
 }));
 
 describe('DeepResearchOrchestrator', () => {
@@ -78,6 +81,12 @@ describe('DeepResearchOrchestrator', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Re-default the session-state failure mocks: clearAllMocks clears call
+    // history but NOT mockReturnValue overrides, so a per-test override (the
+    // hollow-run tests) would otherwise leak into every later test.
+    vi.mocked(getFailedResearchers).mockReturnValue([]);
+    vi.mocked(getResearcherFailureReasons).mockReturnValue({});
 
     // Create mock planning service
     mockPlanningService = {
@@ -215,9 +224,44 @@ describe('DeepResearchOrchestrator', () => {
     // 'Research completed but no summary was generated.' as SUCCESS (exit 0).
     mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: '' });
     mockSynthesisService.hasReports.mockReturnValue(false);
+    const { getFailedResearchers, getResearcherFailureReasons } = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(getFailedResearchers).mockReturnValue(['1']);
+    vi.mocked(getResearcherFailureReasons).mockReturnValue({ '1': 'HTTP 429 rate_limit_error from provider' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await expect(orchestrator.run()).rejects.toThrow(/produced no report.*HTTP 429 rate_limit_error/s);
+  });
+
+  it('throws (not hollow success) when researchers failed, ZERO reports exist, and synthesis is chatty refusal prose', async () => {
+    // Residual of the hollow-success bug: gating the throw on EMPTY synthesis
+    // text alone let a run whose sole researcher failed still ship, as long as
+    // the synthesis LLM produced refusal prose ("no information was found…").
+    // The gate must key on zero-reports + failed-researchers, not on the text.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
+      action: 'synthesize',
+      content: 'Unfortunately, no reliable information was found for this query.',
+    });
+    mockSynthesisService.hasReports.mockReturnValue(false);
+    const { getFailedResearchers, getResearcherFailureReasons } = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(getFailedResearchers).mockReturnValue(['1']);
+    vi.mocked(getResearcherFailureReasons).mockReturnValue({ '1': 'HTTP 429 rate_limit_error from provider' });
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await expect(orchestrator.run()).rejects.toThrow(/produced no report.*HTTP 429 rate_limit_error/s);
+  });
+
+  it('immediate synthesis with no delegation and no failures still succeeds (zero reports is not a failure by itself)', async () => {
+    // The coordinator may legitimately answer directly on round 1 without
+    // delegating researchers. Zero reports + zero failed researchers + real
+    // content must ship — the hollow-run gate must not fire here.
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'synthesize',
+      content: 'Direct grounded answer',
+    });
+    mockSynthesisService.hasReports.mockReturnValue(false);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await expect(orchestrator.run()).resolves.toBe('Direct grounded answer');
   });
 
   it('should handle immediate synthesis request', async () => {

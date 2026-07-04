@@ -116,6 +116,9 @@ export async function searchGitHubAdvisories(
         });
 
         if (!resp.ok) {
+          // Drain before throwing: an unconsumed error body pins its socket until
+          // GC, and the 403/5xx branches below are retried with backoff.
+          void resp.body?.cancel()?.catch(() => { /* best-effort */ });
           if (resp.status === 404) {
             throw new Error(`Repository "${owner}/${name}" not found or no access to security advisories.`);
           }
@@ -206,6 +209,8 @@ export async function searchGitHubAdvisories(
           });
 
           if (!resp.ok) {
+            // Same drain-before-throw as the repo-advisories fetch above.
+            void resp.body?.cancel()?.catch(() => { /* best-effort */ });
             if (resp.status === 404) {
               throw new Error('Advisory not found (HTTP 404)');
             }

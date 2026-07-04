@@ -17,7 +17,7 @@ import {
 import type {
   ResearchObserver,
 } from '../core/interfaces/observer-interfaces.ts';
-import { HeadlessObserver, type HeadlessObserverOptions } from './headless-observer.ts';
+import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import {
   ServiceNames,
   type IResearchOrchestration,
@@ -61,11 +61,12 @@ export class DeepResearchOrchestrator {
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.config = options.config || getConfig(options.ctx.cwd);
     
-    // Resolve observer: if options were provided instead of an instance, create the instance
+    // Resolve observer: if options were provided instead of an instance, create the instance.
+    // Either way, wrap it so a throwing observer callback can never fail the run.
     if (options.observer && typeof (options.observer as any).onProgress === 'function' && !(options.observer instanceof HeadlessObserver)) {
-       this.observer = new HeadlessObserver(options.observer as HeadlessObserverOptions);
+       this.observer = makeSafeObserver(new HeadlessObserver(options.observer as HeadlessObserverOptions));
     } else {
-       this.observer = options.observer as ResearchObserver | undefined;
+       this.observer = options.observer ? makeSafeObserver(options.observer as ResearchObserver) : undefined;
     }
 
     if (options.orchestrationService) {
@@ -478,30 +479,40 @@ export class DeepResearchOrchestrator {
       }
 
       let result = finalReport.content || '';
-      
-      // If content is empty but we have reports, build a fallback synthesis
+
+      // ZERO reports collected AND researchers actually failed — the run attempted
+      // research and produced nothing groundable. This gate is deliberately
+      // independent of the synthesis text: with the default single-researcher plan
+      // the fast-stop threshold (MAX_FAILED_RESEARCHERS = 2) never trips, so a lone
+      // researcher that exhausts its retries (e.g. a provider rate limit) reaches
+      // synthesis with no source material. Whether the LLM then returns an empty
+      // string OR chatty refusal prose ("no information was found"), that is a
+      // FAILED run: throw, and surface the recorded root causes so the user sees
+      // the 429/model error, not a shrug (and never a source-free report shipped
+      // as success). The failed-researcher condition keeps the designed
+      // immediate-synthesis path intact: a coordinator that chose to answer
+      // directly (no delegation, no failures) is not a failed run.
+      const synthesisCheckService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
+      const hasReports = synthesisCheckService.hasReports(researchId);
+      const failedIds = getFailedResearchers(this.options.sessionId, researchId);
+      if (!hasReports && failedIds.length > 0) {
+          const reasons = getResearcherFailureReasons(this.options.sessionId, researchId);
+          const causes = failedIds
+            .map((id) => `researcher ${id}: ${reasons[id] ?? 'no usable report'}`)
+            .join('; ');
+          throw new Error(
+            `Research produced no report — no source material was collected. Causes: ${causes}`
+          );
+      }
+
       if (!result.trim()) {
-          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-          if (synthesisService.hasReports(researchId)) {
-              logger.warn(`[DeepOrchestrator] LLM returned empty synthesis for ${researchId}, building fallback from ${synthesisService.getReportCount(researchId)} reports`);
-              result = synthesisService.buildFallbackSynthesis(researchId, this.currentRound);
+          if (hasReports) {
+              // Content is empty but reports exist — build a fallback synthesis.
+              logger.warn(`[DeepOrchestrator] LLM returned empty synthesis for ${researchId}, building fallback from ${synthesisCheckService.getReportCount(researchId)} reports`);
+              result = synthesisCheckService.buildFallbackSynthesis(researchId, this.currentRound);
           } else {
-              // ZERO reports were collected — the run produced nothing groundable.
-              // With the default single-researcher plan the fast-stop threshold
-              // (MAX_FAILED_RESEARCHERS = 2) never trips, so a lone researcher that
-              // exhausts its retries (e.g. a provider rate limit) used to land here
-              // and return a hollow "no summary was generated" string on the SUCCESS
-              // path — exit 0. That is a FAILED run: throw, and surface the recorded
-              // root causes so the user sees the 429/model error, not a shrug.
-              const failedIds = getFailedResearchers(this.options.sessionId, researchId);
-              const reasons = getResearcherFailureReasons(this.options.sessionId, researchId);
-              const causes = failedIds
-                .map((id) => `researcher ${id}: ${reasons[id] ?? 'no usable report'}`)
-                .join('; ');
-              throw new Error(
-                'Research produced no report — no source material was collected' +
-                (causes ? `. Causes: ${causes}` : '.')
-              );
+              // No reports, no recorded failures, and nothing to ship either.
+              throw new Error('Research produced no report — no source material was collected.');
           }
       }
 

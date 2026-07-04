@@ -140,6 +140,57 @@ function decodeHtmlBody(bytes: Uint8Array, contentTypeHeader: string): string {
   }
 }
 
+/** Thrown by readBodyCapped when a streamed body crosses its byte cap. */
+class BodyTooLargeError extends Error {
+  constructor(public readonly bytesRead: number, public readonly maxBytes: number) {
+    super(`Response body exceeded ${maxBytes} byte cap`);
+    this.name = 'BodyTooLargeError';
+  }
+}
+
+/**
+ * Read a response body with a HARD byte cap, streaming chunk-by-chunk so an
+ * over-limit body aborts the moment the cap is crossed. The Content-Length
+ * pre-screen above is advisory only: a chunked (or lying) response carries no
+ * usable length header, and `response.arrayBuffer()` would otherwise buffer the
+ * entire body — potentially hundreds of MB from a hostile server — into the
+ * main process before any size check ran.
+ *
+ * A body-less response (test doubles, some mocks) falls back to arrayBuffer();
+ * callers keep their post-read size checks as the belt for that path.
+ */
+async function readBodyCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const body = response.body;
+  // Also tolerate non-standard doubles that expose a body without getReader.
+  if (!body || typeof body.getReader !== 'function') {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > maxBytes) throw new BodyTooLargeError(total, maxBytes);
+        chunks.push(value);
+      }
+    }
+  } finally {
+    // Over-cap or downstream throw: release the connection instead of leaving
+    // the socket open (and the server still sending) until GC. No-op after a
+    // clean done=true read.
+    try { await reader.cancel(); } catch { /* already closed */ }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
+  return out;
+}
+
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   await validateUrlForSSRF(url);
 
@@ -189,6 +240,9 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
         if (!location) break; // No Location header — treat as final response
         const resolved = new URL(location, currentUrl).href;
         await validateUrlForSSRF(resolved); // Block SSRF targets in redirects
+        // Drain the redirect response before following: an unconsumed body pins
+        // its socket (undici keeps it open until read/cancelled or GC).
+        try { await response.body?.cancel(); } catch { /* best-effort */ }
         currentUrl = resolved;
         continue;
       }
@@ -197,6 +251,8 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 
     if (!response.ok) {
       metrics.increment('scrape_errors_total', 1, { error_type: 'http_error', status_code: String(response.status) });
+      // Same socket-pinning concern as the redirect drain above.
+      try { await response.body?.cancel(); } catch { /* best-effort */ }
       throw new Error(`HTTP ${response.status}`);
     }
 
@@ -222,8 +278,19 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     }
     
     if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
-      const buffer = await response.arrayBuffer();
-      const markdown = await extractPdfToMarkdown(new Uint8Array(buffer));
+      let pdfBytes: Uint8Array;
+      try {
+        pdfBytes = await readBodyCapped(response, MAX_PDF_SIZE);
+      } catch (e) {
+        if (e instanceof BodyTooLargeError) {
+          const sizeMB = Math.round(e.bytesRead / 1024 / 1024);
+          logger.warn(`[Scrapers] PDF too large (streamed ${sizeMB}MB, max 100MB), skipping`);
+          metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'size_exceeded' });
+          throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`, { cause: e });
+        }
+        throw e;
+      }
+      const markdown = await extractPdfToMarkdown(pdfBytes);
       validateContent('', markdown, url);
       metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'pdf', status: 'success' });
       metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'pdf', status: 'success' });
@@ -232,8 +299,28 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 
     // Read the raw bytes and decode with the DECLARED charset. response.text() blindly UTF-8-decodes,
     // which mangles Shift_JIS/GBK/EUC-KR/ISO-8859-1 pages into mojibake that then gets cached + cited.
-    // Size-check on the byte length before decoding.
-    const bodyBytes = new Uint8Array(await response.arrayBuffer());
+    // Size-capped while streaming; the post-read check below is the belt for the
+    // body-less fallback path inside readBodyCapped.
+    let bodyBytes: Uint8Array;
+    try {
+      bodyBytes = await readBodyCapped(response, MAX_HTML_SIZE);
+    } catch (e) {
+      if (e instanceof BodyTooLargeError) {
+        const sizeMB = Math.round(e.bytesRead / 1024 / 1024);
+        logger.warn(`[Scrapers] HTML response too large (streamed ${sizeMB}MB, max 25MB), skipping`);
+        metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
+        errorTracker.trackError(new Error(`HTML response too large (${sizeMB}MB, max 25MB)`), {
+          component: 'scrapers',
+          operation: 'fetch',
+          url,
+          domain: extractDomain(url),
+          layer: 'fetch',
+          contentType: 'html',
+        });
+        throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`, { cause: e });
+      }
+      throw e;
+    }
 
     if (bodyBytes.length > MAX_HTML_SIZE) {
       const sizeMB = Math.round(bodyBytes.length / 1024 / 1024);

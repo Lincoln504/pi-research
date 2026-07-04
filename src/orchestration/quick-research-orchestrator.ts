@@ -20,7 +20,7 @@ import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
-import { HeadlessObserver, type HeadlessObserverOptions } from './headless-observer.ts';
+import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
@@ -51,11 +51,12 @@ export class QuickResearchOrchestrator {
   constructor(private options: QuickResearchOrchestratorOptions) {
     this.config = options.config || getConfig(options.ctx.cwd);
 
-    // Resolve observer: if options were provided instead of an instance, create the instance
+    // Resolve observer: if options were provided instead of an instance, create the instance.
+    // Either way, wrap it so a throwing observer callback can never fail the run.
     if (options.observer && typeof (options.observer as any).onProgress === 'function' && !(options.observer instanceof HeadlessObserver)) {
-       this.observer = new HeadlessObserver(options.observer as HeadlessObserverOptions);
+       this.observer = makeSafeObserver(new HeadlessObserver(options.observer as HeadlessObserverOptions));
     } else {
-       this.observer = options.observer as ResearchObserver | undefined;
+       this.observer = options.observer ? makeSafeObserver(options.observer as ResearchObserver) : undefined;
     }
   }
 

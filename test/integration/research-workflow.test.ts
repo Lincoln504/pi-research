@@ -269,6 +269,19 @@ describe('End-to-End Research Workflows', () => {
   });
 
   describe('Deep Research Workflow', () => {
+    // The mocked agent session never invokes tools, so a scrape-enabled deep
+    // researcher can never ground its report. PI_RESEARCH_MOCK_SCRAPE is the
+    // designed escape hatch for exactly this (see researcher-executor.ts's
+    // scrapeEnabled): without it the grounding gate rejects every mock
+    // researcher, and the run now (correctly) hard-fails as a zero-report run
+    // instead of shipping a source-free synthesis.
+    beforeEach(() => {
+      vi.stubEnv('PI_RESEARCH_MOCK_SCRAPE', 'true');
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     it('should complete full deep research workflow: coordinator → researchers → aggregation', async (ctx) => {
       if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 

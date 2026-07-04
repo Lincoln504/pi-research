@@ -327,6 +327,9 @@ function handleFetchError(error: unknown): never {
 
 function handleResponseStatus(response: Response): void {
   if (!response.ok) {
+    // Drain before throwing: an unconsumed error body pins its socket until GC,
+    // and this path runs on every retry of a rate-limited/5xx sweep.
+    void response.body?.cancel()?.catch(() => { /* best-effort */ });
     if (response.status === 429) {
       throw new Error('NVD API rate limit exceeded (HTTP 429). Retrying with backoff...');
     }

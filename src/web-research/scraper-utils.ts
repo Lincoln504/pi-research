@@ -150,7 +150,10 @@ export function validateUrlForSSRFSync(url: string): boolean {
  *
  * FIX (#8): In addition to hostname pattern checks, resolves the hostname
  * via DNS and rejects any address that resolves to a private/reserved IP.
- * This defends against DNS rebinding and decimal/octal IP representations.
+ * This defends against DNS rebinding and AAAA-only private hosts. (Decimal/
+ * octal/hex IP encodings are handled earlier: WHATWG URL parsing normalizes
+ * them to dotted-quad, so the sync IP-literal gate blocks them — see the
+ * comment on the DNS pass below.)
  */
 export async function validateUrlForSSRF(url: string): Promise<void> {
   // Synchronous protocol/localhost/internal-pattern/IP-literal screen first.
@@ -161,8 +164,12 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
   const hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   // Resolve hostname via DNS (both IPv4 and IPv6) and check all resulting addresses.
-  // This catches DNS rebinding, decimal IP representations (2130706433),
-  // AAAA-only hosts (::1, fc00::/7) and other hostname-based bypasses.
+  // This catches DNS rebinding, AAAA-only hosts (::1, fc00::/7) and other
+  // hostname-based bypasses. (It does NOT catch numeric-encoding forms like
+  // decimal 2130706433 — dns.resolve4/6 reject numeric hosts with EBADNAME — but
+  // it doesn't need to: WHATWG URL parsing normalizes decimal/octal/hex IPv4
+  // forms to dotted-quad before this function ever sees them, so the IP-literal
+  // gate in validateUrlForSSRFSync blocks them. Pinned by a regression test.)
   const [v4Results, v6Results] = await Promise.allSettled([
     dns.resolve4(hostname),
     dns.resolve6(hostname),

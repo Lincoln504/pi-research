@@ -267,10 +267,12 @@ export class KnowledgeStore implements IKnowledgeStore {
               if (strategy !== 'drop' && strategy !== 'backup') {
                 logger.warn('[store] Falling back to backup strategy after migration failure');
                 await this.handleModelChange(storedModel || 'unknown', this.options.modelName, 'backup');
-              } else if (strategy === 'backup') {
-                logger.warn('[store] Falling back to drop strategy after backup failure');
-                await this.handleModelChange(storedModel || 'unknown', this.options.modelName, 'drop');
               } else {
+                // 'backup' failure must ABORT, never escalate to 'drop': backup is the
+                // data-preserving strategy, and silently destroying every row after a
+                // (possibly transient) failure is the opposite of what the user asked
+                // for. The store stays on the old model; the next open() retries.
+                // 'drop' failure has nowhere further to fall.
                 throw new Error(errorMsg, { cause: err });
               }
             }
@@ -332,8 +334,16 @@ export class KnowledgeStore implements IKnowledgeStore {
       throw new Error('Table not connected');
     }
 
-    const count = await this.table.countRows();
-    
+    // Best-effort: the count is only used for logging and the result summary, so a
+    // transient countRows() failure must not abort the backup (previously it threw
+    // while the fallback ladder could still escalate to a data-destroying drop).
+    let count = -1;
+    try {
+      count = await this.table.countRows();
+    } catch (err) {
+      logger.warn(`[store] countRows failed before backup (continuing): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Close current table handle
     this.table = null;
     
@@ -355,9 +365,9 @@ export class KnowledgeStore implements IKnowledgeStore {
     this.table = await this.createTable();
     // Table name unchanged (still canonical 'knowledge'), but persist to be safe.
     await this.saveManifest();
-    logger.info(`[store] Migration complete: ${count} documents backed up, fresh table created with model ${newModel}`);
+    logger.info(`[store] Migration complete: ${count >= 0 ? count : 'unknown count of'} documents backed up, fresh table created with model ${newModel}`);
 
-    return { strategy: 'backup', success: true, documentsProcessed: count };
+    return { strategy: 'backup', success: true, documentsProcessed: Math.max(0, count) };
   }
 
   private async migrationDrop(_oldModel: string, newModel: string): Promise<MigrationResult> {

@@ -174,9 +174,11 @@ built with, the store is migrated according to `PI_RESEARCH_MIGRATION_STRATEGY`:
 | `drop` | The old table is discarded and a fresh one created. Fast; no backup. |
 | `re-embed` | Every stored document is re-embedded with the new model into a new table, preserving history. Slowest. |
 
-If the chosen strategy fails, pi-research falls back to `backup`, then to `drop`,
-rather than leaving the store in a broken state. Changing the model from the
-`/research-config` menu always clears the current store and starts fresh.
+If `re-embed` fails, pi-research falls back to `backup`. A failed `backup` (or
+`drop`) aborts the migration instead: the store stays on the old model and the
+next open retries — data is never dropped unless `drop` was chosen explicitly.
+Changing the model from the `/research-config` menu always clears the current
+store and starts fresh.
 
 ### Managing the store
 

@@ -33,6 +33,18 @@ describe('validateUrlForSSRFSync — literal/pattern screen for the browser requ
     expect(() => validateUrlForSSRFSync('http://172.16.0.1/')).toThrow();
   });
 
+  it('blocks decimal/octal/hex IPv4 encodings (WHATWG URL normalizes them to dotted-quad first)', () => {
+    // dns.resolve4/6 reject numeric hosts with EBADNAME, so the DNS pass in
+    // validateUrlForSSRF can never catch these — the coverage lives HERE:
+    // new URL() normalizes every numeric IPv4 encoding to dotted-quad before
+    // the hostname reaches the IP-literal gate. Pin that assumption.
+    expect(() => validateUrlForSSRFSync('http://2130706433/')).toThrow();          // decimal 127.0.0.1
+    expect(() => validateUrlForSSRFSync('http://0x7f000001/')).toThrow();          // hex 127.0.0.1
+    expect(() => validateUrlForSSRFSync('http://017700000001/')).toThrow();        // octal 127.0.0.1
+    expect(() => validateUrlForSSRFSync('http://127.1/')).toThrow();               // shorthand 127.0.0.1
+    expect(() => validateUrlForSSRFSync('http://0xA9FEA9FE/')).toThrow();          // hex 169.254.169.254
+  });
+
   it('blocks IPv6 loopback / mapped / unique-local literals (no DNS)', () => {
     expect(() => validateUrlForSSRFSync('http://[::1]/')).toThrow();
     expect(() => validateUrlForSSRFSync('http://[::ffff:127.0.0.1]/')).toThrow();

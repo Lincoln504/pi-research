@@ -122,6 +122,9 @@ async function fetchWithRetryImpl(url: string, options: RequestInit, signal?: Ab
       async () => {
         const response = await fetch(url, options);
         if (!response.ok) {
+          // Drain before throwing: an unconsumed error body pins its socket until
+          // GC, and this path runs on every retry of a failed sweep.
+          void response.body?.cancel()?.catch(() => { /* best-effort */ });
           const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
           error.status = response.status;
           metrics.increment('cisa_kev_errors_total', 1, { endpoint, status_code: response.status.toString() });

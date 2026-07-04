@@ -44,6 +44,9 @@ async function fetchWithRetry(
       async () => {
         const response = await fetch(url, options);
         if (!response.ok) {
+          // Drain before throwing: an unconsumed error body pins its socket until
+          // GC, and this path runs on every retry of a rate-limited/5xx sweep.
+          void response.body?.cancel()?.catch(() => { /* best-effort */ });
           const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
           error.status = response.status;
           metrics.increment('osv_errors_total', 1, { endpoint, status_code: response.status.toString() });

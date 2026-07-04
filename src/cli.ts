@@ -259,7 +259,7 @@ export interface CredentialDetection {
   apiKeyConfigured: boolean;
   provider?: string;
   model?: string;
-  modelFrom: 'PI_RESEARCH_MODEL' | 'config.env' | 'unset';
+  modelFrom: '--model' | 'PI_RESEARCH_MODEL' | 'config.env' | 'unset';
   piAuthPresent: boolean;
   piModelsPresent: boolean;
   /** A short, human-readable problem string, or undefined when ready. */
@@ -269,8 +269,17 @@ export interface CredentialDetection {
 /**
  * Detect how the SDK will authenticate WITHOUT initializing it. Used both for
  * the `status` command and for the fast-fail pre-flight before every run.
+ *
+ * `explicitModel` is a per-run `--model` flag. It must participate in the
+ * pre-flight: it outranks PI_RESEARCH_MODEL/config for the run, so (a) it
+ * satisfies the model-required check on its own, and (b) when no explicit
+ * PI_RESEARCH_PROVIDER is set, provider-aware key detection derives the
+ * provider from the FLAG's model — otherwise a configured model on provider X
+ * greenlights a `--model` run on keyless provider Y (or vice versa wrongly
+ * blocks a valid `--model` run). An explicit PI_RESEARCH_PROVIDER still wins:
+ * it names the provider the configured key belongs to.
  */
-function detectCredentials(): CredentialDetection {
+function detectCredentials(explicitModel?: string): CredentialDetection {
   const paths = resolvedConfigPaths();
   const piAuthPresent = fileExists(paths.piAuth);
   const piModelsPresent = fileExists(paths.piModels);
@@ -280,8 +289,8 @@ function detectCredentials(): CredentialDetection {
   const modelEnv = process.env['PI_RESEARCH_MODEL'];
   const modelConfig = getConfig(process.cwd(), 'cli').RESEARCH_MODEL;
 
-  const model = modelEnv ?? modelConfig;
-  const modelFrom = modelEnv ? 'PI_RESEARCH_MODEL' : modelConfig ? 'config.env' : 'unset';
+  const model = explicitModel ?? modelEnv ?? modelConfig;
+  const modelFrom = explicitModel ? '--model' : modelEnv ? 'PI_RESEARCH_MODEL' : modelConfig ? 'config.env' : 'unset';
   // Provider is either explicit, or inferred from a "provider/id" model string.
   const provider =
     providerEnv ?? (model && model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined);
@@ -316,7 +325,7 @@ function detectCredentials(): CredentialDetection {
         piModelsPresent,
         problem:
           'PI_RESEARCH_API_KEY is set but no model is configured. Set PI_RESEARCH_MODEL to a ' +
-          '"provider/model-id" (e.g. openai/gpt-4o).',
+          '"provider/model-id" (e.g. openai/gpt-4o), or pass --model <provider/id> for a single run.',
       };
     }
     return {
@@ -350,7 +359,8 @@ function detectCredentials(): CredentialDetection {
           'pi credentials were found (in pi\'s configuration), but no research model is configured. ' +
           'The standalone CLI / agent skill run only on an explicitly configured model — they do not ' +
           'follow the model selected inside the pi extension. Set PI_RESEARCH_MODEL to a ' +
-          '"provider/model-id" (in the environment, or in config.env / cli.env below).',
+          '"provider/model-id" (in the environment, or in config.env / cli.env below), or pass ' +
+          '--model <provider/id> for a single run.',
       };
     }
     return {
@@ -401,8 +411,8 @@ function configBlock(det: CredentialDetection, extraNote?: string): string {
   lines.push(`  • api key configured: ${det.apiKeyConfigured}`);
   lines.push(`  • provider:           ${det.provider ?? '(unset — inferred from a provider/model-id model)'}`);
   lines.push(`  • model:              ${det.model ? `${det.model}  [from: ${det.modelFrom}]` : '(not set — set PI_RESEARCH_MODEL, required)'}`);
-  lines.push(`  • pi auth.json:       ${det.piAuthPresent ? 'present' : 'absent'}`);
-  lines.push(`  • pi models.json:     ${det.piModelsPresent ? 'present' : 'absent'}`);
+  lines.push(`  • pi config (auth.json):   ${det.piAuthPresent ? 'present' : 'absent'}`);
+  lines.push(`  • pi config (models.json): ${det.piModelsPresent ? 'present' : 'absent'}`);
   if (extraNote) lines.push(`  • note:               ${extraNote}`);
   return lines.join('\n');
 }
@@ -425,7 +435,9 @@ interface ResearchArgs {
  * markdown report to stdout, and always shuts down (even on failure).
  */
 async function cmdResearch(args: ResearchArgs): Promise<number> {
-  const det = detectCredentials();
+  // Pre-flight with the per-run --model flag folded in: it satisfies the
+  // model-required check and steers the provider-aware key detection.
+  const det = detectCredentials(args.model);
   if (det.problem) {
     if (args.json) toStdout(pretty({ ok: false, error: det.problem, exitCode: EXIT.CONFIG }));
     else toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
@@ -447,8 +459,8 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
 
   const depth: 0 | 1 | 2 | 3 =
     (args.depth ?? getConfig(process.cwd(), 'cli').DEFAULT_RESEARCH_DEPTH) as 0 | 1 | 2 | 3;
-  // An explicit --model wins over configured/PI_RESEARCH_MODEL for this run.
-  const runModel = args.model ?? det.model;
+  // det.model already reflects --model-first precedence (detectCredentials above).
+  const runModel = det.model;
   toStderr(`[pi-research] starting research (depth ${depth})${runModel ? ` with ${runModel}` : ''}…\n`);
 
   // Stream concise lifecycle progress to stderr so a long run is never silent.
@@ -877,7 +889,7 @@ USAGE
 COMMANDS
   research  "<query>"            Run multi-agent web research (default depth: 1).
     --depth <0-3>                0 = quick, 1 = normal (default), 2 = deep, 3 = ultra.
-    --model <provider/id>        Override the model for this run.
+    --model <provider/id>        Model for this run (outranks PI_RESEARCH_MODEL; satisfies the required-model check).
     --exclude-tools <a,b>        Disable internal tools (e.g. security_search,stackexchange).
     --initial-links <url ...>    Seed URLs to investigate first; requires a query (-- ends options).
     --config <path>              Use this config file instead of the base config.env.
@@ -914,9 +926,9 @@ CONFIGURE
     pi config (keys):    ${p.piAuth}
     pi config (models):  ${p.piModels}
 
-  A model is REQUIRED: set PI_RESEARCH_MODEL to a "provider/model-id". This CLI and
-  the agent skill run only on that configured model — they do not follow the model
-  selected inside the pi extension.
+  A model is REQUIRED: set PI_RESEARCH_MODEL to a "provider/model-id" (or pass
+  --model per run). This CLI and the agent skill run only on that configured
+  model — they do not follow the model selected inside the pi extension.
 
   The pi extension has its own optional overlay file:
     pi extension: ${p.piIfaceEnv}
