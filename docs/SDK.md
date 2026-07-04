@@ -16,7 +16,8 @@ npm install @lincoln504/pi-research
 Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
 (env or `~/.pi/research/config.env`). The SDK never follows the model selected
 inside the pi extension; only when neither is set does it fall back to the first
-available model in your pi registry.
+available model in your pi registry. The API key comes from pi's auth storage
+automatically, or from the `apiKey` option / `PI_RESEARCH_API_KEY` env var.
 
 `src/sdk.ts` is a library for scripts, CI, and custom tooling. It is configured
 from code, not from a global overlay file — there is no `sdk.env`. It reads the
