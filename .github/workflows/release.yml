@@ -71,11 +71,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # NOTE: registry-url is intentionally OMITTED here. We publish via npm
+      # OIDC "Trusted Publishing" (GA since npm v11.5.1), which exchanges a
+      # short-lived GitHub OIDC token for a scoped publish credential and needs
+      # NO long-lived NPM_TOKEN. Crucially, passing `registry-url` to
+      # actions/setup-node makes it write `_authToken=${NODE_AUTH_TOKEN}` into
+      # .npmrc using the (npm-invalid) GITHUB_TOKEN — and npm only takes the
+      # OIDC path when it finds NO other auth, so that injected token would
+      # suppress the OIDC exchange and the publish would fail with ENEEDAUTH.
+      # The `cache: 'npm'` input works without registry-url; npmjs.org is the
+      # default registry, so neither `npm ci` nor `npm publish` needs it here.
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Verify tag matches version
         run: |
@@ -122,8 +131,13 @@ jobs:
       - run: npm run test:unit
       - run: node scripts/verify-package.cjs manifest
 
+      # npm >=11.5.1 ships the OIDC trusted-publishing exchange (Node 22 in
+      # .nvmrc bundles npm 10, which lacks it and would hit ENEEDAUTH).
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@11
 
+      # No NODE_AUTH_TOKEN: trusted publishing authenticates via OIDC and emits
+      # provenance automatically (the --provenance flag is now redundant but kept
+      # to state intent explicitly).
       - name: Publish to npm
         run: npm publish --provenance --access public

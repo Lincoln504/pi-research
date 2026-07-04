@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { extractText, ensureAssistantResponse, parseCitations, stripThinkingTags, truncateWithMarker } from '../../../src/utils/text-utils';
+import { stripTrailingLlmPunctuation } from '../../../src/utils/url-utils';
 
 describe('text-utils', () => {
   describe('extractText', () => {
@@ -248,6 +249,33 @@ describe('text-utils', () => {
         'https://example.com/report-2024.pdf',
         'https://192.168.1.10/advisory',
       ]);
+    });
+
+    it('strips an unbalanced trailing ) ] } from a URL (balance-aware)', () => {
+      // Markdown noise brackets the LLM appends after a URL must be trimmed, or the
+      // CITED LINKS entry ships a broken 404 link. Balanced brackets that belong to
+      // the URL are preserved (handled in the next test).
+      const report = [
+        'CITED LINKS',
+        '[1] https://example.com/a], — trailing ] and comma',
+        '[2] https://example.com/b)}, — trailing } ) and comma',
+      ].join('\n');
+      const urls = parseCitations(report).map((c) => c.url);
+      expect(urls).toEqual(['https://example.com/a', 'https://example.com/b']);
+    });
+
+    it('preserves balanced brackets but strips unbalanced ones (stripTrailingLlmPunctuation, unit)', () => {
+      // Real-world balanced cases (Wikipedia disambiguation parens, IPv6 literals)
+      // must be kept; a lone trailing noise bracket must be removed.
+      expect(stripTrailingLlmPunctuation('https://en.wikipedia.org/wiki/Python_(programming_language)'))
+        .toBe('https://en.wikipedia.org/wiki/Python_(programming_language)');
+      expect(stripTrailingLlmPunctuation('http://[::1]:8080/path')).toBe('http://[::1]:8080/path');
+      // Unbalanced noise brackets are trimmed.
+      expect(stripTrailingLlmPunctuation('https://example.com/a]')).toBe('https://example.com/a');
+      expect(stripTrailingLlmPunctuation('https://example.com/b}')).toBe('https://example.com/b');
+      expect(stripTrailingLlmPunctuation('https://example.com/c)')).toBe('https://example.com/c');
+      // Multiple stacked noise brackets are trimmed in one pass each (bounded loop).
+      expect(stripTrailingLlmPunctuation('https://example.com/d]),')).toBe('https://example.com/d');
     });
 
     it('drops a malformed/truncated URL fragment instead of emitting garbage (regression: "https://www")', () => {

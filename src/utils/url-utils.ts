@@ -11,9 +11,11 @@ import { logger } from '../logger.ts';
  * Strips trailing punctuation an LLM commonly appends to a URL in prose
  * (sentence periods, list commas, markdown emphasis/code markers) WITHOUT
  * corrupting the URL itself:
- * - A trailing ')' is removed only when it is unbalanced (e.g. from "(see http://x)").
- *   A balanced ')' is part of the URL — e.g. Wikipedia's
- *   "…/Python_(programming_language)" — and is preserved.
+ * - A trailing closing bracket (')', ']', '}') is removed only when it is
+ *   unbalanced (e.g. from "(see http://x)" or "[1] http://x]"). A balanced
+ *   one is part of the URL — e.g. Wikipedia's
+ *   "…/Python_(programming_language)" or an IPv6 "http://[::1]/" — and is
+ *   preserved.
  * - '_' and '~' are RFC 3986 unreserved characters and are legitimate at the
  *   end of a URL, so they are never stripped (in the main parse path a leading
  *   markdown marker would have made new URL() throw and diverted to the
@@ -28,12 +30,17 @@ export function stripTrailingLlmPunctuation(input: string): string {
       s = s.slice(0, -1);
       continue;
     }
-    if (last === ')') {
+    // Balance-aware removal of a trailing closing bracket: strip it only when it
+    // has no matching opener anywhere in the string (so a markdown/parenthetical
+    // noise bracket is removed, but a balanced one that's part of the URL —
+    // Wikipedia "..._(programming_language)", IPv6 "http://[::1]/" — is kept).
+    if (last === ')' || last === ']' || last === '}') {
+      const open = last === ')' ? '(' : last === ']' ? '[' : '{';
       let opens = 0;
       let closes = 0;
       for (const ch of s) {
-        if (ch === '(') opens++;
-        else if (ch === ')') closes++;
+        if (ch === open) opens++;
+        else if (ch === last) closes++;
       }
       if (closes > opens) {
         s = s.slice(0, -1);

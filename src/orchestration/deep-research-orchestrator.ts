@@ -518,9 +518,17 @@ export class DeepResearchOrchestrator {
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'success' });
       
-      // Fire onComplete observer event
-      observer?.onComplete?.(result);
-      
+      // Fire onComplete observer event. A throwing user observer must NOT divert
+      // control into the catch below — that would fire onComplete AGAIN with a
+      // fallback payload (double terminal callback) AND silently replace the
+      // full report with the fallback synthesis. Isolate it, mirroring the
+      // researcher-executor's safeObserve pattern.
+      try {
+        observer?.onComplete?.(result);
+      } catch (obsErr) {
+        logger.debug('[DeepOrchestrator] onComplete observer threw:', obsErr);
+      }
+
       return result;
 
     } catch (error) {
@@ -550,7 +558,11 @@ export class DeepResearchOrchestrator {
           logger.log(`[DeepOrchestrator] Returning ${aborted ? 'partial (cancelled)' : 'fallback'} synthesis (${fallback.length} chars) from ${synthesisService.getReportCount(researchId)} collected reports`);
           const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
           const result = synthesisService.appendSteeringGuidance(fallback, finalSteeringMessages);
-          observer?.onComplete?.(result);
+          try {
+            observer?.onComplete?.(result);
+          } catch (obsErr) {
+            logger.debug('[DeepOrchestrator] fallback onComplete observer threw:', obsErr);
+          }
           return result;
         }
       } catch (fallbackErr) {
@@ -559,7 +571,11 @@ export class DeepResearchOrchestrator {
 
       // Nothing to return — this run genuinely failed (or was cancelled with no
       // collected work). Fire onError and propagate, matching QuickOrchestrator.
-      observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+      try {
+        observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+      } catch (obsErr) {
+        logger.debug('[DeepOrchestrator] onError observer threw:', obsErr);
+      }
       throw error;
     } finally {
       // Guard cleanup: getOrchestrationService()/cleanup can throw when the

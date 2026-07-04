@@ -258,6 +258,41 @@ describe('DeepResearchOrchestrator', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('a throwing onComplete observer does not double-fire or downgrade the report (success path)', async () => {
+    // Regression guard: before the safeObserve wrap, a user onComplete that threw
+    // on the success path diverted control into the catch, which fired onComplete
+    // AGAIN with a fallback payload and silently replaced the full report with the
+    // fallback synthesis. The throw must be isolated: exactly one onComplete, and
+    // the full report is returned unchanged.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
+      action: 'synthesize',
+      content: 'THE FULL REPORT',
+    });
+    const onComplete = vi.fn(() => { throw new Error('observer blew up'); });
+    const onError = vi.fn();
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onComplete, onError } });
+    const result = await orchestrator.run();
+
+    expect(result).toBe('THE FULL REPORT'); // NOT downgraded to a fallback
+    expect(onComplete).toHaveBeenCalledTimes(1); // NOT double-fired
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('a throwing onError observer does not mask the original failure', async () => {
+    // The onError wrap must swallow observer throws so the real error propagates
+    // instead of being replaced by the observer's throw.
+    mockPlanningService.generatePlan.mockRejectedValueOnce(new Error('Planning failed'));
+    mockSynthesisService.hasReports.mockReturnValue(false);
+    const onError = vi.fn(() => { throw new Error('observer blew up'); });
+    const onComplete = vi.fn();
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onError, onComplete } });
+    await expect(orchestrator.run()).rejects.toThrow('Planning failed'); // not 'observer blew up'
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it('should enforce maximum rounds and force synthesis', async () => {
     // Mock updatePlanForRound to always return delegate
     mockPlanningService.updatePlanForRound.mockResolvedValue({

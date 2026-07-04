@@ -383,7 +383,14 @@ export class QuickResearchOrchestrator {
           // without searching. Now the lifecycle mirrors deep mode.
           observer?.onResearcherComplete?.('quick', result);
           terminalCallbackFired = true;
-          observer?.onComplete?.(result);
+          // A throwing user observer must not divert into the inner catch (which
+          // would fire onError too — a double terminal callback — and discard the
+          // result). Isolate it, mirroring the deep orchestrator + researcher-executor.
+          try {
+            observer?.onComplete?.(result);
+          } catch (obsErr) {
+            logger.debug('[QuickOrchestrator] onComplete observer threw:', obsErr);
+          }
           return result;
         } catch (error) {
           // Terminal-callback contract (shared with DeepResearchOrchestrator):
@@ -401,7 +408,11 @@ export class QuickResearchOrchestrator {
             observer?.onResearcherFailure?.('quick', error instanceof Error ? error.message : String(error));
           }
           terminalCallbackFired = true;
-          observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+          try {
+            observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+          } catch (obsErr) {
+            logger.debug('[QuickOrchestrator] onError observer threw:', obsErr);
+          }
           throw error;
         }
     } catch (error) {
@@ -415,7 +426,11 @@ export class QuickResearchOrchestrator {
           if (!aborted) {
             observer?.onResearcherFailure?.('quick', error instanceof Error ? error.message : String(error));
           }
-          observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+          try {
+            observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+          } catch (obsErr) {
+            logger.debug('[QuickOrchestrator] onError observer threw (early-throw path):', obsErr);
+          }
         }
         throw error;
     } finally {

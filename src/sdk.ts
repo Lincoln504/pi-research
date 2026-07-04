@@ -784,6 +784,11 @@ async function _doShutdown(): Promise<void> {
   isInitialized = false;
   _shuttingDown = false;
   _initPromise = null;
+  // Belt-and-suspenders: an orphaned run whose finally() never settled (e.g. a
+  // native call that outlives disposal) would otherwise leave _isRunning latched
+  // true, so every runDeepResearch() after a shutdown+re-init in the same process
+  // throws "already in progress". The run's own finally remains the primary clear.
+  _isRunning = false;
   globalRegistry = null;
   globalModel = null;
   globalCwd = process.cwd();

@@ -38,7 +38,7 @@ model/key is missing.
 
 ### Prerequisites
 
-- Node.js >= 22.19
+- Node.js >= 22.19.0
 - `pi-research` installed somewhere the launcher can find it, and a model +
   API key configured. See [`references/configuration.md`](references/configuration.md).
 
