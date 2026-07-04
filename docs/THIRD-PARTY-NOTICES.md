@@ -6,8 +6,9 @@ license covers this project's own source code only.
 This package depends on third-party software distributed under its own license
 terms. Dependencies are resolved and installed by npm at install time (by
 reference); they are **not** bundled into this package's published artifacts
-(`dist/*` is built with esbuild `--packages=external`, so no third-party code is
-inlined).
+(the esbuild-bundled entry points — `dist/cli.mjs`, `dist/thread-worker.mjs` — are
+built with `--packages=external`, and the remaining `dist/` files are copied
+first-party sources, so no third-party code is inlined).
 
 ### Notable dependency licensing
 
@@ -15,7 +16,7 @@ camoufox-js / Camoufox browser
 
 The `camoufox-js` npm package itself is licensed under **MPL-2.0** (file-level
 copyleft). It is resolved at install time and **not bundled** into this package's
-artifacts (`dist/*` is built `--packages=external`), so no MPL-covered source is
+artifacts (the bundled entry points are built `--packages=external`), so no MPL-covered source is
 combined into or redistributed by this MIT package. It is used in-process only to
 configure and launch the Camoufox (Firefox-fork) browser **binary as a separate
 operating-system process**, which this package then drives over the Playwright/CDP
@@ -27,7 +28,7 @@ ua-parser-js
 `ua-parser-js` 2.x is licensed under AGPL-3.0-or-later. To keep this MIT-licensed
 package free of AGPL-licensed code in its dependency tree, `package.json`
 `overrides` pins `ua-parser-js` to the `1.x` line, which is MIT-licensed. The
-1.x and 2.x APIs are compatible for the only surface our transitive dependency
+1.x and 2.x APIs are compatible for the only surface our direct dependency
 (`camoufox-js`) uses, and the pin is behavior-neutral for this package's usage
 (no custom `navigator.userAgent`/`fingerprint` is passed to Camoufox).
 
@@ -48,7 +49,8 @@ sharp / @img/sharp-libvips (via @huggingface/transformers)
 in turn installs prebuilt `@img/sharp-libvips-*` native packages licensed under
 **LGPL-3.0-or-later**. These are platform-specific shared libraries linked
 **dynamically** at runtime and resolved at install time; no LGPL code is statically
-linked into or bundled with this package (`dist/*` is built `--packages=external`).
+linked into or bundled with this package (the bundled entry points are built
+`--packages=external`).
 Dynamic linkage of an unmodified LGPL library from an MIT-licensed program is
 permitted by the LGPL. The image path is only exercised by the embedding/knowledge
 stack; text-only research does not load it.

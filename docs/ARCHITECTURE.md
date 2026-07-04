@@ -301,7 +301,7 @@ Browser & scraping
 
 - [Camoufox](https://camoufox.com) — stealth Firefox (driven via [Playwright](https://playwright.dev)) for undetected search and scraping
 - [poolifier](https://github.com/poolifier/poolifier) — the worker-process pool behind the browser workers
-- [html-to-markdown](https://github.com/Goldziher/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
+- [html-to-markdown](https://github.com/kreuzberg-dev/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
 - `pdf-oxide-wasm` — PDF text extraction (Rust/WASM)
 
 Knowledge store & embeddings
