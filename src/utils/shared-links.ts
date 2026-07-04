@@ -125,6 +125,7 @@ export function registerTranscribedLinks(researchId: string, links: string[]) {
     if (!transcribedUrls.has(researchId)) {
         transcribedUrls.set(researchId, new Set());
     }
+    sessionTimestamps.set(researchId, Date.now()); // last-activity TTL refresh (parity with registerScrapedLinks)
     const pool = transcribedUrls.get(researchId)!;
     links.forEach(l => pool.add(normalizeUrl(l)));
 }

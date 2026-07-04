@@ -267,12 +267,16 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
           const sizeMB = Math.round(size / 1024 / 1024);
           logger.warn(`[Scrapers] PDF too large (Content-Length: ${sizeMB}MB, max 100MB), skipping`);
           metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'size_exceeded' });
+          // Same socket-pinning concern as the redirect/!ok drains above — and this
+          // throw fires precisely on the LARGEST responses.
+          try { await response.body?.cancel(); } catch { /* best-effort */ }
           throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
         }
       } else if (size > MAX_HTML_SIZE) {
         const sizeMB = Math.round(size / 1024 / 1024);
         logger.warn(`[Scrapers] HTML response too large (Content-Length: ${sizeMB}MB, max 25MB), skipping`);
         metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: contentType.split(';')[0] || 'unknown' });
+        try { await response.body?.cancel(); } catch { /* best-effort */ }
         throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
       }
     }
