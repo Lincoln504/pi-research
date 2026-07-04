@@ -264,7 +264,10 @@ describe('Extended Tools Integration', () => {
       
       const result = await tool.execute(
         'sec-severity-test',
-        { terms: ['vulnerability'], databases: ['cisa'], severity: ['HIGH', 'CRITICAL'] },
+        // severity is a single string in the schema (not an array), and the CISA
+        // database key is 'cisa_kev'. The old params were invalid — the tool returned
+        // "Invalid parameters" and the previous vacuous toBeDefined() masked it.
+        { terms: ['vulnerability'], databases: ['cisa_kev'], severity: 'HIGH' },
         new AbortController().signal,
         undefined,
         mockExtensionCtx as any
