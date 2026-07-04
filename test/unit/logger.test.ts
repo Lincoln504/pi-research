@@ -285,33 +285,40 @@ describe('logger', () => {
       expect(content).not.toContain('TUI Output');
     });
 
-    it('should capture direct writes to FD 2 via fs.writeSync if supported', async () => {
-      const fs = await import('node:fs');
+    it('should capture direct writes to FD 2 via fs.writeSync if supported', async (ctx) => {
+      // The capture patch replaces writeSync on the CJS require-cache `fs` object
+      // (stdio-capture obtains a mutable binding via createRequire). Native addons
+      // and CJS callers — the real producers of FD-2 writes — go through that same
+      // object, so the test must drive THAT binding too. An ESM `import('node:fs')`
+      // namespace export is a fixed binding that would never observe the patch,
+      // which is what silently masked a regression before.
+      const { createRequire } = await import('node:module');
+      const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
       const descriptor = Object.getOwnPropertyDescriptor(fs, 'writeSync');
       if (descriptor && !descriptor.writable && !descriptor.set) {
-          // Skip if fs.writeSync is immutable in this environment
-          return;
+          // fs.writeSync is immutable in this environment, so the capture patch
+          // genuinely cannot be installed. Skip VISIBLY rather than return a
+          // silent green (which would hide an FD-2 capture regression).
+          return ctx.skip();
       }
 
       const logDir = path.dirname(TEST_LOG_PATH);
       if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
-      
+
       const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      
+
       await logger.runCapturingStderr(async () => {
-        try {
-            fs.writeSync(2, 'Direct native write\n');
-        } catch (e) {
-            // Ignore if patch failed
-        }
+        // NOT wrapped in try/catch: if the FD-2 patch throws, the test must fail
+        // rather than swallow the error and pass.
+        fs.writeSync(2, 'Direct native write\n');
       });
 
-      if (existsSync(TEST_LOG_PATH)) {
-        const content = readFileSync(TEST_LOG_PATH, 'utf-8');
-        if (content.includes('Direct native write')) {
-            expect(content).toContain('"level":"FS_WRITE_SYNC_STDERR"');
-        }
-      }
+      // Unconditional assertions: the direct FD-2 write must have been diverted
+      // to the log file AND tagged with the FS_WRITE_SYNC_STDERR marker. If the
+      // capture regressed, the write goes to the real stderr and these fail.
+      const content = readFileSync(TEST_LOG_PATH, 'utf-8');
+      expect(content).toContain('Direct native write');
+      expect(content).toContain('"level":"FS_WRITE_SYNC_STDERR"');
     });
   });
 

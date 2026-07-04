@@ -242,7 +242,9 @@ describe('Extended Tools Integration', () => {
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
-        if (isNetworkUnavailable(text)) return;
+        // Visibly skip on a rate-limited/offline CI run rather than a silent
+        // return that would report PASS having asserted nothing.
+        if (isNetworkUnavailable(text)) return ctx.skip();
         // The "++" characters must not break the query — a real, non-empty
         // response body is returned rather than an empty/error result.
         expect(text.length).toBeGreaterThan(50);
@@ -271,9 +273,12 @@ describe('Extended Tools Integration', () => {
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
-        if (!isNetworkUnavailable(text)) {
-          expect(text).toBeDefined();
-        }
+        // Visibly skip when offline/rate-limited; otherwise assert the real
+        // report was produced (not a vacuous toBeDefined() that a regression to
+        // an empty/error body would still pass).
+        if (isNetworkUnavailable(text)) return ctx.skip();
+        expect(text).toContain('Security Vulnerability Search Results');
+        expect(text.length).toBeGreaterThan(50);
       }
     }, 60000);
 
@@ -398,7 +403,7 @@ describe('Extended Tools Integration', () => {
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
-          return;
+          return ctx.skip();
         }
         expect(text).toMatch(/stack\s*exchange/i);
         expect(text).toMatch(/stackoverflow/i);
@@ -428,7 +433,7 @@ describe('Extended Tools Integration', () => {
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
-          return;
+          return ctx.skip();
         }
         expect(text).toMatch(/regex/i);
         expect(text.length).toBeGreaterThan(50);
@@ -464,7 +469,7 @@ describe('Extended Tools Integration', () => {
         // network-independent and is the regression the prior test missed.
         expect(text).not.toContain('Invalid parameters');
         if (isNetworkUnavailable(text)) {
-          return;
+          return ctx.skip();
         }
         // With connectivity, a valid tag-filtered query returns substantive text.
         expect(text.length).toBeGreaterThan(50);

@@ -217,31 +217,47 @@ describe('initBrowser() Windows headed-launch fallback (#614)', () => {
 // ---------------------------------------------------------------------------
 
 describe('resetBrowser() / cleanupBrowser() safe with void close()', () => {
-  it('resetBrowser() does not throw when browser.close() returns void', () => {
-    // Simulate a virtual-mode browser where close() returns void (not a Promise).
-    const voidCloseBrowser = {
-      isConnected: () => true,
-      close: () => undefined,  // synchronous void, mimics headless:'virtual'
-    };
-    // Directly inject into module state by initialising via a mock that succeeds.
-    // We can't reach module-level `browser` directly, so we verify indirectly:
-    // if resetBrowser() throws, the test fails; if it completes, the fix holds.
-    //
-    // This test works by calling resetBrowser() when browser is already null
-    // (the safe no-op path), then verifying the Promise.resolve() wrapping in the
-    // fix doesn't regress the null-check guard.
-    expect(() => resetBrowser()).not.toThrow();
+  beforeEach(() => {
+    cleanBrowserState();
+    vi.clearAllMocks();
+    // Pin to Linux so the win32 headed-launch fallback never re-invokes the mock.
+    platformSpy.mockReturnValue('linux');
+  });
 
-    // The key assertion: if we somehow have a void-close browser and call resetBrowser,
-    // it must not throw a TypeError. We verify the Promise.resolve() pattern directly.
-    expect(() => {
-      Promise.resolve(voidCloseBrowser.close()).catch(() => {});
-    }).not.toThrow();
+  // A browser + context whose close() returns undefined (synchronous void),
+  // exactly as camoufox-js behaves when launched with headless:'virtual'. If the
+  // production code chained .catch() directly on browser.close()/context.close()
+  // instead of wrapping in Promise.resolve(), driving the REAL resetBrowser()/
+  // cleanupBrowser() below would throw "Cannot read properties of undefined
+  // (reading 'catch')". Driving the real functions (not an inline re-implementation)
+  // means removing the Promise.resolve() wrapping in source would fail these tests.
+  const voidCloseBrowser = () => ({
+    isConnected: () => true,
+    newContext: vi.fn().mockResolvedValue({
+      close: () => undefined,               // synchronous void, mimics virtual mode
+      route: vi.fn().mockResolvedValue(undefined),
+    }),
+    close: () => undefined,                  // synchronous void, mimics virtual mode
+  });
+
+  it('resetBrowser() does not throw when a live browser.close() returns void', async () => {
+    // Drive the REAL init path so module-level `browser`/`context` hold the
+    // void-close mock, then exercise the real resetBrowser().
+    mockCamoufox.mockResolvedValueOnce(voidCloseBrowser());
+    await initBrowser();
+
+    expect(() => resetBrowser()).not.toThrow();
+  });
+
+  it('cleanupBrowser() resolves cleanly when a live browser.close() returns void', async () => {
+    mockCamoufox.mockResolvedValueOnce(voidCloseBrowser());
+    await initBrowser();
+
+    await expect(cleanupBrowser()).resolves.toBeUndefined();
   });
 
   it('cleanupBrowser() resolves cleanly when browser is null (no-op)', async () => {
     // When no browser is initialised, cleanupBrowser() must resolve cleanly.
-    // This also validates the Promise.resolve() wrapping path is safe.
     resetBrowser();
     await expect(cleanupBrowser()).resolves.toBeUndefined();
   });

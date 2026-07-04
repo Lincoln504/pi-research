@@ -138,17 +138,21 @@ describe('Service Registry Disposal Behavior', () => {
     // Initialize the service
     const service1 = await getService<MockService>('test-service-4');
     
-    // Start disposal and concurrent access
+    // Start disposal and concurrent access. disposeAllServices() sets the
+    // container's isDisposing flag synchronously (it is _runDisposeAll's first
+    // statement, before any await), so a getService() issued while the returned
+    // promise is still in flight observes mid-disposal state.
     const disposePromise = disposeAllServices();
-    
-    // Try to get the service while disposal is in progress
-    // This should either throw or wait for disposal to complete
-    try {
-      await getService<MockService>('test-service-4');
-    } catch {
-      // Expected — may throw during disposal
-    }
-    
+
+    // Pin the actual contract (mirrors service-registry.test.ts "getService during
+    // disposal"): a getService() during an in-flight disposal must REJECT with a
+    // "during container disposal" error rather than silently succeed. The old
+    // try/catch swallowed both outcomes and asserted neither, so a regression that
+    // returned a half-disposed instance would have passed unnoticed.
+    await expect(getService<MockService>('test-service-4')).rejects.toThrow(
+      'during container disposal'
+    );
+
     // Wait for disposal to complete
     await disposePromise;
     

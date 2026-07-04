@@ -64,15 +64,18 @@ describe('isEmbeddingLeaderAlive — liveness contract', () => {
 describe('isEmbeddingLeaderAlive — with the real ProcessLifecycleService', () => {
   const svc = new ProcessLifecycleService();
 
-  it('treats the live current process with its true start-time as alive', async () => {
+  it('treats the live current process with its true start-time as alive', async (ctx) => {
     const start = await svc.getProcessStartTime(process.pid);
-    if (start === null) return; // platform cannot read start-time; nothing to assert
+    // Visibly skip (not a silent green) if the platform can't read start-time —
+    // a silent return would hide a getProcessStartTime regression.
+    if (start === null) return ctx.skip();
     expect(await isEmbeddingLeaderAlive({ pid: process.pid, startTime: start }, svc)).toBe(true);
   });
 
-  it('reports the current pid with a WRONG recorded start-time as dead (PID-reuse defense)', async () => {
+  it('reports the current pid with a WRONG recorded start-time as dead (PID-reuse defense)', async (ctx) => {
     const start = await svc.getProcessStartTime(process.pid);
-    if (start === null) return;
+    // Visibly skip rather than silently pass when start-time is unavailable.
+    if (start === null) return ctx.skip();
     // Same live pid, but a start-time that could not belong to it → treated as a
     // recycled pid, i.e. not the process we recorded.
     expect(await isEmbeddingLeaderAlive({ pid: process.pid, startTime: start + 1_000_000 }, svc)).toBe(false);
