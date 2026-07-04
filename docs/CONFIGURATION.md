@@ -128,7 +128,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model initialization timeout (first-time download can be slow). |
 | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ | — | Set `1` to discard the cached WebGPU-viability verdict and probe again on next use. |
 
-API keys (all optional)
+API keys
 
 | Variable | Description |
 |----------|-------------|
