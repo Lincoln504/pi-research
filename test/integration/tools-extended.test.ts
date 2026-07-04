@@ -94,23 +94,25 @@ describe('Extended Tools Integration', () => {
       expect(firstContent).toHaveProperty('text');
       
       const text = (firstContent as any).text as string;
+      // Visibly skip on a rate-limited/offline run rather than a silent pass.
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      // Proves a real report, not a "Search Failed"/"Invalid parameters" body.
       expect(text).toContain('Security Vulnerability Search Results');
       expect(text).toContain('CVE-2024-21626');
-      
+
       // Check for markdown structure
       expect(text).toMatch(/^#+\s/); // Headers
-      expect(text.length).toBeGreaterThan(50);
     }, 60000);
 
     it('should search for multiple CVEs in single request', async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
-      
+
       const tracker = new ToolUsageTracker({ gathering: 10 });
-      const tool = createSecuritySearchTool({ 
-        ctx: mockExtensionCtx as any, 
-        tracker 
+      const tool = createSecuritySearchTool({
+        ctx: mockExtensionCtx as any,
+        tracker
       });
-      
+
       const result = await tool.execute(
         'sec-cve-test-multi',
         { terms: ['CVE-2024-21626', 'CVE-2024-3094'], databases: ['osv'] },
@@ -120,11 +122,11 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('CVE-2024-21626');
-        expect(text.length).toBeGreaterThan(50);
-      }
+      const text = (result.content[0] as any)?.text as string;
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      // A real report, not a failure body (which would also echo the CVE term).
+      expect(text).toContain('Security Vulnerability Search Results');
+      expect(text).toContain('CVE-2024-21626');
     }, 60000);
   });
 
@@ -147,13 +149,13 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('lodash');
-        expect(text).toMatch(/vulnerabilit(y|ies)/i);
-        expect(text).toMatch(/open\s*source/i);
-        expect(text.length).toBeGreaterThan(50);
-      }
+      const text = (result.content[0] as any)?.text as string;
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      // A real report — not a "Search Failed" body (which echoes the term too).
+      expect(text).toContain('Security Vulnerability Search Results');
+      expect(text).toContain('lodash');
+      // "open source" appears only in a real OSV result section, never in a failure body.
+      expect(text).toMatch(/open\s*source/i);
     }, 60000);
 
     it('should search for Python package vulnerabilities', async (ctx) => {
@@ -174,11 +176,12 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('requests');
-        expect(text.length).toBeGreaterThan(50);
-      }
+      const text = (result.content[0] as any)?.text as string;
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      // The success marker is the failure-distinguishing assertion here: a
+      // "Search Failed" body would echo 'requests' but never this heading.
+      expect(text).toContain('Security Vulnerability Search Results');
+      expect(text).toContain('requests');
     }, 60000);
   });
 
@@ -274,15 +277,12 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        // Visibly skip when offline/rate-limited; otherwise assert the real
-        // report was produced (not a vacuous toBeDefined() that a regression to
-        // an empty/error body would still pass).
-        if (isNetworkUnavailable(text)) return ctx.skip();
-        expect(text).toContain('Security Vulnerability Search Results');
-        expect(text.length).toBeGreaterThan(50);
-      }
+      const text = (result.content[0] as any)?.text as string;
+      // Visibly skip when offline/rate-limited; otherwise assert the real
+      // report was produced (not a vacuous toBeDefined() that a regression to
+      // an empty/error body would still pass).
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      expect(text).toContain('Security Vulnerability Search Results');
     }, 60000);
 
     it('should handle maxResults parameter', async (ctx) => {
@@ -303,12 +303,11 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (!isNetworkUnavailable(text)) {
-          expect(text.length).toBeGreaterThan(50);
-        }
-      }
+      const text = (result.content[0] as any)?.text as string;
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      // Assertions always run when the network is available (the old wrapper
+      // silently skipped them); the success marker rejects a failure body.
+      expect(text).toContain('Security Vulnerability Search Results');
     }, 60000);
 
     it('should handle includeExploited parameter', async (ctx) => {
@@ -322,19 +321,18 @@ describe('Extended Tools Integration', () => {
       
       const result = await tool.execute(
         'sec-exploited-test',
-        { terms: ['exploit'], databases: ['cisa'], includeExploited: true },
+        // includeExploited is a CISA-KEV concept; the valid DB key is 'cisa_kev'
+        // ('cisa' is an unknown DB value and was silently a no-op).
+        { terms: ['exploit'], databases: ['cisa_kev'], includeExploited: true },
         new AbortController().signal,
         undefined,
         mockExtensionCtx as any
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (!isNetworkUnavailable(text)) {
-          expect(text.length).toBeGreaterThan(50);
-        }
-      }
+      const text = (result.content[0] as any)?.text as string;
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      expect(text).toContain('Security Vulnerability Search Results');
     }, 60000);
 
     it('should handle githubRepo parameter for package vulnerabilities', async (ctx) => {
@@ -348,19 +346,19 @@ describe('Extended Tools Integration', () => {
       
       const result = await tool.execute(
         'sec-githubrepo-test',
-        { terms: ['express'], databases: ['osv'], ecosystem: 'npm', githubRepo: 'expressjs/express' },
+        // githubRepo is only consulted by the 'github' DB; with ['osv'] the param
+        // was ignored, so this test never exercised it. ecosystem is dropped
+        // (the github DB doesn't use it).
+        { terms: ['express'], databases: ['github'], githubRepo: 'expressjs/express' },
         new AbortController().signal,
         undefined,
         mockExtensionCtx as any
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (!isNetworkUnavailable(text)) {
-          expect(text.length).toBeGreaterThan(50);
-        }
-      }
+      const text = (result.content[0] as any)?.text as string;
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      expect(text).toContain('Security Vulnerability Search Results');
     }, 60000);
   });
 
