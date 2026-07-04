@@ -41,15 +41,13 @@ a project-scoped setting you can change per directory:
 |------|----------|
 | `global` (default) | One store shared across every directory. A finding cached in one project is retrievable from any other. |
 | `project` | Findings are scoped to the working directory they were created in; only that directory retrieves them. |
-| `none` | The store is disabled — no data is read or written. The `research_knowledge_search` tool stays registered (so re-enabling the mode later needs no pi restart) but is not advertised to the agent: its prompt guidance is stripped, and any direct call returns a "knowledge store is disabled" result. The `/knowledge-store` command is unavailable. |
+| `none` | The store is disabled — nothing is read or written, the `research_knowledge_search` tool is not advertised to the agent, and `/knowledge-store` is unavailable. Re-enabling needs no restart (see [PI-EXTENSION.md](PI-EXTENSION.md) for the registration mechanics). |
 
 Change the mode for the current directory with the `/research-config` TUI (Knowledge Mode)
 in the pi extension, or with `pi-research knowledge-config set none|project|global` on the
-standalone CLI (`pi-research knowledge-config` shows the current mode and its source). Under
-the agent skill you don't have to run anything — you ask the agent to change it and it runs that
-command for you. All persist to the per-directory project registry; a per-directory value
-overrides a machine-wide `PI_RESEARCH_KNOWLEDGE_STORE_MODE` in `config.env`, and a real
-environment variable overrides everything. The change applies on the next run — no restart.
+standalone CLI. The setting persists to the per-directory project registry — see
+[CONFIGURATION.md](CONFIGURATION.md) for the full precedence chain. The change applies on
+the next run — no restart.
 
 All scopes share one physical LanceDB directory; project vs. global rows are
 distinguished by columns (a normalized workspace path and a global flag) and filtered

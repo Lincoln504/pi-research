@@ -39,7 +39,7 @@ agent
 run.mjs  —  zero-dep launcher (skills/pi-research/scripts/)
   │  locates the installed engine, or fails fast with guidance
   ▼
-pi-research engine  —  the SDK (dist/cli.mjs)
+pi-research engine  —  the CLI (dist/cli.mjs)
   │  init → run → shutdown
   ▼
 cited Markdown report  →  stdout  →  back to the agent

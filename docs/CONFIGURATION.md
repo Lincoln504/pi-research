@@ -75,7 +75,7 @@ Research
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes. Higher = more throughput, more CPU/RAM. |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process. |
-| `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents (deep and quick) and knowledge synthesis. The coordinator and evaluator keep using the session model. Accepts `provider/id` or a bare model id. |
+| `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents (deep and quick) and knowledge synthesis. In the pi extension the coordinator and evaluator keep using the session model; on the standalone CLI/SDK, when no `--model`/`model` option is given, this also selects the session model itself. Accepts `provider/id` or a bare model id. |
 | `PI_RESEARCH_DISABLED_TOOLS` | _(none)_ | — | Comma-separated research tools to disable for a run (`search`, `scrape`, `security_search`, `stackexchange`, `youtube_transcript`, `grep`). Removed from every researcher's toolset and named in the coordinator/evaluator prompt. |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` (TUI) | `false` | — | Front-ends write a Markdown report to disk and surface its path. |
 | `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the agent skill, which runs from the host agent's arbitrary directory. |
