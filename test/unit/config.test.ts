@@ -130,8 +130,8 @@ describe('config (refactored)', () => {
       );
       expect(fs.renameSync).toHaveBeenCalled();
       expect(fs.chmodSync).toHaveBeenCalledWith(expect.stringContaining('config.env'), 0o600);
-      // Verify locking
-      expect(fs.openSync).toHaveBeenCalledWith(expect.stringContaining('.lock'), 'wx');
+      // Verify locking — the lock is created 0o600 to match the owner-only dir posture.
+      expect(fs.openSync).toHaveBeenCalledWith(expect.stringContaining('.lock'), 'wx', 0o600);
       expect(fs.closeSync).toHaveBeenCalledWith(42);
       expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('.lock'));
     });
@@ -155,11 +155,12 @@ describe('config (refactored)', () => {
       
       saveConfig(config, 'local', cwd);
 
-      // Should write to project-settings.json
+      // Should write to project-settings.json. The registry sits in the same
+      // owner-only state dir as config.env, so the temp write is mode 0o600.
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('project-settings.json'),
         expect.stringContaining(cwd),
-        'utf-8'
+        { encoding: 'utf-8', mode: 0o600 }
       );
     });
 

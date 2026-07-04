@@ -310,7 +310,9 @@ function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<
   try {
     for (let i = 0; i < maxRetries; i++) {
       try {
-        lockFd = fs.openSync(lockPath, 'wx');
+        // 0o600: owner-only, matching the directory's 0o700 posture (this lock sits
+        // in the same state dir as config.env / backups).
+        lockFd = fs.openSync(lockPath, 'wx', 0o600);
         break;
       } catch (err: any) {
         if (err.code === 'EEXIST') {
@@ -363,8 +365,12 @@ function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<
     // every workspace's saved settings. Write a temp then rename (atomic on the same FS).
     const tmpPath = `${registryPath}.tmp.${process.pid}.${Date.now()}`;
     try {
-      fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
+      // 0o600 at creation + a post-rename chmod, mirroring the user-scope config.env
+      // writer: the registry sits in the same owner-only state dir, and a chmod tightens
+      // any pre-existing 0644 registry left by an older release.
+      fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), { encoding: 'utf-8', mode: 0o600 });
       fs.renameSync(tmpPath, registryPath);
+      try { fs.chmodSync(registryPath, 0o600); } catch { /* FS without chmod (Windows) — best effort */ }
     } catch (writeErr) {
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       throw writeErr;
@@ -775,7 +781,8 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
 
   for (let i = 0; i < lockMaxRetries; i++) {
     try {
-      lockFd = fs.openSync(lockPath, 'wx');
+      // 0o600: owner-only, matching the 0o700 directory posture.
+      lockFd = fs.openSync(lockPath, 'wx', 0o600);
       break;
     } catch (err: any) {
       if (err.code === 'EEXIST') {
