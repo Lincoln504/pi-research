@@ -373,6 +373,11 @@ jobs:
           PI_RESEARCH_MOCK_SEARCH: "true"
           PI_RESEARCH_MOCK_SCRAPE: "true"
           PI_RESEARCH_WORKER_THREADS: "2"
+          # GitHub runners have no real GPU, so the default EMBEDDING_DEVICE=auto
+          # out-of-process WebGPU probe can only ever fall back to CPU — after a slow
+          # model load and a software-Vulkan crash/hang. Force CPU so the knowledge-store
+          # embedder is deterministic and never blocks a test on a pointless probe.
+          PI_RESEARCH_EMBEDDING_DEVICE: "cpu"
       - name: Integration Tests (Serial Group)
         run: npm run test:integration:serial
         env:
@@ -397,6 +402,11 @@ jobs:
           # exercised in CI by the "Verify camoufox launches" step and the
           # remaining real-browser serial tests (error recovery, tools, etc.).
           PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS: "true"
+          # No real GPU on CI runners: force CPU embedding so the store embedder never
+          # runs the WebGPU probe (pointless here), which on a GPU-less host loads/crashes
+          # slowly and can block a store-using test — e.g. sdk-lifecycle's quick-research
+          # path. Same rationale as the parallel group above.
+          PI_RESEARCH_EMBEDDING_DEVICE: "cpu"
       - name: Upload worker diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
