@@ -15,8 +15,8 @@ to configure (no research runs).
    export PI_RESEARCH_MODEL=openai/gpt-4o    # provider/model-id
    ```
 2. **Global config** `~/.pi/research/config.env` (same KEY=VALUE keys; read at startup).
-3. **pi configuration** (if you use `pi`): the API key comes from `~/.pi/agent/auth.json`
-   automatically — `PI_RESEARCH_MODEL` must still be set (env or `config.env`).
+3. **pi configuration** (if you use `pi`): the API key comes from your pi
+   configuration automatically — `PI_RESEARCH_MODEL` must still be set (env or `config.env`).
 
 Real env vars always win. Optional CLI-only overlay `~/.pi/research/cli.env` layers
 over `config.env` for the CLI only. Precedence:

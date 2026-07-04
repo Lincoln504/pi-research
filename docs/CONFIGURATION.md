@@ -132,7 +132,7 @@ API keys
 
 | Variable | Description |
 |----------|-------------|
-| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI mode (not needed when pi's configuration — `~/.pi/agent/auth.json` — supplies the key). On the CLI / agent skill both can also live in `config.env` / `cli.env`. The provider is required alongside the key, or inferred from a `provider/model-id` `PI_RESEARCH_MODEL`. |
+| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI mode (not needed when pi's configuration supplies the key). On the CLI / agent skill both can also live in `config.env` / `cli.env`. The provider is required alongside the key, or inferred from a `provider/model-id` `PI_RESEARCH_MODEL`. |
 | `STACKEXCHANGE_API_KEY` | Raises the Stack Exchange tool's limit from 300/day to 10,000/day. Obtain at <https://stackapps.com/apps/oauth>. |
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
 | `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. Recommended when using severity-filtered security searches: those issue a second (CVSS v2) NVD query to catch v2-only CVEs, which roughly doubles request time against the 6 s/request unauthenticated throttle. |
