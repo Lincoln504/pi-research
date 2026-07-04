@@ -39,6 +39,7 @@ import { validateInitialLink, MAX_INITIAL_LINKS } from './utils/url-utils.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey, parseDotEnv } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { buildModelRegistry, safeGetAvailable } from './core/llm/model-registry-factory.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -226,6 +227,27 @@ function fileExists(p: string): boolean {
   }
 }
 
+/**
+ * Are keys usable from pi's configuration? Answered by pi's OWN semantics, not
+ * by file presence: build pi's model registry (two small JSON reads — no
+ * services, network, or native deps) and ask for the authed subset. That check
+ * (`hasConfiguredAuth`) covers every source the registry consults at call
+ * time: an auth.json provider entry (api-key or OAuth), a per-provider apiKey
+ * embedded in models.json (env-template aware), and provider env vars like
+ * OPENAI_API_KEY. File presence alone is neither necessary (keys can live in
+ * models.json / env with no auth.json) nor sufficient (auth.json can be `{}`).
+ */
+function piKeysAvailable(piAuthPresent: boolean): boolean {
+  try {
+    return safeGetAvailable(buildModelRegistry(undefined, undefined)).length > 0;
+  } catch {
+    // Cannot inspect (e.g. malformed models.json) — fall back to file
+    // presence: pre-flight must never block a possibly-working setup; the run
+    // itself reports the precise error.
+    return piAuthPresent;
+  }
+}
+
 export interface CredentialDetection {
   /** Where credentials will come from once initResearchSDK runs. */
   source: 'explicit-env' | 'pi-config' | 'none';
@@ -247,6 +269,7 @@ function detectCredentials(): CredentialDetection {
   const paths = resolvedConfigPaths();
   const piAuthPresent = fileExists(paths.piAuth);
   const piModelsPresent = fileExists(paths.piModels);
+  const piKeysUsable = piKeysAvailable(piAuthPresent);
 
   const apiKey = process.env['PI_RESEARCH_API_KEY'];
   const providerEnv = process.env['PI_RESEARCH_PROVIDER'];
@@ -300,13 +323,13 @@ function detectCredentials(): CredentialDetection {
     };
   }
 
-  // --- pi configuration path (key from auth.json) -----------------------------
-  if (piAuthPresent) {
-    // Keys come from auth.json, but the MODEL must be configured explicitly:
-    // the standalone CLI / agent skill run only on the configured model — they
-    // never follow the model selected inside the pi extension, and silently
-    // falling back to the registry's first authed entry picks a model nobody
-    // chose. Fail fast here (pre-flight, before any SDK init).
+  // --- pi configuration path (key from auth.json, models.json, or provider env) ---
+  if (piKeysUsable) {
+    // Keys come from pi's configuration, but the MODEL must be configured
+    // explicitly: the standalone CLI / agent skill run only on the configured
+    // model — they never follow the model selected inside the pi extension, and
+    // silently falling back to the registry's first authed entry picks a model
+    // nobody chose. Fail fast here (pre-flight, before any SDK init).
     if (!model) {
       return {
         source: 'pi-config',
@@ -317,7 +340,7 @@ function detectCredentials(): CredentialDetection {
         piAuthPresent,
         piModelsPresent,
         problem:
-          'pi credentials were found (auth.json), but no research model is configured. ' +
+          'pi credentials were found (in pi\'s configuration), but no research model is configured. ' +
           'The standalone CLI / agent skill run only on an explicitly configured model — they do not ' +
           'follow the model selected inside the pi extension. Set PI_RESEARCH_MODEL to a ' +
           '"provider/model-id" (in the environment, or in config.env / cli.env below).',
@@ -325,7 +348,7 @@ function detectCredentials(): CredentialDetection {
     }
     return {
       source: 'pi-config',
-      apiKeyConfigured: true, // key lives in auth.json; SDK reads it
+      apiKeyConfigured: true, // key lives in pi's configuration; the SDK reads it at call time
       provider,
       model,
       modelFrom,
@@ -346,7 +369,8 @@ function detectCredentials(): CredentialDetection {
     problem:
       'No model or API key is configured for pi-research. Provide credentials via environment ' +
       'variables (PI_RESEARCH_API_KEY + PI_RESEARCH_PROVIDER + PI_RESEARCH_MODEL) or, if you use ' +
-      'pi, via ~/.pi/agent/auth.json.',
+      "pi, via pi's configuration (a provider entry in ~/.pi/agent/auth.json, or a per-provider " +
+      'apiKey in ~/.pi/agent/models.json).',
   };
 }
 

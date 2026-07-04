@@ -123,12 +123,13 @@ export function buildModelRegistry(apiKey?: string, provider?: string): ModelReg
     );
   }
 
-  // No explicit key: use the user's pi auth storage and model list if available.
+  // No explicit key: use the user's pi configuration when EITHER file exists.
   // ModelRegistry.create() reads embedded apiKeys from models.json providers
-  // directly (via providerRequestConfigs), so glm-coding and other custom
-  // providers with embedded keys are visible to hasConfiguredAuth() without
-  // needing to duplicate them into AuthStorage.
-  if (fs.existsSync(authPath)) {
+  // directly (via providerRequestConfigs), so custom providers with embedded
+  // keys work with no auth.json at all — auth.json presence must not gate
+  // models.json (AuthStorage.create tolerates a missing file). Env provider
+  // keys (e.g. OPENAI_API_KEY) are honored by AuthStorage in every branch.
+  if (fs.existsSync(authPath) || fs.existsSync(modelsJsonPath)) {
     const authStorage = AuthStorage.create(authPath);
     return ModelRegistry.create(
       authStorage,

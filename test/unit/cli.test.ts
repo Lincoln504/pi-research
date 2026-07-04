@@ -454,7 +454,13 @@ describe('CLI subprocess — model required with pi credentials', () => {
   beforeAll(() => {
     home = mkdtempSync(path.join(os.tmpdir(), 'pir-model-home-'));
     mkdirSync(path.join(home, '.pi', 'agent'), { recursive: true });
-    writeFileSync(path.join(home, '.pi', 'agent', 'auth.json'), '{}\n', 'utf-8');
+    // A real credential entry (matches pi's auth.json shape) — an empty `{}`
+    // deliberately does NOT count as keys (see the empty-auth test below).
+    writeFileSync(
+      path.join(home, '.pi', 'agent', 'auth.json'),
+      JSON.stringify({ openai: { type: 'api_key', key: 'sk-test' } }) + '\n',
+      'utf-8'
+    );
   });
   afterAll(() => {
     rmSync(home, { recursive: true, force: true });
@@ -481,6 +487,71 @@ describe('CLI subprocess — model required with pi credentials', () => {
     expect(out.ready).toBe(true);
     expect(out.credentials.model).toBe('some-provider/some-model');
     expect(out.credentials.modelFrom).toBe('PI_RESEARCH_MODEL');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subprocess — key detection reads pi's configuration CONTENT, not file
+// presence: an empty auth.json is not keys; an embedded models.json
+// providers.*.apiKey IS keys even with no auth.json at all (mirrors pi's
+// registry, which reads auth.json entry ?? providers[name].apiKey at call time).
+// ---------------------------------------------------------------------------
+
+describe('CLI subprocess — pi key detection by content', () => {
+  const env = (home: string): Record<string, string> => {
+    const base: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      // Strip research vars AND provider env keys (OPENAI_API_KEY, GITHUB_TOKEN, …):
+      // pi's hasAuth() honors provider env vars, so an ambient key on the dev/CI
+      // machine would make the empty-auth case falsely "available".
+      if (v !== undefined && !k.startsWith('PI_RESEARCH_') && !/_API_KEY$/.test(k) && !/_TOKEN$/.test(k)) base[k] = v;
+    }
+    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_MODEL: 'some-provider/some-model' };
+  };
+  const status = (home: string) =>
+    JSON.parse(spawnSync(process.execPath, [CLI, 'status', '--json'], { encoding: 'utf-8', env: env(home), timeout: 20_000 }).stdout);
+
+  it('an EMPTY auth.json (and no models.json keys) is not credentials — reports the no-key problem', () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), 'pir-emptyauth-'));
+    try {
+      mkdirSync(path.join(home, '.pi', 'agent'), { recursive: true });
+      writeFileSync(path.join(home, '.pi', 'agent', 'auth.json'), '{}\n', 'utf-8');
+      const out = status(home);
+      expect(out.ready).toBe(false);
+      expect(out.credentials.source).toBe('none');
+      expect(out.credentials.problem).toMatch(/No model or API key/i);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('an embedded models.json apiKey counts as credentials even with NO auth.json', () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), 'pir-modelskey-'));
+    try {
+      mkdirSync(path.join(home, '.pi', 'agent'), { recursive: true });
+      // A custom provider needs at least one model for pi's registry to expose
+      // anything "available" — mirrors a real models.json entry.
+      writeFileSync(
+        path.join(home, '.pi', 'agent', 'models.json'),
+        JSON.stringify({
+          providers: {
+            'some-provider': {
+              baseUrl: 'https://x.invalid',
+              api: 'openai-completions',
+              apiKey: 'sk-embedded',
+              models: [{ id: 'some-model' }],
+            },
+          },
+        }) + '\n',
+        'utf-8'
+      );
+      const out = status(home);
+      expect(out.ready).toBe(true);
+      expect(out.credentials.source).toBe('pi-config');
+      expect(out.credentials.apiKeyConfigured).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
