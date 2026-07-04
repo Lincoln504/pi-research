@@ -675,7 +675,12 @@ async function cmdSkill(s: NonNullable<ParsedArgs['skill']>): Promise<number> {
     toStdout(`\n[pi-research] ${note}\n`);
     return EXIT.OK;
   }
-  const results = uninstallSkill(candidates.map((d) => d.id), { dryRun: s.dryRun });
+  let results;
+  try {
+    results = uninstallSkill(candidates.map((d) => d.id), { dryRun: s.dryRun });
+  } catch (err) {
+    return reportError(err, 'skill uninstall', s.json);
+  }
   if (s.json) {
     toStdout(pretty({ command: 'skill', action: 'uninstall', dryRun: !!s.dryRun, results }));
   } else {

@@ -373,6 +373,11 @@ jobs:
           PI_RESEARCH_MOCK_SEARCH: "true"
           PI_RESEARCH_MOCK_SCRAPE: "true"
           PI_RESEARCH_WORKER_THREADS: "2"
+          # youtube-transcript.test.ts is the only file in this group that consults
+          # skipsLiveNetwork(); its live InnerTube/PoToken fetches need a residential
+          # IP, so skip them here (visible ctx.skip) exactly as its header documents —
+          # this mirrors the serial group below and removes a live-network flake source.
+          PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS: "true"
           # GitHub runners have no real GPU, so the default EMBEDDING_DEVICE=auto
           # out-of-process WebGPU probe can only ever fall back to CPU — after a slow
           # model load and a software-Vulkan crash/hang. Force CPU so the knowledge-store
