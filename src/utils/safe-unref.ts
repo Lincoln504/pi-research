@@ -10,3 +10,22 @@ export function safeUnref(timer: NodeJS.Timeout | null | undefined): void {
     (timer as any).unref();
   }
 }
+
+/**
+ * Await `promise`, but give up after `deadlineMs` (resolving `undefined`).
+ *
+ * Unlike a bare `Promise.race([promise, setTimeout])`, the deadline timer is
+ * unref'd AND cleared as soon as `promise` settles, so a losing timeout never
+ * holds the event loop open after teardown work completes. Rejections of
+ * `promise` propagate unchanged (matching Promise.race semantics).
+ */
+export function raceWithDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), deadlineMs);
+    safeUnref(timer);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}

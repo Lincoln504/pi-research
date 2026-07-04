@@ -47,6 +47,18 @@ export interface ResearchObserver {
   onEvaluationDecision?(action: 'synthesize' | 'delegate', plan?: ResearchPlan, round?: number): void;
 
   // Synthesis/Completion
+  /**
+   * Fired when the run enters FINAL synthesis / stops consuming steering:
+   *   - deep mode: right before the forced (mustSynthesize) evaluator call, and
+   *     on the evaluator-chose-synthesize path (idempotent there — the flag is
+   *     already off via onEvaluationDecision('synthesize')).
+   *   - quick mode: as soon as the researcher session settles, i.e. the point
+   *     the 500ms steering-consume poller stops running.
+   * TUI consequence: steeringAcceptable flips false, so a late steer takes the
+   * fall-through path (forwarded to pi with an accurate toast) instead of being
+   * queued for a "next round" that will never happen.
+   */
+  onSynthesisStart?(): void;
   onComplete?(result: string): void;
   onError?(error: Error): void;
 

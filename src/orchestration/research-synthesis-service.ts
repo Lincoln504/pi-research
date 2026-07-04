@@ -12,7 +12,7 @@
 import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks, type GlobalCitation } from '../utils/citation-utils.ts';
 import { lastCitedLinksHeaderIndex } from '../utils/text-utils.ts';
-import { getScrapedLinks } from '../utils/shared-links.ts';
+import { getScrapedLinks, normalizeUrl } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
@@ -205,7 +205,29 @@ export class ResearchSynthesisService implements IService {
       const citedHeaderIdx = lastCitedLinksHeaderIndex(synthesis);
       if (citedHeaderIdx >= 0) {
         logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
-        return `${synthesis.slice(0, citedHeaderIdx).trimEnd()}\n\n${verifiedLinksSection}`;
+        // The verified list is renumbered (dedup by URL, implausible entries dropped),
+        // but the body's inline [N] markers were authored against the list being
+        // replaced. Remap them by URL identity — parse the synthesis's own list and
+        // map each written number to the global id of the same normalized URL. In
+        // deep mode the numbering already matches and this is a no-op; in quick mode
+        // (where the model's own list is what gets replaced) it prevents every
+        // marker after a dropped/deduped entry from pointing at the wrong source.
+        const ownCitations = parseCitations(synthesis);
+        const urlToGlobalId = new Map(globalCitations.map((c) => [normalizeUrl(c.url), c.id]));
+        const localToGlobal = new Map<number, number>();
+        ownCitations.forEach((cit, index) => {
+          const globalId = urlToGlobalId.get(normalizeUrl(cit.url));
+          if (globalId !== undefined) localToGlobal.set(cit.number ?? index + 1, globalId);
+        });
+        let body = synthesis.slice(0, citedHeaderIdx).trimEnd();
+        const needsRemap = [...localToGlobal].some(([local, global]) => local !== global);
+        if (needsRemap) {
+          body = body.replace(/\[(\d+)\]/g, (match, p1) => {
+            const globalId = localToGlobal.get(parseInt(p1, 10));
+            return globalId !== undefined ? `[${globalId}]` : match;
+          });
+        }
+        return `${body}\n\n${verifiedLinksSection}`;
       }
       logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
       return `${synthesis.trim()}\n\n${verifiedLinksSection}`;

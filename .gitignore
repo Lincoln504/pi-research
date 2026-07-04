@@ -12,7 +12,6 @@ node_modules/
 
 # Research output files
 pi-research-*.md
-docs/pi-research-test-*.md
 
 # TypeScript
 *.tsbuildinfo
@@ -28,7 +27,6 @@ src/infrastructure/browser/thread-worker.mjs
 
 # Editor directories and files
 .vscode/
-!.vscode/extensions.json
 .idea/
 *.swp
 *.swo
@@ -69,10 +67,6 @@ Thumbs.db
 Desktop.ini
 .browser/
 
-# Performance/Stress testing output
-testing-results/
-testing/*-results/
-
 # Patch and draft files (development artifacts)
 *.patch
 *.diff
@@ -88,7 +82,6 @@ test-results.txt
 integration-test-run.log
 
 # Session planning / chat artifacts (never belong in source history)
-planchat.txt
 *_SUMMARY.md
 *_REPORT.md
 *_PLAN.md
@@ -98,9 +91,6 @@ planchat.txt
 *_ROADMAP.md
 *_ASSESSMENT.md
 *_STATUS.md
-CIRCULAR_*.md
-ZERO_SCOPE_CREEP_REMEDIATION.md
-VERIFICATION_REPORT.md
 
 
 # Generated skill launcher (built by scripts/build.cjs skill on prepare)

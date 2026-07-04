@@ -83,6 +83,28 @@ let _cachedDevice: string | null = null;
 // getEmbedder — public entry point
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// In-process Embedder construction — shared by the leader path (wrapped in an
+// EmbeddingServer) and the model-mismatch fallback (used bare, never elected).
+// ---------------------------------------------------------------------------
+
+function buildInProcessEmbedder(cfg: Config, stateManager: IStateManager): Embedder {
+  const modelCfg = getModelEmbedderConfig(cfg.EMBEDDING_MODEL);
+  return new Embedder({
+    model: cfg.EMBEDDING_MODEL,
+    pooling: modelCfg.pooling,
+    queryPrefix: modelCfg.queryPrefix,
+    initializationTimeoutMs: cfg.EMBEDDING_MODEL_INIT_TIMEOUT_MS,
+    device: cfg.EMBEDDING_DEVICE,
+    maxTokens: modelCfg.maxTokens,
+    batchSize: modelCfg.batchSize,
+    charsPerToken: modelCfg.charsPerToken,
+    documentPrefix: modelCfg.documentPrefix,
+    stateManager,
+    useCache: modelCfg.useCache,
+  });
+}
+
 // Bounds the leader-wait retry tail-call below. Without a cap, a cluster where no
 // process can ever become leader (e.g. every model init OOMs) would recurse
 // forever, each hop doing a state-lock round-trip and accumulating async frames.
@@ -121,6 +143,7 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
     // This prevents concurrent GPU sessions and wasted init work.
     let iAmCandidate = false;
     let fastPathPort: number | null = null;
+    let fastPathModel: string | null = null;
 
     await stateManager.updateState(async (state) => {
       if (state.embeddingServer) {
@@ -128,23 +151,49 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
         if (alive) {
           // Either a real server (port > 0) or another process is initializing (port = -1)
           fastPathPort = state.embeddingServer.port;
+          fastPathModel = state.embeddingServer.model ?? null;
           return state;
         }
         // Stale entry from a dead process — clear it
         delete state.embeddingServer;
       }
-      // Claim the slot with sentinel port -1 to signal "initializing"
+      // Claim the slot with sentinel port -1 to signal "initializing". Record the
+      // model we will serve so followers with a DIFFERENT configured model can
+      // refuse adoption (see mismatch check below) instead of silently
+      // cross-embedding into a shared vector space.
       state.embeddingServer = {
         port: -1,
         pid: process.pid,
         serverId,
+        model: cfg.EMBEDDING_MODEL,
         ...(myStartTime !== null ? { startTime: myStartTime } : {}),
       };
       iAmCandidate = true;
       return state;
     });
 
+    // A live leader serving a DIFFERENT model must not be adopted: two sessions
+    // with different EMBEDDING_MODELs would cross-embed (same-dimension models
+    // corrupt the vector space silently). Fall back to a local in-process
+    // embedder for this session — no competing election, the leader's entry is
+    // left untouched. Entries without a recorded model (older process) are
+    // tolerated as matching.
+    const localFallbackForMismatch = (leaderModel: string): IEmbedder => {
+      logger.warn(
+        `[EmbeddingFactory] Live embedding leader serves model "${leaderModel}" but this session is configured for ` +
+        `"${cfg.EMBEDDING_MODEL}". Not adopting it — using a local in-process embedder for this session.`,
+      );
+      const embedder = buildInProcessEmbedder(cfg, stateManager);
+      _embeddingInstance = embedder;
+      _cachedModel = cfg.EMBEDDING_MODEL;
+      _cachedDevice = cfg.EMBEDDING_DEVICE;
+      return embedder;
+    };
+
     if (!iAmCandidate) {
+      if (fastPathModel !== null && fastPathModel !== cfg.EMBEDDING_MODEL) {
+        return localFallbackForMismatch(fastPathModel);
+      }
       // Another process is already leader or initializing — wait for real port
       const POLL_INTERVAL_MS = 500;
       const POLL_TIMEOUT_MS = 120_000;
@@ -164,6 +213,11 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
           // an unrelated process — the start-time pairing catches that too).
           await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
           break;
+        }
+        // Re-check model identity every poll: the leader may have changed while
+        // we waited (old one died, a new one with a different model claimed).
+        if (info.model !== undefined && info.model !== cfg.EMBEDDING_MODEL) {
+          return localFallbackForMismatch(info.model);
         }
         if (info.port > 0) {
           const portOk = await isPortListening(info.port);
@@ -200,20 +254,7 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
     }
 
     // ---- Phase 2: We are the exclusive candidate — do model init ----
-    const modelCfg = getModelEmbedderConfig(cfg.EMBEDDING_MODEL);
-    const embedder = new Embedder({
-      model: cfg.EMBEDDING_MODEL,
-      pooling: modelCfg.pooling,
-      queryPrefix: modelCfg.queryPrefix,
-      initializationTimeoutMs: cfg.EMBEDDING_MODEL_INIT_TIMEOUT_MS,
-      device: cfg.EMBEDDING_DEVICE,
-      maxTokens: modelCfg.maxTokens,
-      batchSize: modelCfg.batchSize,
-      charsPerToken: modelCfg.charsPerToken,
-      documentPrefix: modelCfg.documentPrefix,
-      stateManager,
-      useCache: modelCfg.useCache,
-    });
+    const embedder = buildInProcessEmbedder(cfg, stateManager);
 
     const server = new EmbeddingServer(embedder, stateManager, serverId, () => {
       // This leader poisoned itself after a permanently hung inference; drop the

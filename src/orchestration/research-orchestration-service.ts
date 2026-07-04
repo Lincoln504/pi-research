@@ -154,8 +154,12 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
   /**
    * Cleanup and reset services for the current research run
+   * @param opts.skipStoreMaintenance - skip the post-run FTS rebuild + optimize
+   *   (used on user abort: both are non-signal-aware optimization passes; row
+   *   durability lives in the LanceDB commits already made, and the next run's
+   *   cleanup performs the same rebuild).
    */
-  async cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any, config?: Config): Promise<void> {
+  async cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any, config?: Config, opts?: { skipStoreMaintenance?: boolean }): Promise<void> {
     const targetId = researchId || sessionId;
     const container = tryGetServiceContainerFromCtx(ctx);
     // Use the run's RESOLVED config when the caller has it — an SDK caller's
@@ -177,7 +181,9 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       // platform missing the native @lancedb binding, e.g. Intel macOS) merely
       // resolving the service loads the native vector stack and throws; gating it
       // lets the rest of cleanup proceed instead of jumping to the catch below.
-      if (resolvedConfig.KNOWLEDGE_STORE_MODE !== 'none') {
+      if (opts?.skipStoreMaintenance) {
+        logger.debug('[ResearchOrchestrationService] Skipping FTS rebuild/optimize (run aborted); next run\'s cleanup will rebuild');
+      } else if (resolvedConfig.KNOWLEDGE_STORE_MODE !== 'none') {
         const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
         if (ksService && ksService.isReady()) {
           const store = await ksService.getStore();

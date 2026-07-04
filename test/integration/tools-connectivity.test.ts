@@ -13,12 +13,15 @@ import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 
 import { isNetworkUnavailable } from './helpers/network.ts';
 
-// This whole suite exercises real network targets (live search + scrape). On CI it
+// Most of this suite exercises real network targets (live search + scrape). On CI it
 // runs from a datacenter IP that search engines / sites throttle or block, so a live
-// scrape can hang to the 300s test timeout (observed on ubuntu). Skip the entire
-// suite — including the browser-spinning beforeAll — when live-network tests are
-// disabled (PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS=true, set by CI). Runs in full locally.
-describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () => {
+// scrape can hang to the 300s test timeout (observed on ubuntu). Those live-success
+// tests are gated per-describe/per-test on skipsLiveNetwork()
+// (PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS=true, set by CI) and run in full locally.
+// The deterministic tests — tool instantiation, invalid-URL failure accounting,
+// non-existent-host (DNS NXDOMAIN → failed either way), empty-URL-list — do NOT
+// depend on live-network success and run everywhere, including CI.
+describe('Search and Scrape Tools Connectivity', () => {
   const mockExtensionCtx = {
     cwd: process.cwd(),
     ui: { setWidget: () => {}, notify: () => {} },
@@ -58,7 +61,8 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
     });
   });
 
-  describe('Search Tool - Basic Functionality', () => {
+  // Live: requires a real search provider to answer from this IP.
+  describe.skipIf(skipsLiveNetwork())('Search Tool - Basic Functionality', () => {
     it('should execute search with valid results structure', async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
       
@@ -100,19 +104,18 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
       );
 
       expect(result.content).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (isNetworkUnavailable(text)) {
-          // Skip test if network is unavailable
-          return;
-        }
-        expect(text).toMatch(/^#\s+/);
-        // Match either formatted results or "No results found" message
-        const hasResults = text.includes('[1] **');
-        const hasNoResults = text.includes('*No results found.*');
-        expect(hasResults || hasNoResults).toBe(true);
-        expect(text.length).toBeGreaterThan(50);
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      if (isNetworkUnavailable(text)) {
+        // Visible skip (not a silent pass) when the network is unavailable.
+        return ctx.skip();
       }
+      expect(text).toMatch(/^#\s+/);
+      // Match either formatted results or "No results found" message
+      const hasResults = text.includes('[1] **');
+      const hasNoResults = text.includes('*No results found.*');
+      expect(hasResults || hasNoResults).toBe(true);
+      expect(text.length).toBeGreaterThan(50);
     });
   });
 
@@ -125,7 +128,8 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
     });
   };
 
-  describe('Scrape Tool - Basic Functionality', () => {
+  // Live: scrapes real Wikipedia and asserts on live-success content.
+  describe.skipIf(skipsLiveNetwork())('Scrape Tool - Basic Functionality', () => {
     it('should scrape Wikipedia successfully with substantial content', async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
       
@@ -143,17 +147,16 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
 
       expect(result).toBeDefined();
       expect(result.content).toBeDefined();
-      
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (isNetworkUnavailable(text)) {
-          return;
-        }
-        expect(text).not.toContain('**Successful:** 0');
-        expect(text).toContain('Python');
-        expect(text.length).toBeGreaterThan(1000);
-        expect(text).toMatch(/^#+\s/m);
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      if (isNetworkUnavailable(text)) {
+        // Visible skip (not a silent pass) when the network is unavailable.
+        return ctx.skip();
       }
+      expect(text).not.toContain('**Successful:** 0');
+      expect(text).toContain('Python');
+      expect(text.length).toBeGreaterThan(1000);
+      expect(text).toMatch(/^#+\s/m);
     });
   });
 
@@ -182,11 +185,10 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
       expect(details.successful).toBe(0);
       expect(details.failed).toBeGreaterThanOrEqual(1);
 
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('**Successful:** 0');
-        expect(text).toContain('Failed to Scrape');
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      expect(text).toContain('**Successful:** 0');
+      expect(text).toContain('Failed to Scrape');
     });
 
     it('should handle non-existent URL gracefully', { timeout: 60000 }, async (ctx) => {
@@ -213,13 +215,13 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
       expect(details.successful).toBe(0);
       expect(details.failed).toBeGreaterThanOrEqual(1);
 
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('Failed to Scrape');
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      expect(text).toContain('Failed to Scrape');
     });
 
-    it('should handle mixed valid and invalid URLs', { timeout: 300000 }, async (ctx) => {
+    // Live: needs the two Wikipedia URLs to actually succeed.
+    it.skipIf(skipsLiveNetwork())('should handle mixed valid and invalid URLs', { timeout: 300000 }, async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
@@ -240,19 +242,18 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
 
       expect(result).toBeDefined();
       expect(result.content).toBeDefined();
-      
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (isNetworkUnavailable(text)) {
-          return;
-        }
-        // One invalid + two reachable Wikipedia URLs → genuine partial success:
-        // at least one succeeds and the invalid one is reported as failed.
-        const details = result.details as { successful: number; failed: number };
-        expect(details.successful).toBeGreaterThanOrEqual(1);
-        expect(details.failed).toBeGreaterThanOrEqual(1);
-        expect(text).toContain('Failed to Scrape');
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      if (isNetworkUnavailable(text)) {
+        // Visible skip (not a silent pass) when the network is unavailable.
+        return ctx.skip();
       }
+      // One invalid + two reachable Wikipedia URLs → genuine partial success:
+      // at least one succeeds and the invalid one is reported as failed.
+      const details = result.details as { successful: number; failed: number };
+      expect(details.successful).toBeGreaterThanOrEqual(1);
+      expect(details.failed).toBeGreaterThanOrEqual(1);
+      expect(text).toContain('Failed to Scrape');
     });
 
     it('should handle empty URL list', async (ctx) => {
@@ -275,7 +276,9 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
     });
   });
 
-  describe('Search Tool - Error Scenarios', () => {
+  // Live: each case still executes a real search request (empty/long/special
+  // queries are edge inputs, not offline paths).
+  describe.skipIf(skipsLiveNetwork())('Search Tool - Error Scenarios', () => {
     it('should handle empty query gracefully', async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
       
@@ -339,7 +342,8 @@ describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () =
     });
   });
 
-  describe('Tool Failure Cascade Prevention', () => {
+  // Live: performs real searches and a real Wikipedia scrape.
+  describe.skipIf(skipsLiveNetwork())('Tool Failure Cascade Prevention', () => {
     it('should prevent search failure from affecting subsequent searches', async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
       

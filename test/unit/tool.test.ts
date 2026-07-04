@@ -324,7 +324,7 @@ describe('createResearchTool', () => {
     it('rejects empty query', async () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: '' }, undefined, undefined, createMockContext());
-      expect((result.content[0] as any).text).toContain('required');
+      expect((result.content[0] as any).text).toContain('requires a query');
     });
 
     it('handles research errors gracefully', async () => {
@@ -332,6 +332,66 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
       expect((result.content[0] as any).text).toContain('Research failed');
+    });
+  });
+
+  describe('initialLinks validation (parity with CLI --initial-links)', () => {
+    it('rejects more than 20 initialLinks', async () => {
+      const tool = createResearchTool();
+      const links = Array.from({ length: 21 }, (_, i) => `https://example.com/page${i}`);
+      const result = await tool.execute('id', { query: 'test', initialLinks: links }, undefined, undefined, createMockContext());
+      expect((result.content[0] as any).text).toContain('invalid initialLinks');
+      expect((result.content[0] as any).text).toContain('at most 20 URLs');
+      expect((result.details as any).error).toBe('invalid_initial_links');
+      expect(mockRunResearch).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-http(s) links (file:, javascript:)', async () => {
+      const tool = createResearchTool();
+      for (const bad of ['file:///etc/passwd', 'javascript:alert(1)', 'ftp://example.com/x']) {
+        mockRunResearch.mockClear();
+        const result = await tool.execute('id', { query: 'test', initialLinks: [bad] }, undefined, undefined, createMockContext());
+        expect((result.content[0] as any).text).toContain('only http(s) URLs are allowed');
+        expect((result.details as any).error).toBe('invalid_initial_links');
+        expect(mockRunResearch).not.toHaveBeenCalled();
+      }
+    });
+
+    it('rejects a link longer than 2048 characters', async () => {
+      const tool = createResearchTool();
+      const longLink = 'https://example.com/' + 'a'.repeat(2100);
+      const result = await tool.execute('id', { query: 'test', initialLinks: [longLink] }, undefined, undefined, createMockContext());
+      expect((result.content[0] as any).text).toContain('at most 2048 characters');
+      expect((result.details as any).error).toBe('invalid_initial_links');
+      expect(mockRunResearch).not.toHaveBeenCalled();
+    });
+
+    it('rejects strings that are not URLs at all', async () => {
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', initialLinks: ['not a url'] }, undefined, undefined, createMockContext());
+      expect((result.content[0] as any).text).toContain('is not a valid URL');
+      expect((result.details as any).error).toBe('invalid_initial_links');
+      expect(mockRunResearch).not.toHaveBeenCalled();
+    });
+
+    it('accepts valid http(s) links and forwards them to runResearch', async () => {
+      const tool = createResearchTool();
+      const links = ['https://example.com/a', 'http://example.org/b'];
+      await tool.execute('id', { query: 'test', depth: 1, initialLinks: links }, undefined, undefined, createMockContext());
+      expect(mockRunResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ initialLinks: links }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    it('declares the bounds in the TypeBox schema (maxItems 20, maxLength 2048)', async () => {
+      const { Value } = await import('typebox/value');
+      const tool = createResearchTool();
+      const schema = tool.parameters as any;
+
+      expect(Value.Check(schema, { query: 'q', initialLinks: ['https://example.com/a'] })).toBe(true);
+      expect(Value.Check(schema, { query: 'q', initialLinks: Array.from({ length: 21 }, () => 'https://e.com') })).toBe(false);
+      expect(Value.Check(schema, { query: 'q', initialLinks: ['https://example.com/' + 'a'.repeat(2100)] })).toBe(false);
     });
   });
 

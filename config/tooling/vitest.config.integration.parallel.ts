@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     ...baseConfig.test,
     name: 'integration-parallel',
+    // Clear mock call history before every test so no test silently depends on
+    // calls recorded by an earlier test (implementations are preserved).
+    clearMocks: true,
     include: [
       'test/integration/knowledge-migrations.test.ts',
       'test/integration/knowledge-models.test.ts',

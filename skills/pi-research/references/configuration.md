@@ -66,7 +66,9 @@ model/key; message lists the fix) · `70` runtime error (network/provider/intern
 
 - **"engine not found" (78 from launcher):** not installed —
   `npm i -g @lincoln504/pi-research`, or `pi install npm:@lincoln504/pi-research`,
-  or `export PI_RESEARCH_PATH=/path/to/pi-research`.
+  or `export PI_RESEARCH_PATH=/path/to/pi-research` (package dir), or
+  `export PI_RESEARCH_BIN=/path/to/pi-research/dist/cli.mjs` (exact CLI entry;
+  checked first — also the escape hatch for unusual Windows shim layouts).
 - **"No model or API key" (78 from engine):** set the three env vars (or config /
   pi auth), then re-run `status`.
 - **Rate limit (70):** provider returned 429 — wait and retry.

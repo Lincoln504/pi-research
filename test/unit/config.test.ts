@@ -24,6 +24,7 @@ vi.mock('node:fs', async () => {
     unlinkSync: vi.fn(),
     openSync: vi.fn(() => 42), // Mock file descriptor
     closeSync: vi.fn(),
+    chmodSync: vi.fn(),
     statSync: vi.fn(() => ({ mtimeMs: Date.now() })),
   };
 });
@@ -57,6 +58,24 @@ describe('parseDotEnv — the single canonical parser', () => {
     const out = parseDotEnv('# comment\n\n__proto__=evil\nK=v\n');
     expect(out.K).toBe('v');
     expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+  });
+
+  it('trims whitespace around the value so `KEY = value` parses cleanly', () => {
+    // Regression: ' true' failed parseEnvBool's strict === 'true' check with no warning,
+    // and ' "value"' defeated surrounding-quote detection.
+    const out = parseDotEnv([
+      'PI_RESEARCH_DEBUG = true',
+      'PI_RESEARCH_MODEL =\t openai/gpt-4o',
+      'QUOTED = "spaced value"',
+    ].join('\n'));
+    expect(out.PI_RESEARCH_DEBUG).toBe('true');
+    expect(out.PI_RESEARCH_MODEL).toBe('openai/gpt-4o');
+    expect(out.QUOTED).toBe('spaced value');
+  });
+
+  it('preserves intentional whitespace inside quotes (trim happens before quote-strip)', () => {
+    const out = parseDotEnv('PADDED=" value "\n');
+    expect(out.PADDED).toBe(' value ');
   });
 });
 
@@ -102,12 +121,31 @@ describe('config (refactored)', () => {
       
       saveConfig(config, 'user');
 
-      expect(fs.writeFileSync).toHaveBeenCalledWith(expect.stringContaining('.tmp.'), expect.any(String), 'utf-8');
+      // config.env is the documented home for API keys: tmp is created 0o600 and the
+      // final file is chmod'd 0o600 after the rename (tightens a pre-existing 0644 file).
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('.tmp.'),
+        expect.any(String),
+        { encoding: 'utf-8', mode: 0o600 },
+      );
       expect(fs.renameSync).toHaveBeenCalled();
+      expect(fs.chmodSync).toHaveBeenCalledWith(expect.stringContaining('config.env'), 0o600);
       // Verify locking
       expect(fs.openSync).toHaveBeenCalledWith(expect.stringContaining('.lock'), 'wx');
       expect(fs.closeSync).toHaveBeenCalledWith(42);
       expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('.lock'));
+    });
+
+    it('creates ~/.pi/research with mode 0o700 when missing (user scope)', () => {
+      const config = { ...DEFAULTS };
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      saveConfig(config, 'user');
+
+      expect(fs.mkdirSync).toHaveBeenCalledWith(
+        expect.stringContaining('research'),
+        { recursive: true, mode: 0o700 },
+      );
     });
 
     it('should use centralized registry for LOCAL scope', () => {
@@ -165,6 +203,55 @@ describe('config (refactored)', () => {
       expect(written).toContain('PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS=33000');
       expect(written).toContain('PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG=de');
       expect(written).toContain('PI_RESEARCH_YOUTUBE_QUERY_EVERY_N=7');
+    });
+
+    it('user scope with changedKeys writes ONLY those keys and preserves other existing lines', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        '# keep me\nPI_RESEARCH_EMBEDDING_MODEL=old-model\nPI_RESEARCH_MODEL=my/model',
+      );
+      const config = { ...DEFAULTS, EMBEDDING_MODEL: 'org/new-model' };
+      saveConfig(config, 'user', '/x', ['PI_RESEARCH_EMBEDDING_MODEL']);
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+      expect(written).toContain('# keep me');
+      expect(written).toContain('PI_RESEARCH_EMBEDDING_MODEL=org/new-model');
+      // An existing line for an UNCHANGED key survives byte-for-byte…
+      expect(written).toContain('PI_RESEARCH_MODEL=my/model');
+      // …and no unchanged key is snapshotted in (that would freeze the whole
+      // resolved config — env overrides and current defaults included).
+      expect(written).not.toContain('PI_RESEARCH_TIMEOUT_MS');
+      expect(written).not.toContain('PI_RESEARCH_MAX_RESEARCHERS');
+    });
+
+    it('first-ever user save with changedKeys still creates a valid file with just those keys', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      const config = { ...DEFAULTS, DEBUG: true };
+      saveConfig(config, 'user', '/x', ['PI_RESEARCH_DEBUG']);
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+      expect(written).toContain('# pi-research global configuration');
+      expect(written).toContain('PI_RESEARCH_DEBUG=true');
+      expect(written).not.toContain('PI_RESEARCH_TIMEOUT_MS');
+    });
+
+    it('aborts a local save when the registry exists but is unreadable/corrupt (never wipes it)', () => {
+      // Regression: a transient read error (EPERM/EMFILE) or corrupt JSON used to be
+      // absorbed as "start fresh with {}" and then PERSISTED — destroying every
+      // workspace's saved settings. The update must abort instead.
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('{corrupt json');
+
+      expect(() => saveConfig({ ...DEFAULTS }, 'local', '/test/project'))
+        .toThrow(/Failed to read project settings registry/);
+      // Nothing was written — the on-disk registry (however corrupt) was not replaced.
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+      // The lock is still released on the failure path.
+      expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('.lock'));
+
+      // Restore the factory defaults for subsequent tests (clearAllMocks keeps impls).
+      vi.mocked(fs.existsSync).mockImplementation(() => false);
+      vi.mocked(fs.readFileSync).mockImplementation(() => '');
     });
 
     it('reads the YouTube knobs back from env (defaults + overrides)', () => {
@@ -308,6 +395,77 @@ describe('config (refactored)', () => {
     it('should return default config if no env', () => {
       const config = getConfig();
       expect(config.RESEARCHER_TIMEOUT_MS).toBe(DEFAULTS.RESEARCHER_TIMEOUT_MS);
+    });
+  });
+
+  describe('one-time registry→config.env migration', () => {
+    it('writes only the keys actually present in the home registry, not a full default snapshot', async () => {
+      // Regression: the migration used to save the ENTIRE user key set (createConfig
+      // fills defaults), freezing the current defaults into config.env forever.
+      const os = await import('node:os');
+      const registryContent = JSON.stringify({
+        [os.homedir()]: {
+          PI_RESEARCH_MAX_RESEARCHERS: '2',
+          PI_RESEARCH_MODEL: 'prov/model',
+        },
+      });
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => String(p).includes('project-settings.json'));
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) =>
+        String(p).includes('project-settings.json') ? registryContent : '');
+
+      getConfig('/tmp/migration-scope-test');
+
+      const tmpWrite = vi.mocked(fs.writeFileSync).mock.calls
+        .find(c => String(c[0]).includes('config.env.tmp'));
+      expect(tmpWrite).toBeDefined();
+      const written = tmpWrite![1] as string;
+      expect(written).toContain('PI_RESEARCH_MAX_RESEARCHERS=2');
+      expect(written).toContain('PI_RESEARCH_MODEL=prov/model');
+      // No defaulted keys frozen in:
+      expect(written).not.toContain('PI_RESEARCH_TIMEOUT_MS');
+      expect(written).not.toContain('PI_RESEARCH_EMBEDDING_MODEL');
+
+      // Restore the factory defaults for subsequent tests (clearAllMocks keeps impls).
+      vi.mocked(fs.existsSync).mockImplementation(() => false);
+      vi.mocked(fs.readFileSync).mockImplementation(() => '');
+    });
+  });
+
+  describe('legacy 0.1.x env-var warning', () => {
+    it('warns once when a dead 0.1.x variable is set (upgrade aid)', async () => {
+      const { logger } = await import('../../src/logger.ts');
+      const warnSpy = vi.spyOn(logger, 'warn');
+      process.env['PROXY_URL'] = 'http://127.0.0.1:8080';
+      process.env['PI_RESEARCH_VERBOSE'] = '1';
+      getConfig('/tmp/legacy-env-test');
+      const legacyWarnings = warnSpy.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('has no effect in v1.0.0'),
+      );
+      expect(legacyWarnings.some((c) => (c[0] as string).includes('PROXY_URL'))).toBe(true);
+      expect(legacyWarnings.some((c) => (c[0] as string).includes('PI_RESEARCH_VERBOSE'))).toBe(true);
+
+      // Once per process: a second load must not repeat the warnings.
+      warnSpy.mockClear();
+      getConfig('/tmp/legacy-env-test-2');
+      expect(
+        warnSpy.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('has no effect in v1.0.0'),
+        ),
+      ).toBe(false);
+      delete process.env['PROXY_URL'];
+      delete process.env['PI_RESEARCH_VERBOSE'];
+    });
+
+    it('stays silent when no legacy variable is present', async () => {
+      const { logger } = await import('../../src/logger.ts');
+      delete process.env['PROXY_URL'];
+      const warnSpy = vi.spyOn(logger, 'warn');
+      getConfig('/tmp/legacy-env-clean');
+      expect(
+        warnSpy.mock.calls.some(
+          (c) => typeof c[0] === 'string' && c[0].includes('has no effect in v1.0.0'),
+        ),
+      ).toBe(false);
     });
   });
 

@@ -13,6 +13,9 @@ export default defineConfig({
   test: {
     ...baseConfig.test,
     name: 'integration-serial',
+    // Clear mock call history before every test so no test silently depends on
+    // calls recorded by an earlier test (implementations are preserved).
+    clearMocks: true,
     include: [
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',

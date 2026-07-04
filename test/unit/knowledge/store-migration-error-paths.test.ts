@@ -71,7 +71,16 @@ describe('KnowledgeStore Migration Error Paths', () => {
     await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
     await store1.close();
 
-    vi.mocked(fsPromises.rename).mockRejectedValueOnce(new Error('Rename failed'));
+    // Fail only the migration DIR rename — saveManifest also calls rename (for
+    // its atomic tmp→manifest swap, including the pre-drop crash-safety save)
+    // and those must succeed for this scenario.
+    const actualRename = (await vi.importActual('node:fs/promises') as any).rename;
+    vi.mocked(fsPromises.rename).mockImplementation(async (src: any, dest: any) => {
+      if (String(dest).endsWith(`${path.sep}knowledge.lance`)) {
+        throw new Error('Rename failed');
+      }
+      return actualRename(src, dest);
+    });
 
     await store.initialize();
 
@@ -81,6 +90,66 @@ describe('KnowledgeStore Migration Error Paths', () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
     expect(manifest.activeTableName).toMatch(/^knowledge_migration_/);
     expect(await store.count()).toBe(1);
+
+    // vi.restoreAllMocks() does not reset vi.fn() module mocks — put the
+    // pass-through implementation back for the remaining tests.
+    vi.mocked(fsPromises.rename).mockImplementation(actualRename);
+  });
+
+  it('migrationReEmbed survives a crash between dropping the old table and the dir rename (manifest already points at temp table; prune spares it)', async () => {
+    // Crash window under test: the old table has been dropped, the temp
+    // `_migration_` dir holds the only copy of the data, and the process dies
+    // before the rename + post-rename manifest save run. We capture the exact
+    // on-disk state at that instant (from inside the rename mock) and reopen a
+    // fresh store on the snapshot, as a restarted process would.
+    const crashDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-migration-crash-test-'));
+    try {
+      const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+        embedder: mockEmbedder,
+        modelName: 'model-a' });
+      await store1.initialize();
+      await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+      await store1.close();
+
+      const actualRename = (await vi.importActual('node:fs/promises') as any).rename;
+      vi.mocked(fsPromises.rename).mockImplementation(async (src: any, dest: any) => {
+        // Snapshot only on the migration dir rename (saveManifest also renames).
+        if (String(dest).endsWith(`${path.sep}knowledge.lance`)) {
+          fs.rmSync(crashDir, { recursive: true, force: true });
+          fs.cpSync(testDbDir, crashDir, { recursive: true });
+        }
+        return actualRename(src, dest);
+      });
+
+      store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+        embedder: mockEmbedder,
+        modelName: 'model-b',
+        migrationStrategy: 're-embed' });
+      await store.initialize();
+      await store.close();
+
+      // At the crash instant the manifest must already reference the temp
+      // table (the only one containing the data), not the dropped old name.
+      const crashManifest = JSON.parse(fs.readFileSync(path.join(crashDir, 'store-manifest.json'), 'utf-8'));
+      expect(crashManifest.activeTableName).toMatch(/^knowledge_migration_/);
+
+      // A restarted process opens the temp table via the manifest, and
+      // pruneOrphanedMigrationDirs must NOT reap the manifest-referenced dir.
+      const restarted = new KnowledgeStore({ knowledgeMode: "project", dbDir: crashDir,
+        embedder: mockEmbedder,
+        modelName: 'model-b',
+        migrationStrategy: 're-embed' });
+      await restarted.initialize();
+      expect(await restarted.count()).toBe(1);
+      expect(fs.existsSync(path.join(crashDir, `${crashManifest.activeTableName}.lance`))).toBe(true);
+      await restarted.close();
+    } finally {
+      // vi.restoreAllMocks() does not reset vi.fn() module mocks — put the
+      // pass-through implementation back for the remaining tests.
+      const actual = (await vi.importActual('node:fs/promises') as any).rename;
+      vi.mocked(fsPromises.rename).mockImplementation(actual);
+      fs.rmSync(crashDir, { recursive: true, force: true });
+    }
   });
 
   it('migrationReEmbed failure falls back to drop strategy', async () => {

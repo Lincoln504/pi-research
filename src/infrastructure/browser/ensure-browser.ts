@@ -80,7 +80,13 @@ function runFetch(): Promise<void> {
     const [cmd, args] = bin ? [bin, ['fetch']] : ['npx', ['camoufox-js', 'fetch']];
     logger.info(`[ensure-browser] Camoufox not found; fetching the browser (this runs once, ~100MB): ${cmd} ${args.join(' ')}`);
 
-    const child = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+    // Windows needs shell:true to run the .cmd shim (Node CVE-2024-27980 fix makes a
+    // shell-less spawn of .cmd throw EINVAL), but shell:true performs NO quoting, so a
+    // spaced install path (C:\Users\John Smith\…) must be quoted explicitly. The args
+    // here are fixed literals ('fetch'), never user input, so quoting the command alone
+    // is sufficient and this stays injection-free.
+    const useShell = process.platform === 'win32';
+    const child = spawn(useShell ? `"${cmd}"` : cmd, args, { stdio: 'inherit', shell: useShell });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`camoufox fetch timed out after ${FETCH_TIMEOUT_MS}ms`));

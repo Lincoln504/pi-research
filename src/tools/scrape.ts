@@ -21,7 +21,9 @@ import {
   BATCH_2_DEFAULT_CONCURRENCY,
   getMaxScrapeBatches,
   DEFAULT_MODEL_CONTEXT_WINDOW,
+  MAX_SCRAPE_CONTENT_CHARS_PER_DOC,
 } from '../constants.ts';
+import { truncateWithMarker } from '../utils/text-utils.ts';
 import { type Config, getConfig } from '../config.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -311,7 +313,13 @@ export function createScrapeTool(options: {
         
         markdown += `### ${res.url}\n`;
         markdown += `**${sourceLabel}**\n\n`;
-        markdown += `${res.markdown || ''}\n\n---\n\n`;
+        // Per-document cap on content entering LLM context. The scraper caps only
+        // raw bytes (25MB HTML / 100MB PDF), so a single huge document could
+        // otherwise inject hundreds of thousands of tokens into the researcher
+        // session and overflow its context window. Applies uniformly to fresh
+        // scrapes, session-cache re-serves, and knowledge-store rebuilds (which
+        // may hold uncapped documents persisted before this cap existed).
+        markdown += `${truncateWithMarker(res.markdown || '', MAX_SCRAPE_CONTENT_CHARS_PER_DOC)}\n\n---\n\n`;
       }
 
       if (failedFresh.length > 0) {

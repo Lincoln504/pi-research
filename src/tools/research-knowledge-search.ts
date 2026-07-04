@@ -805,6 +805,17 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
+
+      // Defensive validation (same pattern as the sibling search/scrape tools):
+      // a string `queries` would otherwise iterate per-character downstream.
+      if (!Value.Check(ResearchKnowledgeSearchParams, params)) {
+        metrics.increment('research_knowledge_search_total', 1, { status: 'invalid_params' });
+        return {
+          content: [{ type: 'text', text: 'Invalid parameters for research_knowledge_search. Expected an array of 1-5 query strings.' }],
+          details: { error: 'invalid_parameters' },
+        };
+      }
+
       const p = params as ResearchKnowledgeSearchParams;
       const container = tryGetServiceContainerFromCtx(ctx);
       // Prefer a config the caller already resolved and placed on the context
@@ -818,6 +829,14 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
       showKnowledgeSearchWidget(ctx);
 
       try {
+        // Live-config gate: honor a mid-session Knowledge Mode switch to 'none'
+        // immediately. An already-INITIALIZED store would otherwise keep serving
+        // searches the user just disabled (the reverse direction, none→enabled,
+        // revives via the getService call below).
+        if (config.KNOWLEDGE_STORE_MODE === 'none') {
+          return missResult('store_disabled');
+        }
+
         // ----------------------------------------------------------
         // Service resolution via central registry
         // ----------------------------------------------------------

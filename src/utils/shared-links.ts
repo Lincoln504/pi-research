@@ -9,6 +9,8 @@ import { normalizeUrl } from './url-utils.ts';
 export { normalizeUrl };
 import { logger } from '../logger.ts';
 import { safeUnref } from './safe-unref.ts';
+import { truncateWithMarker } from './text-utils.ts';
+import { MAX_SCRAPE_CONTENT_CHARS_PER_DOC } from '../constants.ts';
 import { randomUUID } from 'node:crypto';
 
 const sessionLinks = new Map<string, Set<string>>();
@@ -69,7 +71,11 @@ export function cacheScrapedContent(researchId: string, url: string, content: st
         const firstKey = cache.keys().next().value;
         if (firstKey !== undefined) cache.delete(firstKey);
     }
-    cache.set(key, content);
+    // Byte-bound each entry: the cache was previously only COUNT-capped (500
+    // entries), so 500 × multi-MB documents could grow unbounded in memory —
+    // and cached entries are re-served verbatim into researcher LLM sessions
+    // (scrape duplicate path) and embedded by the knowledge-store writer.
+    cache.set(key, truncateWithMarker(content, MAX_SCRAPE_CONTENT_CHARS_PER_DOC));
 }
 
 /**

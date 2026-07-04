@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { KnowledgeStore } from '../../../src/knowledge/store.ts';
+import { KnowledgeStore, isLanceCommitConflict } from '../../../src/knowledge/store.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
@@ -191,5 +191,59 @@ describe('KnowledgeStore Error Recovery', () => {
     
     expect(addCalls).toBe(2);
     expect(await store.count()).toBe(2);
+  });
+
+  it('write contention retry loop retries on the real LanceDB 0.29 "Commit conflict" message', async () => {
+    // The pre-fix matcher only knew 'Version mismatch'/'Lock error'/'Commit error' —
+    // none of which LanceDB 0.29 emits — so every real cross-process conflict fell
+    // through to a hard throw and the batch was dropped. This proves the real
+    // message now reaches the retry path end-to-end.
+    await store.addDocuments([{ url: 'https://init2.com', text: 'init', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+
+    const db = (store as any).db;
+    const originalOpenTable = db.openTable.bind(db);
+    let addCalls = 0;
+
+    vi.spyOn(db, 'openTable').mockImplementation(async (name) => {
+      const table = await originalOpenTable(name);
+      const originalAdd = table.add.bind(table);
+      table.add = vi.fn().mockImplementation(async (data) => {
+        addCalls++;
+        if (addCalls === 1) throw new Error('Commit conflict for version 42: a concurrent transaction committed first');
+        return originalAdd(data);
+      });
+      return table;
+    });
+
+    await store.addDocuments([{ url: 'https://real-conflict.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+
+    expect(addCalls).toBe(2);
+    expect(await store.count()).toBe(2);
+  });
+});
+
+describe('isLanceCommitConflict', () => {
+  it('matches the three REAL LanceDB 0.29 concurrent-write conflict messages', () => {
+    // Strings confirmed present in the @lancedb 0.29.0 native binary.
+    expect(isLanceCommitConflict(new Error('Commit conflict for version 7: another writer won'))).toBe(true);
+    expect(isLanceCommitConflict(new Error('Retryable commit conflict for version 12'))).toBe(true);
+    expect(isLanceCommitConflict(new Error('Too many concurrent writes, please retry later: backpressure'))).toBe(true);
+  });
+
+  it('keeps matching the legacy strings as a safety net', () => {
+    expect(isLanceCommitConflict(new Error('Version mismatch: concurrent writer'))).toBe(true);
+    expect(isLanceCommitConflict(new Error('Lock error acquiring table lock'))).toBe(true);
+    expect(isLanceCommitConflict(new Error('Commit error: something'))).toBe(true);
+  });
+
+  it('accepts non-Error throwables', () => {
+    expect(isLanceCommitConflict('Retryable commit conflict for version 3')).toBe(true);
+  });
+
+  it('does not match unrelated errors', () => {
+    expect(isLanceCommitConflict(new Error('ECONNREFUSED'))).toBe(false);
+    expect(isLanceCommitConflict(new Error('Table not found: knowledge'))).toBe(false);
+    expect(isLanceCommitConflict(new Error('embedder poisoned; leader stepping down'))).toBe(false);
+    expect(isLanceCommitConflict(null)).toBe(false);
   });
 });

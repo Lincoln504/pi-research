@@ -77,6 +77,11 @@ See [Agent skill](docs/AGENT-SKILL.md) for details.
 
 The first install pulls the stealth browser engine, which takes a few minutes.
 
+On Windows, run the CLI from `cmd` or use `pi-research.cmd` — stock PowerShell
+execution policy (`Restricted`) blocks npm's `.ps1` shims with a "running
+scripts is disabled" error. Alternatively run
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
 ### Stability (v1.x.x)
 
 v0.1.13 (April 2026) was the last release before a rebuild against current pi APIs
@@ -87,4 +92,5 @@ and the stealth-browser stack. v1.0.0 is the first stable release since. Channel
 
 ### License
 
-MIT
+MIT. Bundled third-party licenses are listed in
+[docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md).

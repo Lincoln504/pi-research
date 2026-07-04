@@ -253,9 +253,10 @@ export function extractJsonArray<T = unknown>(
  * Extract JSON with fallback chain
  *
  * Tries multiple extraction methods in order:
- * 1. Code blocks (most reliable)
- * 2. Raw JSON object (for objects)
- * 3. Raw JSON array (for arrays)
+ * 1. Direct parse of the whole trimmed string (the payload IS the JSON)
+ * 2. Code blocks
+ * 3. Raw JSON object (for objects)
+ * 4. Raw JSON array (for arrays)
  *
  * @param text - Text to extract JSON from
  * @param targetType - Whether to expect 'object', 'array', or 'any'
@@ -265,7 +266,25 @@ export function extractJson<T = unknown>(
   text: string,
   targetType: 'object' | 'array' | 'any' = 'any'
 ): JsonExtractionResult<T> {
-  // Try code blocks first (most reliable)
+  // Direct parse first: when the entire response is the JSON payload, a fenced
+  // ```json example embedded INSIDE one of its string values must not win —
+  // code-block-first extraction would latch onto that example and return it
+  // instead of the real payload.
+  try {
+    const direct = JSON.parse(text.trim());
+    const isArray = Array.isArray(direct);
+    const typeMatches =
+      targetType === 'any' ||
+      (targetType === 'array' ? isArray : !isArray && direct !== null && typeof direct === 'object');
+    if (typeMatches && direct !== null && typeof direct === 'object') {
+      logger.debug('[json-utils] Extracted JSON via direct parse of full text');
+      return { success: true, value: direct as T, method: isArray ? 'raw-array' : 'raw-object' };
+    }
+  } catch {
+    // Not a pure-JSON payload — fall through to the extraction chain.
+  }
+
+  // Try code blocks next (most reliable for mixed prose+JSON responses)
   const codeBlockResult = extractJsonFromCodeBlocks<T>(text);
   if (codeBlockResult.success) {
     logger.debug('[json-utils] Extracted JSON from code block');

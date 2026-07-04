@@ -389,6 +389,16 @@ export class DeepResearchOrchestrator {
             }, researcherLinks, storeLinks);
         }
 
+        // Esc/abort responsiveness: runResearchers returns NORMALLY when the signal
+        // fires (researchers are individually aborted), so without this check a
+        // cancelled run would still perform the full post-round embedding pass
+        // (storeLinkDescriptions → writer.drain) before the loop-top guard throws.
+        // Throw here instead — the catch below returns the partial fallback report.
+        // Skipping the store pass is safe: nothing has been enqueued for this round
+        // yet, and the FTS rebuild is an optimization pass (see cleanup below), not
+        // required for durability of previously drained rows.
+        if (signal?.aborted) throw new Error('Research aborted');
+
         // 4. Store synthesized descriptions for semantic search
         // Show embedding indicator in eval box while embedding runs
         observer?.onEvaluationProgress?.('embedding');
@@ -414,6 +424,18 @@ export class DeepResearchOrchestrator {
         observer?.onEvaluationStart?.(maxRounds);
         observer?.onEvaluationProgress?.('evaluating');
       }
+
+      // Final synthesis is beginning: flip steering OFF *before* the final drain
+      // below. Ordering matters — there is no next round, so a message queued after
+      // the drain would show the affirmative "will steer the next research round"
+      // toast and then be destroyed at teardown. With the flag off first (this and
+      // the consume run synchronously — no interleaving window), any later steer
+      // takes the input handler's fall-through path (forwarded to pi, accurate
+      // toast). On the evaluator-chose-synthesize path this is idempotent: the
+      // observer already flipped the flag in onEvaluationDecision('synthesize').
+      // NOTE: this must also come after the onEvaluationStart above, which re-sets
+      // the flag to true (correct for in-loop evaluations, wrong for this final one).
+      observer?.onSynthesisStart?.();
 
       // One final check for new steering messages before synthesis. Done for BOTH
       // exit paths: a message arriving after the evaluator chose 'synthesize' (the
@@ -546,7 +568,13 @@ export class DeepResearchOrchestrator {
       // Mirrors QuickResearchOrchestrator's guarded cleanup.
       try {
         const orch = await this.getOrchestrationService();
-        await orch.cleanupResearchServices(undefined, researchId, ctx, this.config);
+        // On user abort, skip the post-run FTS rebuild + optimize: they are
+        // non-signal-aware optimization passes (durability lives in the LanceDB
+        // commits already made) and would block Esc from returning promptly.
+        // Any rows the run committed are picked up by the next run's start-of-run
+        // cleanup (which performs the same rebuild) or the next completed run.
+        await orch.cleanupResearchServices(undefined, researchId, ctx, this.config,
+          { skipStoreMaintenance: signal?.aborted === true });
       } catch (cleanupErr) {
         logger.warn('[DeepOrchestrator] Failed to cleanup research services:', cleanupErr);
       }

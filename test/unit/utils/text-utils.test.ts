@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractText, ensureAssistantResponse, parseCitations, stripThinkingTags } from '../../../src/utils/text-utils';
+import { extractText, ensureAssistantResponse, parseCitations, stripThinkingTags, truncateWithMarker } from '../../../src/utils/text-utils';
 
 describe('text-utils', () => {
   describe('extractText', () => {
@@ -330,6 +330,52 @@ describe('text-utils', () => {
       const report = `cited links\n[1] https://example.com — Found\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('truncateWithMarker', () => {
+    it('returns content unchanged when at or under the cap', () => {
+      expect(truncateWithMarker('short content', 1000)).toBe('short content');
+      const exact = 'a'.repeat(100);
+      expect(truncateWithMarker(exact, 100)).toBe(exact);
+    });
+
+    it('truncates oversized content with an explicit marker and bounded total length', () => {
+      const content = ('lorem ipsum dolor sit amet\n').repeat(1000); // 27k chars
+      const out = truncateWithMarker(content, 5000);
+      expect(out.length).toBeLessThanOrEqual(5000);
+      expect(out).toMatch(/\[content truncated: showing \d+ of 27000 chars\]$/);
+      // Body is a prefix of the original
+      const body = out.slice(0, out.indexOf('\n\n[content truncated'));
+      expect(content.startsWith(body)).toBe(true);
+    });
+
+    it('cuts at a clean boundary (no mid-word split) when one is near the cut point', () => {
+      const content = ('word '.repeat(10000)).trim(); // spaces throughout
+      const out = truncateWithMarker(content, 2000);
+      const body = out.slice(0, out.indexOf('\n\n[content truncated'));
+      // Ends exactly on a full word, not a fragment
+      expect(body.endsWith('word')).toBe(true);
+    });
+
+    it('is idempotent — re-applying the same cap to truncated output is a no-op', () => {
+      const content = 'x'.repeat(500_000);
+      const once = truncateWithMarker(content, 80_000);
+      const twice = truncateWithMarker(once, 80_000);
+      expect(twice).toBe(once);
+      // No nested markers
+      expect(once.match(/\[content truncated/g)!.length).toBe(1);
+    });
+
+    it('reports accurate shown/total counts in the marker', () => {
+      const content = 'b'.repeat(10_000);
+      const out = truncateWithMarker(content, 1000);
+      const m = out.match(/\[content truncated: showing (\d+) of (\d+) chars\]$/);
+      expect(m).not.toBeNull();
+      const shown = parseInt(m![1]!, 10);
+      expect(parseInt(m![2]!, 10)).toBe(10_000);
+      const body = out.slice(0, out.indexOf('\n\n[content truncated'));
+      expect(body.length).toBe(shown);
     });
   });
 });

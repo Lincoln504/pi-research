@@ -38,7 +38,6 @@ export interface ISchedulerInternals extends IService {
  */
 export interface ISchedulerService extends IService {
   isReady(): boolean;
-  ensureScheduler(config?: Config, ctx?: any): Promise<IScheduler>;
   getScheduler(): IScheduler | null;
 }
 

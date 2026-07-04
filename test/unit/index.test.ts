@@ -139,6 +139,39 @@ describe('extension entrypoint', () => {
     expect(result.systemPrompt).not.toContain('MOCK_USAGE_PROMPT');
   });
 
+  it('does NOT append steering to researcher sub-agent prompts (executor copy is authoritative)', async () => {
+    // Regression: every researcher received each steering message TWICE — once from
+    // the executor/quick-orchestrator system-prompt injection ("ADDITIONAL USER
+    // GUIDANCE") and once more from this hook ("ADDITIONAL CONSIDERATIONS").
+    const { addSteeringMessage, registerSessionPanel, clearAllSessionState } =
+      await import('../../src/orchestration/session-state.ts');
+    const { pi, handlers } = createPiMock();
+    await activate(pi as any);
+
+    try {
+      // Make steering visible to the hook: a queued message + one active research run.
+      addSteeringMessage(undefined, 'focus on X');
+      registerSessionPanel(undefined, 'run-1', {} as any);
+
+      const researcherEvent = { systemPrompt: 'RESEARCHER_AGENT_MARKER body', prompt: 'go' };
+      const researcherResult = await handlers.get('before_agent_start')?.(researcherEvent, {});
+      expect(researcherResult.systemPrompt).toBe('RESEARCHER_AGENT_MARKER body');
+      expect(researcherResult.systemPrompt).not.toContain('ADDITIONAL CONSIDERATIONS');
+
+      // Sanity: the HOST agent (non-researcher) still gets the steering injection.
+      const hostEvent = {
+        systemPrompt: 'ORIGINAL',
+        prompt: 'go',
+        systemPromptOptions: { selectedTools: ['bash'] },
+      };
+      const hostResult = await handlers.get('before_agent_start')?.(hostEvent, {});
+      expect(hostResult.systemPrompt).toContain('ADDITIONAL CONSIDERATIONS');
+      expect(hostResult.systemPrompt).toContain('focus on X');
+    } finally {
+      clearAllSessionState();
+    }
+  });
+
   describe('/research slash command', () => {
     it('registers the research command', async () => {
       const { pi, commands } = createPiMock();

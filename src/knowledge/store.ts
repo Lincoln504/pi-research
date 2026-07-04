@@ -28,6 +28,25 @@ import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import { normalizeWorkspacePath } from '../utils/text-utils.ts';
 
+/**
+ * Detect a LanceDB concurrent-write conflict — the class of error worth retrying
+ * with backoff. LanceDB 0.29 surfaces these as "Commit conflict for version N",
+ * "Retryable commit conflict for version N" and "Too many concurrent writes,
+ * please retry later:" (strings confirmed in the 0.29.0 native binary). The three
+ * legacy strings ("Version mismatch" / "Lock error" / "Commit error") no longer
+ * appear in 0.29 but are kept as a safety net for other/older Lance versions.
+ */
+export function isLanceCommitConflict(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /commit conflict/i.test(msg) ||
+    /too many concurrent writes/i.test(msg) ||
+    msg.includes('Version mismatch') ||
+    msg.includes('Lock error') ||
+    msg.includes('Commit error')
+  );
+}
+
 export interface StoreOptions {
   dbDir: string;
   embedder: IEmbedder;
@@ -123,17 +142,20 @@ export class KnowledgeStore implements IKnowledgeStore {
     }
   }
 
-  private async saveManifest(): Promise<void> {
+  /** @returns true if the manifest was durably written, false on failure (logged). */
+  private async saveManifest(): Promise<boolean> {
     const tempPath = `${this.manifestPath}.tmp`;
     try {
       const content = JSON.stringify({ activeTableName: this.tableName }, null, 2);
       await fsPromises.writeFile(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
       await fsPromises.rename(tempPath, this.manifestPath);
+      return true;
     } catch (err) {
       logger.warn('[store] Failed to save manifest:', err);
       if (fs.existsSync(tempPath)) {
         try { await fsPromises.unlink(tempPath); } catch { /* ignore */ }
       }
+      return false;
     }
   }
 
@@ -424,6 +446,21 @@ export class KnowledgeStore implements IKnowledgeStore {
       logger.info(`[store] Migration successful, dropping old table ${this.tableName}...`);
       const canonicalName = 'knowledge'; // We try to return to the canonical name if possible
       const oldTableName = this.tableName;
+
+      // Crash-ordering constraint: point the manifest at the fully populated
+      // temp table BEFORE dropping the old one. If the process dies between the
+      // drop and the post-rename manifest save below, the next startup would
+      // otherwise open the (now-dropped) old name, create an empty table under
+      // it, and pruneOrphanedMigrationDirs would reap the temp dir — the only
+      // remaining copy of the data. With this save, a manifest referencing a
+      // table that contains the data exists at every instant, and prune never
+      // touches the manifest-referenced dir. If the save fails, abort while the
+      // old table is still intact.
+      this.tableName = tempTableName;
+      if (!(await this.saveManifest())) {
+        this.tableName = oldTableName;
+        throw new Error(`Cannot persist manifest for ${tempTableName}; aborting before dropping ${oldTableName}`);
+      }
       await this.db.dropTable(oldTableName);
 
       // LanceDB has no rename API, but its tables are plain directories on disk.
@@ -583,9 +620,8 @@ export class KnowledgeStore implements IKnowledgeStore {
             );
             return;
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            // Detect version mismatch or lock errors typical of cross-process contention
-            if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+            // Detect commit conflicts typical of cross-process write contention
+            if (isLanceCommitConflict(err)) {
               retryCount++;
               if (retryCount > MAX_RETRIES) throw err;
 
@@ -658,8 +694,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         logger.log(`[store] Deleted chunks for ${url} (scoped)`);
         return;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+        if (isLanceCommitConflict(err)) {
           retryCount++;
           if (retryCount > MAX_RETRIES) throw err;
           const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
@@ -700,8 +735,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         logger.log(`[store] Deleted ${ingestionType} chunks for ${url} (scoped)`);
         return;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+        if (isLanceCommitConflict(err)) {
           retryCount++;
           if (retryCount > MAX_RETRIES) throw err;
           const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
@@ -1109,8 +1143,7 @@ export class KnowledgeStore implements IKnowledgeStore {
 
           return { local, global, projects: uniqueWorkspaces.size };
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+          if (isLanceCommitConflict(err)) {
             retryCount++;
             if (retryCount > MAX_RETRIES) throw err;
             const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
@@ -1152,8 +1185,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         logger.info(`[store] Knowledge store cleared for scope: ${scopeFilter}`);
         return;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+        if (isLanceCommitConflict(err)) {
           retryCount++;
           if (retryCount > MAX_RETRIES) {
             metrics.increment('knowledge_store_clear_total', 1, { status: 'error' });

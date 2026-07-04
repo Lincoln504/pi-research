@@ -199,6 +199,36 @@ describe('ResearchSynthesisService', () => {
       const input = 'Some findings.\n\nCITED LINKS\n[1] https://example.com - desc';
       expect(service.ensureCitedLinks('test-session', input)).toBe(input);
     });
+
+    it('remaps inline [N] markers when the rebuilt list renumbers entries (quick-mode desync)', () => {
+      // Quick mode: the synthesis IS the single report. Its own list numbers a
+      // duplicate URL as [1] and [2]; dedup collapses them, shifting [3] → [2].
+      const report = [
+        'Fact from the first source [1]. Same source again [2]. Fact from the other source [3].',
+        '',
+        'CITED LINKS',
+        '[1] https://dup.example.com/page',
+        'Source: Scrape',
+        'Description: First listing of the page.',
+        '[2] https://dup.example.com/page',
+        'Source: Scrape',
+        'Description: Duplicate listing of the same page.',
+        '[3] https://unique.example.com/other',
+        'Source: Scrape',
+        'Description: A different page.',
+      ].join('\n');
+      service.storeReport('test-session', '1.A', report);
+
+      const result = service.ensureCitedLinks('test-session', report);
+      const [body = '', links = ''] = result.split(/^CITED LINKS$/m);
+      // The rebuilt list has exactly two entries…
+      expect(links).toContain('[1] https://dup.example.com/page');
+      expect(links).toContain('[2] https://unique.example.com/other');
+      expect(links).not.toContain('[3]');
+      // …and the body's marker for the unique source follows the renumbering.
+      expect(body).toContain('Fact from the other source [2].');
+      expect(body).not.toContain('[3]');
+    });
   });
 
   // ─── appendSteeringGuidance ──────────────────────────────────────────────────

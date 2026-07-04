@@ -304,12 +304,20 @@ function launch(engine: ResolvedEngine): void {
     }
   }
 
-  const child = spawn(target, runArgv, {
-    stdio: 'inherit',
-    env: process.env,
-    windowsHide: true,
-    ...(useShell ? { shell: true } : {}),
-  });
+  // shell:true performs NO quoting, so a spaced shim path or a multi-word query would
+  // be word-split by cmd.exe. The metacharacter guard above already refused anything
+  // containing `"` (and every other cmd.exe special), so plain double-quoting each
+  // token is safe and cannot itself be escaped out of.
+  const child = spawn(
+    useShell ? `"${target}"` : target,
+    useShell ? runArgv.map((a) => `"${a}"`) : runArgv,
+    {
+      stdio: 'inherit',
+      env: process.env,
+      windowsHide: true,
+      ...(useShell ? { shell: true } : {}),
+    },
+  );
 
   child.on('error', (err) => {
     process.stderr.write(`\nError: failed to launch pi-research (${engine.label}): ${err.message}\n`);
@@ -331,7 +339,7 @@ function printUsage(): void {
       'research skill — pi-research launcher',
       '',
       'USAGE',
-      '  node run.mjs research  "<query>" [--depth <1|2|3>] [--model provider/id]',
+      '  node run.mjs research  "<query>" [--depth <0|1|2|3>] [--model provider/id]',
       '  node run.mjs knowledge "<query>" ["<q2>" ...]',
       '  node run.mjs knowledge-config [set <none|project|global>]',
       '  node run.mjs status [--json]',

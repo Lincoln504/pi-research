@@ -265,6 +265,12 @@ describe('parseArgs — research', () => {
     expect(() => parseArgs(['node', 'cli.mjs', 'research'])).toThrow(UsageError);
   });
 
+  it('research --initial-links without a query → UsageError up front (links-only was a dead path: exit 64 later anyway)', () => {
+    expect(() =>
+      parseArgs(['node', 'cli.mjs', 'research', '--initial-links', 'https://a.com']),
+    ).toThrow(/requires a query.*--initial-links/);
+  });
+
   it('-- terminates flags and rest becomes query', () => {
     const r = parseArgs(['node', 'cli.mjs', 'research', '--', '--looks-like-a-flag']);
     expect(r.research?.query).toBe('--looks-like-a-flag');
@@ -562,3 +568,4 @@ describe('skill launcher subprocess', () => {
     expect(r.status).toBe(64);
   });
 });
+

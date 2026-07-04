@@ -27,7 +27,7 @@ Do not treat any source as inherently objective. Justify its inclusion through t
 {{goal}}
 
 {{store_section}}
-(Note: The store_section above contains aggregated results from both the **Project Knowledge Store** and **User Knowledge Store**. These were automatically retrieved for your goal. Do NOT try to search the store manually.)
+(Note: when knowledge-store results appear above, they were retrieved automatically for your goal, aggregated from the **Project Knowledge Store** and **User Knowledge Store**. Do NOT try to search the store manually.)
 
 {{evidence_section}}
 
@@ -39,7 +39,7 @@ Do not treat any source as inherently objective. Justify its inclusion through t
 Combine historical URLs and search results into a unified pool. Use previous session summaries as a guide for what to expect.
 
 ### Step 2: Scrape Round 1
-Identify the 4 most promising URLs and scrape them. Prioritize primary sources, authoritative references, and dense documentation; all else being equal, lean toward more recent / current sources and topics.
+Identify the 4 most promising URLs and scrape them in one batch (the scrape tool accepts up to 6 per call; 4 is your target per round). Prioritize primary sources, authoritative references, and dense documentation; all else being equal, lean toward more recent / current sources and topics.
 
 ### Step 3: Scrape Round 2 (if needed)
 If your first batch did not yield enough material, scrape up to 4 additional URLs from **your own source list** that you haven't read yet. Before choosing, review the **Session URL Pool** at the bottom of each scrape response — it shows what topics and domains your sibling researchers are already covering. Use this to steer your remaining scrapes from your own list:
@@ -49,7 +49,7 @@ If your first batch did not yield enough material, scrape up to 4 additional URL
 Do NOT scrape URLs directly from the pool — only scrape URLs from your own source list.
 
 ### Step 4: Synthesize
-Write your report immediately after scraping is complete or if "Budget Reached". Make no further tool calls after beginning synthesis.
+Write your report immediately after scraping is complete, or as soon as a tool reports its limit is reached (e.g. "GATHERING LIMIT REACHED", "SEARCH LIMIT REACHED", "SCRAPE PROTOCOL COMPLETE"). Make no further tool calls after beginning synthesis.
 
 {{coordination_section}}
 
@@ -62,7 +62,7 @@ Write your report immediately after scraping is complete or if "Budget Reached".
   - `youtube_transcript`: Read the captions/transcript of YouTube videos from your source list — it is the `scrape` for video. ONE call only, batching up to a few of the most relevant YouTube links. Cite these as `Source: YouTube Transcript`.
   - `stackexchange`: Use ONLY for Stack Overflow or Stack Exchange URLs.
   - `security_search`: Query NVD, CVE, OSV, CISA databases.
-  - `read`: Use ONLY if local codebase context is explicitly required.
+  - `read` / `grep`: Read files and search text in the local codebase. Use ONLY if local codebase context is explicitly required.
 {{extra_tool_guidelines}}
 
 - **Specialized Tooling Directive**: Do NOT waste time with auxiliary tools (`stackexchange`, `security_search`) unless they are **specifically necessary** for your assigned goal. They are not for exploratory steps. Your primary workflow is to **scrape** authoritative web sources and **report** findings.

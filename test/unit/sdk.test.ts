@@ -9,9 +9,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ─── Hoisted stubs ───────────────────────
 
-const { mockDeepRun, mockQuickRun, mockSetLogger, mockCreateLogger } = vi.hoisted(() => ({
+// Both runDeepResearch and runQuickResearch route through the single
+// 'research-orchestration' service's runResearch() (quick = depth 0), so one
+// orchestrator stub covers both entry points.
+const { mockDeepRun, mockSetLogger, mockCreateLogger } = vi.hoisted(() => ({
   mockDeepRun: vi.fn().mockResolvedValue('deep result'),
-  mockQuickRun: vi.fn().mockResolvedValue('quick result'),
   mockSetLogger: vi.fn(),
   mockCreateLogger: vi.fn().mockReturnValue({ verbose: true }),
 }));
@@ -129,6 +131,7 @@ vi.mock('../../src/config.ts', () => ({
 import {
   initResearchSDK,
   runDeepResearch,
+  runQuickResearch,
   shutdownResearchSDK,
   getLastRunMetrics,
   getLastRunSummary,
@@ -161,7 +164,6 @@ describe('SDK Lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDeepRun.mockClear().mockResolvedValue('deep result');
-    mockQuickRun.mockClear().mockResolvedValue('quick result');
     mockSetLogger.mockClear();
     mockCreateLogger.mockClear().mockReturnValue({ verbose: true });
     
@@ -273,6 +275,22 @@ describe('SDK Lifecycle', () => {
       // getLastRunStats() and getSessionMetrics() must be callable without throwing.
       expect(() => getLastRunStats()).not.toThrow();
       expect(getSessionMetrics()).toHaveProperty('counters');
+    });
+  });
+
+  describe('runQuickResearch', () => {
+    it('throws "not initialized" before init', async () => {
+      await expect(runQuickResearch('q')).rejects.toThrow('SDK not initialized');
+    });
+
+    it('delegates to the orchestrator with depth 0 and returns its result', async () => {
+      await initSDK();
+      const result = await runQuickResearch('quick q');
+      expect(result).toBe('deep result');
+      expect(mockDeepRun).toHaveBeenCalledOnce();
+      const passed = mockDeepRun.mock.calls[0]![0] as any;
+      expect(passed.query).toBe('quick q');
+      expect(passed.depth).toBe(0);
     });
   });
 });

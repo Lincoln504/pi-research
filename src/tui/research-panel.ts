@@ -59,6 +59,21 @@ export {
   parseAnsiFgColor as _parseAnsiFgColor,
 } from './research-panel-color-utils.ts';
 
+/**
+ * Center `display` inside a column of `w` terminal cells, measuring by DISPLAY
+ * width (visibleWidth), not code units. String.padStart/padEnd count UTF-16 code
+ * units, so a CJK/emoji label (2 cells per glyph, and 2 code units per emoji)
+ * produced rows whose visible width disagreed with the border rows — the box
+ * edges no longer lined up. Exported for tests as _centerPadToWidth.
+ */
+function centerPadToWidth(display: string, w: number): string {
+  const pad = Math.max(0, w - visibleWidth(display));
+  const left = Math.floor(pad / 2);
+  return ' '.repeat(left) + display + ' '.repeat(pad - left);
+}
+
+export { centerPadToWidth as _centerPadToWidth };
+
 function renderPanelBlock(
   state: ResearchPanelState,
   theme: Theme,
@@ -148,9 +163,12 @@ function renderPanelBlock(
       const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
       const nextIsEval = nextSliceId === 'eval';
 
-      // Top Border with Label
+      // Top Border with Label — all sizing by DISPLAY width. labelStr can be the
+      // quick-mode query (CJK/emoji): measuring with .length (code units) made the
+      // border row wider/narrower than the body rows, breaking box alignment.
       const labelPadding = 2; // Spaces around label
-      const totalLabelWidth = labelStr.length + labelPadding;
+      const labelWidth = visibleWidth(labelStr);
+      const totalLabelWidth = labelWidth + labelPadding;
 
       let topPart;
       if (isEval) {
@@ -166,8 +184,12 @@ function renderPanelBlock(
         const rightPad = sideWidth - leftPad;
         topPart = '─'.repeat(leftPad) + ' ' + labelStr + ' ' + '─'.repeat(rightPad);
       } else if (w >= 1 && labelStr.length > 0) {
-        // Tight space: show first char of label if possible
-        topPart = labelStr[0]!.slice(0, w).padEnd(w, '─');
+        // Tight space: show as much of the label as fits. truncateToWidth cuts at
+        // grapheme boundaries (never emits a lone surrogate, unlike the previous
+        // labelStr[0].slice(0, w)), and the '─' fill is sized by remaining CELLS
+        // (a single CJK first char occupies 2 cells, so padEnd-by-length overflowed).
+        const clipped = truncateToWidth(labelStr, w, '');
+        topPart = clipped + '─'.repeat(Math.max(0, w - visibleWidth(clipped)));
       } else {
         topPart = '─'.repeat(w);
       }
@@ -189,7 +211,7 @@ function renderPanelBlock(
         const rightPad = padding - leftPad;
         tokenStr = '╷' + ' '.repeat(leftPad) + labelDisplay + ' '.repeat(rightPad) + '╷';
       } else if (isIndicator) {
-        tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
+        tokenStr = centerPadToWidth('...', w);
       } else {
         // Identify the coordinator column by its stable slice id, not a label substring:
         // "planning"/"complexity" in the (possibly query-derived, in quick mode) label would
@@ -214,8 +236,9 @@ function renderPanelBlock(
             raw = formatTokens(tokens);
         }
 
-        const display = truncateToWidth(raw, w);
-        tokenStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
+        // Center by display width (padStart/padEnd count code units and misalign
+        // the box for wide/astral chars — e.g. a CJK status or query fragment).
+        tokenStr = centerPadToWidth(truncateToWidth(raw, w), w);
       }
 
       const rightWall12 = isEval ? '┊' : (nextIsEval ? '┊' : '│');
@@ -236,14 +259,12 @@ function renderPanelBlock(
         const rightPad = padding - leftPad;
         costStr = '╵' + ' '.repeat(leftPad) + labelDisplay + ' '.repeat(rightPad) + '╵';
       } else if (isIndicator) {
-        const display = truncateToWidth('...', w);
-        costStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
+        costStr = centerPadToWidth(truncateToWidth('...', w), w);
       } else {
         const isPlanning = sliceId === 'coord'; // coordinator column shows no per-column cost (see token row)
         const cost = slice?.cost || 0;
         const raw = (isPlanning || cost === 0) ? '' : formatCost(cost);
-        const display = truncateToWidth(raw, w);
-        costStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
+        costStr = centerPadToWidth(truncateToWidth(raw, w), w);
       }
       rightRawRows[2]!.push(costStr + rightWall12);
       const f2 = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
@@ -354,7 +375,7 @@ export function createMasterResearchPanel(
           }
 
           const maxWidth = Math.max(20, width - 4);
-          if (headerText.length > maxWidth) {
+          if (visibleWidth(headerText) > maxWidth) {
             if (pctStr) {
               const remainingLen = maxWidth - ` ${label}: ${pctStr} `.length;
               if (remainingLen > 6) {

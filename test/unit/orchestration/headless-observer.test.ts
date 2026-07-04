@@ -316,4 +316,30 @@ describe('HeadlessObserver', () => {
       }).not.toThrow();
     });
   });
+
+  describe('callback isolation', () => {
+    it('a throwing onProgress callback does not propagate into event dispatch', () => {
+      const observer = makeObserver({
+        onProgress: () => { throw new Error('SDK consumer bug'); },
+      });
+      expect(() => {
+        observer.onStart('q', 1);
+        observer.onComplete('done');
+        observer.onError(new Error('boom'));
+      }).not.toThrow();
+    });
+
+    it('logs the callback failure at debug and continues', async () => {
+      const { logger } = await import('../../../src/logger.ts');
+      vi.mocked(logger.debug).mockClear();
+      const observer = makeObserver({
+        onProgress: () => { throw new Error('SDK consumer bug'); },
+      });
+      observer.onComplete('done');
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('onProgress callback threw'),
+        expect.any(Error),
+      );
+    });
+  });
 });

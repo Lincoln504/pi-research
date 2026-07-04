@@ -591,6 +591,94 @@ describe('DeepResearchOrchestrator', () => {
     expect(onError).toHaveBeenCalledWith(testError);
   });
 
+  it('fires onSynthesisStart BEFORE the final steering drain and the forced synthesis call', async () => {
+    // Regression: on the maxRounds/mustSynthesize path, onEvaluationStart re-enabled
+    // steering and the last drain ran before the long synthesis call — a steer typed
+    // during forced synthesis was queued with an affirmative toast, then destroyed at
+    // teardown. The orchestrator must flip steering off (onSynthesisStart) first, THEN
+    // drain, THEN call the evaluator, so no message can be queued-and-stranded.
+    const events: string[] = [];
+    const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(consumeQueuedMessages).mockImplementation(() => {
+      events.push('consume');
+      return [];
+    });
+
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      if (opts.mustSynthesize) {
+        events.push('forcedSynthesisCall');
+        return { action: 'synthesize', content: 'Forced' };
+      }
+      events.push('inLoopEval');
+      return {
+        action: 'delegate',
+        researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+        allQueries: ['q'],
+      };
+    });
+
+    const onSynthesisStart = vi.fn(() => events.push('synthesisStart'));
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1, observer: { onSynthesisStart } });
+    const result = await orchestrator.run();
+
+    expect(result).toContain('Forced');
+    const flipIdx = events.indexOf('synthesisStart');
+    const finalDrainIdx = events.lastIndexOf('consume');
+    const forcedIdx = events.indexOf('forcedSynthesisCall');
+    expect(flipIdx).toBeGreaterThan(-1);
+    // flag off → final drain → synthesis call
+    expect(flipIdx).toBeLessThan(finalDrainIdx);
+    expect(finalDrainIdx).toBeLessThan(forcedIdx);
+  });
+
+  it('fires onSynthesisStart on the evaluator-chose-synthesize path too (idempotent flip)', async () => {
+    const onSynthesisStart = vi.fn();
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Direct' });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onSynthesisStart } });
+    await orchestrator.run();
+
+    expect(onSynthesisStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('on abort mid-round: skips storeLinkDescriptions and passes skipStoreMaintenance to cleanup', async () => {
+    // Esc/abort responsiveness: runResearchers returns normally on abort, so the
+    // orchestrator must not run the post-round embedding pass, and the finally must
+    // not run the (non-signal-aware) FTS rebuild + optimize.
+    const controller = new AbortController();
+    mockOrchestrationService.runResearchers.mockImplementation(async () => {
+      controller.abort();
+    });
+    mockSynthesisService.hasReports.mockReturnValue(false);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await expect(orchestrator.run(controller.signal)).rejects.toThrow('Research aborted');
+
+    expect(mockOrchestrationService.storeLinkDescriptions).not.toHaveBeenCalled();
+    expect(mockOrchestrationService.cleanupResearchServices).toHaveBeenLastCalledWith(
+      undefined,
+      options.researchId,
+      expect.anything(),
+      expect.anything(),
+      { skipStoreMaintenance: true },
+    );
+  });
+
+  it('passes skipStoreMaintenance: false to the final cleanup on a normal completion', async () => {
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Done' });
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await orchestrator.run();
+
+    expect(mockOrchestrationService.cleanupResearchServices).toHaveBeenLastCalledWith(
+      undefined,
+      options.researchId,
+      expect.anything(),
+      expect.anything(),
+      { skipStoreMaintenance: false },
+    );
+  });
+
   it('should fire onPlanningProgress with wait status when plan returns wait action', async () => {
     const onPlanningProgress = vi.fn();
     const onError = vi.fn();

@@ -73,6 +73,12 @@ export const SingletonStateSchema = Type.Object({
     pid: Type.Number(),
     startTime: Type.Optional(Type.Number()),
     serverId: Type.String(),
+    // EMBEDDING_MODEL the leader serves. A follower configured with a DIFFERENT
+    // model must not adopt this leader (same-dimension models would silently
+    // cross-embed and corrupt the vector space) — it falls back to a local
+    // in-process embedder instead. Optional for entries written by older
+    // processes, which are tolerated as matching.
+    model: Type.Optional(Type.String()),
   })),
 });
 

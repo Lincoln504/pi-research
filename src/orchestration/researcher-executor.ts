@@ -193,6 +193,13 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
     let lastSteeringCheck = Date.now();
 
+    // User-supplied observer callbacks (SDK consumers) are invoked from inside
+    // session event dispatch — a throw there would propagate into the session's
+    // event loop. Isolate them the way TuiPulse isolates its subscribers.
+    const safeObserve = (fn: () => void): void => {
+      try { fn(); } catch (err) { logger.debug('[ResearcherExecutor] Observer callback threw:', err); }
+    };
+
     const subscription = session.subscribe((event: any) => {
       // Check for new steering messages periodically
       const now = Date.now();
@@ -213,7 +220,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         if (ame?.type === 'start') {
           const inputTokens: number = ame.partial?.usage?.input ?? 0;
           if (inputTokens > 0) {
-            observer?.onResearcherTokensHint?.(id, inputTokens);
+            safeObserve(() => observer?.onResearcherTokensHint?.(id, inputTokens));
           }
         }
       } else if (event.type === 'message_end') {
@@ -227,17 +234,17 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
           if (tokens > 0 || cost > 0) {
             metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(complexity) });
             metrics.increment('llm_cost_total', cost, { component: 'researcher', complexity: String(complexity) });
-            observer?.onResearcherProgress?.(id, undefined, tokens, cost);
-            observer?.onTokensConsumed?.(tokens, cost);
+            safeObserve(() => observer?.onResearcherProgress?.(id, undefined, tokens, cost));
+            safeObserve(() => observer?.onTokensConsumed?.(tokens, cost));
           }
         }
       } else if (event.type === 'tool_execution_start') {
-        observer?.onResearcherProgress?.(id, `${event.toolName}`);
+        safeObserve(() => observer?.onResearcherProgress?.(id, `${event.toolName}`));
       } else if (event.type === 'tool_execution_end') {
-        observer?.onResearcherProgress?.(id, `done:${event.toolName}`);
+        safeObserve(() => observer?.onResearcherProgress?.(id, `done:${event.toolName}`));
         // Per-tool flash for non-scrape tools (scrape uses per-URL callback instead)
         if (event.toolName !== 'scrape') {
-          observer?.onToolResult?.(id, !event.isError);
+          safeObserve(() => observer?.onToolResult?.(id, !event.isError));
         }
         // Grounding accumulation for the non-URL grounding tools. They don't go through
         // onUrlScrapeResult, so they report how many real items they retrieved via a uniform

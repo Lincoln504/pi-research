@@ -235,6 +235,76 @@ export async function executeSearchTask(
 }
 
 /**
+ * Short-TTL, per-worker cache of per-hostname DNS-aware SSRF verdicts for
+ * SUBRESOURCE requests. Subresources previously got only the synchronous
+ * literal/pattern screen (no DNS), so a hostile page — whose own navigation
+ * DNS-validated as public — could fetch() a hostname that resolves to a
+ * private/link-local/metadata address (TTL-0 DNS rebinding) and read the
+ * response into the DOM that page.content() returns. Every http(s) subresource
+ * hostname now gets the same DNS-aware validateUrlForSSRF as navigations; this
+ * cache keeps that to ONE resolution per hostname per TTL (the sync screen's
+ * whole purpose was avoiding per-asset DNS stalls — a page with 40 assets on
+ * one CDN host costs one lookup, not 40, and same-origin assets are seeded by
+ * the navigation's own validation). The TTL is deliberately short so a verdict
+ * cannot stay stale for long, and this pre-validation is only the first layer:
+ * DNS pre-checks are inherently TOCTOU-racy against a rebinding resolver
+ * (Firefox resolves independently at connect time; camoufox has no connect-time
+ * IP pinning), so the response-side serverAddr() backstop in executeScrapeTask
+ * is the authoritative rebinding defense.
+ */
+const SUBRESOURCE_DNS_VERDICT_TTL_MS = 15_000;
+const SUBRESOURCE_DNS_VERDICT_MAX_ENTRIES = 256;
+const subresourceDnsVerdicts = new Map<string, { expires: number; verdict: Promise<Error | null> }>();
+
+function getCachedSubresourceVerdict(
+  reqUrl: string,
+  validate: (u: string) => Promise<void>,
+): Promise<Error | null> {
+  let hostname: string;
+  try {
+    hostname = new URL(reqUrl).hostname.toLowerCase();
+  } catch (e) {
+    return Promise.resolve(e instanceof Error ? e : new Error(String(e)));
+  }
+  const now = Date.now();
+  const cached = subresourceDnsVerdicts.get(hostname);
+  if (cached && cached.expires > now) return cached.verdict;
+  // Store the SETTLED outcome (null = allowed, Error = blocked) instead of a
+  // rejecting promise so a cached denial can never surface as an unhandled
+  // rejection, and concurrent requests for the same hostname share one lookup.
+  const verdict = validate(reqUrl).then(
+    () => null,
+    (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
+  );
+  if (subresourceDnsVerdicts.size >= SUBRESOURCE_DNS_VERDICT_MAX_ENTRIES) {
+    for (const [key, entry] of subresourceDnsVerdicts) {
+      if (entry.expires <= now) subresourceDnsVerdicts.delete(key);
+    }
+    // Still full after dropping expired entries: evict oldest-inserted.
+    while (subresourceDnsVerdicts.size >= SUBRESOURCE_DNS_VERDICT_MAX_ENTRIES) {
+      const oldest = subresourceDnsVerdicts.keys().next().value;
+      if (oldest === undefined) break;
+      subresourceDnsVerdicts.delete(oldest);
+    }
+  }
+  subresourceDnsVerdicts.set(hostname, { expires: now + SUBRESOURCE_DNS_VERDICT_TTL_MS, verdict });
+  return verdict;
+}
+
+/** Seed the subresource verdict cache with a PASS for a hostname whose full DNS-aware validation just succeeded (the navigation), so same-origin assets don't pay a second resolution. */
+function seedSubresourceVerdict(validatedUrl: string): void {
+  try {
+    const hostname = new URL(validatedUrl).hostname.toLowerCase();
+    subresourceDnsVerdicts.set(hostname, {
+      expires: Date.now() + SUBRESOURCE_DNS_VERDICT_TTL_MS,
+      verdict: Promise.resolve(null),
+    });
+  } catch {
+    /* unparseable URLs are rejected by the validator itself */
+  }
+}
+
+/**
  * Execute a scrape task
  */
 export async function executeScrapeTask(
@@ -260,15 +330,26 @@ export async function executeScrapeTask(
     else signal.addEventListener('abort', onAbort, { once: true });
   }
 
+  // Set by the response-side SSRF backstop (see page.on('response') below) when
+  // ANY response was served from a private/reserved address: the scrape is
+  // poisoned and must fail without returning content. Declared outside the try
+  // so the catch can surface it instead of the secondary 'Target closed' error
+  // produced by the poison-triggered page.close().
+  let poisonedError: Error | null = null;
+  const pendingAddrChecks: Array<Promise<void>> = [];
+
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
 
     // Intercept EVERY request and validate it against SSRF rules: navigations
     // (server 3xx AND client-side meta-refresh / window.location / form submit)
-    // get the full DNS-aware check; subresources get a cheap synchronous
-    // literal/pattern screen. Without this, Playwright follows redirects and
-    // client-side navigations natively and could reach internal IPs / cloud
-    // metadata, returning the rendered body to the researcher.
+    // get the full DNS-aware check; subresources (img/script/xhr/fetch) get the
+    // SAME DNS-aware check, deduplicated per hostname by a short-TTL verdict
+    // cache so a page full of same-host assets costs one resolution, not one
+    // per asset. Without the DNS pass on subresources, a hostile page could
+    // fetch() a TTL-0 rebinding hostname that resolves to an internal IP /
+    // cloud metadata and read the response into the DOM that page.content()
+    // serializes into the research report.
     // Must use page.route (a BLOCKING intercept), NOT page.on('request') — the
     // latter does not pause navigation, so the abort raced the redirect and the
     // metadata endpoint could be reached before it fired. route.fallback() defers
@@ -290,11 +371,22 @@ export async function executeScrapeTask(
             // Closes full-content SSRF exfil where a page redirects itself to
             // 169.254.169.254 / an internal host and the rendered body is returned.
             await validateForWorker(reqUrl);
+            // Same-origin assets of a just-validated document ride this verdict.
+            seedSubresourceVerdict(reqUrl);
           } else {
-            // Subresource (img/script/style/xhr/fetch). Cheap synchronous
-            // literal/pattern screen only (no DNS) to block blind SSRF probing of
-            // private/loopback/metadata addresses without adding per-asset latency.
-            validateForWorkerSync(reqUrl);
+            // Subresource (img/script/style/xhr/fetch). Synchronous literal/
+            // pattern screen first: it is free, and a `true` return means the
+            // test-only loopback affordance definitively accepted the target
+            // (a DNS pass would wrongly reject localhost→127.0.0.1).
+            const loopbackAccepted = validateForWorkerSync(reqUrl);
+            if (!loopbackAccepted) {
+              // DNS-aware pass, one resolution per hostname per short TTL.
+              // Same-origin subresources are a cache hit (seeded by the
+              // navigation) — for those, the rebinding TOCTOU window is closed
+              // by the response-side serverAddr() backstop below, not here.
+              const verdictError = await getCachedSubresourceVerdict(reqUrl, validateForWorker);
+              if (verdictError) throw verdictError;
+            }
           }
         } catch (_ssrfErr: unknown) {
           await route.abort('blockedbyclient').catch(() => {});
@@ -309,12 +401,41 @@ export async function executeScrapeTask(
     // (window.location / meta-refresh / form submit) to a TTL-0 host that rebinds to a private /
     // metadata IP. Re-validating the FINAL main-frame document's serverAddr before its body is
     // returned closes that second-hop DNS-rebind window.
+    //
+    // ADDITIONALLY: response-side rebinding backstop for EVERY response. The request-time DNS
+    // pass above is inherently TOCTOU-racy — Firefox resolves hostnames itself at connect time
+    // (camoufox has no connect-time IP pinning), so a TTL-0 resolver can answer public during
+    // validation and private at connect. Firefox's juggler reports the IP each network-served
+    // response ACTUALLY came from via serverAddr() (null for cached/route-fulfilled responses).
+    // If any response arrived from a private/loopback/link-local/metadata address that wasn't
+    // explicitly allowed (loopback test flag), internal data may already be in the DOM — poison
+    // the scrape: close the page (aborting the load) and fail with a 'Fetch blocked:' error,
+    // which isBenignScrapeFailure classifies as an expected per-URL outcome (debug, not ERROR).
     let finalMainFrameAddr: Promise<{ ipAddress?: string } | null> = Promise.resolve(null);
     page.on('response', (resp: any) => {
       try {
         if (resp.request().resourceType() === 'document' && resp.frame() === page.mainFrame()) {
           finalMainFrameAddr = resp.serverAddr().catch(() => null);
         }
+        const check: Promise<void> = Promise.resolve(resp.serverAddr())
+          .then((addr: { ipAddress?: string } | null) => {
+            const ip = addr?.ipAddress;
+            if (!ip || poisonedError) return;
+            try {
+              validateForWorkerSync(ip.includes(':') ? `http://[${ip}]/` : `http://${ip}/`);
+            } catch (cause: unknown) {
+              poisonedError = new Error(
+                'Fetch blocked: a response was served from a private/reserved address (SSRF DNS-rebinding defense)',
+                { cause },
+              );
+              logToDebugFile('WARN', `[Worker-${workerId}] SSRF rebinding defense: a response connected to a private/reserved address; poisoning scrape of ${url}`);
+              // Abort the in-flight load; goto/content() reject with 'Target
+              // closed', and the catch below surfaces poisonedError instead.
+              page.close().catch(() => {});
+            }
+          })
+          .catch(() => {});
+        pendingAddrChecks.push(check);
       } catch {
         /* frame detached / teardown — ignore */
       }
@@ -341,6 +462,9 @@ export async function executeScrapeTask(
     if (contentType.includes('application/pdf')) {
       if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
       const buffer = await response.body();
+      // Discard the bytes if any observed response came from a private address.
+      await Promise.allSettled(pendingAddrChecks);
+      if (poisonedError) throw poisonedError;
       await page.close();
       return { contentType, buffer, jitter: 0 };
     }
@@ -411,10 +535,21 @@ export async function executeScrapeTask(
       validateForWorkerSync(fip.includes(':') ? `http://[${fip}]/` : `http://${fip}/`);
     }
 
+    // Response-side SSRF backstop: settle every serverAddr() inspection recorded
+    // so far and refuse to return the captured HTML if any response — main frame
+    // OR subresource (the same-origin fetch() rebinding case) — was served from
+    // a private/reserved address.
+    await Promise.allSettled(pendingAddrChecks);
+    if (poisonedError) throw poisonedError;
+
     await page.close();
     return { contentType, html, jitter };
   } catch (error) {
     await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
+    // A poison-triggered page.close() makes the in-flight goto/content() reject
+    // with 'Target closed'; report the SSRF poisoning (a benign-classified
+    // 'Fetch blocked:' failure), not the secondary teardown error.
+    if (poisonedError) throw poisonedError;
     throw error;
   } finally {
     signal?.removeEventListener('abort', onAbort);

@@ -5,11 +5,11 @@
  * Implements leader election to ensure only one browser pool is active.
  */
 
-import { ServiceLifecycle, getService, tryGetServiceContainerFromCtx } from './service-registry.ts';
+import { ServiceLifecycle } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
-import type { IScheduler, ISchedulerFactory, ISchedulerService, ISchedulerInternals, ISchedulerInstance } from './service-interfaces.ts';
+import type { IScheduler, ISchedulerService, ISchedulerInternals, ISchedulerInstance } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
-import type { Config } from '../config.ts';
+import { raceWithDeadline } from '../utils/safe-unref.ts';
 
 /**
  * Scheduler Service Implementation
@@ -31,7 +31,26 @@ export class SchedulerService implements ISchedulerService, ISchedulerInternals 
   async dispose(): Promise<void> {
     if (this.lifecycle === ServiceLifecycle.DISPOSED) return;
     this.lifecycle = ServiceLifecycle.DISPOSING;
-    
+
+    // Invalidate any in-flight initialization FIRST: the scheduler factory
+    // re-checks this slot (its "superseded" guard) after every await point,
+    // so nulling it here makes a mid-election init shut down its
+    // freshly-created scheduler (closing its HTTP server) instead of
+    // installing it onto a disposed service where nothing would ever tear it
+    // down. Then await the in-flight init (bounded — the election can block
+    // up to ~60s on the browser-init lock) so its product is torn down
+    // before we report disposal complete. The expected outcome is a
+    // rejection ("Initialization superseded"); swallow it.
+    const inFlightInit = this.initializationPromise;
+    this.initializationPromise = null;
+    if (inFlightInit) {
+      try {
+        await raceWithDeadline(inFlightInit.then(() => undefined, () => undefined), 10000);
+      } catch {
+        /* raceWithDeadline only rejects if the promise rejects; already swallowed above */
+      }
+    }
+
     if (this.scheduler) {
       try {
         await this.scheduler.shutdown();
@@ -42,30 +61,6 @@ export class SchedulerService implements ISchedulerService, ISchedulerInternals 
     }
     
     this.lifecycle = ServiceLifecycle.DISPOSED;
-  }
-
-  /**
-   * Ensure a scheduler is available for research
-   * This implements the leader election / connection logic
-   */
-  async ensureScheduler(config?: Config, ctx?: any): Promise<IScheduler> {
-    if (this.scheduler) return this.scheduler;
-    if (this.initializationPromise) return this.initializationPromise;
-
-    const container = tryGetServiceContainerFromCtx(ctx);
-
-    this.initializationPromise = (async () => {
-      try {
-        const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY, ctx, container);
-        const scheduler = await factory.getScheduler(config);
-        this.scheduler = scheduler;
-        return scheduler;
-      } finally {
-        this.initializationPromise = null;
-      }
-    })();
-
-    return this.initializationPromise;
   }
 
   /**

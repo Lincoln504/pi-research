@@ -353,6 +353,77 @@ describe('healthcheck', () => {
     expect(result.status).not.toBe('unhealthy');
   });
 
+  it('FORCED check on a native-unavailable platform reports disabled (healthy), not a false UNHEALTHY', async () => {
+    // On e.g. Intel macOS the service does NOT throw from getService: initialize()
+    // memoizes the native failure as DISABLED and resolves fine. The forced path
+    // used to fall through to the getEmbedder() null check and report
+    // {healthy:false, error:'Embedder service not available'} — contradicting the
+    // non-forced path's correct "disabled (native ...)" verdict for the same host.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => {
+        const svc: any = {
+          name: 'knowledge-store',
+          lifecycle: ServiceLifecycle.DISABLED,
+          getDisabledReason: () => 'native',
+          isReady: () => false,
+          getCwd: () => process.cwd(),
+          async initialize() { svc.lifecycle = ServiceLifecycle.DISABLED; },
+          async dispose() {},
+          // A DISABLED service degrades getStore/getEmbedder to null — the exact
+          // shape that used to trip the false-unhealthy path.
+          async getStore() { return null; },
+          async getEmbedder() { return null; },
+        };
+        return svc;
+      },
+      { allowOverwrite: true, enableLogging: false }
+    );
+
+    const result = await runHealthCheck({ force: true });
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    expect(String(ks?.diagnostic?.['status'])).toMatch(/native embedding\/vector stack unavailable/i);
+    expect(result.status).not.toBe('unhealthy');
+  });
+
+  it('idle path reports a DISPOSED service as disposed (not running), never "ready (idle)"', async () => {
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    const svc: any = {
+      name: 'knowledge-store',
+      lifecycle: ServiceLifecycle.INITIALIZED,
+      isReady: () => true,
+      getCwd: () => process.cwd(),
+      async initialize() {},
+      async dispose() {},
+    };
+    registerService(ServiceNames.KNOWLEDGE_STORE, () => svc, { allowOverwrite: true, enableLogging: false });
+    await getService(ServiceNames.KNOWLEDGE_STORE);
+    // Teardown happened (dispose ran) but the container still holds the instance.
+    svc.lifecycle = ServiceLifecycle.DISPOSED;
+
+    const result = await runHealthCheck(); // non-forced -> idle path, must not re-init
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    expect(String(ks?.diagnostic?.['status'])).toBe('disposed (not running)');
+    expect(result.status).not.toBe('unhealthy');
+  });
+
   it('should fail when browser pool health check fails', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
     vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: false });

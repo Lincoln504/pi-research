@@ -186,10 +186,25 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
 
     let p: Promise<IScheduler>;
 
+    /**
+     * True once this initialization must no longer install its product:
+     * either the owning container started disposing, or the init-promise slot
+     * no longer holds `p` (cleared by forceSchedulerRestart or by
+     * SchedulerService.dispose()). Must be re-checked after EVERY await point
+     * that could complete post-disposal — a scheduler installed past this
+     * check would be a live BrowserTaskScheduler (with a ref'd, listening
+     * HTTP server) that nothing will ever shut down.
+     */
+    const isSuperseded = () =>
+        container.isDisposing || schedulerService.getSchedulerInitializationPromise() !== p;
+
     const initializationFunction = async () => {
         const lock = await getBrowserInitLock(container);
-        
+
         return await lock.withLock(async () => {
+            if (isSuperseded()) {
+                throw new Error('Initialization superseded');
+            }
             const schedulerVersion = currentVersion;
             const schedulerId = crypto.randomUUID();
 
@@ -219,11 +234,11 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                             logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
                             const client = new BrowserClient(serverInfo.port, serverInfo.authSecret);
 
-                            if (schedulerService.getSchedulerInitializationPromise() === p) {
+                            if (!isSuperseded()) {
                                 schedulerService.setSchedulerInstance(client);
                                 schedulerService.setSchedulerVersion(currentVersion);
                             } else {
-                                logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
+                                logger.warn('[Scheduler] Initialization finished but was superseded by a restart or disposal. Disposing...');
                                 await client.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                                 throw new Error('Initialization superseded');
                             }
@@ -233,13 +248,20 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                 }
             }
 
+            // Last check before creating a scheduler with a listening server —
+            // several state-manager awaits above could have completed after a
+            // disposal or restart began.
+            if (isSuperseded()) {
+                throw new Error('Initialization superseded');
+            }
+
             const scheduler = new BrowserTaskScheduler(schedulerId, stateManager, container);
             let port: number;
             try {
                 port = await scheduler.startServer();
             } catch (error) {
                 logger.error('[Scheduler] Failed to start server, running standalone:', error);
-                if (schedulerService.getSchedulerInitializationPromise() === p) {
+                if (!isSuperseded()) {
                     schedulerService.setSchedulerInstance(scheduler);
                     schedulerService.setSchedulerVersion(currentVersion);
                 } else {
@@ -247,6 +269,14 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                     throw new Error('Initialization superseded', { cause: error });
                 }
                 return scheduler;
+            }
+
+            // startServer() bound a ref'd HTTP server; if disposal or a restart
+            // won the race while it was starting, tear it down instead of
+            // proceeding to register it as election leader.
+            if (isSuperseded()) {
+                await scheduler.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
+                throw new Error('Initialization superseded');
             }
 
             let wonElection = false;
@@ -271,7 +301,7 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                 });
             } catch (error) {
                 logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
-                if (schedulerService.getSchedulerInitializationPromise() === p) {
+                if (!isSuperseded()) {
                     schedulerService.setSchedulerInstance(scheduler);
                     schedulerService.setSchedulerVersion(currentVersion);
                 } else {
@@ -285,7 +315,7 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                 logger.log(`[Scheduler] Lost election, connecting to winner at port ${winnerPort}`);
                 await scheduler.shutdown();
                 const client = new BrowserClient(winnerPort, winnerAuthSecret);
-                if (schedulerService.getSchedulerInitializationPromise() === p) {
+                if (!isSuperseded()) {
                     schedulerService.setSchedulerInstance(client);
                     schedulerService.setSchedulerVersion(schedulerVersion);
                 } else {
@@ -297,7 +327,7 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
 
             logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
             metrics.increment('browser_leadership_wins_total', 1);
-            if (schedulerService.getSchedulerInitializationPromise() === p) {
+            if (!isSuperseded()) {
                 schedulerService.setSchedulerInstance(scheduler);
                 schedulerService.setSchedulerVersion(schedulerVersion);
                 // Only now that we are the registered leader is it safe to arm the
@@ -305,7 +335,7 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                 // registration and self-shut-down mid-init under lock contention.
                 scheduler.startLeadershipMonitor();
             } else {
-                logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
+                logger.warn('[Scheduler] Won election but was superseded by restart or disposal. Shutting down pool...');
                 await scheduler.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                 throw new Error('Initialization superseded');
             }

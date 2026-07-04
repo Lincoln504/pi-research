@@ -26,6 +26,7 @@ import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.t
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
+import { validateInitialLinks, MAX_INITIAL_LINKS, MAX_INITIAL_LINK_CHARS } from '../utils/url-utils.ts';
 import { startResearchSession, registerSessionAbort, clearSteeringMessages, getPiActivePanels } from '../orchestration/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
@@ -105,8 +106,12 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
     excludeTools: Type.Optional(Type.Array(Type.String(), {
       description: 'List of internal tools to disable (e.g., search, scrape, security_search).',
     })),
-    initialLinks: Type.Optional(Type.Array(Type.String(), {
-      description: 'Optional seed URLs to investigate before (or instead of) web search.',
+    // Bounded exactly like the CLI's --initial-links flag (validated again in
+    // execute via the shared validateInitialLinks — the schema alone is not
+    // enforced on every caller path).
+    initialLinks: Type.Optional(Type.Array(Type.String({ maxLength: MAX_INITIAL_LINK_CHARS }), {
+      maxItems: MAX_INITIAL_LINKS,
+      description: `Optional seed URLs to investigate before (or instead of) web search. http(s) only; at most ${MAX_INITIAL_LINKS} URLs of up to ${MAX_INITIAL_LINK_CHARS} characters each.`,
     })),
   });
 
@@ -164,6 +169,21 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
       }
 
       const { query, depth: rawDepth, model: modelId, excludeTools: paramExcludeTools, initialLinks } = params as ResearchParams;
+
+      // Enforce the same bounds the CLI applies to --initial-links: these links are
+      // templated verbatim into the researcher prompt as trusted seed evidence, so
+      // they must be http(s)-only, length-bounded, and count-capped on this path too
+      // (the TypeBox schema declares the bounds, but is not enforced by every caller).
+      if (initialLinks && initialLinks.length > 0) {
+        const linkError = validateInitialLinks(initialLinks);
+        if (linkError) {
+          return {
+            content: [{ type: 'text', text: `Error: invalid initialLinks — ${linkError}.` }],
+            details: { error: 'invalid_initial_links' },
+          };
+        }
+      }
+
       const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd, iface).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
       const eCtx = ctx as ExtendedExtensionContext;
       const parentExcludeTools = eCtx.excludeTools || [];
@@ -225,8 +245,11 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         }
       };
 
-      if (!query && (!initialLinks || initialLinks.length === 0)) {
-        return { content: [{ type: 'text', text: 'Error: Research query or initialLinks are required' }], details: {} };
+      // A query is always required — initialLinks seed URLs for a query but cannot
+      // replace it (validateAndSanitizeQuery below rejects an empty query anyway;
+      // failing here keeps the message clear and matches the CLI's up-front check).
+      if (!query) {
+        return { content: [{ type: 'text', text: 'Error: research requires a query; initialLinks seed URLs for a query but cannot replace it.' }], details: {} };
       }
 
       // Each run gets its own isolated registry; session-level counter is incremented

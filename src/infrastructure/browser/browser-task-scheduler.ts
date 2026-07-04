@@ -21,6 +21,7 @@ import { isPoolShutdownError } from './browser-error-utils.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
+import { raceWithDeadline } from '../../utils/safe-unref.ts';
 import { PriorityTaskQueue } from './priority-task-queue.ts';
 
 /**
@@ -417,10 +418,7 @@ export class BrowserTaskScheduler implements IScheduler {
 
         if (this.server) {
             try {
-                await Promise.race([
-                    this.server.stop(),
-                    new Promise(resolve => setTimeout(resolve, 2000))
-                ]);
+                await raceWithDeadline(this.server.stop(), 2000);
             } catch (e) {
                 logger.warn('[Scheduler] Server shutdown error:', e);
             }
@@ -448,19 +446,13 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         if (targetBrowserPids.length > 0) {
-            await Promise.race([
-                killBrowserProcesses(targetBrowserPids),
-                new Promise(resolve => setTimeout(resolve, 10000))
-            ]);
+            await raceWithDeadline(killBrowserProcesses(targetBrowserPids), 10000);
         }
 
         try {
             const orphanPromise = cleanupOrphanedCamoufoxProcesses();
             orphanPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background orphan cleanup rejection: ${err.message}`));
-            await Promise.race([
-                orphanPromise,
-                new Promise(resolve => setTimeout(resolve, 15000))
-            ]);
+            await raceWithDeadline(orphanPromise, 15000);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             logger.warn('[Scheduler] Failed to cleanup orphaned browsers:', msg);

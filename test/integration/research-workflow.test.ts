@@ -109,6 +109,15 @@ interface ResearchWorkflowResult {
 // Test Implementation
 // ============================================================================
 
+// NOTE on the skipsLiveNetwork() gates below: although the LLM (completeSimple/
+// complete) and agent sessions (createAgentSession) are mocked above, these tests
+// are NOT hermetic, so they stay gated in CI:
+//  - Quick-orchestrator tests: QuickResearchOrchestrator.run() always executes the
+//    pre-flight runHealthCheck(), which drives a REAL browser search probe against
+//    a live search provider (blocked/throttled from CI datacenter IPs).
+//  - Deep-orchestrator tests: KNOWLEDGE_STORE_MODE='project' means the store's
+//    findRelevantUrls()/writer-queue paths initialize the REAL embedder (model
+//    fetched from the HuggingFace hub on a cold cache).
 describe('End-to-End Research Workflows', () => {
   let testContext: TestContext;
   let testDbDir: string;

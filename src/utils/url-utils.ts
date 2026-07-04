@@ -146,9 +146,58 @@ export function normalizeUrl(url: string): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Initial-links validation (shared by the CLI --initial-links flag and the
+// research tool's initialLinks parameter, so the two paths cannot drift).
+// These links are templated verbatim into the researcher prompt as trusted
+// seed evidence, so they must be bounded and shape-checked at every entry
+// point: http(s)-only, ≤ MAX_INITIAL_LINK_CHARS each, ≤ MAX_INITIAL_LINKS.
+// ---------------------------------------------------------------------------
+
+/** Maximum number of initial/seed links a caller may provide. */
+export const MAX_INITIAL_LINKS = 20;
+
+/** Maximum length (chars) of each initial/seed link. */
+export const MAX_INITIAL_LINK_CHARS = 2048;
+
+/**
+ * Validate a single initial/seed link.
+ * @returns null when valid, or a human-readable reason (no trailing period).
+ */
+export function validateInitialLink(link: string): string | null {
+  if (link.length > MAX_INITIAL_LINK_CHARS) {
+    return `each URL must be at most ${MAX_INITIAL_LINK_CHARS} characters`;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(link);
+  } catch {
+    return `"${link}" is not a valid URL`;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'only http(s) URLs are allowed';
+  }
+  return null;
+}
+
+/**
+ * Validate a full initialLinks array (count cap + per-link checks).
+ * @returns null when valid, or a human-readable reason (no trailing period).
+ */
+export function validateInitialLinks(links: readonly string[]): string | null {
+  if (links.length > MAX_INITIAL_LINKS) {
+    return `at most ${MAX_INITIAL_LINKS} URLs may be provided`;
+  }
+  for (const link of links) {
+    const err = validateInitialLink(link);
+    if (err) return err;
+  }
+  return null;
+}
+
 /**
  * Validates URL format and applies basic SSRF defense-in-depth.
- * 
+ *
  * Rejects:
  * - Non-HTTP/HTTPS protocols
  * - Localhost, loopback, and private network ranges

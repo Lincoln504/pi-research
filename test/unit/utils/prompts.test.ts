@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { mkdirSync, rmSync } from 'node:fs';
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -43,20 +44,24 @@ describe('utils/prompts', () => {
       expect(content).toMatch(/You are/i);
     });
 
-    it('returns non-empty content for known prompts', async () => {
+    it('returns non-empty content for every shipped prompt', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      const prompts = ['researcher', 'coordinator', 'agent'];
+      // Enumerate the real shipped prompt files so the test can't drift when a
+      // prompt is added/renamed. Each MUST load non-empty: loadPrompt throws on
+      // a miss (packaging bug), and an empty file would silently feed a blank
+      // system prompt to the LLM. No try/catch — a failure here must fail the
+      // test, not be swallowed.
+      const shippedDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts');
+      const prompts = fs.readdirSync(shippedDir)
+        .filter(f => f.endsWith('.md'))
+        .map(f => f.slice(0, -'.md'.length));
+      expect(prompts).toContain('researcher');
+      expect(prompts.length).toBeGreaterThanOrEqual(3);
 
       for (const promptName of prompts) {
-        try {
-          const content = loadPrompt(promptName);
-          if (content) {
-            expect(typeof content).toBe('string');
-            expect(content.length).toBeGreaterThan(0);
-          }
-        } catch {
-          // Prompt may not exist, that's ok for this test
-        }
+        const content = loadPrompt(promptName);
+        expect(typeof content).toBe('string');
+        expect(content.length).toBeGreaterThan(0);
       }
     });
   });

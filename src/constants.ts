@@ -147,6 +147,27 @@ export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
  *  to the real browser-pool capacity (WORKER_THREADS × WORKER_CONCURRENCY). */
 export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 
+/**
+ * Per-document cap (in characters) on scraped content that flows into LLM
+ * context — the scrape tool result and the session scraped-content cache
+ * (shared-links), whose entries are re-served into researcher sessions and
+ * embedded by the knowledge store.
+ *
+ * The scraper itself caps only RAW bytes (25MB HTML / 100MB PDF — see
+ * scraper-types.ts), and the pre-scrape context gate bills a flat
+ * AVG_TOKENS_PER_SCRAPE (~2500 tokens) per URL, so without this cap a single
+ * huge PDF/page could inject millions of tokens into a researcher session,
+ * overflow its context window, and kill the run.
+ *
+ * 500k chars ≈ 125k tokens: a deliberately permissive ceiling — real articles
+ * and long-form docs are never cut; only pathological pages (multi-hundred-page
+ * PDFs, dumps) hit it. This is a backstop against the multi-million-token
+ * blowout, not a tuning knob: the post-batch context gate handles ordinary
+ * budget pressure. Truncation appends an explicit "[content truncated: …]"
+ * marker (see truncateWithMarker).
+ */
+export const MAX_SCRAPE_CONTENT_CHARS_PER_DOC = 500_000;
+
 // ==================== Orchestrator Constants ====================
 
 /** Delay in milliseconds between launching concurrent researchers to stagger browser pool startup */

@@ -57,6 +57,34 @@ export function extractText(message: unknown): string {
 }
 
 /**
+ * Truncate content to at most `maxChars` characters, appending an explicit
+ * `[content truncated: showing N of M chars]` marker so an LLM consuming the
+ * text knows it is incomplete.
+ *
+ * Guarantees:
+ * - Content at or under the cap is returned unchanged (no marker).
+ * - Truncated output (body + marker) never exceeds `maxChars`, which makes the
+ *   function idempotent — re-applying the same cap to already-truncated output
+ *   is a no-op (no nested markers).
+ * - Cuts at a clean boundary (last newline/space) when one exists in the final
+ *   20% of the kept text, so words/lines are not split mid-token.
+ */
+export function truncateWithMarker(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+
+  const total = content.length;
+  const makeMarker = (kept: number) => `\n\n[content truncated: showing ${kept} of ${total} chars]`;
+  // Reserve marker room using the longest possible marker (kept ≤ total, so the
+  // digit count of `kept` never exceeds that of `total`).
+  const keep = Math.max(0, maxChars - makeMarker(total).length);
+  let body = content.slice(0, keep);
+  // Prefer a clean boundary near the cut point.
+  const boundary = Math.max(body.lastIndexOf('\n'), body.lastIndexOf(' '));
+  if (boundary > keep * 0.8) body = body.slice(0, boundary);
+  return body + makeMarker(body.length);
+}
+
+/**
  * Robustly remove thinking/reasoning tags from a string.
  * Handles <thought>, <thinking>, and <reasoning> tags (case-insensitive).
  */

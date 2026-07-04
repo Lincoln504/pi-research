@@ -243,15 +243,14 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        // Visibly skip on a rate-limited/offline CI run rather than a silent
-        // return that would report PASS having asserted nothing.
-        if (isNetworkUnavailable(text)) return ctx.skip();
-        // The "++" characters must not break the query — a real, non-empty
-        // response body is returned rather than an empty/error result.
-        expect(text.length).toBeGreaterThan(50);
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      // Visibly skip on a rate-limited/offline CI run rather than a silent
+      // return that would report PASS having asserted nothing.
+      if (isNetworkUnavailable(text)) return ctx.skip();
+      // The "++" characters must not break the query — a real, non-empty
+      // response body is returned rather than an empty/error result.
+      expect(text.length).toBeGreaterThan(50);
     }, 60000);
   });
 
@@ -401,16 +400,15 @@ describe('Extended Tools Integration', () => {
       expect(result.content).toBeDefined();
       expect(Array.isArray(result.content)).toBe(true);
       
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (isNetworkUnavailable(text)) {
-          return ctx.skip();
-        }
-        expect(text).toMatch(/stack\s*exchange/i);
-        expect(text).toMatch(/stackoverflow/i);
-        expect(text).toMatch(/typescript/i);
-        expect(text.length).toBeGreaterThan(50);
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      if (isNetworkUnavailable(text)) {
+        return ctx.skip();
       }
+      expect(text).toMatch(/stack\s*exchange/i);
+      expect(text).toMatch(/stackoverflow/i);
+      expect(text).toMatch(/typescript/i);
+      expect(text.length).toBeGreaterThan(50);
     }, 60000);
 
     it('should handle different Stack Exchange sites', async (ctx) => {
@@ -431,14 +429,13 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        if (isNetworkUnavailable(text)) {
-          return ctx.skip();
-        }
-        expect(text).toMatch(/regex/i);
-        expect(text.length).toBeGreaterThan(50);
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      if (isNetworkUnavailable(text)) {
+        return ctx.skip();
       }
+      expect(text).toMatch(/regex/i);
+      expect(text.length).toBeGreaterThan(50);
     }, 60000);
   });
 
@@ -464,17 +461,16 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        // The tags parameter must be accepted, not rejected as invalid — this is
-        // network-independent and is the regression the prior test missed.
-        expect(text).not.toContain('Invalid parameters');
-        if (isNetworkUnavailable(text)) {
-          return ctx.skip();
-        }
-        // With connectivity, a valid tag-filtered query returns substantive text.
-        expect(text.length).toBeGreaterThan(50);
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      // The tags parameter must be accepted, not rejected as invalid — this is
+      // network-independent and is the regression the prior test missed.
+      expect(text).not.toContain('Invalid parameters');
+      if (isNetworkUnavailable(text)) {
+        return ctx.skip();
       }
+      // With connectivity, a valid tag-filtered query returns substantive text.
+      expect(text.length).toBeGreaterThan(50);
     }, 60000);
 
     it('should handle format parameter for different output formats', async (ctx) => {
@@ -496,12 +492,11 @@ describe('Extended Tools Integration', () => {
         );
 
         expect(result).toBeDefined();
-        if (result.content[0]?.type === 'text') {
-          const text = result.content[0]!.text as string;
-          if (!isNetworkUnavailable(text)) {
-            expect(text.length).toBeGreaterThan(50);
-          }
-        }
+        expect(result.content[0]?.type).toBe('text');
+        const text = (result.content[0] as any).text as string;
+        // Visible skip on a rate-limited/offline run — never a silent pass.
+        if (isNetworkUnavailable(text)) return ctx.skip();
+        expect(text.length).toBeGreaterThan(50);
       }
     }, 60000);
 
@@ -578,12 +573,11 @@ describe('Extended Tools Integration', () => {
       expect(result.content).toBeDefined();
       expect(Array.isArray(result.content)).toBe(true);
       
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        // SDK grep returns "filename:line: content" format (relative to searched dir)
-        expect(text).toContain('createGrepTool');
-        expect(text).toContain('grep.ts');
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      // SDK grep returns "filename:line: content" format (relative to searched dir)
+      expect(text).toContain('createGrepTool');
+      expect(text).toContain('grep.ts');
     });
 
     it('should find multiple occurrences of a pattern', async () => {
@@ -599,12 +593,11 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('ToolUsageTracker');
-        // Should appear multiple times
-        expect(text.length).toBeGreaterThan(100);
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      expect(text).toContain('ToolUsageTracker');
+      // Should appear multiple times
+      expect(text.length).toBeGreaterThan(100);
     });
 
     it('should handle case-insensitive search', async () => {
@@ -620,10 +613,9 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toContain('createGrepTool');
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      expect(text).toContain('createGrepTool');
     });
   });
 
@@ -642,11 +634,10 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        // SDK grep throws on missing path; wrapper converts to error result
-        expect(text).toMatch(/no\s*matches|error|not\s*found/i);
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      // SDK grep throws on missing path; wrapper converts to error result
+      expect(text).toMatch(/no\s*matches|error|not\s*found/i);
     });
 
     it('should handle pattern with no matches', async () => {
@@ -662,10 +653,9 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text).toMatch(/no\s*matches/i);
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      expect(text).toMatch(/no\s*matches/i);
     });
 
     it('should handle regex patterns with special characters', async () => {
@@ -681,10 +671,9 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0]!.text as string;
-        expect(text.length).toBeGreaterThan(50);
-      }
+      expect(result.content[0]?.type).toBe('text');
+      const text = (result.content[0] as any).text as string;
+      expect(text.length).toBeGreaterThan(50);
     });
   });
 

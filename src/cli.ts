@@ -7,6 +7,7 @@
  *
  *   pi-research research "<query>" [--depth N] [--model provider/id]
  *   pi-research knowledge "<q>" ["<q2>" ...]
+ *   pi-research knowledge-config [set <none|project|global>]
  *   pi-research status [--json]
  *   pi-research help
  *
@@ -34,6 +35,7 @@ import {
 } from './sdk.ts';
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 import { validateAndSanitizeQuery } from './utils/input-validation.ts';
+import { validateInitialLink, MAX_INITIAL_LINKS } from './utils/url-utils.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey, parseDotEnv } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
@@ -150,28 +152,32 @@ function makeProgressObserver(): HeadlessObserverOptions {
  * would otherwise be silently ignored. We bridge only when a key is absent from
  * the real environment, so real shell exports always win.
  */
-function bridgeConfigEnv(explicitConfigPath?: string): { path: string; loaded: boolean } {
+export function bridgeConfigEnv(explicitConfigPath?: string): { path: string; loaded: boolean } {
   const basePath = explicitConfigPath ?? getGlobalEnvFilePath();
   const cliOverlayPath = getInterfaceEnvFilePath('cli');
   let loaded = false;
-  // Base first, then the cli overlay so overlay keys win — but neither clobbers a
-  // real environment value.
+  // Merge base then overlay into one map FIRST (overlay wins), and only then
+  // promote into process.env. Promoting per-file would invert the documented
+  // precedence: the base file's key would land in process.env on the first
+  // iteration and the "don't clobber the real environment" guard would then
+  // block the overlay's value — cli.env could never override config.env.
+  const merged: Record<string, string> = {};
   for (const filePath of [basePath, cliOverlayPath]) {
     try {
       if (!fs.existsSync(filePath)) continue;
-      const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
-      for (const [k, v] of Object.entries(parsed)) {
-        // Skip per-directory (project-scoped) keys: promoting them into process.env would make
-        // config.env out-rank the per-directory registry, defeating a per-cwd override. They are
-        // still applied as a lower-precedence file layer by getConfig()/loadEnvFiles().
-        if (isProjectScopedKey(k)) continue;
-        if (process.env[k] === undefined && (k.startsWith('PI_RESEARCH_') || k === 'STACKEXCHANGE_API_KEY' || k === 'GITHUB_TOKEN' || k === 'NVD_API_KEY')) {
-          process.env[k] = v;
-        }
-      }
+      Object.assign(merged, parseDotEnv(fs.readFileSync(filePath, 'utf-8')));
       loaded = true;
     } catch {
       // ignore unreadable file; fall through to the next
+    }
+  }
+  for (const [k, v] of Object.entries(merged)) {
+    // Skip per-directory (project-scoped) keys: promoting them into process.env would make
+    // config.env out-rank the per-directory registry, defeating a per-cwd override. They are
+    // still applied as a lower-precedence file layer by getConfig()/loadEnvFiles().
+    if (isProjectScopedKey(k)) continue;
+    if (process.env[k] === undefined && (k.startsWith('PI_RESEARCH_') || k === 'STACKEXCHANGE_API_KEY' || k === 'GITHUB_TOKEN' || k === 'NVD_API_KEY')) {
+      process.env[k] = v;
     }
   }
   return { path: basePath, loaded };
@@ -692,7 +698,7 @@ COMMANDS
     --depth <0-3>                0 = quick, 1 = normal (default), 2 = deep, 3 = ultra.
     --model <provider/id>        Override the model for this run.
     --exclude-tools <a,b>        Disable internal tools (e.g. security_search,stackexchange).
-    --initial-links <url ...>    Seed URLs to investigate first (-- ends options).
+    --initial-links <url ...>    Seed URLs to investigate first; requires a query (-- ends options).
     --config <path>              Read additional config from this file.
     --json                       Emit a JSON object instead of a markdown report.
 
@@ -867,17 +873,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
         // (like the query) they must be bounded and shape-checked — reject non-http(s)
         // or oversized tokens and cap the count so a caller can't inject arbitrary
         // instructions framed as trusted seed evidence or blow the prompt budget.
+        // Shares validateInitialLink with the research tool's initialLinks
+        // parameter (research-tool-definition.ts) so the two paths cannot drift.
         let j = i + 1;
         while (j < rest.length && !rest[j]?.startsWith('--')) {
           const link = rest[j];
           if (link) {
-            if (link.length > 2048) throw new UsageError('--initial-links: each URL must be at most 2048 characters.');
-            let parsed: URL;
-            try { parsed = new URL(link); } catch { throw new UsageError(`--initial-links: "${link}" is not a valid URL.`); }
-            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-              throw new UsageError('--initial-links: only http(s) URLs are allowed.');
-            }
-            if (initialLinks.length >= 20) throw new UsageError('--initial-links: at most 20 URLs may be provided.');
+            const linkError = validateInitialLink(link);
+            if (linkError) throw new UsageError(`--initial-links: ${linkError}.`);
+            if (initialLinks.length >= MAX_INITIAL_LINKS) throw new UsageError(`--initial-links: at most ${MAX_INITIAL_LINKS} URLs may be provided.`);
             initialLinks.push(link);
           }
           j++;
@@ -895,8 +899,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
     }
 
-    if (positional.length === 0 && initialLinks.length === 0) {
-      throw new UsageError('research requires a query (or --initial-links).');
+    // A links-only invocation is a dead path: cmdResearch feeds the (empty) query
+    // through validateAndSanitizeQuery, which rejects it anyway — but with a
+    // confusing "empty query" error at exit 64. Reject it up front with one
+    // clear message instead: --initial-links SEEDS a query, it cannot replace one.
+    if (positional.length === 0) {
+      throw new UsageError(
+        initialLinks.length > 0
+          ? 'research requires a query; --initial-links seeds URLs for a query but cannot replace it.'
+          : 'research requires a query.',
+      );
     }
     r.query = positional.join(' ').trim();
     r.depth = depth;

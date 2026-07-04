@@ -299,7 +299,8 @@ function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<
   const registryPath = getProjectSettingsRegistryPath();
   const dir = path.dirname(registryPath);
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    // 0o700: same owner-only posture as the state-manager/backup writers that share this dir.
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
 
   const lockPath = `${registryPath}.lock`;
@@ -334,14 +335,25 @@ function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<
     }
 
     // Read the LATEST registry inside the lock so a concurrent writer's change is never lost.
+    // Start fresh ONLY when the file genuinely does not exist (first write / ENOENT). Any other
+    // read or parse failure — EPERM, EMFILE, corrupt JSON — must ABORT the update: proceeding
+    // with {} would persist an empty registry and wipe every workspace's saved settings over a
+    // transient error. Mirrors the write path's fail-loud posture (the outer catch rethrows).
     let registry: Record<string, Record<string, string>> = {};
-    try {
-      if (fs.existsSync(registryPath)) {
+    if (fs.existsSync(registryPath)) {
+      try {
         registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+      } catch (readErr) {
+        if ((readErr as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          // Deleted between the existsSync check and the read — genuinely fresh.
+          registry = {};
+        } else {
+          throw new Error(
+            `Failed to read project settings registry at ${registryPath} — aborting the update so a transient read error cannot wipe other workspaces' settings: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
+            { cause: readErr },
+          );
+        }
       }
-    } catch (readErr) {
-      logger.warn('[config] Failed to read project settings registry (starting fresh):', readErr);
-      registry = {};
     }
 
     mutate(registry);
@@ -503,7 +515,11 @@ export function parseDotEnv(content: string): Record<string, string> {
     const eq = line.indexOf('=');
     if (eq < 1) continue;
     const key = line.slice(0, eq).trim();
-    let val = line.slice(eq + 1).replace(/\r$/, '');
+    // Trim BEFORE the quote-strip so `KEY = value` yields "value", not " value" — an
+    // untrimmed leading space silently broke booleans (parseEnvBool(' true') → false)
+    // and defeated quote detection for `KEY = "value"`. Intentional whitespace can
+    // still be preserved by quoting it: KEY=" value " → " value ".
+    let val = line.slice(eq + 1).replace(/\r$/, '').trim();
     // Strip a matched pair of surrounding quotes so KEY="value" yields value.
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
@@ -534,9 +550,12 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
         if (homeRegistry[key] !== undefined) migrated[key] = homeRegistry[key];
       }
       if (Object.keys(migrated).length > 0) {
-        // We use a dummy config to trigger saveConfig('user')
+        // We use a dummy config to trigger saveConfig('user'). Pass the migrated key names as
+        // changedKeys so ONLY the settings the user had actually saved are written — createConfig
+        // fills every other key with its current default, and snapshotting those into config.env
+        // would freeze today's defaults forever (they'd shadow future default changes).
         const dummyConfig = createConfig(migrated, {});
-        saveConfig(dummyConfig, 'user', cwd);
+        saveConfig(dummyConfig, 'user', cwd, Object.keys(migrated));
       }
     }
   } catch (err) {
@@ -620,7 +639,37 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
     logger.warn(`[config] No configuration found for workspace: ${cwd}. Using code defaults. Run /research-config to configure.`);
   }
 
+  warnLegacyEnvVarsOnce(merged);
+
   return merged;
+}
+
+// Env vars from the 0.1.x generation (Docker/SearXNG/Chromium era) that 1.0.0 no longer
+// reads. Without this, an upgrader's old setting silently stops applying — worst case
+// PROXY_URL, where the user believes searches are proxied but they now connect directly.
+const LEGACY_ENV_VARS: Record<string, string> = {
+  PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS: 'renamed to PI_RESEARCH_MAX_RESEARCHERS',
+  PI_RESEARCH_RESEARCHER_TIMEOUT_MS: 'renamed to PI_RESEARCH_TIMEOUT_MS',
+  PI_RESEARCH_VERBOSE: 'replaced by PI_RESEARCH_DEBUG=true',
+  PI_RESEARCH_SEARCH_LANGUAGE: 'removed with the SearXNG backend in v1.0.0',
+  PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS: 'removed in v1.0.0',
+  SEARXNG_URL: 'removed with the SearXNG backend in v1.0.0',
+  BRAVE_SEARCH_API_KEY: 'removed with the SearXNG backend in v1.0.0',
+  PROXY_URL:
+    'no longer read — the SearXNG proxy path was removed in v1.0.0 and searches/scrapes connect directly',
+};
+
+let warnedLegacyEnvVars = false;
+
+/** Warn once per process about set-but-dead 0.1.x env vars (upgrade aid; never throws). */
+function warnLegacyEnvVarsOnce(merged: Record<string, string>): void {
+  if (warnedLegacyEnvVars) return;
+  warnedLegacyEnvVars = true;
+  for (const [name, note] of Object.entries(LEGACY_ENV_VARS)) {
+    if (process.env[name] !== undefined || merged[name] !== undefined) {
+      logger.warn(`[config] ${name} is a pi-research <=0.1.13 setting and has no effect in v1.0.0: ${note}.`);
+    }
+  }
 }
 
 /**
@@ -676,9 +725,18 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
   // Scope-filter: only write the keys that belong to the target scope.
   // This prevents cross-contamination (project-scoped keys leaking into config.env
   // and user-scoped keys leaking into the project registry).
-  const newValues = scope === 'local'
+  const scopedValues = scope === 'local'
     ? Object.fromEntries(Object.entries(allValues).filter(([k]) => LOCAL_SCOPE_KEYS.has(k)))
     : Object.fromEntries(Object.entries(allValues).filter(([k]) => !LOCAL_SCOPE_KEYS.has(k)));
+
+  // changedKeys narrows the write to just the setting(s) the caller actually changed —
+  // for BOTH scopes. Without it a user-scope save snapshots the ENTIRE resolved config
+  // (env overrides and current defaults included) into config.env, freezing values the
+  // user never chose; a local-scope save would freeze the sibling local key per-directory.
+  // The comment-preserving merge below leaves every other existing line untouched.
+  const newValues = changedKeys
+    ? Object.fromEntries(Object.entries(scopedValues).filter(([k]) => changedKeys.includes(k)))
+    : scopedValues;
 
   if (scope === 'local') {
     // CENTRALIZED PROJECT STORAGE
@@ -689,13 +747,10 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     // the OTHER local key for this directory (e.g. changing KNOWLEDGE_STORE_MODE would pin
     // DEFAULT_RESEARCH_DEPTH at whatever it resolved to now), silently decoupling it from later
     // machine-wide default changes. Callers pass `changedKeys` to scope the write.
-    const toWrite = changedKeys
-      ? Object.fromEntries(Object.entries(newValues).filter(([k]) => changedKeys.includes(k)))
-      : newValues;
     // Read-merge-write under one lock so a concurrent local write to another directory
     // isn't lost (the merge onto the existing entry happens against the latest on-disk state).
     updateProjectSettingsRegistry((registry) => {
-      registry[normalizedCwd] = { ...(registry[normalizedCwd] ?? {}), ...toWrite };
+      registry[normalizedCwd] = { ...(registry[normalizedCwd] ?? {}), ...newValues };
     });
 
     logger.debug(`[config] Saved project settings for ${normalizedCwd} to central registry.`);
@@ -708,7 +763,9 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
   const dir = path.dirname(p);
 
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    // 0o700: ~/.pi/research holds config.env, which is the documented home for API keys.
+    // Same owner-only posture as the state/lock/log writers.
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
 
   // Simple synchronous file lock
@@ -790,9 +847,14 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
       }
     }
 
-    // Atomic write
-    const tmpPath = `${p}.tmp.${Date.now()}`;
-    fs.writeFileSync(tmpPath, outLines.join('\n'), 'utf-8');
+    // Atomic write. config.env can hold API keys, so it must never be world-readable:
+    // the tmp file is created 0o600 ({ mode } applies at creation; the pid+timestamp
+    // name makes reuse of an existing tmp file effectively impossible), and after the
+    // rename the final file is chmod'd 0o600 so a pre-existing 0644 config.env from an
+    // older release gets tightened too (rename alone would only carry the tmp's mode
+    // for the fresh-file case, and the merge path rewrites existing files).
+    const tmpPath = `${p}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmpPath, outLines.join('\n'), { encoding: 'utf-8', mode: 0o600 });
     try {
       fs.renameSync(tmpPath, p);
     } catch (renameErr) {
@@ -804,6 +866,9 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
         throw renameErr;
       }
     }
+    // Tighten regardless of how the file came to exist (fresh rename, Windows copy over
+    // an existing file, or a pre-hardening 0644 file that the rename replaced-in-place).
+    fs.chmodSync(p, 0o600);
   } catch (err) {
     logger.error(`[config] Failed to write config to ${p}:`, err);
     throw err;
@@ -898,6 +963,14 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     processEnv['PI_RESEARCH_DEBUG'] = 'true';
   }
 
+  // Same enabling-only bridge for CONSOLE_LOG: the logger reads only the env var
+  // (same circular-dependency constraint as DEBUG). Without this, a config.env
+  // PI_RESEARCH_CONSOLE_LOG=true silently did nothing under the pi extension —
+  // the CLI worked only because bridgeConfigEnv promotes file keys into the env.
+  if (config.CONSOLE_LOG && processEnv['PI_RESEARCH_CONSOLE_LOG'] === undefined) {
+    processEnv['PI_RESEARCH_CONSOLE_LOG'] = 'true';
+  }
+
   return config;
 }
 
@@ -939,6 +1012,7 @@ export function setConfig(config: Partial<Config>, iface?: ConfigInterface): voi
 
 export function resetConfig(): void {
   configCache.clear();
+  warnedLegacyEnvVars = false;
 }
 
 /**

@@ -303,7 +303,18 @@ export class QuickResearchOrchestrator {
             clearTimeout(timeoutId);
             if (abortCleanup) abortCleanup();
           }
-          
+
+          // The session has settled — the subscribe() poller above stops consuming
+          // steering from here on. Flip steering OFF first (synchronously, before the
+          // final consume, so there is no window where a new message can be queued
+          // with the affirmative "will steer the next research round" toast and then
+          // stranded): a steer typed from now on takes the input handler's
+          // fall-through path to pi instead. Then consume anything queued in the last
+          // poller window (≤500ms) so it is marked active and surfaced via
+          // appendSteeringGuidance below rather than silently destroyed at teardown.
+          observer?.onSynthesisStart?.();
+          consumeQueuedMessages(this.options.sessionId);
+
           let result = ensureAssistantResponse(session, 'Quick');
           
           // Store report in synthesis service so citations can be verified/processed
@@ -424,7 +435,11 @@ export class QuickResearchOrchestrator {
           // session) the run used — without it the container-local instances never get
           // cleared and reports accumulate toward MAX_SESSIONS eviction (matches the
           // DeepResearchOrchestrator cleanup call).
-          await orch.cleanupResearchServices(undefined, researchId, ctx, this.config);
+          // On user abort, skip the FTS rebuild + optimize (non-signal-aware
+          // optimization passes) so Esc returns promptly — mirrors deep mode; the
+          // next run's cleanup performs the same rebuild.
+          await orch.cleanupResearchServices(undefined, researchId, ctx, this.config,
+            { skipStoreMaintenance: signal?.aborted === true });
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to cleanup research services:', err);
         }

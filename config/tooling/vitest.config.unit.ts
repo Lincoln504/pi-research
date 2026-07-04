@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     ...baseConfig.test,
     name: 'unit',
+    // Clear mock call history before every test so no test silently depends on
+    // calls recorded by an earlier test (implementations are preserved).
+    clearMocks: true,
     include: ['test/unit/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
     pool: 'forks' as const,

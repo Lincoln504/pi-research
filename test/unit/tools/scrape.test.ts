@@ -140,6 +140,60 @@ describe('tools/scrape', () => {
 
     expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
   });
+
+  describe('per-document content cap (context-overflow guard)', () => {
+    it('truncates an oversized document to MAX_SCRAPE_CONTENT_CHARS_PER_DOC with an explicit marker', async () => {
+      const { MAX_SCRAPE_CONTENT_CHARS_PER_DOC } = await import('../../../src/constants.ts');
+      const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+      const hugeDoc = 'scraped pdf text line\n'.repeat(100_000); // 2.2M chars — like a huge PDF
+      (scrape as any).mockResolvedValueOnce([
+        { url: 'https://example.com/huge.pdf', success: true, markdown: hugeDoc, source: 'fetch' },
+      ]);
+
+      const tool = createScrapeTool(mockOptions);
+      const result = await tool.execute('call-1', { urls: ['https://example.com/huge.pdf'] }, undefined, undefined, {} as any);
+      const text = (result.content[0] as any).text as string;
+
+      // The embedded document must be capped, not passed through verbatim
+      expect(text).toContain('[content truncated: showing');
+      expect(text.length).toBeLessThan(MAX_SCRAPE_CONTENT_CHARS_PER_DOC + 2_000); // doc capped + small envelope
+      expect(text.length).toBeLessThan(hugeDoc.length); // sanity: nowhere near 2.2M
+      // Marker reports the true original size
+      expect(text).toContain(`of ${hugeDoc.length} chars]`);
+    });
+
+    it('caps each document independently in a multi-URL batch', async () => {
+      const { MAX_SCRAPE_CONTENT_CHARS_PER_DOC } = await import('../../../src/constants.ts');
+      const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+      const hugeDoc = 'x'.repeat(MAX_SCRAPE_CONTENT_CHARS_PER_DOC + 100_000);
+      (scrape as any).mockResolvedValueOnce([
+        { url: 'https://example.com/big1', success: true, markdown: hugeDoc, source: 'fetch' },
+        { url: 'https://example.com/big2', success: true, markdown: hugeDoc, source: 'fetch' },
+      ]);
+
+      const tool = createScrapeTool(mockOptions);
+      const result = await tool.execute('call-1', { urls: ['https://example.com/big1', 'https://example.com/big2'] }, undefined, undefined, {} as any);
+      const text = (result.content[0] as any).text as string;
+
+      expect((text.match(/\[content truncated: showing/g) || []).length).toBe(2);
+      expect(text.length).toBeLessThan(2 * MAX_SCRAPE_CONTENT_CHARS_PER_DOC + 4_000);
+    });
+
+    it('leaves normal-sized documents untouched (no marker)', async () => {
+      const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+      const normalDoc = 'A regular article body. '.repeat(200); // ~4.8k chars
+      (scrape as any).mockResolvedValueOnce([
+        { url: 'https://example.com/article', success: true, markdown: normalDoc, source: 'fetch' },
+      ]);
+
+      const tool = createScrapeTool(mockOptions);
+      const result = await tool.execute('call-1', { urls: ['https://example.com/article'] }, undefined, undefined, {} as any);
+      const text = (result.content[0] as any).text as string;
+
+      expect(text).toContain(normalDoc);
+      expect(text).not.toContain('[content truncated');
+    });
+  });
 });
 
 describe('tools/scrape — Session URL Pool footer', () => {

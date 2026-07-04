@@ -107,7 +107,13 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
             : 'disabled',
         } };
       }
-      const status = existing?.lifecycle === ServiceLifecycle.INITIALIZING ? 'initializing' : 'ready (idle)';
+      // A DISPOSED/DISPOSING service is not "ready" — report it accurately without
+      // initializing anything (it re-resolves lazily on next real use, so still healthy).
+      const status = existing?.lifecycle === ServiceLifecycle.INITIALIZING
+        ? 'initializing'
+        : (existing?.lifecycle === ServiceLifecycle.DISPOSED || existing?.lifecycle === ServiceLifecycle.DISPOSING)
+          ? 'disposed (not running)'
+          : 'ready (idle)';
       return { healthy: true, diagnostic: { status } };
     }
 
@@ -137,6 +143,19 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     // research aborts with "Research cannot start" for any fresh user on such a host.
     if (isNativeStackUnavailableError(initError)) {
       return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
+    }
+    // getService can SUCCEED on a native-unavailable platform: the service memoizes
+    // the failure as DISABLED instead of throwing, so initError stays null and the
+    // getStore()/getEmbedder() null checks below would report a false UNHEALTHY
+    // ("Embedder service not available") on a forced check — contradicting the
+    // non-forced path's correct "disabled" verdict above. Report the same verdict.
+    if (service?.lifecycle === ServiceLifecycle.DISABLED) {
+      const reason = service.getDisabledReason();
+      return { healthy: true, diagnostic: {
+        status: reason === 'native'
+          ? 'disabled (native embedding/vector stack unavailable on this platform)'
+          : 'disabled',
+      } };
     }
     try {
       if (!service) {

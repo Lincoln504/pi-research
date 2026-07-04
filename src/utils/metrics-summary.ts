@@ -90,7 +90,7 @@ export function sumCounter(
  *
  * Example: getLabeledCounter(counters, 'scrape_results_total', { outcome: 'fetch_success' })
  */
-export function getLabeledCounter(
+function getLabeledCounter(
   counters: Record<string, number>,
   baseName: string,
   labels: Record<string, string>

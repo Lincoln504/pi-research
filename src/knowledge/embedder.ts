@@ -384,6 +384,10 @@ export class Embedder {
           lockAcquired = false;
         }
         await this.recoverToCpu();
+        // recoverToCpu early-returns (no re-init) when disposal/idle already started;
+        // dereferencing a null pipeline would raise a TypeError that MASKS the
+        // original device error — rethrow the original instead.
+        if (!this.pipeline) throw err;
         const output = await logger.runCapturingStderr(async () => {
           return await this.pipeline!(input, this.pipelineOpts());
         });
@@ -423,10 +427,11 @@ export class Embedder {
         }
 
         for (let i = 0; i < texts.length; i += this.batchSize) {
-          const batch = texts.slice(i, i + this.batchSize).map(t => {
-            const truncated = this.truncateText(t);
-            return this.documentPrefix ? this.documentPrefix + truncated : truncated;
-          });
+          // Prefix BEFORE truncation (matching embed()'s queryPrefix handling) so
+          // the model input never exceeds the char cap by the prefix length.
+          const batch = texts.slice(i, i + this.batchSize).map(t =>
+            this.truncateText(this.documentPrefix ? this.documentPrefix + t : t)
+          );
 
           let output: any;
           try {
@@ -442,6 +447,9 @@ export class Embedder {
                 lockAcquired = false;
               }
               await this.recoverToCpu();
+              // Same guard as embed(): recoverToCpu may have skipped (disposing/idle),
+              // leaving pipeline null — rethrow the original error, not a TypeError.
+              if (!this.pipeline) throw err;
               output = await logger.runCapturingStderr(async () => {
                 return await this.pipeline!(batch, this.pipelineOpts());
               });

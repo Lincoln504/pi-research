@@ -59,6 +59,27 @@ import * as path from 'node:path';
 // Utilities
 // ============================================================================
 
+/**
+ * TUI setting id → canonical env-var key written to config.env / the project
+ * registry. Passed to saveConfig as `changedKeys` so a save persists ONLY the
+ * setting the user actually changed — never a snapshot of the whole resolved
+ * config (which would freeze env overrides and current defaults into the file).
+ * Several ids do not map 1:1 (e.g. RESEARCHER_TIMEOUT_MS → PI_RESEARCH_TIMEOUT_MS),
+ * hence an explicit map instead of `PI_RESEARCH_${id}`.
+ */
+const ENV_KEY_BY_SETTING_ID: Record<string, string> = {
+  DEFAULT_RESEARCH_DEPTH: 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH',
+  KNOWLEDGE_STORE_MODE: 'PI_RESEARCH_KNOWLEDGE_STORE_MODE',
+  RESEARCHER_TIMEOUT_MS: 'PI_RESEARCH_TIMEOUT_MS',
+  MAX_CONCURRENT_RESEARCHERS: 'PI_RESEARCH_MAX_RESEARCHERS',
+  MAX_SCRAPE_BATCHES: 'PI_RESEARCH_MAX_SCRAPE_BATCHES',
+  RESEARCH_REPORT_EXPORT_ENABLED: 'PI_RESEARCH_REPORT_EXPORT_ENABLED',
+  DEBUG: 'PI_RESEARCH_DEBUG',
+  EMBEDDING_MODEL: 'PI_RESEARCH_EMBEDDING_MODEL',
+  EMBEDDING_DEVICE: 'PI_RESEARCH_EMBEDDING_DEVICE',
+  KNOWLEDGE_STORE_CACHE_TTL_DAYS: 'PI_RESEARCH_CACHE_TTL_DAYS',
+};
+
 // ============================================================================
 // Command Handler
 // ============================================================================
@@ -344,7 +365,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project' | 'global';
             } else if (id === 'EMBEDDING_MODEL') {
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
-            scope = 'user';
+            // DESTRUCTIVE + DEFERRED: changing the model clears the knowledge store, so it is
+            // NOT auto-saved on cycle like the other settings. Persist + clear happen in the
+            // close handler, gated on an explicit ctx.ui.confirm — and an Esc/cancel close
+            // reverts the change entirely (nothing was written here, so there is nothing to
+            // roll back on disk).
+            changed = false;
             } else if (id === 'EMBEDDING_DEVICE') {
             // TUI offers only GPU (= safe auto/probe-then-fallback) and CPU.
             // Raw forced 'webgpu' (no probe) stays reachable via env var only.
@@ -359,10 +385,11 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 
             if (changed) {
               try {
-                // For a per-directory (local) write, persist ONLY the key that changed so the
-                // sibling local key isn't frozen as a side effect. Both local-scope ids
-                // (DEFAULT_RESEARCH_DEPTH, KNOWLEDGE_STORE_MODE) map to PI_RESEARCH_<id>.
-                saveConfig(config, scope, cwd, scope === 'local' ? [`PI_RESEARCH_${id}`] : undefined);
+                // Persist ONLY the key that changed — for BOTH scopes. A local write scoped to
+                // all keys would freeze the sibling local key per-directory; a user write scoped
+                // to all keys would snapshot the entire resolved config (env overrides included)
+                // into config.env, freezing values the user never chose.
+                saveConfig(config, scope, cwd, [ENV_KEY_BY_SETTING_ID[id] ?? `PI_RESEARCH_${id}`]);
                 resetConfig();
               } catch (e: unknown) {
                 ctx.ui.notify(`Failed to save: ${e instanceof Error ? e.message : String(e)}`, 'error');
@@ -449,9 +476,28 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 .then(async (result: any) => {
       // 1. Handle Critical Config Changes (Model/Device)
       // We do this after the TUI closes to avoid race conditions and redundant clears
+      let modelChangeConfirmed = false;
       if (config.EMBEDDING_MODEL !== initialConfig.EMBEDDING_MODEL) {
-        logger.info(`[research-config] Embedding model changed from ${initialConfig.EMBEDDING_MODEL} to ${config.EMBEDDING_MODEL}. Clearing knowledge store.`);
-        try {
+        // The model change was deliberately NOT auto-saved on cycle (see the change handler):
+        // it clears the knowledge store, so it needs the same explicit confirm as the other
+        // destructive actions — and an Esc/cancel close must abandon it without prompting.
+        const cancelled = result?.type === 'cancel';
+        modelChangeConfirmed = !cancelled && await ctx.ui.confirm(
+          'Change Embedding Model',
+          `Switch the embedding model to ${config.EMBEDDING_MODEL.split('/').pop()}? This permanently clears the current knowledge store.`,
+        );
+        if (modelChangeConfirmed) {
+          logger.info(`[research-config] Embedding model changed from ${initialConfig.EMBEDDING_MODEL} to ${config.EMBEDDING_MODEL}. Clearing knowledge store.`);
+          try {
+            saveConfig(config, 'user', cwd, ['PI_RESEARCH_EMBEDDING_MODEL']);
+            resetConfig();
+          } catch (e: unknown) {
+            modelChangeConfirmed = false;
+            ctx.ui.notify(`Failed to save: ${e instanceof Error ? e.message : String(e)}`, 'error');
+          }
+        }
+        if (modelChangeConfirmed) {
+          try {
           const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
           await service.clear();
           await clearService(ServiceNames.KNOWLEDGE_STORE, container);
@@ -461,7 +507,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           } catch (e: unknown) {
           logger.warn('[research-config] Failed to clear knowledge store on model change:', e);
           }
-          } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
+        } else {
+          // Declined, cancelled, or the save failed: revert the in-memory value so nothing
+          // downstream acts on a model that was never persisted.
+          config.EMBEDDING_MODEL = initialConfig.EMBEDDING_MODEL;
+          if (!cancelled) ctx.ui.notify('Embedding model unchanged.', 'info');
+        }
+      }
+      if (!modelChangeConfirmed && config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
           logger.info('[research-config] Device changed. Resetting service.');
           try {
           await clearService(ServiceNames.KNOWLEDGE_STORE, container);

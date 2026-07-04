@@ -24,6 +24,7 @@ import {
   ResearchKnowledgeSynthesisResponseSchema,
 } from '../../../src/tools/research-knowledge-types.ts';
 import {
+  createResearchKnowledgeSearchTool,
   assembleReferenceDocuments,
   collectCandidateUrls,
   triageRelevantUrls,
@@ -697,5 +698,42 @@ describe('Knowledge Search TUI Panel', () => {
     // Top/bottom borders must match the same inner width so the box is square.
     expect(lines[0]).toBe('┌' + '─'.repeat(8) + '┐');
     expect(lines[2]).toBe('└' + '─'.repeat(8) + '┘');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// execute() parameter validation — defensive Value.Check (same pattern as the
+// sibling search/scrape/security tools)
+// ---------------------------------------------------------------------------
+describe('research_knowledge_search execute — parameter validation', () => {
+  it('rejects a string `queries` (would otherwise iterate per-character)', async () => {
+    const tool = createResearchKnowledgeSearchTool();
+    const result = await tool.execute(
+      'test-id',
+      { queries: 'what is quantum computing' } as any,
+      undefined,
+      undefined as any,
+      {} as any,
+    );
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+    expect((result.content[0] as any).text).toContain('Invalid parameters');
+  });
+
+  it('rejects missing queries', async () => {
+    const tool = createResearchKnowledgeSearchTool();
+    const result = await tool.execute('test-id', {} as any, undefined, undefined as any, {} as any);
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+  });
+
+  it('rejects more than 5 queries', async () => {
+    const tool = createResearchKnowledgeSearchTool();
+    const result = await tool.execute(
+      'test-id',
+      { queries: ['a', 'b', 'c', 'd', 'e', 'f'] } as any,
+      undefined,
+      undefined as any,
+      {} as any,
+    );
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
   });
 });

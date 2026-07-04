@@ -17,6 +17,7 @@ import {
   cacheScrapedContent,
   getCachedScrapedContent
 } from '../../../src/utils/shared-links.ts';
+import { MAX_SCRAPE_CONTENT_CHARS_PER_DOC } from '../../../src/constants.ts';
 
 describe('shared-links', () => {
   const researchId = 'test-session';
@@ -125,6 +126,26 @@ describe('shared-links', () => {
       expect(getCachedScrapedContent(researchId, 'https://example.com/p250')).toBe('updated-250');
       // The unrelated oldest entry must survive (it was wrongly evicted before the fix).
       expect(getCachedScrapedContent(researchId, 'https://example.com/p0')).toBe('content-0');
+    });
+  });
+
+  describe('cacheScrapedContent byte-bounding', () => {
+    it('caps oversized content at MAX_SCRAPE_CONTENT_CHARS_PER_DOC with a truncation marker', () => {
+      const huge = 'line of scraped text\n'.repeat(30_000); // 630k chars, above the cap
+      cacheScrapedContent(researchId, 'https://example.com/huge-pdf', huge);
+      const cached = getCachedScrapedContent(researchId, 'https://example.com/huge-pdf');
+      expect(cached).toBeDefined();
+      expect(cached!.length).toBeLessThanOrEqual(MAX_SCRAPE_CONTENT_CHARS_PER_DOC);
+      expect(cached).toMatch(/\[content truncated: showing \d+ of \d+ chars\]$/);
+      // Kept body is a prefix of the original content
+      const body = cached!.slice(0, cached!.indexOf('\n\n[content truncated'));
+      expect(huge.startsWith(body)).toBe(true);
+    });
+
+    it('stores content under the cap verbatim (no marker)', () => {
+      const normal = 'regular article content '.repeat(100); // 2.4k chars
+      cacheScrapedContent(researchId, 'https://example.com/article', normal);
+      expect(getCachedScrapedContent(researchId, 'https://example.com/article')).toBe(normal);
     });
   });
 

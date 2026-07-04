@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { EmbeddingServer, _SerialQueue } from '../../../src/infrastructure/embedding/embedding-server';
 import type { IStateManager } from '../../../src/core/interfaces/state-manager-interfaces';
 import type { Embedder } from '../../../src/knowledge/embedder';
@@ -141,6 +142,64 @@ describe('EmbeddingServer', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('handleRequest — headers-sent guard in the catch path', () => {
+    it('destroys the response instead of writeHead(500) when headers were already sent', async () => {
+      // JSON.stringify(BigInt) throws — but only AFTER res.writeHead(200) has
+      // already been called: the exact partially-sent-response case. Pre-fix,
+      // the catch block's writeHead(500) threw ERR_HTTP_HEADERS_SENT inside the
+      // async 'end' listener (an unhandledRejection in the leader process).
+      const embedder = { embed: vi.fn().mockResolvedValue([1n]) } as any;
+      const s = new EmbeddingServer(embedder, mockStateManager, 'headers-sent-test');
+
+      const req = new EventEmitter() as any;
+      req.method = 'POST';
+      req.url = '/embed';
+
+      const res: any = {
+        headersSent: false,
+        writeHead: vi.fn(() => { res.headersSent = true; }),
+        end: vi.fn(),
+        destroy: vi.fn(),
+      };
+
+      const done = (s as any).handleRequest(req, res);
+      req.emit('data', Buffer.from(JSON.stringify({ text: 'hello' })));
+      req.emit('end');
+      await done; // must settle (finish() runs) without throwing
+
+      expect(res.writeHead).toHaveBeenCalledTimes(1);
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.anything());
+      expect(res.destroy).toHaveBeenCalledTimes(1);
+      expect(res.end).not.toHaveBeenCalled();
+    });
+
+    it('still writes a clean 500 when the failure happens before any header is sent', async () => {
+      const embedder = { embed: vi.fn().mockRejectedValue(new Error('boom\nsecret stack line')) } as any;
+      const s = new EmbeddingServer(embedder, mockStateManager, 'clean-500-test');
+
+      const req = new EventEmitter() as any;
+      req.method = 'POST';
+      req.url = '/embed';
+
+      const res: any = {
+        headersSent: false,
+        writeHead: vi.fn(() => { res.headersSent = true; }),
+        end: vi.fn(),
+        destroy: vi.fn(),
+      };
+
+      const done = (s as any).handleRequest(req, res);
+      req.emit('data', Buffer.from(JSON.stringify({ text: 'hello' })));
+      req.emit('end');
+      await done;
+
+      expect(res.writeHead).toHaveBeenCalledTimes(1);
+      expect(res.writeHead).toHaveBeenCalledWith(500, expect.anything());
+      expect(res.end).toHaveBeenCalledWith(JSON.stringify({ error: 'boom' }));
+      expect(res.destroy).not.toHaveBeenCalled();
     });
   });
 

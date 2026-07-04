@@ -97,6 +97,19 @@ describe('Configuration Scoping', () => {
 
     expect(config.DEFAULT_RESEARCH_DEPTH).toBe(DEFAULTS.DEFAULT_RESEARCH_DEPTH);
   });
+
+  it('degrades to defaults when the registry is corrupt — without crashing or persisting {}', () => {
+    // A read/parse failure of the registry must NOT crash config loading (resolution
+    // just proceeds without project overrides) and, crucially, the failed read must
+    // never flow into a save that replaces the on-disk registry with {}.
+    vi.mocked(fs.existsSync).mockImplementation((p: any) => p === projectSettingsPath);
+    vi.mocked(fs.readFileSync).mockImplementation(() => '{not valid json');
+
+    const config = getConfig(mockCwd);
+
+    expect(config.DEFAULT_RESEARCH_DEPTH).toBe(DEFAULTS.DEFAULT_RESEARCH_DEPTH);
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
 });
 
 describe('Per-interface config overlay', () => {

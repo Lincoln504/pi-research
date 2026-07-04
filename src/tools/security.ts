@@ -24,7 +24,7 @@ export function createSecuritySearchTool(options: {
     }))),
     terms: Type.Array(Type.String({
       description: 'Search terms: CVE IDs (e.g., CVE-2024-1234), package names, keywords',
-    }), { minItems: 1 }),
+    }), { minItems: 1, maxItems: 20 }),
     severity: Type.Optional(Type.String({
       description: 'Filter by severity: LOW, MEDIUM, HIGH, CRITICAL',
     })),

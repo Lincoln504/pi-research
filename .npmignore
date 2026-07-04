@@ -80,7 +80,6 @@ Desktop.ini
 .DS_Store
 
 # Session / planning artifacts (never belong in a release)
-planchat.txt
 *_SUMMARY.md
 *_REPORT.md
 *_PLAN.md
@@ -90,6 +89,3 @@ planchat.txt
 *_ROADMAP.md
 *_ASSESSMENT.md
 *_STATUS.md
-CIRCULAR_*.md
-ZERO_SCOPE_CREEP_REMEDIATION.md
-VERIFICATION_REPORT.md

@@ -193,6 +193,29 @@ describe('extractJsonArray', () => {
 // ---------------------------------------------------------------------------
 
 describe('extractJson', () => {
+  it('direct-parses a pure-JSON payload before fenced-block extraction (fenced example inside a string field must not win)', () => {
+    // The whole response IS the JSON payload, and one string value contains a
+    // fenced ```json example whose content is itself valid JSON ([1, 2, 3] —
+    // no quotes, so it survives JSON string escaping verbatim). Code-block-first
+    // extraction used to latch onto the example and return it instead.
+    const payload = { report: 'Example output:\n```json\n[1, 2, 3]\n```\ndone', ok: true };
+    const text = JSON.stringify(payload);
+    const result = extractJson<typeof payload>(text, 'any');
+    expect(result.success).toBe(true);
+    expect(result.value).toEqual(payload);
+    expect(result.method).toBe('raw-object');
+  });
+
+  it('direct parse respects targetType (whole-string array is rejected for targetType=object)', () => {
+    const result = extractJson('["a","b"]', 'object');
+    expect(result.success).toBe(false);
+  });
+
+  it('direct parse does not accept scalars (falls through to the extraction chain)', () => {
+    const result = extractJson('42', 'any');
+    expect(result.success).toBe(false);
+  });
+
   it('prefers code blocks over raw extraction', () => {
     // Raw object also present — code block should win
     const text = '{"wrong":true}\n```json\n{"correct":true}\n```';

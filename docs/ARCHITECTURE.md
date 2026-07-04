@@ -10,7 +10,7 @@ skill any skills-aware host runs, including OpenClaw — and a programmatic SDK
 ```
 pi CLI
 └── pi-research extension (src/index.ts)
-    ├── Registered Tools   research, health, research_knowledge_search (when the store is enabled)
+    ├── Registered Tools   research, health, research_knowledge_search (always registered; reports why when the store is disabled)
     ├── Commands           /research, /research-config, /knowledge-store
     ├── Events             input (mid-run steering), session_shutdown (cleanup)
     └── Layers

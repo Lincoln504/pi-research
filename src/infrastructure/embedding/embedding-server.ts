@@ -518,8 +518,15 @@ export class EmbeddingServer implements IEmbedder {
             errorMessage = (error.split('\n')[0] || '').trim();
           }
 
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: errorMessage }));
+          // Headers may already be out (e.g. res.end() threw mid-response) —
+          // writeHead() would then throw ERR_HTTP_HEADERS_SENT inside this async
+          // handler and surface as an unhandledRejection in the leader process.
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: errorMessage }));
+          } else {
+            res.destroy();
+          }
         }
         finish();
       });

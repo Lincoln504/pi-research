@@ -338,5 +338,21 @@ describe('ResearchOrchestrationService', () => {
       expect(store.rebuildFtsIndex).toHaveBeenCalledTimes(1);
       expect(store.optimize).not.toHaveBeenCalled();
     });
+
+    it('skips BOTH rebuild and optimize when skipStoreMaintenance is set (aborted run)', async () => {
+      // Esc mid-run must not pay for a full FTS rebuild + optimize before returning.
+      // Rows already committed to LanceDB stay durable; the next run's cleanup rebuilds.
+      const store = mockStore(true);
+      await service.cleanupResearchServices('s1', 'r1', ctx, undefined, { skipStoreMaintenance: true });
+      expect(store.rebuildFtsIndex).not.toHaveBeenCalled();
+      expect(store.optimize).not.toHaveBeenCalled();
+    });
+
+    it('still performs maintenance when skipStoreMaintenance is explicitly false', async () => {
+      const store = mockStore(true);
+      await service.cleanupResearchServices('s1', 'r1', ctx, undefined, { skipStoreMaintenance: false });
+      expect(store.rebuildFtsIndex).toHaveBeenCalledTimes(1);
+      expect(store.optimize).toHaveBeenCalledTimes(1);
+    });
   });
 });

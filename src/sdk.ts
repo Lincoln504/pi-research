@@ -38,6 +38,7 @@ import { ErrorTracker, runWithTracker, type ErrorReport } from './utils/error-tr
 import { runHealthCheck } from './healthcheck/index.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { scrapeSingle } from './web-research/web-scraper.ts';
+import { validateInitialLinks } from './utils/url-utils.ts';
 import { validateUrlForSSRF } from './web-research/scraper-utils.ts';
 import type { ScrapeResult } from './core/interfaces/scheduler-interfaces.ts';
 import { randomUUID } from 'node:crypto';
@@ -400,6 +401,11 @@ export async function runDeepResearch(
   signal?: AbortSignal
 ): Promise<string> {
   if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+
+  if (options.initialLinks?.length) {
+    const linkError = validateInitialLinks(options.initialLinks);
+    if (linkError) throw new Error(`Invalid initialLinks: ${linkError}`);
+  }
 
   if (_isRunning) {
     throw new Error('A research run is already in progress on this SDK instance; concurrent runs are not supported. Await the current run, or use a separate process/instance.');

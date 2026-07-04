@@ -19,7 +19,13 @@ export class HeadlessObserver implements ResearchObserver {
     if (this.options.enableLogging) {
       logger.debug(`[HeadlessObserver] ${event}`, data);
     }
-    this.options.onProgress?.(event, data);
+    // User-supplied SDK callback: a throw must not propagate into research
+    // event dispatch (same isolation TuiPulse applies to its subscribers).
+    try {
+      this.options.onProgress?.(event, data);
+    } catch (err) {
+      logger.debug('[HeadlessObserver] onProgress callback threw:', err);
+    }
   }
 
   onStart(query: string, complexity: number): void {

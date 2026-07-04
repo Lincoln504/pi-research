@@ -72,7 +72,12 @@ export function createResearchObserver(
   return {
     onStart: (query, complexity) => {
       if (complexity === 0) {
-        const truncatedQuery = query.length > 20 ? query.slice(0, 20) + '...' : query;
+        // Truncate at a CODEPOINT boundary (Array.from iterates codepoints), not a
+        // code-unit index: query.slice(0, 20) can split a surrogate pair (emoji,
+        // rare CJK), emitting a lone surrogate that renders as � and corrupts the
+        // panel's width math downstream.
+        const codepoints = Array.from(query);
+        const truncatedQuery = codepoints.length > 20 ? codepoints.slice(0, 20).join('') + '...' : query;
         state.quickSliceLabel = `researching: ${truncatedQuery}`;
         addSlice(panelState, state.quickSliceLabel, state.quickSliceLabel, false);
         activateSlice(panelState, state.quickSliceLabel);
@@ -399,6 +404,18 @@ export function createResearchObserver(
         }
         panelState.steeringAcceptable = true;
       }
+      debouncedRefresh();
+    },
+
+    onSynthesisStart: () => {
+      // Final synthesis has begun (deep: forced mustSynthesize call; quick: the
+      // researcher session settled and the steering-consume poller stopped).
+      // There is NO next round boundary left to consume a queued message, so
+      // steering must stop being "acceptable" — otherwise a steer typed now is
+      // queued with an affirmative "will steer the next research round" toast
+      // and then destroyed at teardown. With the flag off, the input handler's
+      // fall-through forwards it to pi with an accurate toast instead.
+      panelState.steeringAcceptable = false;
       debouncedRefresh();
     },
 

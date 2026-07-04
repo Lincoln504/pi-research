@@ -23,8 +23,10 @@ cited Markdown report  →  stdout  →  back to the agent
 ```
 
 The agent matches the `description` in `SKILL.md` and shells out to the launcher.
-`run.mjs` carries no dependencies; it locates the installed engine (PATH /
-`node_modules` / `~/.pi/bin` / `PI_RESEARCH_PATH`) and exits with an actionable
+`run.mjs` carries no dependencies; it locates the installed engine
+(`PI_RESEARCH_BIN` pointing at the engine's `dist/cli.mjs`, then
+`PI_RESEARCH_PATH` pointing at its package dir, then PATH / `node_modules` /
+`~/.pi/bin`) and exits with an actionable
 message — including config-file locations — if the package, a model, or an API key
 is missing. It exposes four subcommands: `research "<query>"` (live research),
 `knowledge "<query>"` (search past findings), `knowledge-config [set <mode>]`
@@ -36,7 +38,7 @@ The skill source lives at `skills/pi-research/` inside the package. Installing m
 linking that directory into each agent's skills folder.
 
 One-click (recommended). From the `pi` extension, run `/research-config` →
-Install Skill in Coding Agents. The installer:
+Install in External Agents. The installer:
 
 1. Detects which target agents are present under `$HOME` — currently Claude
    (`~/.claude/skills`), OpenAI Codex CLI (`~/.codex/skills`), and OpenClaw
@@ -44,7 +46,7 @@ Install Skill in Coding Agents. The installer:
    skill folders).
 2. Symlinks `skills/pi-research/` into each present agent, never overwriting an
    unrelated skill already in that slot.
-3. Records what it created in a manifest, so Uninstall Skill in Coding Agents
+3. Records what it created in a manifest, so Remove from External Agents
    removes only its own links. Stale links are also garbage-collected on startup and
    on `npm uninstall`.
 

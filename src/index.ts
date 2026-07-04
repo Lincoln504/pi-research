@@ -553,6 +553,18 @@ export default async function (pi: ExtensionAPI) {
       initGlobalTuiController(ctx.ui, (ctx as ExtendedExtensionContext).sessionId);
     }
 
+    // Researcher sub-agent sessions already carry the authoritative steering copy:
+    // the executor (deep) and quick orchestrator inject "ADDITIONAL USER GUIDANCE"/
+    // "ADDITIONAL CONSIDERATIONS" into the researcher system prompt themselves.
+    // Appending the same messages again here delivered every steering message
+    // TWICE to every researcher — return the prompt untouched. (The coordinator/
+    // evaluator never pass through this hook at all: they run via completeSimple,
+    // not an agent session, and get steering from planning-service directly.)
+    const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
+    if (isResearcher) {
+      return { systemPrompt: event.systemPrompt };
+    }
+
     const eCtx = ctx as ExtendedExtensionContext;
     const normalizedSid = normalizeSessionId(eCtx.sessionId);
     const steeringMessages = getSteeringMessages(normalizedSid);
@@ -563,14 +575,9 @@ export default async function (pi: ExtensionAPI) {
     const shouldInjectSteering = hasSteeringMessages && activeCount > 0;
 
     if (shouldInjectSteering) {
-      injectedSystemPrompt += '\n\n### ADDITIONAL CONSIDERATIONS\n' + 
-        'The user has provided the following additional considerations for this task:\n' + 
+      injectedSystemPrompt += '\n\n### ADDITIONAL CONSIDERATIONS\n' +
+        'The user has provided the following additional considerations for this task:\n' +
         steeringMessages.map(m => `- ${m.text}`).join('\n');
-    }
-
-    const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
-    if (isResearcher) {
-      return { systemPrompt: injectedSystemPrompt };
     }
 
     const isResearchToolAvailable = !event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchTool.name);

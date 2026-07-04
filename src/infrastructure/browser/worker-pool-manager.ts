@@ -19,6 +19,7 @@ import { cleanupStaleProfiles } from './cleanup-utils.ts';
 import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
 import { setupMasterIpcErrorHandler, isBenignClusterIpcError } from './thread-worker-lifecycle.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
+import { raceWithDeadline } from '../../utils/safe-unref.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -400,10 +401,7 @@ export class WorkerPoolManager implements IService {
                 // allow enough time for those to complete before the IPC channel closes.
                 const destroyPromise = this.pool.destroy();
                 destroyPromise.catch((err: Error) => logger.debug(`[WorkerPoolManager] Background pool destroy rejection: ${err.message}`));
-                await Promise.race([
-                    destroyPromise,
-                    new Promise(resolve => setTimeout(resolve, 5000))
-                ]);
+                await raceWithDeadline(destroyPromise, 5000);
             } catch (e) {
                 logger.warn('[WorkerPoolManager] Pool destruction error:', e);
             }
