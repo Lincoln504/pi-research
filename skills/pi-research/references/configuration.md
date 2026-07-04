@@ -15,7 +15,7 @@ to configure (no research runs).
    export PI_RESEARCH_MODEL=openai/gpt-4o    # provider/model-id
    ```
 2. **Global config** `~/.pi/research/config.env` (same KEY=VALUE keys; read at startup).
-3. **pi auth** (if you use `pi`): the API key comes from `~/.pi/agent/auth.json`
+3. **pi configuration** (if you use `pi`): the API key comes from `~/.pi/agent/auth.json`
    automatically — `PI_RESEARCH_MODEL` must still be set (env or `config.env`).
 
 Real env vars always win. Optional CLI-only overlay `~/.pi/research/cli.env` layers
@@ -73,7 +73,7 @@ model/key; message lists the fix) · `70` runtime error (network/provider/intern
   `export PI_RESEARCH_BIN=/path/to/pi-research/dist/cli.mjs` (exact CLI entry;
   checked first — also the escape hatch for unusual Windows shim layouts).
 - **"No model or API key" (78 from engine):** set the three env vars (or config /
-  pi auth), then re-run `status`.
+  pi's configuration), then re-run `status`.
 - **Rate limit (70):** provider returned 429 — wait and retry.
 - **GPU/embedding errors:** set `PI_RESEARCH_EMBEDDING_DEVICE=cpu` (headless/no-GPU).
 

@@ -91,12 +91,12 @@ On exit 78 the engine prints exact configure locations to stderr — relay verba
 ```
 config file:  ~/.pi/research/config.env
 env vars:     PI_RESEARCH_API_KEY  PI_RESEARCH_PROVIDER  PI_RESEARCH_MODEL
-pi auth:      ~/.pi/agent/auth.json   (supplies the API key only)
-pi models:    ~/.pi/agent/models.json
+pi config (keys):    ~/.pi/agent/auth.json   (supplies the API key only)
+pi config (models):  ~/.pi/agent/models.json
 ```
 
-`PI_RESEARCH_MODEL` (a `provider/model-id`) is always required — pi auth supplies
-only the key, and the skill never uses the model selected inside the pi extension.
+`PI_RESEARCH_MODEL` (a `provider/model-id`) is always required — pi's configuration
+supplies only the key, and the skill never uses the model selected inside the pi extension.
 
 Run `status` for the resolved paths on this machine. Full reference:
 [`references/configuration.md`](references/configuration.md).

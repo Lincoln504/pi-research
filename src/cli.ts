@@ -196,7 +196,7 @@ export interface ResolvedConfigPaths {
   cliIfaceEnv: string;
   /** Per-interface overlay for the pi extension (~/.pi/research/pi.env). */
   piIfaceEnv: string;
-  /** pi auth storage (~/.pi/agent/auth.json). */
+  /** pi's key file (~/.pi/agent/auth.json), part of pi's configuration. */
   piAuth: string;
   /** pi model definitions (~/.pi/agent/models.json). */
   piModels: string;
@@ -300,7 +300,7 @@ function detectCredentials(): CredentialDetection {
     };
   }
 
-  // --- pi auth storage path --------------------------------------------------
+  // --- pi configuration path (key from auth.json) -----------------------------
   if (piAuthPresent) {
     // Keys come from auth.json, but the MODEL must be configured explicitly:
     // the standalone CLI / agent skill run only on the configured model — they
@@ -362,8 +362,8 @@ function configBlock(det: CredentialDetection, extraNote?: string): string {
   lines.push(`  • base config file:   ${paths.configEnv}`);
   lines.push(`  • cli overlay:        ${paths.cliIfaceEnv}  (optional; overrides base for this CLI / agent skill)`);
   lines.push(`  • env vars:           PI_RESEARCH_API_KEY / PI_RESEARCH_PROVIDER / PI_RESEARCH_MODEL`);
-  lines.push(`  • pi auth storage:    ${paths.piAuth}`);
-  lines.push(`  • pi models:          ${paths.piModels}`);
+  lines.push(`  • pi config (keys):   ${paths.piAuth}`);
+  lines.push(`  • pi config (models): ${paths.piModels}`);
   lines.push('');
   lines.push('Detected:');
   lines.push(`  • credential source:  ${det.source}`);
@@ -873,11 +873,11 @@ COMMANDS
 CONFIGURE
   Credentials are resolved in this order (first match wins):
 
-    env vars:     PI_RESEARCH_API_KEY  PI_RESEARCH_PROVIDER  PI_RESEARCH_MODEL
-    cli overlay:  ${p.cliIfaceEnv}   (optional; this CLI / agent skill only)
-    base config:  ${p.configEnv}
-    pi auth:      ${p.piAuth}
-    pi models:    ${p.piModels}
+    env vars:            PI_RESEARCH_API_KEY  PI_RESEARCH_PROVIDER  PI_RESEARCH_MODEL
+    cli overlay:         ${p.cliIfaceEnv}   (optional; this CLI / agent skill only)
+    base config:         ${p.configEnv}
+    pi config (keys):    ${p.piAuth}
+    pi config (models):  ${p.piModels}
 
   A model is REQUIRED: set PI_RESEARCH_MODEL to a "provider/model-id". This CLI and
   the agent skill run only on that configured model — they do not follow the model

@@ -158,7 +158,7 @@ export interface ResearchSDKOptions {
   /** 
    * Optional explicit API key for the model. 
    * If provided, `provider` must also be set.
-   * If omitted, pi's global auth storage (~/.pi/agent/auth.json) is used.
+   * If omitted, the key from pi's configuration (~/.pi/agent/auth.json) is used.
    */
   apiKey?: string;
 

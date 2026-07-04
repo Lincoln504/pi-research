@@ -238,7 +238,7 @@ function notInstalled(): never {
     'Locations:',
     `  • env vars:           PI_RESEARCH_API_KEY / PI_RESEARCH_PROVIDER / PI_RESEARCH_MODEL`,
     `  • global config file: ${join(home, '.pi', 'research', 'config.env')}`,
-    `  • pi auth storage:    ${join(home, '.pi', 'agent', 'auth.json')}  (supplies the API key only)`,
+    `  • pi config (keys):   ${join(home, '.pi', 'agent', 'auth.json')}  (supplies the API key only)`,
     '',
     'Run `status` once installed to verify detection.',
     '',

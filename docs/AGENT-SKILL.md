@@ -34,7 +34,7 @@ pi extension) and refuse to start without one:
 PI_RESEARCH_MODEL=provider/model-id
 ```
 
-If you use `pi`, the API key comes from its auth storage automatically; otherwise
+If you use `pi`, the API key comes from your pi configuration (`~/.pi/agent/auth.json`) automatically; otherwise
 also set `PI_RESEARCH_API_KEY` (same file or env var). See [Configuration](CONFIGURATION.md).
 
 On Windows, run `pi-research` from `cmd` or use `pi-research.cmd`: PowerShell's default

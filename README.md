@@ -63,7 +63,7 @@ pi install npm:@lincoln504/pi-research
 
 See [Agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md) for standalone (no pi extension) installation.
 
-The pi extension works out of the box — it runs on your pi session's model and pi's own auth. Standalone use (agent skill / CLI / SDK) requires a configured model: set `PI_RESEARCH_MODEL` (e.g. `openai/gpt-4o`) as an environment variable or in `~/.pi/research/config.env`, plus `PI_RESEARCH_API_KEY` if you don't use pi. See [Configuration](docs/CONFIGURATION.md).
+The pi extension works out of the box — it runs on your pi session's model and pi's own configuration. Standalone use (agent skill / CLI / SDK) requires a configured model: set `PI_RESEARCH_MODEL` (e.g. `openai/gpt-4o`) as an environment variable or in `~/.pi/research/config.env`, plus `PI_RESEARCH_API_KEY` if you don't use pi. See [Configuration](docs/CONFIGURATION.md).
 
 The first install pulls the stealth browser engine, which takes a few minutes.
 
