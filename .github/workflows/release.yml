@@ -40,7 +40,12 @@ jobs:
             # Newest ci.yml run for this exact commit. ci.yml runs on branch pushes
             # (tags are excluded there), so the run is the one from the branch that
             # carried this commit to main.
-            run_json="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=1" 2>/dev/null || echo '{}')"
+            # On failure gh prints its JSON error body to STDOUT — discard it and
+            # substitute '{}' so jq always sees exactly one document and the poll
+            # logs the honest "no run yet" line instead of an unknown status.
+            if ! run_json="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=1" 2>/dev/null)"; then
+              run_json='{}'
+            fi
             status="$(printf '%s' "$run_json" | jq -r '.workflow_runs[0].status // "missing"')"
             concl="$(printf '%s' "$run_json"  | jq -r '.workflow_runs[0].conclusion // ""')"
             url="$(printf '%s' "$run_json"    | jq -r '.workflow_runs[0].html_url // ""')"

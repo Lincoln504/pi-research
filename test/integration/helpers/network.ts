@@ -16,9 +16,17 @@ const TRANSPORT_ERROR_PATTERNS: readonly RegExp[] = [
     /ERR_CONNECTION_CLOSED/i,
     /socket hang up/i,
     /EPERM: operation not permitted/i,
-    /throttle_violation/i,
-    /too many requests/i,
-    /rate limit/i,
+    // Stack Exchange's structured throttle wrapper — anchored to the exact prefix
+    // the client emits ("Stack Exchange API Error (502 - throttle_violation): too
+    // many requests from this ip…", src/stackexchange/rest-client.ts), so a result
+    // body that merely mentions throttling is NOT misread as an environment failure.
+    /Stack Exchange API Error \(\d+ - throttle_violation\)/i,
+    // NVD's and GitHub's throttle errors ("NVD API rate limit exceeded (HTTP 429).
+    // Retrying with backoff…", "GitHub API rate limit exceeded (HTTP 403)…") —
+    // anchored the same way; a bare "rate limit" in an advisory description must
+    // not skip the test. Every other upstream 429 surfaces as statusText behind an
+    // "HTTP 429:" prefix and is matched by the anchored pattern below.
+    /rate limit exceeded \(HTTP (429|403)\)/i,
     // Upstream API throttling from the live third-party APIs these integration
     // tests hit (Stack Exchange / NVD / OSV / GitHub Advisory). Shared CI datacenter
     // IPs exhaust the anonymous per-IP quota, so an HTTP 429/503 is an environment
