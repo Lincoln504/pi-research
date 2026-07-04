@@ -875,7 +875,10 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     }
     // Tighten regardless of how the file came to exist (fresh rename, Windows copy over
     // an existing file, or a pre-hardening 0644 file that the rename replaced-in-place).
-    fs.chmodSync(p, 0o600);
+    // Best-effort: on Windows, chmodSync only toggles the read-only attribute and is
+    // effectively a no-op for the write-bit; a throw here (e.g. on an exotic FS) must
+    // not fail a save whose data is already durably written.
+    try { fs.chmodSync(p, 0o600); } catch { /* best effort — data already saved */ }
   } catch (err) {
     logger.error(`[config] Failed to write config to ${p}:`, err);
     throw err;
