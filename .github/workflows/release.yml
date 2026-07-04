@@ -5,6 +5,16 @@ on:
     tags:
       - 'v*.*.*'
 
+# TODO(hardening, low): add a `concurrency: release` group so two tags pushed in
+# quick succession can't run publish jobs in parallel. Damage today is bounded
+# (npm rejects duplicate versions; each publish gates on its own SHA's CI), but a
+# serializing group is the conventional guard against interleaved publishes.
+#
+# TODO(hardening, low): pin third-/first-party actions (actions/checkout,
+# actions/setup-node, actions/upload-artifact) by full commit SHA instead of
+# mutable major tags. This workflow holds `id-token: write` and publishes to npm,
+# so a compromised action tag would run inside the trusted-publishing job.
+
 permissions:
   contents: read
   id-token: write

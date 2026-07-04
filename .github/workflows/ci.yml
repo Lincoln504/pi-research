@@ -20,6 +20,11 @@ concurrency:
 permissions:
   contents: read
 
+# TODO(hardening, low): pin actions (actions/checkout, actions/setup-node,
+# actions/cache, github/codeql-action/*) by full commit SHA instead of mutable
+# major tags — standard supply-chain hardening; keep in lockstep with the same
+# TODO in release.yml when addressing.
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ONNXRUNTIME_NODE_SKIP_BINARIES: 1
