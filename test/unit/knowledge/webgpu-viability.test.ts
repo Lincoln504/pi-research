@@ -7,7 +7,7 @@ import * as fsp from 'node:fs/promises';
 
 // Mock child_process.spawn so no real subprocess is ever launched. Each test
 // configures `nextScenario` to drive the fake child's stdout/stderr/close.
-const { spawnMock, setScenario } = vi.hoisted(() => {
+const { spawnMock, setScenario, setModelCached, isModelCachedMock } = vi.hoisted(() => {
   let nextScenario: {
     stdout?: string;
     stderr?: string;
@@ -16,6 +16,10 @@ const { spawnMock, setScenario } = vi.hoisted(() => {
     emitError?: Error;
     hang?: boolean;
   } = {};
+  // The probe only runs against an already-cached model; default the mock to cached
+  // so the probe-behavior tests below exercise the spawn path. The skip-when-uncached
+  // test flips this to false.
+  let modelCached = true;
 
   const spawnMock = vi.fn(() => {
     const child = new EventEmitter() as any;
@@ -35,10 +39,14 @@ const { spawnMock, setScenario } = vi.hoisted(() => {
   });
 
   const setScenario = (s: typeof nextScenario) => { nextScenario = s; };
-  return { spawnMock, setScenario };
+  const setModelCached = (v: boolean) => { modelCached = v; };
+  const isModelCachedMock = vi.fn(async () => modelCached);
+  return { spawnMock, setScenario, setModelCached, isModelCachedMock };
 });
 
 vi.mock('node:child_process', () => ({ spawn: spawnMock }));
+// The device resolver defers the probe until the model is cached; mock that check.
+vi.mock('../../../src/knowledge/embedder-init.ts', () => ({ isModelCached: isModelCachedMock }));
 
 let tmpCache: string;
 
@@ -50,6 +58,7 @@ beforeEach(async () => {
   delete process.env['PI_RESEARCH_WEBGPU_REPROBE'];
   spawnMock.mockClear();
   setScenario({});
+  setModelCached(true);
 });
 
 afterEach(async () => {
@@ -129,5 +138,17 @@ describe('resolveEmbeddingDevice', () => {
     setScenario({ emitError: new Error('ENOENT') });
     const { resolveEmbeddingDevice } = await load();
     expect(await resolveEmbeddingDevice('auto', MODEL, 5000)).toBe('cpu');
+  });
+
+  it('auto -> cpu WITHOUT spawning a probe when the model is not cached yet (probe deferred)', async () => {
+    // Downloading the model inside the probe could hang init on a first-ever run, so
+    // the resolver defers: CPU now, no verdict cached, probe once the model is present.
+    setModelCached(false);
+    setScenario({ stdout: 'PROBE_OK 384\n', code: 0 });
+    const { resolveEmbeddingDevice } = await load();
+    expect(await resolveEmbeddingDevice('auto', MODEL, 5000)).toBe('cpu');
+    expect(spawnMock).not.toHaveBeenCalled();
+    // Inconclusive -> nothing persisted, so a later (cached) init still probes.
+    expect(fs.existsSync(verdictFile())).toBe(false);
   });
 });

@@ -187,9 +187,9 @@ let _probeInFlight: { signature: string; promise: Promise<boolean> } | null = nu
  *
  * @param requested  config EMBEDDING_DEVICE value ('auto' | 'webgpu' | 'cpu')
  * @param model      embedding model id (passed to the probe)
- * @param timeoutMs  hard cap for the probe child on a first-ever (uncached) run,
- *                   where the child may still download the model. Once the model is
- *                   cached, WEBGPU_PROBE_TIMEOUT_MS applies instead (fast CPU fallback).
+ * @param timeoutMs  caller's upper bound; the probe is additionally capped at
+ *                   WEBGPU_PROBE_TIMEOUT_MS (it runs only against an already-cached
+ *                   model, so it needs no model-download budget).
  */
 export async function resolveEmbeddingDevice(
   requested: string,
@@ -208,12 +208,23 @@ export async function resolveEmbeddingDevice(
     return cached ? 'webgpu' : 'cpu';
   }
 
+  // The probe loads the model on the WebGPU EP to test a real compute. If the model
+  // is not cached yet, downloading it INSIDE the probe would block init on a
+  // first-ever run and can hang for minutes on a GPU-less host. Defer instead: use
+  // CPU now WITHOUT caching a verdict, so the model downloads on the ordinary CPU
+  // path and the NEXT init (model present) runs a fast, download-free probe for the
+  // real verdict. Keeps the probe bounded and never on a model-download critical path.
+  if (!(await isModelCached(model))) {
+    logger.info('[embedder] Embedding model not cached yet — using CPU for now; WebGPU will be probed once the model is present.');
+    return 'cpu';
+  }
+
   const reprobe = process.env['PI_RESEARCH_WEBGPU_REPROBE'] === '1';
   if (reprobe || _probeInFlight?.signature !== signature) {
-    // A cached model needs only a fast WebGPU init, so bound the probe tightly to
-    // fail fast to CPU on a GPU-less host; an uncached first run may download the
-    // model inside the probe, so keep the full caller budget there.
-    const probeTimeoutMs = (await isModelCached(model)) ? WEBGPU_PROBE_TIMEOUT_MS : timeoutMs;
+    // Model is cached here, so the probe only does a WebGPU init + tiny compute:
+    // bound it tightly (WEBGPU_PROBE_TIMEOUT_MS) so it fails fast to CPU on a
+    // GPU-less/hanging host instead of running out the caller's full budget.
+    const probeTimeoutMs = Math.min(WEBGPU_PROBE_TIMEOUT_MS, timeoutMs);
     logger.info('[embedder] Probing WebGPU viability in a disposable child process...');
     const cacheDir = getModelCacheDir();
     // runProbe never throws and writeVerdict swallows its own errors, so this
