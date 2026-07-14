@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 // Guard: skip mocked-module bleed from other test files by importing after
 // all vi.mock() calls.  parseArgs and UsageError are pure — no side effects
 // on import because the _isMain guard prevents top-level execution.
-import { parseArgs, UsageError, EXIT } from '../../src/cli.ts';
+import { parseArgs, UsageError, EXIT, reportError } from '../../src/cli.ts';
+import { createResearchStopError } from '../../src/orchestration/session-state.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(ROOT, 'dist', 'cli.mjs');
@@ -349,6 +350,36 @@ describe('EXIT', () => {
     expect(EXIT.USAGE).toBe(64);
     expect(EXIT.CONFIG).toBe(78);
     expect(EXIT.SOFTWARE).toBe(70);
+  });
+});
+
+describe('reportError — exit-code classification', () => {
+  // Regression (ISSUES-ANALYSIS-2026-07-09.md, Symptom 3b): every "Research
+  // stopped" message carries generic boilerplate advice containing the literal
+  // substring "API key", which used to make the substring heuristic below
+  // misclassify every fail-fast research stop as a config error (exit 78) —
+  // even when the real cause was worker-pool contention with nothing wrong
+  // with the model or credentials.
+  it('classifies a tagged research-stop error as SOFTWARE even though its message contains "API key"', () => {
+    const err = createResearchStopError('session-1', 'research-1');
+    expect(err.message.toLowerCase()).toContain('api key');
+    const exitCode = reportError(err, 'research', true);
+    expect(exitCode).toBe(EXIT.SOFTWARE);
+  });
+
+  it('still classifies a genuine, untagged credentials error as CONFIG', () => {
+    const exitCode = reportError(new Error('Invalid API key provided'), 'research', true);
+    expect(exitCode).toBe(EXIT.CONFIG);
+  });
+
+  it('still classifies a rate-limit error as SOFTWARE (operational, not a setup problem)', () => {
+    const exitCode = reportError(new Error('429 rate limit exceeded for this api key'), 'research', true);
+    expect(exitCode).toBe(EXIT.SOFTWARE);
+  });
+
+  it('classifies an unrelated runtime error as SOFTWARE', () => {
+    const exitCode = reportError(new Error('Worker pool is shutting down'), 'research', true);
+    expect(exitCode).toBe(EXIT.SOFTWARE);
   });
 });
 

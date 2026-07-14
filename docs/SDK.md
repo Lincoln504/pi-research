@@ -76,7 +76,10 @@ await shutdownResearchSDK();
 `runResearchDetailed`, `searchKnowledge`, `scrapeUrl`, `getResearchHealth`,
 `getLastRunStats`, and `getSessionMetrics`, plus `exportKnowledge` (write the
 knowledge store to a web-consumable JSON file) and the post-run telemetry accessors
-`getLastRunMetrics`, `getLastRunSummary`, and `getLastErrorReport`. Both
+`getLastRunMetrics`, `getLastRunSummary`, `getLastErrorReport`, and
+`getLastResearcherOutcome` (planned/launched/succeeded/failed researcher counts plus
+per-researcher failure reasons for the most recent run — lets a caller tell a thin
+report caused by a sparse topic apart from one where most researchers failed). Both
 `@lincoln504/pi-research` and `@lincoln504/pi-research/sdk` export these symbols.
 
 > Concurrency: a single initialized SDK instance runs one research call at a time.

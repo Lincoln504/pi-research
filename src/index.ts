@@ -53,6 +53,8 @@ export {
   getLastRunSummary,
   getLastErrorReport,
   getLastRunStats,
+  getLastResearcherOutcome,
+  type ResearcherOutcome,
   getSessionMetrics,
   getResearchHealth,
   runQuickResearch,

@@ -109,9 +109,9 @@
     "image": "https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/hero.png"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": ">=0.80.2 <1",
-    "@earendil-works/pi-coding-agent": ">=0.80.2 <1",
-    "@earendil-works/pi-tui": ">=0.80.2 <1",
+    "@earendil-works/pi-ai": ">=0.80.7 <1",
+    "@earendil-works/pi-coding-agent": ">=0.80.7 <1",
+    "@earendil-works/pi-tui": ">=0.80.7 <1",
     "@huggingface/transformers": "4.2.0",
     "@kreuzberg/html-to-markdown-node": "^3.5.5",
     "@lancedb/lancedb": "0.29.0",

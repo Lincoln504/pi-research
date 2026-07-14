@@ -78,6 +78,24 @@ describe('youtube/command', () => {
     expect(res.details).toMatchObject({ requested: 2, fetched: 1, failed: 1 });
   });
 
+  it('still emits a parseable "Cite as" line for a video with no title (regression: used to be dropped entirely)', async () => {
+    fetchVideoTranscripts.mockResolvedValueOnce([
+      { videoId: 'aaaaaaaaaaa', url: 'https://youtu.be/aaaaaaaaaaa', success: true, text: 'transcript text', charCount: 15 },
+    ]);
+
+    const res = await youtubeTranscriptCommand({
+      urls: ['https://youtu.be/aaaaaaaaaaa'],
+      maxVideos: 1,
+      timeoutMs: 20000,
+      lang: 'en',
+    });
+
+    const text = (res.content[0] as any).text as string;
+    expect(text).toContain('**Cite as:** https://youtu.be/aaaaaaaaaaa');
+    // No title/author suffix should be appended when neither is known.
+    expect(text).not.toContain("**Cite as:** https://youtu.be/aaaaaaaaaaa —");
+  });
+
   it('emits a knowledge-store document only for successful transcripts', async () => {
     fetchVideoTranscripts.mockResolvedValueOnce([
       { videoId: 'aaaaaaaaaaa', url: 'https://youtu.be/aaaaaaaaaaa', success: true, title: 'Good Video', author: 'Chan', durationSeconds: 65, text: 'the full transcript', charCount: 19 },

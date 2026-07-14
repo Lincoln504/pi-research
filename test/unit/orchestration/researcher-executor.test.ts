@@ -52,6 +52,14 @@ vi.mock('@earendil-works/pi-ai', () => ({
   calculateCost: vi.fn(() => ({ total: 0 })),
 }));
 
+const { mockSearch } = vi.hoisted(() => ({
+  mockSearch: vi.fn(),
+}));
+
+vi.mock('../../../src/web-research/search.ts', () => ({
+  search: mockSearch,
+}));
+
 // Hoisted session mock references
 const { mockPrompt, mockAbort, mockSubscribe, mockRegister, mockUnregister, mockStoreReport } = vi.hoisted(() => ({
   mockPrompt: vi.fn().mockResolvedValue(undefined),
@@ -143,6 +151,7 @@ describe('runResearcher', () => {
     mockRegister.mockClear();
     mockUnregister.mockClear();
     mockStoreReport.mockClear();
+    mockSearch.mockReset().mockResolvedValue([]);
     STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue(null);
 
     // Default getService implementation
@@ -206,6 +215,61 @@ describe('runResearcher', () => {
 
     it('proceeds when only historicalUrls is non-empty', async () => {
       await runResearcher(makeOptions({ initialLinks: [], historicalUrls: [{ url: 'https://x.com', description: 'test description' }] }));
+      expect(mockPrompt).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── No-initial-links retry (regression: this path used to bypass all retries) ──
+
+  describe('no-initial-links search retry', () => {
+    it('retries the search burst and proceeds once a retry returns links', async () => {
+      mockSearch
+        .mockResolvedValueOnce([{ query: 'query 1', results: [] }, { query: 'query 2', results: [] }])
+        .mockResolvedValueOnce([{ query: 'query 1', results: [{ title: 't', url: 'https://found.example.com', content: 'c' }] }]);
+
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [],
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 1, RESEARCHER_MAX_RETRY_DELAY_MS: 1 } as any,
+      }));
+
+      expect(mockSearch).toHaveBeenCalledTimes(2);
+      expect(mockSearch).toHaveBeenCalledWith(DEFAULT_RESEARCHER_CONFIG.queries, expect.anything(), undefined, undefined, expect.anything());
+      expect(mockPrompt).toHaveBeenCalledOnce();
+    });
+
+    it('records a researcher failure only after exhausting search retries', async () => {
+      const onResearcherFailure = vi.fn();
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [],
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 1, RESEARCHER_MAX_RETRY_DELAY_MS: 1 } as any,
+        observer: { onResearcherFailure } as any,
+      }));
+
+      // maxLinkAttempts = RESEARCHER_MAX_RETRIES + 1 = 2 search attempts before giving up.
+      expect(mockSearch).toHaveBeenCalledTimes(2);
+      expect(mockPrompt).not.toHaveBeenCalled();
+      expect(onResearcherFailure).toHaveBeenCalledWith(DEFAULT_RESEARCHER_CONFIG.id, expect.any(String));
+    });
+
+    it('falls back to the researcher goal as the retry query when no queries are configured', async () => {
+      mockSearch.mockResolvedValueOnce([{ query: 'g', results: [{ title: 't', url: 'https://found.example.com', content: 'c' }] }]);
+
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [],
+        config: { id: 'r1', name: 'R1', goal: 'fallback goal query', queries: [] },
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 0 } as any,
+      }));
+
+      expect(mockSearch).toHaveBeenCalledWith(['fallback goal query'], expect.anything(), undefined, undefined, expect.anything());
+      expect(mockPrompt).toHaveBeenCalledOnce();
+    });
+
+    it('does not retry the search when a tolerant historicalUrls fallback already exists', async () => {
+      await runResearcher(makeOptions({ initialLinks: [], historicalUrls: [{ url: 'https://x.com', description: 'd' }] }));
+      expect(mockSearch).not.toHaveBeenCalled();
       expect(mockPrompt).toHaveBeenCalledOnce();
     });
   });

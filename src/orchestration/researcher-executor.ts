@@ -21,6 +21,7 @@ import { loadPrompt } from '../core/llm/prompts.ts';
 import { injectCurrentDate } from '../core/llm/inject-date.ts';
 import { recordResearcherFailure, getSteeringMessages } from './session-state.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
+import { search } from '../web-research/search.ts';
 
 /**
  * Run a single researcher with retries
@@ -62,22 +63,59 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   }
 
   const researcherPromptTemplate = loadPrompt('researcher');
-  if (initialLinks.length === 0 && historicalUrls.length === 0) {
-    logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links; skipping.`);
-    // Use the resolved sessionId (= piSessionId), NOT the raw ctx.sessionId: when
-    // ctx.sessionId is unset but sessionManager supplies a real id (common in SDK
-    // use), recording under ctx.sessionId would file this no-links skip under a
-    // different id than shouldStopResearch() checks, so the fast-stop guard would
-    // under-count exactly the broad-search-failure case it exists to catch.
-    recordResearcherFailure(sessionId, researchId, id, 'no initial search results or historical links (search produced nothing usable)');
-    metrics.increment('researcher_skipped_total', 1, { mode: 'deep', complexity: String(complexity), reason: 'no_initial_links' });
-    observer?.onResearcherFailure?.(id, 'No initial search results or historical links available');
-    return;
+
+  let effectiveInitialLinks = initialLinks;
+  if (effectiveInitialLinks.length === 0 && historicalUrls.length === 0) {
+    // The plan-wide initial search burst (run once, before any researcher starts)
+    // can come back empty for THIS researcher's queries specifically because the
+    // shared browser pool was mid-recovery (e.g. leader-election churn, see
+    // task-execution-service.ts) at that exact moment — not because the topic has
+    // no results. Unlike every other researcher failure mode, this one used to
+    // `return` immediately, bypassing RESEARCHER_MAX_RETRIES entirely: a single
+    // transient pool hiccup counted as a full, unretried researcher failure and,
+    // combined with MAX_FAILED_RESEARCHERS, could abort a run with several other
+    // researchers still healthy and in flight. Give it the same bounded retry
+    // budget as the rest of this function, re-issuing a fresh search for this
+    // researcher's own queries before giving up.
+    const retryQueries = researcherConfig.queries?.length ? researcherConfig.queries : [researcherConfig.goal];
+    const maxLinkAttempts = config.RESEARCHER_MAX_RETRIES + 1;
+    for (let linkAttempt = 1; linkAttempt <= maxLinkAttempts && effectiveInitialLinks.length === 0; linkAttempt++) {
+      if (linkAttempt > 1) {
+        if (signal?.aborted || container?.isDisposing) break;
+        const delay = Math.min(1000 * Math.pow(2, linkAttempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
+        logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results; retry ${linkAttempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+      if (signal?.aborted || container?.isDisposing) break;
+      try {
+        const queryResults = await search(retryQueries, config, signal, undefined, container);
+        const urls = new Set<string>();
+        for (const qr of queryResults) {
+          for (const r of qr.results || []) urls.add(r.url);
+        }
+        effectiveInitialLinks = [...urls];
+      } catch (err) {
+        logger.debug(`[ResearcherExecutor] Researcher ${id} link-retry search burst failed:`, err);
+      }
+    }
+
+    if (effectiveInitialLinks.length === 0) {
+      logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links after ${maxLinkAttempts} attempt(s); skipping.`);
+      // Use the resolved sessionId (= piSessionId), NOT the raw ctx.sessionId: when
+      // ctx.sessionId is unset but sessionManager supplies a real id (common in SDK
+      // use), recording under ctx.sessionId would file this no-links skip under a
+      // different id than shouldStopResearch() checks, so the fast-stop guard would
+      // under-count exactly the broad-search-failure case it exists to catch.
+      recordResearcherFailure(sessionId, researchId, id, 'no initial search results or historical links (search produced nothing usable)');
+      metrics.increment('researcher_skipped_total', 1, { mode: 'deep', complexity: String(complexity), reason: 'no_initial_links' });
+      observer?.onResearcherFailure?.(id, 'No initial search results or historical links available');
+      return;
+    }
   }
 
   let evidenceSection = '';
-  if (initialLinks.length > 0) {
-    evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
+  if (effectiveInitialLinks.length > 0) {
+    evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${effectiveInitialLinks.map(l => `- ${l}`).join('\n')}`;
   }
 
   const maxAttempts = config.RESEARCHER_MAX_RETRIES + 1;

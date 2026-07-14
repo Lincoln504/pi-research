@@ -178,28 +178,39 @@ export class ResearchSynthesisService implements IService {
     let globalCitations: GlobalCitation[] =
       reports.size > 0 ? normalizeCitations(reports).globalCitations : [];
 
-    // Robustness fallback: if the reports yielded no parseable citations — e.g. the
-    // LLM omitted or mangled its "CITED LINKS" block, or wrote the sources under a
-    // heading parseCitations does not recognize — rebuild the sources list from the
-    // ground-truth provenance: the URLs the researchers ACTUALLY, successfully
-    // scraped this session (registerScrapedLinks only records HTTP-success fetches).
-    // This decouples the final sources list from fragile LLM prose formatting so that
-    // real fetched sources are never silently lost.
-    if (globalCitations.length === 0) {
+    // Robustness fallback: reconcile against ground-truth provenance — the URLs
+    // ACTUALLY, successfully scraped this session (registerScrapedLinks only records
+    // HTTP-success fetches). This runs even when SOME citations parsed: a
+    // multi-researcher run where only one researcher's report has an unparseable/
+    // missing "CITED LINKS" block still needs that researcher's real sources folded
+    // in — gating this on globalCitations being entirely EMPTY only ever caught the
+    // all-researchers-failed-to-cite case and silently dropped a partial researcher's
+    // sources whenever ANY other researcher cited normally. Only URLs not already
+    // represented (by normalized URL) are added, so parsed citations — richer, with
+    // descriptions and source tags — are never overwritten.
+    if (reports.size > 0) {
       const scraped = getScrapedLinks(sessionId);
       if (scraped.length > 0) {
-        // Label per actual provenance: the pool also contains transcript watch
-        // URLs the youtube_transcript tool registered — calling those "Scrape"
-        // misattributes the report's real source material.
-        globalCitations = scraped.map((url, i) => ({
-          id: i + 1,
-          url,
-          description: '',
-          source: isTranscribedLink(sessionId, url) ? 'YouTube Transcript' : 'Scrape',
-        }));
-        logger.warn(
-          `[ResearchSynthesisService] No citations parsed from reports; rebuilt ${scraped.length} source(s) from scrape/transcript provenance.`,
-        );
+        const known = new Set(globalCitations.map((c) => normalizeUrl(c.url)));
+        const missing = scraped.filter((url) => !known.has(normalizeUrl(url)));
+        if (missing.length > 0) {
+          const startId = globalCitations.reduce((max, c) => Math.max(max, c.id), 0) + 1;
+          // Label per actual provenance: the pool also contains transcript watch
+          // URLs the youtube_transcript tool registered — calling those "Scrape"
+          // misattributes the report's real source material.
+          globalCitations = [
+            ...globalCitations,
+            ...missing.map((url, i) => ({
+              id: startId + i,
+              url,
+              description: '',
+              source: isTranscribedLink(sessionId, url) ? 'YouTube Transcript' : 'Scrape',
+            })),
+          ];
+          logger.warn(
+            `[ResearchSynthesisService] Folded in ${missing.length} source(s) from scrape/transcript provenance not covered by parsed citations.`,
+          );
+        }
       }
     }
 

@@ -37,7 +37,7 @@ import type { Config } from '../config.ts';
 import { getConfig, DEFAULTS } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
-import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from './session-state.ts';
+import { recordResearcherFailure, shouldStopResearch, createResearchStopError } from './session-state.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
@@ -291,6 +291,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const active = new Set<Promise<void>>();
     // Honour MAX_CONCURRENT_RESEARCHERS — prevents resource spikes when a plan has many researchers.
     const maxConcurrent: number = (orchestratorOptions.config as Config)?.MAX_CONCURRENT_RESEARCHERS ?? DEFAULTS.MAX_CONCURRENT_RESEARCHERS;
+    const maxFailedResearchers: number = (orchestratorOptions.config as Config)?.MAX_FAILED_RESEARCHERS ?? DEFAULTS.MAX_FAILED_RESEARCHERS;
 
     for (const configItem of researchers) {
       if (signal?.aborted) break;
@@ -299,10 +300,10 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       // post-launch check below only fires after a researcher is in-flight, so
       // without this an early check, up to maxConcurrent-1 extra researchers could
       // start past the stop threshold and waste a browser slot + an LLM call.
-      if (shouldStopResearch(sessionId, researchId)) {
+      if (shouldStopResearch(sessionId, researchId, maxFailedResearchers)) {
         const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
         await sessionService.abortAllSessions(researchId);
-        throw new Error(getResearchStopMessage(sessionId, researchId));
+        throw createResearchStopError(sessionId, researchId);
       }
 
       // Enforce the concurrency cap before launching the next researcher.
@@ -391,13 +392,12 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         if (signal?.aborted) break;
       }
 
-      if (shouldStopResearch(sessionId, researchId)) {
+      if (shouldStopResearch(sessionId, researchId, maxFailedResearchers)) {
         const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
         // Abort sessions specifically for this researchId, not the whole piSessionId
         await sessionService.abortAllSessions(researchId);
 
-        const stopMessage = getResearchStopMessage(sessionId, researchId);
-        throw new Error(stopMessage);
+        throw createResearchStopError(sessionId, researchId);
       }
     }
 

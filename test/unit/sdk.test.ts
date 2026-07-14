@@ -68,6 +68,7 @@ vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
       if (name === 'research-orchestration') return { runResearch: mockDeepRun };
       if (name === 'session-service') return { registerSession: vi.fn(), cleanup: vi.fn() };
       if (name === 'research-synthesis-service') return { getAllReports: vi.fn().mockResolvedValue(new Map()), appendMetadata: vi.fn((result: string) => result) };
+      if (name === 'planning') return { getTotalResearchersPlanned: vi.fn().mockReturnValue(3) };
       return {};
     }),
     tryGetService: vi.fn().mockImplementation((name) => {
@@ -139,6 +140,7 @@ import {
   getLastRunSummary,
   getLastRunStats,
   getSessionMetrics,
+  getLastResearcherOutcome,
 } from '../../src/sdk.ts';
 import { 
   registerCoreServices, 
@@ -331,6 +333,21 @@ describe('SDK Lifecycle', () => {
       // getLastRunStats() and getSessionMetrics() must be callable without throwing.
       expect(() => getLastRunStats()).not.toThrow();
       expect(getSessionMetrics()).toHaveProperty('counters');
+    });
+
+    it('captures a researcher-outcome summary (planned/launched/succeeded/failed) readable after the run', async () => {
+      await initSDK();
+      await runDeepResearch('q');
+      const outcome = getLastResearcherOutcome();
+      expect(outcome).not.toBeNull();
+      // planningService.getTotalResearchersPlanned is mocked to 3; this mock run
+      // never emits researchers_launched_total or records a failure, so launched/
+      // failed are both 0 — the point of this test is that the accessor is
+      // populated and internally consistent (succeeded === launched - failed),
+      // not that it be a live plan/launch count in a fully stubbed orchestrator.
+      expect(outcome!.planned).toBe(3);
+      expect(outcome!.succeeded).toBe(outcome!.launched - outcome!.failed);
+      expect(outcome!.failureReasons).toEqual({});
     });
   });
 

@@ -605,16 +605,18 @@ export function getFailedResearchers(piSessionId: string | undefined, researchId
 }
 
 /**
- * Maximum allowed unique failed researchers
+ * Default (and fallback, for callers not passing a resolved Config) max allowed
+ * unique failed researchers before the run aborts. Configurable per-run via
+ * Config.MAX_FAILED_RESEARCHERS / PI_RESEARCH_MAX_FAILED_RESEARCHERS.
  */
-const MAX_FAILED_RESEARCHERS = 2;
+const DEFAULT_MAX_FAILED_RESEARCHERS = 2;
 
 /**
  * Check if research should stop due to too many unique failures
  */
-export function shouldStopResearch(piSessionId: string | undefined, researchId: string): boolean {
+export function shouldStopResearch(piSessionId: string | undefined, researchId: string, maxFailedResearchers: number = DEFAULT_MAX_FAILED_RESEARCHERS): boolean {
   const sid = normalizeSessionId(piSessionId);
-  return getFailedResearchers(sid, researchId).length >= MAX_FAILED_RESEARCHERS;
+  return getFailedResearchers(sid, researchId).length >= maxFailedResearchers;
 }
 
 /**
@@ -657,6 +659,27 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
     '',
     'Partial results may be available below.',
   ].join('\n');
+}
+
+/**
+ * Stable error code for a fail-fast research-stop error. cli.ts's reportError()
+ * checks this BEFORE its 'api key'-substring config-error heuristic: the
+ * boilerplate advice line above ("...API key / context settings are valid.")
+ * is appended to every research-stop message regardless of cause, so a
+ * substring match alone misclassifies every worker-pool/infra-driven stop as
+ * a config error (exit 78) instead of a software error (exit 70).
+ */
+export const RESEARCH_STOPPED_ERROR_CODE = 'RESEARCH_STOPPED';
+
+/**
+ * Build the Error to throw when shouldStopResearch() trips, tagged with
+ * RESEARCH_STOPPED_ERROR_CODE so callers can classify it without re-parsing
+ * the (human-oriented, boilerplate-laden) message text.
+ */
+export function createResearchStopError(piSessionId: string | undefined, researchId: string): Error & { code: string } {
+  const err = new Error(getResearchStopMessage(piSessionId, researchId)) as Error & { code: string };
+  err.code = RESEARCH_STOPPED_ERROR_CODE;
+  return err;
 }
 
 /**

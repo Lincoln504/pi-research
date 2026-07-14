@@ -73,6 +73,7 @@ Research
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
+| `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | Unique researcher failures that abort the whole run. Raise to let slower, still-in-flight researchers finish before giving up. |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes. Higher = more throughput, more CPU/RAM. |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process. |
 | `PI_RESEARCH_MODEL` | _(pi: session model; CLI/skill: required)_ | — | The model research runs on. **Required for the standalone CLI / agent skill** — they use only this configured model (never the model selected inside the pi extension) and refuse to start without one (the CLI's per-run `--model` flag also satisfies this). On the SDK it selects the session model when no `model` option is given. In the pi extension it overrides researcher sub-agents and knowledge synthesis, while the coordinator and evaluator keep using the session model. Accepts `provider/id` or a bare model id. |

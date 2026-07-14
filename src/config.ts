@@ -28,6 +28,8 @@ export const ConfigSchema = Type.Object({
   RESEARCHER_MAX_RETRIES: Type.Number({ minimum: 0, maximum: 5, default: 2 }),
   /** Base delay between retries in milliseconds (default: 2000, range: 100-10000) */
   RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 100, maximum: 10000, default: 2000 }),
+  /** Unique researcher failures that abort the entire run (default: 2, range: 1-10) */
+  MAX_FAILED_RESEARCHERS: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
   /** Target depth for recursive research (default: 1, range: 1-3) */
   DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
   /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
@@ -690,6 +692,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_MAX_RESEARCHERS: String(config.MAX_CONCURRENT_RESEARCHERS),
     PI_RESEARCH_MAX_RETRIES: String(config.RESEARCHER_MAX_RETRIES),
     PI_RESEARCH_RETRY_DELAY_MS: String(config.RESEARCHER_MAX_RETRY_DELAY_MS),
+    PI_RESEARCH_MAX_FAILED_RESEARCHERS: String(config.MAX_FAILED_RESEARCHERS ?? DEFAULTS.MAX_FAILED_RESEARCHERS),
     PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: String(config.HEALTH_CHECK_TIMEOUT_MS ?? DEFAULTS.HEALTH_CHECK_TIMEOUT_MS),
     PI_RESEARCH_SEARCH_TIMEOUT_MS: String(config.SEARCH_TIMEOUT_MS),
     PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS: String(config.TUI_REFRESH_DEBOUNCE_MS),
@@ -912,6 +915,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_CONCURRENT_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_RESEARCHERS', DEFAULTS.MAX_CONCURRENT_RESEARCHERS, 1, 5, true),
     RESEARCHER_MAX_RETRIES: parseEnvNumber(e, 'PI_RESEARCH_MAX_RETRIES', DEFAULTS.RESEARCHER_MAX_RETRIES, 0, 5, true),
     RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS, 100, 10000),
+    MAX_FAILED_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_FAILED_RESEARCHERS', DEFAULTS.MAX_FAILED_RESEARCHERS, 1, 10, true),
     DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH, 1, 3, true),
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES, 0, 99, true),
     MAX_GATHERING_CALLS: parseEnvNumber(e, 'PI_RESEARCH_MAX_GATHERING_CALLS', DEFAULTS.MAX_GATHERING_CALLS, 1, 100, true),

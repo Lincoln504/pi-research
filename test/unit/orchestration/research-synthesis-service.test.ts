@@ -202,6 +202,41 @@ describe('ResearchSynthesisService', () => {
       expect(lines.slice(pageIdx, pageIdx + 2).join('\n')).toContain('Scrape');
     });
 
+    it('folds in a second researcher\'s YouTube transcript source even when a first researcher cited normally (multi-researcher partial-citation regression)', () => {
+      // Regression: the provenance fallback used to only run when globalCitations
+      // was entirely empty (every researcher failed to cite), so a second
+      // researcher's uncited YouTube transcript source was silently dropped
+      // whenever a sibling researcher's report DID parse normally.
+      service.storeReport(
+        'test-session',
+        '1.A',
+        reportWithCitations([{ url: 'https://example.org/page', desc: 'cited normally' }]),
+      );
+      service.storeReport('test-session', '1.B', 'A transcript-grounded report with no parseable citation block.');
+      registerScrapedLinks('test-session', ['https://example.org/page', 'https://www.youtube.com/watch?v=abc123']);
+      registerTranscribedLinks('test-session', ['https://www.youtube.com/watch?v=abc123']);
+
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      expect(result).toContain('https://example.org/page');
+      expect(result).toContain('watch?v=abc123');
+      const lines = result.split('\n');
+      const ytIdx = lines.findIndex((l) => l.includes('watch?v=abc123'));
+      expect(lines.slice(ytIdx, ytIdx + 2).join('\n')).toContain('YouTube Transcript');
+    });
+
+    it('does not duplicate a URL that is already covered by a parsed citation', () => {
+      service.storeReport(
+        'test-session',
+        '1.A',
+        reportWithCitations([{ url: 'https://example.org/page', desc: 'cited normally' }]),
+      );
+      registerScrapedLinks('test-session', ['https://example.org/page']);
+
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      const occurrences = result.split('example.org/page').length - 1;
+      expect(occurrences).toBe(1);
+    });
+
     it('appends an explicit no-sources note when neither citations nor scrape provenance exist', () => {
       service.storeReport('test-session', '1.A', 'A report with no citation section at all.');
       const input = 'Synthesis without links.';

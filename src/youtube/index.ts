@@ -126,10 +126,11 @@ function formatResults(results: VideoTranscript[], rejected: string[]): string {
     // citation pipeline (parseCitations extracts URLs), so the transcript's
     // provenance would silently drop out of the final report's CITED LINKS.
     // The title/channel follows so the report names the real video, not a
-    // paraphrase (the watch URL alone is not human-identifiable).
-    if (r.title) {
-      md += `**Cite as:** ${r.url} — '${r.title}'${r.author ? ` by ${r.author}` : ''}\n`;
-    }
+    // paraphrase (the watch URL alone is not human-identifiable). Emit this line
+    // unconditionally — an untitled video still needs a parseable "Cite as" the
+    // model can copy verbatim; omitting the line entirely for untitled videos
+    // left them without any prompt-visible citation string to reuse.
+    md += `**Cite as:** ${r.url}${r.title ? ` — '${r.title}'${r.author ? ` by ${r.author}` : ''}` : ''}\n`;
     md += `\n${r.text}\n\n---\n\n`;
   }
 

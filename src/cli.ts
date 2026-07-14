@@ -31,9 +31,12 @@ import {
   runDeepResearch,
   searchKnowledge,
   shutdownResearchSDK,
+  getLastErrorReport,
+  getLastResearcherOutcome,
   type KnowledgeSearchResult,
 } from './sdk.ts';
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
+import { RESEARCH_STOPPED_ERROR_CODE } from './orchestration/session-state.ts';
 import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import { validateInitialLink, MAX_INITIAL_LINKS } from './utils/url-utils.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
@@ -468,6 +471,11 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
   const observer: HeadlessObserverOptions = makeProgressObserver();
 
   let exit: number = EXIT.OK;
+  // Let Ctrl-C/SIGTERM (main()'s onSignal) cancel THIS run's orchestrator instead of
+  // only tearing down shared SDK services out from under it — see
+  // activeResearchAbortController's declaration for why.
+  const abortController = new AbortController();
+  activeResearchAbortController = abortController;
   try {
     await initResearchSDK({
       model: runModel,
@@ -485,7 +493,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
       observer,
       ...(args.excludeTools ? { excludeTools: args.excludeTools } : {}),
       ...(args.initialLinks ? { initialLinks: args.initialLinks } : {}),
-    });
+    }, abortController.signal);
 
     // Optionally persist the report to a file (opt-in via
     // PI_RESEARCH_REPORT_EXPORT_ENABLED). The SDK is a pure library and does not
@@ -503,13 +511,29 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
     }
 
     if (args.json) {
-      toStdout(pretty({ ok: true, depth, report, ...(reportPath ? { reportPath } : {}) }));
+      // Surface the internal quality/health signals that were previously log-only
+      // (ISSUES-ANALYSIS-2026-07-09.md, Symptom 4): a caller reading only stdout/JSON
+      // had no way to distinguish "thin report, little material out there" from "thin
+      // report because most researchers died mid-run" without opening the log file.
+      const outcome = getLastResearcherOutcome();
+      const errorReport = getLastErrorReport();
+      toStdout(pretty({
+        ok: true,
+        depth,
+        report,
+        ...(reportPath ? { reportPath } : {}),
+        ...(outcome ? { researchers: { planned: outcome.planned, launched: outcome.launched, succeeded: outcome.succeeded, failed: outcome.failed } } : {}),
+        ...(errorReport && errorReport.totalErrors > 0 ? {
+          trackedErrors: { total: errorReport.totalErrors, uniquePatterns: errorReport.uniquePatterns },
+        } : {}),
+      }));
     } else {
       toStdout(report.endsWith('\n') ? report : report + '\n');
     }
   } catch (err) {
     exit = reportError(err, 'research', args.json);
   } finally {
+    if (activeResearchAbortController === abortController) activeResearchAbortController = null;
     await safeShutdown();
   }
   return exit;
@@ -791,12 +815,23 @@ function describeUninstall(r: { status: string; path: string; message?: string }
 // ---------------------------------------------------------------------------
 
 /** Distinguish setup errors from runtime errors and print a clean, located message. */
-function reportError(err: unknown, what: string, json?: boolean): number {
+export function reportError(err: unknown, what: string, json?: boolean): number {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
 
+  // A tagged research-stop error (session-state.ts's createResearchStopError) is an
+  // orchestration/infrastructure failure (worker-pool contention, ungrounded
+  // researchers, etc.), never a credentials problem — classify it as SOFTWARE
+  // unconditionally and skip the substring heuristic below entirely. Without this,
+  // the boilerplate advice line every research-stop message carries ("Verify the
+  // model is available and the API key / context settings are valid.") contains the
+  // literal substring "api key," so the heuristic alone would misclassify EVERY
+  // research-stop — regardless of real cause — as a config error (exit 78).
+  const isTaggedResearchStop = (err as { code?: unknown } | undefined)?.code === RESEARCH_STOPPED_ERROR_CODE;
+
   // Auth / model / config-shaped errors → CONFIG exit + config block.
   const isConfigError =
+    !isTaggedResearchStop && (
     lower.includes('no llm model available') ||
     lower.includes('not found in pi') ||
     lower.includes('no api key') ||
@@ -804,7 +839,7 @@ function reportError(err: unknown, what: string, json?: boolean): number {
     lower.includes('invalid model string') ||
     lower.includes('authentication') ||
     lower.includes('unauthorized') ||
-    lower.includes('api key');
+    lower.includes('api key'));
 
   // Rate limits win over config-shaped matches: a provider 429 often mentions
   // "api key" in its body (e.g. "rate limit exceeded for this api key"), and
@@ -1175,6 +1210,15 @@ const flushAndExit = (code: number): void => {
   });
 };
 
+// Signal to the in-flight `research` run's AbortController, if any is active.
+// Without this, Ctrl-C only tore down shared SDK services (browser pool, LLM
+// clients, LanceDB) via safeShutdown() while runDeepResearch() was still using
+// them — the orchestrator never saw a cancellation and had no chance to return
+// its already-wired partial/fallback synthesis for a clean stop. Set at the
+// start of cmdResearch, cleared in its finally so a stale reference never
+// outlives that one run.
+let activeResearchAbortController: AbortController | null = null;
+
 async function main(argv: string[]): Promise<number> {
   // Register signal handlers so SIGINT/SIGTERM always trigger SDK shutdown
   // before the process exits. safeShutdown() is idempotent — safe to call
@@ -1184,6 +1228,11 @@ async function main(argv: string[]): Promise<number> {
     if (_signalCleanupDone) return;
     _signalCleanupDone = true;
     toStderr(`\n[pi-research] ${sig} — cleaning up…\n`);
+    // Abort the in-flight research run FIRST (synchronously ahead of the shutdown
+    // teardown below) so the orchestrator's existing signal-aware cancellation path
+    // gets a chance to return a partial/fallback synthesis instead of racing a live
+    // browser-pool/LLM teardown out from under it.
+    activeResearchAbortController?.abort();
     // Fire-and-forget: we can't await here, but safeShutdown swallows errors
     // and the finally blocks in each command handler also call it. Drain via
     // flushAndExit (not a bare process.exit) so buffered stdout isn't truncated.

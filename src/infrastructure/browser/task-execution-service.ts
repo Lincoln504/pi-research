@@ -99,11 +99,17 @@ export async function runBrowserTask<T>(
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
                 // True socket/connection error — restart the scheduler with thundering herd guard.
+                // Do NOT force-clear remote leader state here: a transient socket
+                // hiccup against a live-but-busy leader is not proof the leader is
+                // dead. forceSchedulerRestart(false) still clears state when its own
+                // PID+start-time liveness probe confirms the registered leader is
+                // actually gone; it only skips clearing when that probe finds the
+                // leader alive, which is exactly the case we must not disturb.
                 const now = Date.now();
                 if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
                     lastRestartTime = now;
                     logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(true, container);
+                    await forceSchedulerRestart(false, container);
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
                 } else {
                     logger.warn(`[BrowserManager] Scheduler restart recently triggered, waiting for pool idle...`);
@@ -141,11 +147,14 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
             if (isPoolShutdownError(error)) {
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
+                // See runBrowserTask: don't force-clear remote leader state on a bare
+                // transient socket error — let the liveness probe inside
+                // forceSchedulerRestart decide.
                 const now = Date.now();
                 if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
                     lastRestartTime = now;
                     logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(true, container);
+                    await forceSchedulerRestart(false, container);
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
                 } else {
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
@@ -189,11 +198,14 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
             if (isPoolShutdownError(error)) {
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
+                // See runBrowserTask: don't force-clear remote leader state on a bare
+                // transient socket error — let the liveness probe inside
+                // forceSchedulerRestart decide.
                 const now = Date.now();
                 if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
                     lastRestartTime = now;
                     logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(true, container);
+                    await forceSchedulerRestart(false, container);
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
                 } else {
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));

@@ -22,11 +22,12 @@ import { getService, resetServiceContainer, getServiceContainer } from './core/s
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from './core/interfaces/knowledge-interfaces.ts';
-import type { 
-  IResearchOrchestration, 
+import type {
+  IResearchOrchestration,
   IResearchSynthesisService,
-  ResearchOptions 
+  ResearchOptions
 } from './core/interfaces/orchestration-interfaces.ts';
+import type { IPlanningService } from './core/interfaces/planning-interfaces.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
@@ -77,6 +78,22 @@ let _lastRunSummary: RunSummary | null = null;
 // discarded unread. Now each run gets its own tracker, a concise summary is logged at
 // run end when errors occurred, and consumers can read the full report after the run.
 let _lastErrorReport: ErrorReport | null = null;
+
+/**
+ * Researcher-outcome summary for the most recent runDeepResearch call: how many
+ * researchers were planned/launched vs. how many ultimately failed (never landed
+ * a report) vs. succeeded, plus the first recorded failure reason per failed
+ * researcher. Lets a caller distinguish "thin report, little material out there"
+ * from "thin report because most researchers died" without opening the log file.
+ */
+export interface ResearcherOutcome {
+  planned: number;
+  launched: number;
+  succeeded: number;
+  failed: number;
+  failureReasons: Record<string, string>;
+}
+let _lastResearcherOutcome: ResearcherOutcome | null = null;
 
 // Signal handler state — registered once, removed on clean shutdown.
 let _onSignal: ((signal: string) => void) | null = null;
@@ -512,6 +529,7 @@ export async function runDeepResearch(
     metrics.recordRunSummary(_lastRunSummary);
     _lastErrorReport = runTracker.getReport();
     logRunErrorSummary(_lastErrorReport, depthLabel, 'success');
+    _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot);
     return result;
   } catch (err) {
     const completedAt = Date.now();
@@ -524,6 +542,7 @@ export async function runDeepResearch(
     metrics.recordRunSummary(_lastRunSummary);
     _lastErrorReport = runTracker.getReport();
     logRunErrorSummary(_lastErrorReport, depthLabel, 'error');
+    _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot);
     throw err;
   } finally {
     // Free the per-run PiSessionState that shouldStopResearch()/getFailedResearchers()
@@ -565,6 +584,14 @@ export function getLastErrorReport(): ErrorReport | null {
 }
 
 /**
+ * Researcher-outcome summary (planned/launched/succeeded/failed + failure reasons)
+ * for the most recent run. Null until the first run completes; cleared on shutdown.
+ */
+export function getLastResearcherOutcome(): ResearcherOutcome | null {
+  return _lastResearcherOutcome;
+}
+
+/**
  * Emit a single compact line summarizing a run's tracked errors, so they are visible in
  * the operator's log instead of silently accumulating. No-op when the run was clean.
  */
@@ -574,6 +601,31 @@ function logRunErrorSummary(report: ErrorReport | null, depthLabel: string, stat
     .map(p => `"${String(p.message ?? p.signature ?? 'error').slice(0, 48)}" ×${p.count}`)
     .join(', ');
   logger.warn(`[SDK] run ${status} with ${report.totalErrors} tracked error(s) across ${report.uniquePatterns} pattern(s) [${depthLabel}]${top ? ` — top: ${top}` : ''}`);
+}
+
+/**
+ * Capture how many researchers were planned/launched/failed for this run, BEFORE
+ * the caller's `finally` block frees the PiSessionState (endResearchSession) that
+ * getFailedResearchers()/getResearcherFailureReasons() read from. Best-effort:
+ * this is instrumentation only and must never affect the run's own result.
+ */
+async function captureResearcherOutcome(sessionId: string, researchId: string, snapshot: IMetricsSnapshot): Promise<ResearcherOutcome | null> {
+  try {
+    const planningService = await getService<IPlanningService>(ServiceNames.PLANNING, undefined, globalContainer!);
+    const planned = planningService.getTotalResearchersPlanned(researchId);
+    const launched = extractRunStats(snapshot)?.researchersLaunched ?? 0;
+    const failed = getFailedResearchers(sessionId, researchId);
+    return {
+      planned,
+      launched,
+      succeeded: Math.max(0, launched - failed.length),
+      failed: failed.length,
+      failureReasons: getResearcherFailureReasons(sessionId, researchId),
+    };
+  } catch (err) {
+    logger.debug('[SDK] Failed to capture researcher outcome (non-fatal):', err);
+    return null;
+  }
 }
 
 /**
@@ -744,7 +796,7 @@ export async function searchKnowledge(
   };
 }
 
-import { clearAllSessionState, endResearchSession } from './orchestration/session-state.ts';
+import { clearAllSessionState, endResearchSession, getFailedResearchers, getResearcherFailureReasons } from './orchestration/session-state.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
 /**
@@ -833,6 +885,7 @@ async function _doShutdown(): Promise<void> {
   _lastResearchId = null;
   _lastRunSummary = null;
   _lastErrorReport = null;
+  _lastResearcherOutcome = null;
   // The module-level config cache survives the globals above. Without this, a
   // shutdown → env/config-file change → re-init cycle in one process silently
   // reuses the first init's config. (The CLI/skill are unaffected — they pass
