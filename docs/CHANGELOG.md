@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2024-07-17
+
+### Added
+- **CHANGELOG** — Added comprehensive CHANGELOG.md documenting all versions from 0.1.13 through 1.0.7
+- **System prompt constraint** — Added "Maximum 4 simultaneous calls" constraint to research-tool-usage prompt to prevent system overload
+
+### Changed
+- **Topic consolidation guidance** — Emphasized that topics can likely be consolidated to fit the 4-call maximum, with strategies for grouping related subtopics
+- **Package structure** — CHANGELOG.md now included in published package (docs/CHANGELOG.md)
+
 ## [1.0.7] - 2024-07-14
 
 ### Fixed
