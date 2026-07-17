@@ -37,7 +37,8 @@
     "scripts/prepare.cjs",
     "LICENSE",
     "docs/THIRD-PARTY-NOTICES.md",
-    "README.md"
+    "README.md",
+    "docs/CHANGELOG.md"
   ],
   "repository": {
     "type": "git",
