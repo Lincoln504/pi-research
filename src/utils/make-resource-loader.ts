@@ -8,9 +8,14 @@
 import type { ResourceLoader, ExtensionRuntime } from '@earendil-works/pi-coding-agent';
 
 export function makeResourceLoader(systemPromptText: string): ResourceLoader {
-  const mockRuntime: ExtensionRuntime = {
+  // Cast (not annotation) so this compiles against both pi 0.80 (no
+  // pendingNativeProviderRegistrations/registerNativeProvider on ExtensionRuntime)
+  // and 0.81 (where createAgentSessionServices iterates that array unconditionally).
+  const mockRuntime = {
     flagValues: new Map(),
     pendingProviderRegistrations: [],
+    pendingNativeProviderRegistrations: [],
+    registerNativeProvider: () => {},
     registerProvider: () => {},
     unregisterProvider: () => {},
     sendMessage: async () => {},
@@ -29,7 +34,7 @@ export function makeResourceLoader(systemPromptText: string): ResourceLoader {
     setThinkingLevel: () => {},
     assertActive: () => {},
     invalidate: () => {},
-  };
+  } as ExtensionRuntime;
 
   return {
     getExtensions: () => ({ extensions: [], errors: [], runtime: mockRuntime }),
