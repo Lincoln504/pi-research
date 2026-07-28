@@ -286,7 +286,7 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   }
 
   // Build and cache the registry (one instance for the lifetime of this init cycle).
-  globalRegistry = sharedBuildModelRegistry(globalApiKey, parsedProvider);
+  globalRegistry = await sharedBuildModelRegistry(globalApiKey, parsedProvider);
 
   try {
     // Resolve the model. Precedence: explicit option (a Model object is used

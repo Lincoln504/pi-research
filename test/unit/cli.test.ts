@@ -360,25 +360,25 @@ describe('reportError — exit-code classification', () => {
   // misclassify every fail-fast research stop as a config error (exit 78) —
   // even when the real cause was worker-pool contention with nothing wrong
   // with the model or credentials.
-  it('classifies a tagged research-stop error as SOFTWARE even though its message contains "API key"', () => {
+  it('classifies a tagged research-stop error as SOFTWARE even though its message contains "API key"', async () => {
     const err = createResearchStopError('session-1', 'research-1');
     expect(err.message.toLowerCase()).toContain('api key');
-    const exitCode = reportError(err, 'research', true);
+    const exitCode = await reportError(err, 'research', true);
     expect(exitCode).toBe(EXIT.SOFTWARE);
   });
 
-  it('still classifies a genuine, untagged credentials error as CONFIG', () => {
-    const exitCode = reportError(new Error('Invalid API key provided'), 'research', true);
+  it('still classifies a genuine, untagged credentials error as CONFIG', async () => {
+    const exitCode = await reportError(new Error('Invalid API key provided'), 'research', true);
     expect(exitCode).toBe(EXIT.CONFIG);
   });
 
-  it('still classifies a rate-limit error as SOFTWARE (operational, not a setup problem)', () => {
-    const exitCode = reportError(new Error('429 rate limit exceeded for this api key'), 'research', true);
+  it('still classifies a rate-limit error as SOFTWARE (operational, not a setup problem)', async () => {
+    const exitCode = await reportError(new Error('429 rate limit exceeded for this api key'), 'research', true);
     expect(exitCode).toBe(EXIT.SOFTWARE);
   });
 
-  it('classifies an unrelated runtime error as SOFTWARE', () => {
-    const exitCode = reportError(new Error('Worker pool is shutting down'), 'research', true);
+  it('classifies an unrelated runtime error as SOFTWARE', async () => {
+    const exitCode = await reportError(new Error('Worker pool is shutting down'), 'research', true);
     expect(exitCode).toBe(EXIT.SOFTWARE);
   });
 });
@@ -616,6 +616,25 @@ describe('CLI subprocess — pi key detection by content', () => {
       expect(out.ready).toBe(true);
       expect(out.credentials.source).toBe('pi-config');
       expect(out.credentials.apiKeyConfigured).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('status in a pi-less HOME creates NO ~/.pi directory (read-only-safe pre-flight)', () => {
+    // Regression guard for the pi 0.80.8 ModelRuntime migration: the runtime's
+    // default file-backed credential store creates ~/.pi/agent/auth.json at
+    // CONSTRUCTION, so without the in-memory store in buildModelRegistry every
+    // CLI invocation — including read-only `status` — would silently create a
+    // pi config dir on machines that never installed pi, and hard-fail where
+    // $HOME is read-only.
+    const home = mkdtempSync(path.join(os.tmpdir(), 'pir-noside-'));
+    try {
+      const r = spawnSync(process.execPath, [CLI, 'status', '--json'], {
+        encoding: 'utf-8', env: env(home), timeout: 20_000,
+      });
+      expect(r.status).toBe(0);
+      expect(existsSync(path.join(home, '.pi'))).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

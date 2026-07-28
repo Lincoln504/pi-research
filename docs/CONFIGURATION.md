@@ -97,7 +97,7 @@ Timeouts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–600000 | Coordinator / evaluator / repair / knowledge LLM call timeout. |
+| `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–1800000 | Coordinator / evaluator / repair / knowledge LLM call timeout. |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape (page-load) timeout. |
 | `PI_RESEARCH_SEARCH_TIMEOUT_MS` | `45000` | 5000–120000 | Browser search page timeout. |
 | `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Queue-wait / overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). |

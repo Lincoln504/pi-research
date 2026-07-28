@@ -81,13 +81,18 @@ vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
 });
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
-  ModelRegistry: {
-    create: vi.fn().mockReturnValue(mockModelRegistryInstance),
-    inMemory: vi.fn().mockReturnValue(mockModelRegistryInstance),
+  // pi 0.80.8+: ModelRegistry is a sync facade wrapping a ModelRuntime.
+  // buildModelRegistry does `await ModelRuntime.create(...)` then `new ModelRegistry(runtime)`.
+  ModelRuntime: {
+    create: vi.fn().mockResolvedValue({
+      setRuntimeApiKey: vi.fn().mockResolvedValue(undefined),
+    }),
   },
-  AuthStorage: {
-    create: vi.fn().mockReturnValue({}),
-    inMemory: vi.fn().mockReturnValue({}),
+  ModelRegistry: class MockModelRegistry {
+    constructor() {
+      // Returning an object from a constructor overrides `new`'s default instance.
+      return mockModelRegistryInstance;
+    }
   },
   getAgentDir: vi.fn().mockReturnValue('/home/user/.pi/agent'),
   CONFIG_DIR_NAME: '.pi',

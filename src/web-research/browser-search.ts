@@ -61,10 +61,22 @@ export async function performSearch(
     if (onProgress) onProgress(0);
 
     // Hard cap per query so a single Cloudflare block or hung browser worker
-    // cannot stall the entire Promise.all burst. Derived from the configured
-    // search timeout (default 45s) so raising SEARCH_TIMEOUT_MS actually takes
-    // effect here instead of being silently overridden by a lower literal.
-    const QUERY_TIMEOUT_MS = config?.SEARCH_TIMEOUT_MS ?? 45_000;
+    // cannot stall the entire Promise.all burst.
+    //
+    // The budget is the worker's nav budget (SEARCH_TIMEOUT_MS) PLUS the
+    // queue-wait/overhead margin (BROWSER_TASK_TIMEOUT_MS), mirroring the
+    // scheduler's own task-timeout ceiling in BrowserTaskScheduler.runSearch
+    // (= SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS). This clock starts at
+    // ENQUEUE (before runWorkerSearch queues onto the shared browser pool), so
+    // a budget of only SEARCH_TIMEOUT_MS would let a query that sat in the
+    // saturated worker queue burn its ENTIRE nav budget waiting for a slot and
+    // abort with zero actual search work — exactly the "Query timed out after
+    // 45000ms (likely blocked or slow startup)" cascade observed under
+    // concurrent load. Including the margin lets a queued query still use its
+    // full nav budget once a worker picks it up, and keeps this layer's hard
+    // cap coherent with the scheduler's so it never preempts the worker's own
+    // (post-dequeue) deadline.
+    const QUERY_TIMEOUT_MS = (config?.SEARCH_TIMEOUT_MS ?? 45_000) + (config?.BROWSER_TASK_TIMEOUT_MS ?? 10_000);
 
     const filteredQueries = queries.filter(q => q.trim());
     let timeoutCount = 0;
@@ -133,7 +145,7 @@ export async function performSearch(
             metrics.increment('browser_search_queries_total', 1, { status });
             
             if (isTimeout) {
-                logger.warn(`[Search] Query timed out after ${QUERY_TIMEOUT_MS}ms (likely blocked or slow startup): "${query}"`);
+                logger.warn(`[Search] Query timed out after ${QUERY_TIMEOUT_MS}ms — likely starved waiting for a free browser worker under concurrent load, or a slow/blocked search provider: "${query}"`);
             } else {
                 const msg = error instanceof Error ? error.message : String(error);
                 if (msg !== 'Aborted') {

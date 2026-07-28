@@ -240,9 +240,9 @@ function fileExists(p: string): boolean {
  * OPENAI_API_KEY. File presence alone is neither necessary (keys can live in
  * models.json / env with no auth.json) nor sufficient (auth.json can be `{}`).
  */
-function piKeysAvailable(piAuthPresent: boolean, provider?: string): boolean {
+async function piKeysAvailable(piAuthPresent: boolean, provider?: string): Promise<boolean> {
   try {
-    const available = safeGetAvailable(buildModelRegistry(undefined, undefined));
+    const available = safeGetAvailable(await buildModelRegistry(undefined, undefined));
     if (!provider) return available.length > 0;
     // Provider known (from the configured provider/model-id): keys must exist
     // for THAT provider — a key for some other provider would pass pre-flight
@@ -282,7 +282,7 @@ export interface CredentialDetection {
  * blocks a valid `--model` run). An explicit PI_RESEARCH_PROVIDER still wins:
  * it names the provider the configured key belongs to.
  */
-function detectCredentials(explicitModel?: string): CredentialDetection {
+async function detectCredentials(explicitModel?: string): Promise<CredentialDetection> {
   const paths = resolvedConfigPaths();
   const piAuthPresent = fileExists(paths.piAuth);
   const piModelsPresent = fileExists(paths.piModels);
@@ -299,7 +299,7 @@ function detectCredentials(explicitModel?: string): CredentialDetection {
     providerEnv ?? (model && model.includes('/') ? model.slice(0, model.indexOf('/')) : undefined);
   // Provider-aware when the configured model names one: a key for a DIFFERENT
   // provider must not greenlight this run.
-  const piKeysUsable = piKeysAvailable(piAuthPresent, provider);
+  const piKeysUsable = await piKeysAvailable(piAuthPresent, provider);
 
   // --- Explicit API-key path -------------------------------------------------
   if (apiKey) {
@@ -440,7 +440,7 @@ interface ResearchArgs {
 async function cmdResearch(args: ResearchArgs): Promise<number> {
   // Pre-flight with the per-run --model flag folded in: it satisfies the
   // model-required check and steers the provider-aware key detection.
-  const det = detectCredentials(args.model);
+  const det = await detectCredentials(args.model);
   if (det.problem) {
     if (args.json) toStdout(pretty({ ok: false, error: det.problem, exitCode: EXIT.CONFIG }));
     else toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
@@ -531,7 +531,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
       toStdout(report.endsWith('\n') ? report : report + '\n');
     }
   } catch (err) {
-    exit = reportError(err, 'research', args.json);
+    exit = await reportError(err, 'research', args.json);
   } finally {
     if (activeResearchAbortController === abortController) activeResearchAbortController = null;
     await safeShutdown();
@@ -545,7 +545,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
  * research.
  */
 async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> {
-  const det = detectCredentials();
+  const det = await detectCredentials();
   if (det.problem) {
     if (json) { toStdout(pretty({ ok: false, error: det.problem, exitCode: EXIT.CONFIG })); return EXIT.CONFIG; }
     toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
@@ -595,7 +595,7 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
  * run, without initializing the SDK. Machine-readable with --json.
  */
 async function cmdStatus(json?: boolean): Promise<number> {
-  const det = detectCredentials();
+  const det = await detectCredentials();
   const paths = resolvedConfigPaths();
   const cfg = getConfig(process.cwd(), 'cli');
   const summary = {
@@ -815,7 +815,7 @@ function describeUninstall(r: { status: string; path: string; message?: string }
 // ---------------------------------------------------------------------------
 
 /** Distinguish setup errors from runtime errors and print a clean, located message. */
-export function reportError(err: unknown, what: string, json?: boolean): number {
+export async function reportError(err: unknown, what: string, json?: boolean): Promise<number> {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
 
@@ -865,7 +865,7 @@ export function reportError(err: unknown, what: string, json?: boolean): number 
     return exitCode;
   }
   if (isConfigError) {
-    toStderr(`\nError: pi-research ${what} failed: ${msg}\n\n${configBlock(detectCredentials())}\n`);
+    toStderr(`\nError: pi-research ${what} failed: ${msg}\n\n${configBlock(await detectCredentials())}\n`);
     return exitCode;
   }
   toStderr(`\nError: pi-research ${what} failed: ${msg}\n`);

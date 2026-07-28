@@ -1,0 +1,21 @@
+{
+  "comment": "Documented exceptions for the production npm-audit release gate (scripts/audit-gate.cjs). Each entry allowlists ONE advisory (by GHSA id) that is confirmed upstream-blocked: no direct dependency bump or npm override in THIS repo can remediate it. Any advisory NOT listed here still fails the gate at the moderate+ threshold. Every entry must carry the reason it is not remediable here, the condition that clears it, and the date it was reviewed. Re-verify entries at every release: remove an entry as soon as its upstream fix lands (the gate warns on stale entries that no longer match anything).",
+  "exceptions": [
+    {
+      "id": "GHSA-mh99-v99m-4gvg",
+      "package": "brace-expansion",
+      "severity": "high",
+      "reason": "Vulnerable brace-expansion@5.0.7 is nested inside @earendil-works/pi-coding-agent, whose published npm-shrinkwrap.json freezes its transitive tree; by npm design a shrinkwrap is authoritative, so a downstream override cannot replace it (verified empirically 2026-07-28: override left the nested copy at 5.0.7). Exposure is a DoS via unbounded expansion of glob patterns inside pi's own CLI internals — not attacker-controlled input in pi-research's usage.",
+      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls brace-expansion >=5.0.8 (fix already published upstream; satisfiable within pi's own ^5.0.5 range).",
+      "reviewed": "2026-07-28"
+    },
+    {
+      "id": "GHSA-f88m-g3jw-g9cj",
+      "package": "sharp",
+      "severity": "high",
+      "reason": "sharp <0.35.0 (libvips CVEs) is a direct dependency of @huggingface/transformers, which pi-research uses exclusively for TEXT embeddings (knowledge store); the sharp image-processing pipeline is never invoked, so the vulnerable code path is unreachable in this package. Forcing sharp 0.35 via an override would deviate a native module from the upstream-tested combination on a code path our test suite cannot exercise — higher regression risk than the unreachable advisory.",
+      "clearsWhen": "@huggingface/transformers publishes a release depending on sharp >=0.35.0 (transformers is deliberately pinned at 4.2.x in this repo; re-evaluate at the next planned transformers bump).",
+      "reviewed": "2026-07-28"
+    }
+  ]
+}

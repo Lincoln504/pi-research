@@ -87,9 +87,13 @@ export const ConfigSchema = Type.Object({
    *  never killed before it has used its full nav budget plus time waiting in the queue.
    *  (default: 10000) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
-  /** Timeout for coordinator/evaluator/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-600s).
-   *  Not exposed in TUI — controlled via PI_RESEARCH_LLM_TIMEOUT_MS env var. */
-  LLM_TIMEOUT_MS: Type.Number({ minimum: 60000, maximum: 600000, default: 300000 }),
+  /** Timeout for coordinator/evaluator/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-30min).
+   *  Not exposed in TUI — controlled via PI_RESEARCH_LLM_TIMEOUT_MS env var.
+   *  Ceiling raised to 30min (matching RESEARCHER_TIMEOUT_MS): a slow model on a
+   *  large-context synthesis/plan call can legitimately run >10min, and the old
+   *  600000 ceiling silently clamped an explicit PI_RESEARCH_LLM_TIMEOUT_MS
+   *  (e.g. 900000), causing those calls to time out mid-generation. */
+  LLM_TIMEOUT_MS: Type.Number({ minimum: 60000, maximum: 1800000, default: 300000 }),
   /** Chain-of-thought "thinking" level for the engine's own LLM calls (coordinator,
    *  evaluator, synthesis, JSON-repair, knowledge extraction) AND the researcher
    *  sub-agents. Default 'off': these calls emit structured JSON / cited reports, not
@@ -945,7 +949,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS, 2000, 120000),
-    LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS, 60000, 600000),
+    LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS, 60000, 1800000),
     LLM_THINKING_LEVEL: parseEnvEnum(e, 'PI_RESEARCH_LLM_THINKING_LEVEL', ['off', 'minimal', 'low', 'medium', 'high'] as const, DEFAULTS.LLM_THINKING_LEVEL),
     PLANNING_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_PLANNING_MAX_TOKENS', DEFAULTS.PLANNING_MAX_TOKENS, 1024, 131072),
     SYNTHESIS_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_SYNTHESIS_MAX_TOKENS', DEFAULTS.SYNTHESIS_MAX_TOKENS, 1024, 131072),

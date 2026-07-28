@@ -22,6 +22,7 @@ import type { Config } from '../config.ts';
 import { logger } from '../logger.ts';
 
 import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
+import { getRuntimeForRegistry } from '../core/llm/model-registry-factory.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -137,7 +138,17 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager: researcherSettings,
       model: modelToUse,
-      modelRegistry,
+      // pi 0.80.8 replaced the SDK's `modelRegistry`/`authStorage` session options
+      // with the async `modelRuntime`. Pass the runtime backing OUR registry when
+      // this run built one (standalone CLI/SDK): it carries any explicit API key
+      // seeded via setRuntimeApiKey, which the session's own default runtime
+      // (auto-built from ~/.pi/agent/{auth,models}.json) would never see — without
+      // this, standalone PI_RESEARCH_API_KEY users fail auth on every researcher
+      // LLM call despite passing pre-flight. For registries we did NOT build
+      // (the pi host's ExtensionContext.modelRegistry), this resolves to
+      // undefined and the host auto-builds from its own agent dir — correct
+      // in-host, where auth lives in the host's config.
+      modelRuntime: getRuntimeForRegistry(modelRegistry),
       resourceLoader: makeResourceLoader(systemPrompt),
       // Thinking/reasoning is disabled for researcher agents: they do retrieval and
       // synthesis from scraped pages, not open-ended reasoning. Keeping it off reduces

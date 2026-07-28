@@ -8,7 +8,8 @@
  * Previously this logic was duplicated (#29) — any bug fix now updates both paths.
  */
 
-import { AuthStorage, ModelRegistry, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { ModelRegistry, ModelRuntime, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { Model } from '@earendil-works/pi-ai';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -103,42 +104,93 @@ function buildHeaders(provider?: string): Record<string, string> {
 /**
  * Create a ModelRegistry with the given credentials.
  *
+ * pi 0.80.8 replaced `AuthStorage`/`ModelRegistry.create()` with the async
+ * `ModelRuntime`: `ModelRegistry` is now a SYNCHRONOUS compatibility facade that
+ * wraps a `ModelRuntime` and still exposes `getAll`/`getAvailable`/`find`/
+ * `getApiKeyAndHeaders` — so every consumer of the registry (resolveModel,
+ * safeGet*, the research-model resolver) stays synchronous. Only this factory
+ * became async (constructing the ModelRuntime is inherently async) and its two
+ * callers await it. Mirrors how pi itself builds a registry
+ * (`sdk.js`: `await ModelRuntime.create({ authPath, modelsPath })`).
+ *
  * @param apiKey  - Optional explicit API key
  * @param provider - Optional provider name to key the API key under
  * @returns A configured ModelRegistry
  */
-export function buildModelRegistry(apiKey?: string, provider?: string): ModelRegistry {
+export async function buildModelRegistry(apiKey?: string, provider?: string): Promise<ModelRegistry> {
   const agentDir = getAgentDir();
   const modelsJsonPath = path.join(agentDir, 'models.json');
   const authPath = path.join(agentDir, 'auth.json');
+  const hasModels = fs.existsSync(modelsJsonPath);
+  const hasAuth = fs.existsSync(authPath);
 
+  // Build the runtime from the user's pi config (models.json + auth.json) when
+  // EITHER file is present, otherwise a bare runtime that reads env-var keys and
+  // built-in providers. allowModelNetwork:false preserves the prior behavior of
+  // NOT doing a network model-catalog refresh at construction (the old
+  // ModelRegistry.create only read the local files). Env provider keys
+  // (e.g. OPENAI_API_KEY) are resolved via pi-ai's provider auth CONTEXT, not the
+  // credential store, so they are honored in every branch below; embedded
+  // models.json apiKeys likewise — auth.json presence must not gate models.json.
+  //
+  // When auth.json does NOT exist, an explicit in-memory credential store is
+  // passed instead of letting ModelRuntime default to the file at authPath:
+  // AuthStorage's file backend CREATES ~/.pi/agent/ and an empty auth.json as a
+  // construction side effect (mkdir+write). Without this, every CLI invocation —
+  // including read-only ones like `status` — would silently create a pi config
+  // dir on machines that never installed pi, and would hard-fail in read-only-
+  // $HOME environments (containers/CI) where the old in-memory path needed no
+  // filesystem write access at all.
+  const runtime = await ModelRuntime.create({
+    authPath: hasAuth ? authPath : undefined,
+    credentials: hasAuth ? undefined : new InMemoryCredentialStore(),
+    modelsPath: hasModels ? modelsJsonPath : null,
+    allowModelNetwork: false,
+  });
+
+  // Explicit key: seed it on the runtime after construction. NOTE: unlike the old
+  // AuthStorage.inMemory({ [provider]: ... }) seeding, this MERGES — the explicit
+  // key wins for its own provider (runtime overrides are checked first), but any
+  // providers already configured in auth.json remain visible in getAvailable().
+  // That broadening is acceptable because explicit-key flows always pair the key
+  // with an explicit model (enforced in cli.ts pre-flight), so resolution never
+  // falls back to "first available".
   if (apiKey && provider) {
-    // Explicit key: seed InMemory storage under the correct provider name.
-    const authStorage = AuthStorage.inMemory({
-      [provider]: { type: 'api_key', key: apiKey },
-    });
-    return ModelRegistry.create(
-      authStorage,
-      fs.existsSync(modelsJsonPath) ? modelsJsonPath : undefined,
-    );
+    // allowNetwork:false is REQUIRED here, not just consistent with create():
+    // setRuntimeApiKey triggers a model-catalog refresh for the newly configured
+    // provider, and its default options open live catalog connections — verified
+    // to hang indefinitely (no timeout at this layer) in network-restricted
+    // environments, which would wedge every explicit-API-key pre-flight.
+    await runtime.setRuntimeApiKey(provider, apiKey, { allowNetwork: false });
   }
 
-  // No explicit key: use the user's pi configuration when EITHER file exists.
-  // ModelRegistry.create() reads embedded apiKeys from models.json providers
-  // directly (via providerRequestConfigs), so custom providers with embedded
-  // keys work with no auth.json at all — auth.json presence must not gate
-  // models.json (AuthStorage.create tolerates a missing file). Env provider
-  // keys (e.g. OPENAI_API_KEY) are honored by AuthStorage in every branch.
-  if (fs.existsSync(authPath) || fs.existsSync(modelsJsonPath)) {
-    const authStorage = AuthStorage.create(authPath);
-    return ModelRegistry.create(
-      authStorage,
-      fs.existsSync(modelsJsonPath) ? modelsJsonPath : undefined,
-    );
-  }
+  // The sync facade all our resolvers consume. getAvailable()/getApiKeyAndHeaders()
+  // read a cached snapshot populated by create(), so the sync reads below work
+  // without further awaits.
+  const registry = new ModelRegistry(runtime);
+  registryRuntimes.set(registry, runtime);
+  return registry;
+}
 
-  // Last resort: in-memory with nothing — will fail at LLM call time with actionable error
-  return ModelRegistry.inMemory(AuthStorage.inMemory());
+/**
+ * The ModelRuntime backing each registry this factory built. Researcher sessions
+ * must be created with `modelRuntime` (pi 0.80.8+ replaced the old
+ * `modelRegistry` session option): without it, createAgentSession() builds its
+ * OWN runtime from the default ~/.pi/agent paths, which never sees an explicit
+ * API key seeded via setRuntimeApiKey above — standalone PI_RESEARCH_API_KEY
+ * users with no (or a different-provider) auth.json would pass pre-flight and
+ * then fail auth on every researcher LLM call.
+ */
+const registryRuntimes = new WeakMap<ModelRegistry, ModelRuntime>();
+
+/**
+ * Return the ModelRuntime behind a registry built by {@link buildModelRegistry},
+ * or undefined for registries built elsewhere (e.g. the pi host's own
+ * ExtensionContext.modelRegistry — for those, createAgentSession()'s default
+ * runtime construction from the host's agent dir is exactly right).
+ */
+export function getRuntimeForRegistry(registry: unknown): ModelRuntime | undefined {
+  return registry instanceof Object ? registryRuntimes.get(registry as ModelRegistry) : undefined;
 }
 
 /**

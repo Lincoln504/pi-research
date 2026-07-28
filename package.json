@@ -93,7 +93,7 @@
     "build": "node scripts/build.cjs all",
     "prepublishOnly": "node scripts/build.cjs all && node scripts/verify-package.cjs manifest",
     "prepare": "node scripts/prepare.cjs",
-    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/\\\"version\\\": \\\"[^\\\"]*\\\"/,'\\\"version\\\": \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('✔ synced SKILL.md to v'+p.version)\" && git add skills/pi-research/SKILL.md",
+    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/\\\"version\\\": \\\"[^\\\"]*\\\"/,'\\\"version\\\": \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('\u2714 synced SKILL.md to v'+p.version)\" && git add skills/pi-research/SKILL.md",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",
@@ -110,9 +110,9 @@
     "image": "https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/hero.png"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": ">=0.80.7 <1",
-    "@earendil-works/pi-coding-agent": ">=0.80.7 <1",
-    "@earendil-works/pi-tui": ">=0.80.7 <1",
+    "@earendil-works/pi-ai": ">=0.80.8 <1",
+    "@earendil-works/pi-coding-agent": ">=0.80.8 <1",
+    "@earendil-works/pi-tui": ">=0.80.8 <1",
     "@huggingface/transformers": "4.2.0",
     "@kreuzberg/html-to-markdown-node": "^3.5.5",
     "@lancedb/lancedb": "0.29.0",
@@ -123,11 +123,11 @@
     "impit": "0.13.0",
     "jsdom": "^29.1.1",
     "node-html-markdown": "^2.0.0",
-    "pdf-oxide-wasm": "^0.3.70",
+    "pdf-oxide-wasm": "^0.3.75",
     "playwright-core": "1.60.0",
     "poolifier": "^5.3.2",
     "typebox": "1.1.38",
-    "undici": "^8.6.0",
+    "undici": "^8.9.0",
     "youtubei.js": "^17.2.0"
   },
   "optionalDependencies": {
@@ -140,20 +140,21 @@
     "onnxruntime-web": "1.24.3",
     "node-domexception": "npm:@nolyfill/domexception@^1.0.28",
     "ua-parser-js": "^1.0.41",
-    "protobufjs": "7.6.4",
-    "vite": "^8.0.16"
+    "protobufjs": "7.6.5",
+    "vite": "^8.0.16",
+    "adm-zip": "^0.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/jsdom": "^28.0.3",
-    "@typescript-eslint/eslint-plugin": "^8.60.0",
-    "@typescript-eslint/parser": "^8.60.0",
-    "@vitest/coverage-v8": "^4.1.7",
-    "dependency-cruiser": "^17.4.2",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "dependency-cruiser": "^17.4.3",
     "depngn": "^0.6.0",
-    "eslint": "^10.4.0",
-    "npm-check-updates": "^22.2.1",
+    "eslint": "^10.8.0",
+    "npm-check-updates": "^22.2.9",
     "typescript": ">=6.0.3 <6.1.0",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.10"
   }
 }

@@ -90,10 +90,14 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.80.2).
-  // 0.80.2 is the floor because the AuthStorage credential discriminator pi-research
-  // passes (`type: 'api_key'`, model-registry-factory.ts) only became correct in 0.80.2
-  // (it was `api-key` before); the pi-ai `/compat` entrypoint also exists from 0.80.0.
+  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.80.8).
+  // 0.80.8 is the floor because pi 0.80.8 introduced ModelRuntime and removed
+  // AuthStorage/ModelRegistry.create(); buildModelRegistry (model-registry-factory.ts)
+  // unconditionally calls ModelRuntime.create(), and createAgentSession() is invoked
+  // without the removed `modelRegistry` option (researcher.ts), relying on the
+  // 0.80.8+ host auto-building its ModelRuntime. This in-host check is the real
+  // enforcement point: when running as an extension the host's version is NOT
+  // constrained by npm's resolution of our own package.json range.
   const versionParts = PI_VERSION.split('.').map(Number);
   const major = versionParts[0] ?? 0;
   const minor = versionParts[1] ?? 0;
@@ -104,7 +108,7 @@ export default async function (pi: ExtensionAPI) {
       `Please ensure pi-coding-agent is installed correctly.`,
     );
   }
-  const minMajor = 0, minMinor = 80, minPatch = 2;
+  const minMajor = 0, minMinor = 80, minPatch = 8;
   const tooOld = major < minMajor
     || (major === minMajor && minor < minMinor)
     || (major === minMajor && minor === minMinor && patch < minPatch);

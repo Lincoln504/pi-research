@@ -188,10 +188,11 @@ jobs:
       # project (mirrors CI's validate job).
       - run: npm run lint
       # Production-dependency security gate — identical to the CI lint job. Blocks the
-      # publish on a moderate+ advisory in the SHIPPED tree; devDeps are excluded
-      # (frozen in the upstream pi-coding-agent shrinkwrap and never shipped).
+      # publish on any moderate+ advisory in the SHIPPED tree that is not explicitly
+      # allowlisted (with a reviewed upstream-blocked justification) in
+      # config/tooling/audit-exceptions.json. See scripts/audit-gate.cjs.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=moderate
+        run: node scripts/audit-gate.cjs
       - run: npm run type-check
       - run: npm run type-check:tests
       # Architectural dependency rules — mirrors the CI dep-graph job's gate.

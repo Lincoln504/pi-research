@@ -123,16 +123,19 @@ jobs:
           # at the `moderate` threshold. That is the surface consumers actually
           # install — the only thing a published-package security gate should block on.
           #
-          # devDependencies are deliberately excluded from the gate: the host
-          # framework (@earendil-works/pi-coding-agent, provided by pi at runtime)
-          # ships its own npm-shrinkwrap.json, which freezes its nested transitive
-          # tree. By npm
+          # The gate (scripts/audit-gate.cjs) fails on any moderate+ advisory in the
+          # shipped tree UNLESS it is explicitly allowlisted, with a reviewed
+          # upstream-blocked justification, in config/tooling/audit-exceptions.json.
+          # Rationale: @earendil-works/pi-coding-agent ships its own
+          # npm-shrinkwrap.json, which freezes its nested transitive tree — by npm
           # design a shrinkwrap is authoritative, so downstream `overrides` cannot
-          # remediate their pinned-vulnerable deps (e.g. tar@7.5.15, protobufjs@8.4.0).
-          # Those advisories are upstream-only and never ship in this package, so
-          # they must not block a release. They are still surfaced (informational)
-          # in the job summary below so upstream regressions stay visible.
-          npm audit --omit=dev --audit-level=moderate --json > /tmp/audit-prod.json 2>&1 || AUDIT_FAILED=$?
+          # remediate advisories inside it; a few other prod deps pin transitives the
+          # same way. Those advisories are upstream-only and must not permanently
+          # block releases, but every OTHER advisory still must — a raw
+          # `--audit-level` threshold cannot express that; the reviewed allowlist can.
+          # Full details still surface (informational) in the job summary below.
+          npm audit --omit=dev --json > /tmp/audit-prod.json 2>&1 || true
+          node scripts/audit-gate.cjs || AUDIT_FAILED=$?
           npm audit --json > /tmp/audit-full.json 2>&1 || true
           {
             echo "## Dependency Security Audit"
