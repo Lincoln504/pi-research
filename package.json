@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "A set of web research tools (search, scrape, and others) and research agent system that uses them safely and efficiently.",
   "type": "module",
   "private": false,
@@ -93,7 +93,7 @@
     "build": "node scripts/build.cjs all",
     "prepublishOnly": "node scripts/build.cjs all && node scripts/verify-package.cjs manifest",
     "prepare": "node scripts/prepare.cjs",
-    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/\\\"version\\\": \\\"[^\\\"]*\\\"/,'\\\"version\\\": \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('\u2714 synced SKILL.md to v'+p.version)\" && git add skills/pi-research/SKILL.md",
+    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/\\\"version\\\": \\\"[^\\\"]*\\\"/,'\\\"version\\\": \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('✔ synced SKILL.md to v'+p.version)\" && git add skills/pi-research/SKILL.md",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",
