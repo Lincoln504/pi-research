@@ -28,7 +28,14 @@ export function makeResourceLoader(systemPromptText: string): ResourceLoader {
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () => systemPromptText,
+    // pi 0.83.0 added these to the ResourceLoader contract (used by interactive
+    // mode's startup context listing to show file-backed SYSTEM.md /
+    // APPEND_SYSTEM.md paths). Our sub-session prompts are in-memory text with
+    // no backing file, so "no source" is the accurate answer. Harmless extras
+    // on pre-0.83 hosts.
+    getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [],
+    getAppendSystemPromptSources: () => [],
     extendResources: () => {},
     reload: async () => {},
   };
