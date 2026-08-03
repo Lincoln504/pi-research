@@ -5,9 +5,17 @@
       "id": "GHSA-mh99-v99m-4gvg",
       "package": "brace-expansion",
       "severity": "high",
-      "reason": "Vulnerable brace-expansion@5.0.7 is nested inside @earendil-works/pi-coding-agent, whose published npm-shrinkwrap.json freezes its transitive tree; by npm design a shrinkwrap is authoritative, so a downstream override cannot replace it (verified empirically 2026-07-28: override left the nested copy at 5.0.7). Exposure is a DoS via unbounded expansion of glob patterns inside pi's own CLI internals — not attacker-controlled input in pi-research's usage.",
-      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls brace-expansion >=5.0.8 (fix already published upstream; satisfiable within pi's own ^5.0.5 range).",
-      "reviewed": "2026-07-28"
+      "reason": "Vulnerable brace-expansion@5.0.7 is nested inside @earendil-works/pi-coding-agent, whose published npm-shrinkwrap.json freezes its transitive tree; by npm design a shrinkwrap is authoritative, so a downstream override cannot replace it (re-verified empirically 2026-08-03 against pi-coding-agent@0.83.0 — the LATEST release: adding a brace-expansion override to this repo updated the top-level copy to 5.0.9 but left the nested-in-shrinkwrap copy pinned at 5.0.7, so the advisory still fires). Exposure is a DoS via unbounded expansion of glob patterns inside pi's own CLI internals — not attacker-controlled input in pi-research's usage.",
+      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls brace-expansion >=5.0.9 (5.0.8 is NOT sufficient — it is itself in the vulnerable range 4.0.0–5.0.8 for the companion GHSA-rgw5-rvv9-x895 bypass; the fix landed in 5.0.9).",
+      "reviewed": "2026-08-03"
+    },
+    {
+      "id": "GHSA-rgw5-rvv9-x895",
+      "package": "brace-expansion",
+      "severity": "high",
+      "reason": "Same root cause and same frozen location as GHSA-mh99-v99m-4gvg: brace-expansion@5.0.7 nested inside @earendil-works/pi-coding-agent@0.83.0's authoritative npm-shrinkwrap.json. This advisory is the bypass of the CVE-2026-14257 mitigation that the companion advisory covers, and it widens the vulnerable range to 4.0.0–5.0.8 (so the previously-assumed 5.0.8 fix is itself vulnerable). Re-verified empirically 2026-08-03 that a downstream `overrides` entry cannot replace the nested copy (it stays at 5.0.7); the only remediation is an upstream pi-coding-agent release whose shrinkwrap pulls brace-expansion >=5.0.9. Same unreachable-code exposure (DoS on glob patterns in pi's CLI internals, not attacker-controlled input in pi-research).",
+      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls brace-expansion >=5.0.9.",
+      "reviewed": "2026-08-03"
     },
     {
       "id": "GHSA-f88m-g3jw-g9cj",
