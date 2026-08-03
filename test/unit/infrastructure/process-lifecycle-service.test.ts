@@ -49,6 +49,39 @@ describe('ProcessLifecycleService', () => {
         killSpy.mockRestore();
         getStartSpy.mockRestore();
     });
+
+    it('returns ALIVE when start-time lookup fails but the process is still alive (Windows/macOS powershell/ps flake)', async () => {
+      // Regression guard for the run-cap cap-breach / duplicate-slot flake on
+      // Windows CI: signal(0) confirms liveness, but the start-time lookup
+      // subprocess (powershell `Get-Process`) failed/timed out → null. The owner
+      // must NOT be reported dead, or its lock/slot is reclaimed from under a
+      // live holder (lost update / cap breach).
+      const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as any); // alive on every signal(0)
+      const getStartSpy = vi.spyOn(service, 'getProcessStartTime').mockResolvedValue(null); // lookup failed
+
+      const alive = await service.isProcessAlive(4242, 9999);
+      expect(alive).toBe(true); // confirmed-alive despite the start-time lookup failure
+      expect(getStartSpy).toHaveBeenCalledWith(4242);
+
+      killSpy.mockRestore();
+      getStartSpy.mockRestore();
+    });
+
+    it('returns DEAD when the process dies between the two signal(0) probes (start-time lookup null because /proc gone)', async () => {
+      // The genuinely-dead case must still be detected: first signal(0) ok, the
+      // process exits, start-time read returns null, the re-confirm signal(0)
+      // throws → outer catch → false. (Linux just-died window.)
+      const killSpy = vi.spyOn(process, 'kill')
+        .mockReturnValueOnce(true as any)        // first signal(0): alive
+        .mockImplementationOnce(() => { throw new Error('ESRCH'); }); // re-confirm: gone
+      const getStartSpy = vi.spyOn(service, 'getProcessStartTime').mockResolvedValue(null);
+
+      const alive = await service.isProcessAlive(4243, 9999);
+      expect(alive).toBe(false);
+
+      killSpy.mockRestore();
+      getStartSpy.mockRestore();
+    });
   });
 
   describe('getProcessStartTime', () => {

@@ -119,9 +119,27 @@ export class ProcessLifecycleService implements IProcessLifecycle {
       if (expectedStartTime !== undefined && expectedStartTime !== null) {
         const actualStartTime = await this.getProcessStartTime(pid);
         if (actualStartTime === null) {
-          // If we can't get start time but expected it, we can't be sure it's the same process
-          // On Linux this usually means the process just exited between the signal and the read.
-          return false;
+          // signal(0) above confirmed a live process at this PID, but we couldn't
+          // resolve its start time to verify it's the SAME instance (the PID-reuse
+          // guard). The two failure modes collapse to the same null here but must
+          // NOT be treated identically:
+          //   • Linux: usually the process exited in the microsecond gap between
+          //     signal(0) and the /proc/{pid}/stat read → genuinely dead.
+          //   • Windows/macOS: far more often the start-time lookup subprocess
+          //     (powershell `Get-Process` / `ps`) simply failed or hit its timeout
+          //     while the process is still very much alive → NOT dead.
+          // Reporting that confirmed-alive PID as DEAD is catastrophic for every
+          // caller — a live lock/leader/run-cap owner is reclaimed from under it
+          // → two writers collide (lost update) or the run-cap admits extra
+          // concurrent runs (the flaky duplicate-slot/cap-breach we saw on Windows
+          // CI). So re-confirm liveness instead of guessing: if signal(0) STILL
+          // succeeds the process is alive → return true; if it now throws it died
+          // between the two probes and the outer catch returns false. A genuine
+          // death is therefore still detected within one poll tick (~100ms); the
+          // only behavioural change is that a confirmed-alive PID is never again
+          // misreported as dead on a transient start-time lookup failure.
+          process.kill(pid, 0); // re-confirm; a throw (process died) → outer catch → false
+          return true;
         }
         // Allow ±1s slack. The macOS/BSD fallback derives start time as
         // floor(Date.now()/1000) - `ps etimes` (elapsed whole seconds); both terms are
