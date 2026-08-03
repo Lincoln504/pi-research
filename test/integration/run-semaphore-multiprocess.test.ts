@@ -320,9 +320,19 @@ describe('ResearchRunSemaphore — real multi-process behaviour', () => {
     const slotDir = await makeSlotDir('distinct');
     const MAX = 4;
 
-    // Every child holds simultaneously, so all four assignments coexist on disk.
+    // Holders hold UNTIL KILLED, so "all four hold simultaneously" is a
+    // deterministic invariant, not a timing hope. A finite holdMs races a
+    // release on a slow runner: the four children start up staggered (Windows CI
+    // is especially slow), so by the time the last one acquires and the overflow
+    // process is spawned and checks the slot table, the FIRST holder's hold may
+    // have already elapsed — leaving a genuinely-free slot the overflow then
+    // wins (the exact flake that failed this test on Windows CI, alternately as
+    // `expected +0 to be 3` and `expected 3 to be 4`). Holding until killed is
+    // the deterministic limit of the thundering-herd test's stated principle
+    // ("winners hold well past the point where every contender has attempted ...
+    // rather than racing a release").
     const children = Array.from({ length: MAX }, (_, i) =>
-      spawnChild({ label: `slot-${i}`, slotDir, maxSlots: MAX, maxWaitMs: 15000, holdMs: 2000 }),
+      spawnChild({ label: `slot-${i}`, slotDir, maxSlots: MAX, maxWaitMs: 15000, holdMs: -1 }),
     );
     const acquired = await Promise.all(children.map((c) => c.waitFor('acquired')));
 
@@ -334,9 +344,14 @@ describe('ResearchRunSemaphore — real multi-process behaviour', () => {
     const extra = spawnChild({ label: 'overflow', slotDir, maxSlots: MAX, maxWaitMs: 0, holdMs: 50 });
     expect(await extra.exited).toBe(3);
 
-    expect(await Promise.all(children.map((c) => c.exited))).toEqual([0, 0, 0, 0]);
+    // The holders were told to hold forever (holdMs:-1); SIGKILL them now and
+    // await their exit so the slot dir is torn down cleanly. (Clean hold-then-
+    // release is exercised by the "hands a released slot" test; this test's
+    // invariant is the distinct assignments + overflow refusal above.)
+    for (const c of children) c.proc.kill('SIGKILL');
+    expect(await Promise.all(children.map((c) => c.exited))).toEqual([null, null, null, null]);
 
-    await rm(slotDir, { recursive: true, force: true });
+    await rm(slotDir, { recursive: true, force: true }).catch(() => {});
   }, 120000);
 });
 

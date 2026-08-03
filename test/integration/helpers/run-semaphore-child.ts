@@ -23,6 +23,26 @@ import {
   ResearchRunCapacityError,
 } from '../../../src/infrastructure/research-run-semaphore.ts';
 
+// Surface the cause of ANY process crash as a protocol `error` event + stderr.
+// Without this a holder that dies mid-hold does so SILENTLY: console logging is
+// off (PI_RESEARCH_CONSOLE_LOG=false) and the file-logger buffer may not flush
+// before the abrupt exit, so the parent sees only an unexpected exit code with
+// no indication of why. These handlers write synchronously to both channels.
+process.on('unhandledRejection', (reason) => {
+  emitCrash('unhandledRejection', reason);
+});
+process.on('uncaughtException', (err) => {
+  emitCrash('uncaughtException', err);
+});
+
+/** Synchronous crash report (protocol line + stderr) then exit(1). */
+function emitCrash(kind: string, reason: unknown): void {
+  const detail = reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason);
+  process.stdout.write(`@@SEM@@ ${JSON.stringify({ event: 'error', message: `${kind}: ${detail}` })}\n`);
+  process.stderr.write(`CRASH(${kind}): ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}\n`);
+  process.exit(1);
+}
+
 /** Emit one protocol line. Kept synchronous so it survives an immediate exit. */
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`@@SEM@@ ${JSON.stringify(event)}\n`);
@@ -75,8 +95,15 @@ async function main(): Promise<void> {
 
   if (holdMs < 0) {
     // Hold forever: the parent will SIGKILL us to exercise dead-owner reclaim.
-    // An unref'd-free interval keeps the event loop alive until that happens.
-    setInterval(() => {}, 1 << 30);
+    // The interval's closure pins `acquisition` so V8 cannot garbage-collect it
+    // (and the open slot FileHandle it transitively holds) while we wait. An open
+    // FileHandle closed by the GC is a *fatal* error in modern Node ("A FileHandle
+    // object was closed during garbage collection") — it would crash this holder
+    // and leave its slot to be reclaimed as if the process had died, breaking the
+    // cap under 4 concurrent holders. (Production never hits this: runResearch
+    // keeps the acquisition referenced in its try/finally for the whole run.)
+    const hold = acquisition;
+    setInterval(() => { void hold; }, 1 << 30);
     return;
   }
 
