@@ -18,6 +18,22 @@
       "reviewed": "2026-08-03"
     },
     {
+      "id": "GHSA-8xcm-r25x-g524",
+      "package": "undici",
+      "severity": "moderate",
+      "reason": "undici@8.5.0 (the response-desync-via-retry-interceptor advisory) is nested inside @earendil-works/pi-coding-agent@0.83.0's authoritative npm-shrinkwrap.json, which a downstream override cannot replace — re-verified empirically 2026-08-03: a nested `overrides` entry fixed jsdom's undici (7.28.0 -> 7.29.0, remediated) but left the pi-coding-agent copy pinned at 8.5.0. pi-research's OWN HTTP goes through the top-level undici@8.9.0 (already fixed, a direct ^8.9.0 dependency); the 8.5.0 copy serves only pi's CLI-internal fetches, not pi-research's scrape/fetch code. The only remediation is an upstream pi-coding-agent release whose shrinkwrap pulls undici >=8.9.0.",
+      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls undici >=8.9.0.",
+      "reviewed": "2026-08-03"
+    },
+    {
+      "id": "GHSA-4cwx-7wf7-3272",
+      "package": "undici",
+      "severity": "high",
+      "reason": "Same root cause and frozen location as GHSA-8xcm-r25x-g524: undici@8.5.0 nested inside @earendil-works/pi-coding-agent@0.83.0's npm-shrinkwrap.json (the cross-user information disclosure / parse-time crash advisory). Re-verified empirically 2026-08-03 that a downstream override cannot replace it; same exposure profile (pi CLI internals, not pi-research's HTTP, which uses the fixed top-level undici@8.9.0).",
+      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls undici >=8.9.0.",
+      "reviewed": "2026-08-03"
+    },
+    {
       "id": "GHSA-f88m-g3jw-g9cj",
       "package": "sharp",
       "severity": "high",
