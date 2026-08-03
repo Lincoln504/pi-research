@@ -23,26 +23,6 @@ import {
   ResearchRunCapacityError,
 } from '../../../src/infrastructure/research-run-semaphore.ts';
 
-// Surface the cause of ANY process crash as a protocol `error` event + stderr.
-// Without this a holder that dies mid-hold does so SILENTLY: console logging is
-// off (PI_RESEARCH_CONSOLE_LOG=false) and the file-logger buffer may not flush
-// before the abrupt exit, so the parent sees only an unexpected exit code with
-// no indication of why. These handlers write synchronously to both channels.
-process.on('unhandledRejection', (reason) => {
-  emitCrash('unhandledRejection', reason);
-});
-process.on('uncaughtException', (err) => {
-  emitCrash('uncaughtException', err);
-});
-
-/** Synchronous crash report (protocol line + stderr) then exit(1). */
-function emitCrash(kind: string, reason: unknown): void {
-  const detail = reason instanceof Error ? `${reason.message}\n${reason.stack ?? ''}` : String(reason);
-  process.stdout.write(`@@SEM@@ ${JSON.stringify({ event: 'error', message: `${kind}: ${detail}` })}\n`);
-  process.stderr.write(`CRASH(${kind}): ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}\n`);
-  process.exit(1);
-}
-
 /** Emit one protocol line. Kept synchronous so it survives an immediate exit. */
 function emit(event: Record<string, unknown>): void {
   process.stdout.write(`@@SEM@@ ${JSON.stringify(event)}\n`);
