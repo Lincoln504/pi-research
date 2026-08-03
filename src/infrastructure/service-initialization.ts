@@ -22,6 +22,7 @@ import { StateValidator } from './state/state-validator.ts';
 import { WorkerPoolManager } from './browser/worker-pool-manager.ts';
 import { StatePathConfiguration } from './state/state-path-configuration.ts';
 import { FileLockService } from './file-lock-service.ts';
+import { ResearchRunSemaphore } from './research-run-semaphore.ts';
 import { StateBackupManager } from './state/state-backup-manager.ts';
 import { logger } from '../logger.ts';
 
@@ -65,6 +66,25 @@ export function registerInfrastructureServices(container: ServiceContainer = get
         lockFilePath: pathConfig.getLockFilePath(),
         processLifecycle,
       });
+    },
+    {
+      allowOverwrite: false,
+      enableLogging: true,
+    },
+    container
+  );
+
+  // Register Research Run Semaphore (Phase 1 cross-process run-cap).
+  // Depends on StatePathConfiguration (slot dir) and ProcessLifecycle (PID-reuse-safe
+  // reclamation). Lazy: only built on first research run. Acquired at runResearch()
+  // entry; released in its finally. A bug here fails OPEN (research proceeds) so it
+  // can never break research; genuine capacity exhaustion fails fast with a clear error.
+  registerService(
+    ServiceNames.RESEARCH_RUN_SEMAPHORE,
+    async () => {
+      const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, undefined, container);
+      const processLifecycle = await getService<ProcessLifecycleService>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
+      return new ResearchRunSemaphore(pathConfig.getStateDir(), processLifecycle);
     },
     {
       allowOverwrite: false,

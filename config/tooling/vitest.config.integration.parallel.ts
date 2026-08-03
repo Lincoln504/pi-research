@@ -22,6 +22,7 @@ export default defineConfig({
       'test/integration/knowledge-models.test.ts',
       'test/integration/knowledge-stack.test.ts',
       'test/integration/research-knowledge-search.test.ts',
+      'test/integration/run-semaphore-multiprocess.test.ts',
       'test/integration/setup.test.ts',
       'test/integration/shutdown.test.ts',
       'test/integration/skill-preuninstall.test.ts',

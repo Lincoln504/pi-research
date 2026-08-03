@@ -108,7 +108,7 @@ export class BrowserTaskScheduler implements IScheduler {
                     if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
                         metrics.increment('browser_leadership_lost_total', 1);
                         logger.error(`[Scheduler] Leadership threshold exceeded (${this.consecutiveLeadershipMisses} misses), shutting down pool...`);
-                        await this.shutdown();
+                        await this.shutdown('leadership-lost');
                         return;
                     }
                 } else {
@@ -145,7 +145,7 @@ export class BrowserTaskScheduler implements IScheduler {
             // getService throwing during a concurrent container disposal) would otherwise surface
             // as an unhandledRejection from this fire-and-forget timer. Swallow it — an idle
             // teardown that fails is non-fatal; the next run gets a fresh scheduler regardless.
-            this.shutdown().catch(err => logger.warn('[Scheduler] Idle-timeout shutdown failed (non-fatal):', err));
+            this.shutdown('idle-timeout').catch(err => logger.warn('[Scheduler] Idle-timeout shutdown failed (non-fatal):', err));
         }, this.IDLE_TIMEOUT_MS);
         if (this.idleTimer.unref) this.idleTimer.unref();
     }
@@ -374,9 +374,25 @@ export class BrowserTaskScheduler implements IScheduler {
         return result;
     }
 
-    async shutdown() {
+    /**
+     * @param reason why the pool is going away. Reported verbatim to clients in the
+     *   drain 503, so a lost election, an idle timeout and a process shutdown are
+     *   distinguishable in a client-side log rather than all reading as one.
+     */
+    async shutdown(reason = 'shutting-down') {
         if (this.isShuttingDown) return;
         this.isShuttingDown = true;
+
+        // Start draining before any of the teardown below. Clearing state and
+        // stopping the pool involves awaits, and until the listener actually
+        // closes a connected client would otherwise keep issuing requests against
+        // a pool that is already going away — the leadership-loss case this
+        // guards. Draining first turns those into an immediate 503 so the client
+        // re-elects at once instead of waiting for a reset.
+        if (this.server?.hasActiveClients()) {
+            logger.log(`[Scheduler] Draining ${this.server.getConnectionCount()} client connection(s) before shutdown (${reason}).`);
+        }
+        this.server?.beginDrain(reason);
 
         if (this.idleTimer) {
             clearTimeout(this.idleTimer);

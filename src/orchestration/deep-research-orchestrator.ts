@@ -555,6 +555,16 @@ export class DeepResearchOrchestrator {
         logger.debug('[DeepOrchestrator] onComplete observer threw:', obsErr);
       }
 
+      // Observability: log the FULL final synthesis body. Every other layer —
+      // researcher prompts, researcher final responses, searches, scrapes — is logged
+      // at DEBUG; the synthesis itself (the actual bytes returned to the caller) was
+      // the one conspicuous exception, which made post-hoc diagnosis of citation /
+      // output issues impossible (a reported "the engine returned placeholder X"
+      // could not be confirmed or refuted from the logs). Mirrors the DEBUG logging
+      // of researcher final responses. Truncation is deliberately NOT applied: the
+      // raw bytes are exactly what's needed to diagnose grounding failures.
+      logger.debug(`[DeepOrchestrator] Final synthesis for ${researchId} (${result.length} chars):\n${result}`);
+
       return result;
 
     } catch (error) {
@@ -589,6 +599,7 @@ export class DeepResearchOrchestrator {
           } catch (obsErr) {
             logger.debug('[DeepOrchestrator] fallback onComplete observer threw:', obsErr);
           }
+          logger.debug(`[DeepOrchestrator] Fallback synthesis for ${researchId} (${result.length} chars):\n${result}`);
           return result;
         }
       } catch (fallbackErr) {

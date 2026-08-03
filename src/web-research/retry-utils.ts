@@ -39,9 +39,15 @@ export interface RetryOptions {
 
 /**
  * Sleep for `ms`, resolving early (rejecting with an AbortError) if `signal`
- * aborts. The timer is unref'd so it never keeps the event loop alive.
+ * aborts. The timer is unref'd by default so it never keeps the event loop alive.
+ *
+ * Pass `keepAlive` when the sleep is *foreground* work — i.e. the caller is
+ * mid-operation and the operation must still complete after the delay. An unref'd
+ * timer is only safe while some other referenced handle exists; if the delay is the
+ * sole pending handle, Node drains the loop and exits mid-operation, silently
+ * truncating the work instead of resuming it.
  */
-export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+export function abortableDelay(ms: number, signal?: AbortSignal, keepAlive = false): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
       reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
@@ -51,7 +57,7 @@ export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> 
       if (signal && onAbort) signal.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
-    (timeoutId as TimeoutHandle).unref?.();
+    if (!keepAlive) (timeoutId as TimeoutHandle).unref?.();
     const onAbort = signal
       ? () => {
           clearTimeout(timeoutId as unknown as ReturnType<typeof setTimeout>);

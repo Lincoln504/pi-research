@@ -265,6 +265,49 @@ export async function getSsrfSafeDispatcher(): Promise<unknown | null> {
 }
 
 /**
+ * Render an error for diagnostics, surfacing the swallowed underlying cause.
+ *
+ * Node's `fetch()`/undici wraps the real transport reason (ECONNRESET, ENOTFOUND,
+ * a TLS error, UND_ERR_*, an AbortError) under `error.cause`, and the top-level
+ * object is almost always the uninformative `TypeError: fetch failed`. Logging
+ * only `String(err)` (or `err.message`) therefore records "fetch failed" and
+ * discards the actual reason — which made the production scrape-failure spike
+ * (212+ sub-5ms failures) impossible to diagnose from logs. This walks the
+ * `cause` chain (bounded, mirroring `isTransientError`) and folds in any Node /
+ * undici `.code`, so each "fetch failed" log line is self-diagnosing.
+ *
+ * Defensive against throwing getters and non-Error values: never throws.
+ */
+export function formatErrorWithCause(err: unknown): string {
+  try {
+    const parts: string[] = [];
+    let current: unknown = err;
+    for (let depth = 0; current !== null && current !== undefined && depth < 5; depth++) {
+      let segment: string;
+      if (current instanceof Error) {
+        segment = current.message || current.name;
+        const code = (current as { code?: unknown }).code;
+        if (typeof code === 'string' && code && !segment.includes(code)) {
+          segment = `${segment} [${code}]`;
+        }
+      } else if (typeof current === 'string') {
+        segment = current;
+      } else {
+        segment = String(current);
+      }
+      if (segment && !parts.includes(segment)) parts.push(segment);
+      const next = (current as { cause?: unknown }).cause;
+      if (next === current) break; // defensive: self-referential cause
+      current = next;
+    }
+    if (parts.length === 0) return String(err);
+    return parts.length === 1 ? parts[0]! : parts.join(' ← ');
+  } catch {
+    return String(err);
+  }
+}
+
+/**
  * Check if an IPv4 address is private/reserved/loopback.
  */
 function isPrivateIp(ip: string): boolean {

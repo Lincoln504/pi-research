@@ -31,7 +31,11 @@ export function isTransientSocketError(error: unknown): boolean {
         // destroyed (e.g., during scheduler restart). Treat as transient — the pool will
         // be ready for new tasks once destruction completes and a new pool is initialized.
         err.message.includes('Cannot execute a task on destroying pool') ||
-        err.message.includes('destroying pool')
+        err.message.includes('destroying pool') ||
+        // The leader answered 503 because it is shutting down after losing
+        // leadership. Retrying re-elects and reaches the new leader, so this is
+        // transient in exactly the same sense as a pool drain.
+        err.message.includes('Browser pool leader is draining')
     );
 }
 
@@ -66,6 +70,22 @@ export function isTaskTimeoutError(error: unknown): boolean {
         err.message.includes('Health check timed out') ||
         err.message.includes('[BrowserClient] Request to')
     );
+}
+
+/**
+ * Check if an error is a "leader is draining" rejection (HTTP 503 from
+ * {@link BrowserServer.beginDrain}).
+ *
+ * The leader answers 503 while tearing down after losing leadership, so this is
+ * an expected transition signal rather than a fault: the correct response is to
+ * re-elect and retry against the new leader. It must not count toward the
+ * circuit breaker — a leadership handover would otherwise look like a burst of
+ * infrastructure failures and open the breaker for every subsequent request.
+ */
+export function isServerDrainingError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const err = error as NodeError;
+    return typeof err.message === 'string' && err.message.includes('Browser pool leader is draining');
 }
 
 /**
@@ -107,6 +127,9 @@ const DEFAULT_BREAKER_CONFIG: any = {
     isTransientError: (error: unknown) => {
         // Pool-drain transients: pool recovers on its own — don't count.
         if (isPoolShutdownError(error)) return false;
+        // Leadership handover (503 draining) is a planned transition, not a
+        // failure — counting it would open the breaker on every re-election.
+        if (isServerDrainingError(error)) return false;
         // Cloudflare blocks are content-layer rejections, not infra failures — don't count.
         if (isCloudflareBlockError(error)) return false;
         // Task-level timeouts (slow/unresponsive sites) are expected during parallel

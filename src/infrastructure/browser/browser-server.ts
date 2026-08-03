@@ -32,8 +32,56 @@ export function getBrowserServerAuthSecret(): string {
 export class BrowserServer {
     private server: http.Server | null = null;
     private port: number = 0;
+    /**
+     * Live client sockets. Tracked so teardown can tell whether anyone is still
+     * attached (`hasActiveClients`) rather than guessing, and so drain has a
+     * meaningful count to report.
+     */
+    private connections: Set<import('node:net').Socket> = new Set();
+    private draining = false;
+    /**
+     * Why this server stopped accepting work. Reported to the client so a log line
+     * says which teardown it hit — a lost election, an idle timeout, or process
+     * shutdown all reach the same code path but are very different incidents.
+     */
+    private drainReason = 'shutting-down';
 
     constructor(private options: BrowserServerOptions) {}
+
+    /**
+     * Enter draining mode: every *subsequent* request is answered `503` instead of
+     * being served or left to hit a closed socket. Requests already past this
+     * check run to completion, so drain never truncates in-flight work.
+     *
+     * This exists for leadership-loss teardown. Without it a client that is
+     * mid-conversation with a leader that just lost the election waits out a
+     * connect timeout or gets a bare ECONNREFUSED/RST once the listener closes,
+     * and only then re-elects. An explicit 503 turns that silent stall into an
+     * immediate, unambiguous "this leader is gone — re-elect now".
+     *
+     * Idempotent: calling it while already draining is a no-op.
+     */
+    beginDrain(reason = 'shutting-down'): void {
+        if (this.draining) return;
+        this.draining = true;
+        this.drainReason = reason;
+        logger.log(`[BrowserServer] Draining (${reason}) — refusing new requests with 503 (${this.connections.size} client connection(s) attached).`);
+    }
+
+    /** True once {@link beginDrain} has been called. */
+    isDraining(): boolean {
+        return this.draining;
+    }
+
+    /** Whether any client socket is currently attached. */
+    hasActiveClients(): boolean {
+        return this.connections.size > 0;
+    }
+
+    /** Number of attached client sockets (observability / teardown decisions). */
+    getConnectionCount(): number {
+        return this.connections.size;
+    }
 
     async start(): Promise<number> {
         return new Promise((resolve, reject) => {
@@ -46,6 +94,20 @@ export class BrowserServer {
                 if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
                     res.writeHead(403, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Unauthorized' }));
+                    return;
+                }
+
+                // Checked after auth so an unauthenticated caller cannot probe
+                // leadership state, and before routing so no new work is started
+                // against a pool that is being torn down. `Connection: close`
+                // stops the client reusing this socket for a retry that would
+                // only 503 again.
+                if (this.draining) {
+                    res.writeHead(503, {
+                        'Content-Type': 'application/json',
+                        'Connection': 'close',
+                    });
+                    res.end(JSON.stringify({ error: 'draining', reason: this.drainReason }));
                     return;
                 }
 
@@ -138,6 +200,13 @@ export class BrowserServer {
                 });
             });
 
+            this.server.on('connection', (socket) => {
+                this.connections.add(socket);
+                socket.on('close', () => {
+                    this.connections.delete(socket);
+                });
+            });
+
             this.server.listen(0, '127.0.0.1', () => {
                 const addr = this.server?.address();
                 if (addr && typeof addr === 'object') {
@@ -162,6 +231,7 @@ export class BrowserServer {
             return new Promise((resolve) => {
                 this.server?.close(() => {
                     this.server = null;
+                    this.connections.clear();
                     resolve();
                 });
             });

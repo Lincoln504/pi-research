@@ -1,0 +1,92 @@
+/**
+ * Child entry point for the multi-process ResearchRunSemaphore tests.
+ *
+ * The semaphore's whole contract is *cross-process* (N slot files coordinated
+ * through FileLockService, with PID+startTime liveness reclaiming dead owners).
+ * In-process unit tests cannot observe that contract: they share one heap, one
+ * FileLockService module instance, and one PID, so "another process holds the
+ * slot" and "a holder was SIGKILLed" are unrepresentable. This entry is bundled
+ * by the test and spawned as genuinely separate OS processes so the real
+ * behaviour is exercised end to end.
+ *
+ * Protocol: every observable event is written to stdout as a single line
+ * `@@SEM@@ {json}`. The parent parses only those lines, so incidental logger
+ * output on either stream is harmless.
+ *
+ * Configuration is by environment variable (see `SEM_*` below) rather than argv
+ * so the bundled file stays a plain entry point with no argument parsing.
+ */
+
+import { ProcessLifecycleService } from '../../../src/infrastructure/process-lifecycle-service.ts';
+import {
+  ResearchRunSemaphore,
+  ResearchRunCapacityError,
+} from '../../../src/infrastructure/research-run-semaphore.ts';
+
+/** Emit one protocol line. Kept synchronous so it survives an immediate exit. */
+function emit(event: Record<string, unknown>): void {
+  process.stdout.write(`@@SEM@@ ${JSON.stringify(event)}\n`);
+}
+
+function envInt(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+async function main(): Promise<void> {
+  const slotDir = process.env['SEM_SLOT_DIR'];
+  if (!slotDir) {
+    emit({ event: 'error', message: 'SEM_SLOT_DIR is required' });
+    process.exit(2);
+  }
+  const label = process.env['SEM_LABEL'] ?? 'child';
+  const maxSlots = envInt('SEM_MAX_SLOTS', 2);
+  const maxWaitMs = envInt('SEM_MAX_WAIT_MS', 0);
+  /** Milliseconds to hold the slot before releasing. Negative = hold until killed. */
+  const holdMs = envInt('SEM_HOLD_MS', 100);
+  /** Optional delay before even attempting, to order contenders deterministically. */
+  const startDelayMs = envInt('SEM_START_DELAY_MS', 0);
+
+  const lifecycle = new ProcessLifecycleService();
+  await lifecycle.initialize();
+
+  const semaphore = new ResearchRunSemaphore(slotDir, lifecycle, maxSlots, maxWaitMs);
+  await semaphore.initialize();
+
+  if (startDelayMs > 0) await new Promise((r) => setTimeout(r, startDelayMs));
+
+  emit({ event: 'ready', label, pid: process.pid });
+
+  let acquisition;
+  try {
+    acquisition = await semaphore.acquire();
+  } catch (err) {
+    if (err instanceof ResearchRunCapacityError) {
+      emit({ event: 'capacity', label, pid: process.pid, slots: err.slots, message: err.message });
+      process.exit(3);
+    }
+    emit({ event: 'error', label, pid: process.pid, message: err instanceof Error ? err.message : String(err) });
+    process.exit(1);
+  }
+
+  emit({ event: 'acquired', label, pid: process.pid, slot: acquisition.slotIndex, at: Date.now() });
+
+  if (holdMs < 0) {
+    // Hold forever: the parent will SIGKILL us to exercise dead-owner reclaim.
+    // An unref'd-free interval keeps the event loop alive until that happens.
+    setInterval(() => {}, 1 << 30);
+    return;
+  }
+
+  await new Promise((r) => setTimeout(r, holdMs));
+  await acquisition.release();
+  emit({ event: 'released', label, pid: process.pid, slot: acquisition.slotIndex, at: Date.now() });
+  process.exit(0);
+}
+
+void main().catch((err) => {
+  emit({ event: 'error', message: err instanceof Error ? err.message : String(err) });
+  process.exit(1);
+});

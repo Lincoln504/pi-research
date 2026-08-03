@@ -37,6 +37,7 @@ import type { Config } from '../config.ts';
 import { getConfig, DEFAULTS } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
+import { ResearchRunSemaphore, ResearchRunCapacityError } from '../infrastructure/research-run-semaphore.ts';
 import { recordResearcherFailure, shouldStopResearch, createResearchStopError } from './session-state.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
@@ -107,6 +108,26 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
     const researchStart = Date.now();
 
+    // Cross-process run-cap (Phase 1): acquire one of N slots so concurrent
+    // research runs can't saturate the shared leader-elected browser/embedding
+    // pool and degrade into ~60-error failures. Fail-OPEN on internal/IO errors
+    // (a semaphore bug must never break research); only a genuine
+    // ResearchRunCapacityError (all slots held by live processes) propagates,
+    // failing the run fast with a clear message. The slot is released in finally.
+    let runSlot: { slotIndex: number; release(): Promise<void> } | null = null;
+    try {
+      const container = tryGetServiceContainerFromCtx(ctx);
+      const semaphore = await getService<ResearchRunSemaphore>(ServiceNames.RESEARCH_RUN_SEMAPHORE, ctx, container);
+      runSlot = await semaphore.acquire(undefined, signal);
+      logger.info(`[ResearchOrchestrationService] Acquired research run slot ${runSlot.slotIndex} (cap ${semaphore.getMaxSlots()}).`);
+    } catch (err) {
+      if (err instanceof ResearchRunCapacityError) throw err; // capacity exhausted → fail fast
+      // A cancel while queueing for a slot must stay cancelled. Fail-open here would
+      // start the very run the user just aborted.
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      logger.warn(`[ResearchOrchestrationService] Run-cap unavailable, proceeding without it: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     let result: string;
     try {
       if (depth === 0) {
@@ -149,6 +170,20 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'error', source: 'extension' });
       metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'error', source: 'extension' });
       throw error;
+    } finally {
+      // Always release the run-cap slot — on success, error, or abort (the
+      // orchestrator throws on AbortSignal, hitting this finally before rethrow).
+      if (runSlot) {
+        // Never let a release failure mask the run's own outcome — but do report it.
+        // A slot that fails to release stays held for the lifetime of THIS process
+        // (liveness reclaim only fires once the owner is gone), so it silently costs
+        // one unit of capacity for every subsequent run in the session.
+        await runSlot.release().catch((relErr) => {
+          logger.warn(
+            `[ResearchOrchestrationService] Failed to release run slot ${runSlot?.slotIndex}; capacity is reduced until this process exits: ${relErr instanceof Error ? relErr.message : String(relErr)}`,
+          );
+        });
+      }
     }
   }
 

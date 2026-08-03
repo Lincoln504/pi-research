@@ -155,6 +155,28 @@ describe('retry-utils', () => {
       controller.abort();
       await expect(p).rejects.toThrow(/abort/i);
     });
+
+    // The default unref is only safe while some OTHER handle is referenced. When the
+    // delay is foreground work (a retry backoff mid-operation) and is the sole pending
+    // handle, an unref'd timer lets Node drain the loop and exit — silently truncating
+    // the operation instead of resuming it. keepAlive opts that call site out.
+    it('leaves the timer referenced when keepAlive is set, and unref\'d by default', async () => {
+      const { abortableDelay } = await import('../../../src/web-research/retry-utils.ts');
+      const seen: Array<{ keepAlive: boolean; referenced: boolean }> = [];
+      const realSetTimeout = globalThis.setTimeout;
+      for (const keepAlive of [false, true]) {
+        const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+          const handle = realSetTimeout(fn, ms);
+          // Sampled after abortableDelay has decided whether to unref.
+          queueMicrotask(() => seen.push({ keepAlive, referenced: handle.hasRef() }));
+          return handle;
+        }) as unknown as typeof setTimeout);
+        await abortableDelay(5, undefined, keepAlive);
+        spy.mockRestore();
+      }
+      expect(seen.find((s) => !s.keepAlive)?.referenced).toBe(false);
+      expect(seen.find((s) => s.keepAlive)?.referenced).toBe(true);
+    });
   });
 
   describe('createTimeoutSignal', () => {

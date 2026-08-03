@@ -31,6 +31,8 @@ export const ServiceNames = {
   // Research session services
   RESEARCH_SESSION_SERVICE: 'research-session-service',
   RESEARCH_SYNTHESIS_SERVICE: 'research-synthesis-service',
+  // Cross-process cap on concurrent research runs (Phase 1 run-cap)
+  RESEARCH_RUN_SEMAPHORE: 'research-run-semaphore',
 } as const;
 
 /**

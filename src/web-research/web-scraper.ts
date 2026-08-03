@@ -23,11 +23,15 @@ import {
 import {
   FETCH_LAYER_TIMEOUT,
 } from './types.ts';
-import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, isBenignScrapeFailure, } from './scraper-utils.ts';
+import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, formatErrorWithCause, isBenignScrapeFailure, } from './scraper-utils.ts';
+import { isTransientError, abortableDelay } from './retry-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { getServiceContainer } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
 import { cacheScrapedContent } from '../utils/shared-links.ts';
+
+/** Backoff before the fetch layer's single transient retry. */
+const FETCH_RETRY_DELAY_MS = 250;
 
 let playwrightAvailable: boolean = false;
 let markdownConverterPromise: Promise<(html: string) => Promise<string>> | null = null;
@@ -191,6 +195,25 @@ async function readBodyCapped(response: Response, maxBytes: number): Promise<Uin
   return out;
 }
 
+/**
+ * Record a fetch-layer failure exactly once per URL.
+ *
+ * Kept out of {@link scrapeWithFetch} because that function is retried: tracking
+ * inside it would file one transient failure as two, and the fetch layer's error
+ * counts are precisely what production incidents are diagnosed from.
+ */
+function trackFetchLayerFailure(url: string, error: unknown): void {
+  const isSsrf = error instanceof Error && error.message.includes('not allowed');
+  errorTracker.trackError(error instanceof Error ? error : String(error), {
+    component: 'scrapers',
+    operation: 'fetch',
+    url,
+    domain: extractDomain(url),
+    layer: 'fetch',
+    ...(isSsrf ? { errorType: 'ssrf_blocked' } : {}),
+  });
+}
+
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   await validateUrlForSSRF(url);
 
@@ -313,14 +336,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
         const sizeMB = Math.round(e.bytesRead / 1024 / 1024);
         logger.warn(`[Scrapers] HTML response too large (streamed ${sizeMB}MB, max 25MB), skipping`);
         metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
-        errorTracker.trackError(new Error(`HTML response too large (${sizeMB}MB, max 25MB)`), {
-          component: 'scrapers',
-          operation: 'fetch',
-          url,
-          domain: extractDomain(url),
-          layer: 'fetch',
-          contentType: 'html',
-        });
+        // Not tracked here — scrapeSingle tracks the fetch layer's final error once.
         throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`, { cause: e });
       }
       throw e;
@@ -330,14 +346,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       const sizeMB = Math.round(bodyBytes.length / 1024 / 1024);
       logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), skipping`);
       metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
-      errorTracker.trackError(new Error(`HTML response too large (${sizeMB}MB, max 25MB)`), {
-        component: 'scrapers',
-        operation: 'fetch',
-        url,
-        domain: extractDomain(url),
-        layer: 'fetch',
-        contentType: 'html',
-      });
+      // Not tracked here — scrapeSingle tracks the fetch layer's final error once.
       throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
     }
 
@@ -356,27 +365,17 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'html', status: 'success' });
     return { source: 'fetch', layer: 'fetch', markdown };
   } catch (error) {
+    // Attempt-scoped metrics stay here (they count fetch operations, and a retried
+    // attempt IS a second operation). Error TRACKING does not: scrapeSingle wraps this
+    // call in a retry, and tracking per attempt would record one failure twice —
+    // inflating exactly the error counts these numbers are read to diagnose.
+    // scrapeSingle calls trackFetchLayerFailure once with the final error.
     if (error instanceof Error && error.message.includes('not allowed')) {
       metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'ssrf_blocked' });
       metrics.observe('scrape_latency_ms', Date.now() - fetchStart, { layer: 'fetch', status: 'ssrf_blocked' });
-      errorTracker.trackError(error, {
-        component: 'scrapers',
-        operation: 'fetch',
-        url,
-        domain: extractDomain(url),
-        layer: 'fetch',
-        errorType: 'ssrf_blocked',
-      });
       throw error;
     }
     metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'error' });
-    errorTracker.trackError(error instanceof Error ? error : String(error), {
-      component: 'scrapers',
-      operation: 'fetch',
-      url,
-      domain: extractDomain(url),
-      layer: 'fetch',
-    });
     throw error;
   } finally {
     clearTimeout(timeoutId);
@@ -482,7 +481,35 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   
   const start = Date.now();
   try {
-    const res = await scrapeWithFetch(url, signal);
+    // One cheap transient retry before falling back to the (10–30× slower) stealth
+    // browser. The fetch layer is the only scrape layer with no retry; a transient
+    // socket/DNS blip (ECONNRESET, ENOTFOUND, UND_ERR_*, a bare `fetch failed`)
+    // otherwise costs a full browser render. Gated on isTransientError, so SSRF
+    // rejections, size caps and 4xx rethrow immediately; the outer catch still owns
+    // the browser fallback on genuine exhaustion.
+    //
+    // Deliberately NOT retryWithBackoff: it logs every retry at WARN, and a
+    // fetch-layer miss is an expected, benign event with a fallback behind it —
+    // the same reason isBenignScrapeFailure keeps these out of ERROR. A burst of
+    // blocked scrapes would otherwise emit one WARN per URL.
+    const res = await (async () => {
+      try {
+        return await scrapeWithFetch(url, signal);
+      } catch (firstErr) {
+        if (!isTransientError(firstErr) || signal?.aborted) throw firstErr;
+        logger.debug(`[Scrapers] fetch transient failure for ${url}, retrying once: ${formatErrorWithCause(firstErr)}`);
+        metrics.increment('scrape_fetch_retries_total', 1, { layer: 'fetch' });
+        try {
+          // keepAlive: the retry is foreground work. An unref'd backoff is only safe
+          // while some other handle is referenced; a lone scrape would otherwise let
+          // the process exit during the 250ms gap and never make the second attempt.
+          await abortableDelay(FETCH_RETRY_DELAY_MS, signal, true);
+        } catch {
+          throw firstErr; // aborted during backoff — surface the real cause
+        }
+        return await scrapeWithFetch(url, signal);
+      }
+    })();
     const duration = Date.now() - start;
     logger.log(`[Scrapers] fetch success for ${url} in ${duration}ms`);
     metrics.increment('scrape_results_total', 1, { outcome: 'fetch_success' });
@@ -494,10 +521,10 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     return { ...res, url, success: true };
   } catch (e1) {
     const fetchDuration = Date.now() - start;
-    logger.debug(`[Scrapers] fetch failed for ${url} in ${fetchDuration}ms: ${String(e1)}`);
-    // Not re-tracked here: scrapeWithFetch's own catch already recorded this error
-    // with richer layer/errorType context immediately before rethrowing. Tracking
-    // it again at this frame would double-count the same failure.
+    logger.debug(`[Scrapers] fetch failed for ${url} in ${fetchDuration}ms: ${formatErrorWithCause(e1)}`);
+    // Tracked here rather than inside scrapeWithFetch, which is retried above —
+    // one transient failure must file one error, not one per attempt.
+    trackFetchLayerFailure(url, e1);
 
     if (playwrightAvailable) {
       try {
@@ -524,18 +551,18 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
         // at ERROR with its stack. Either way, scrapeWithStealthBrowser's own catch
         // already tracked the error with layer context, so it is not re-tracked here.
         if (isBenignScrapeFailure(e2)) {
-          logger.debug(`[Scrapers] Browser fallback did not yield content for ${url} in ${totalDuration}ms: ${String(e2)}`);
+          logger.debug(`[Scrapers] Browser fallback did not yield content for ${url} in ${totalDuration}ms: ${formatErrorWithCause(e2)}`);
         } else {
           logger.error(`[Scrapers] Browser fallback failed for ${url} in ${totalDuration}ms:`, e2);
         }
         metrics.increment('scrape_errors_total', 1, { error_type: 'fallback_failed', layer: 'playwright' });
         metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
-        return { url, success: false, error: String(e2), markdown: '' };
+        return { url, success: false, error: formatErrorWithCause(e2), markdown: '' };
       }
     }
     metrics.increment('scrape_errors_total', 1, { error_type: 'no_fallback_available', layer: 'fetch' });
     metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
-    return { url, success: false, error: String(e1), markdown: '' };
+    return { url, success: false, error: formatErrorWithCause(e1), markdown: '' };
   }
 }
 

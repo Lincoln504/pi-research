@@ -18,6 +18,12 @@ describe('npm pack', () => {
   beforeAll(() => {
     // Run npm pack --dry-run once for all tests to save time
     packFiles = getPackFiles();
+    // Fail loudly if the manifest could not be read. Every negative assertion below
+    // ("should NOT include …") is trivially satisfied by an empty list, so without
+    // this guard a broken pack invocation reports as a passing packaging audit.
+    if (packFiles.length < 50) {
+      throw new Error(`npm pack manifest looks wrong: ${packFiles.length} file(s) parsed`);
+    }
     // Create a temporary directory for packing (if needed by other tests, though current ones only use the list)
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-pack-'));
   });
@@ -30,38 +36,22 @@ describe('npm pack', () => {
   });
 
   function getPackFiles(): string[] {
-    // Run npm pack --dry-run to get the list of files that would be included
-    // Note: npm pack writes to stderr, so we redirect to stdout with 2>&1
-    const output = execSync('npm pack --dry-run 2>&1', {
+    // Read the manifest from `--json` rather than scraping human `npm notice` lines.
+    // Those notices are written at npm's *notice* log level, so an inherited
+    // `npm_config_loglevel=silent` — which `npm run <script> --silent` propagates to
+    // every child process — suppresses them entirely. The scraper then produced an
+    // EMPTY list, and an empty list silently satisfies every "should NOT include
+    // <secrets|tests|node_modules>" assertion in this file: the packaging guarantees
+    // would read as green while nothing had actually been checked.
+    const output = execSync('npm pack --dry-run --json', {
       encoding: 'utf8',
       cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'ignore'], // drop the prepare-script build output
+      maxBuffer: 32 * 1024 * 1024,
     });
 
-    // Parse the output - it looks like:
-    // npm notice
-    // npm notice 📦 @lincoln504/pi-research@0.1.13
-    // npm notice === Tarball Contents ===
-    // npm notice ...
-    // npm notice 1.2kB  package.json
-    // npm notice 982B  config/file.txt
-    // npm notice ...
-    const lines = output.split('\n');
-    const files: string[] = [];
-
-    for (const line of lines) {
-      if (line.startsWith('npm notice ') && (line.includes('kB') || line.match(/\d+B\s/))) {
-        // Extract the file path (last part of the line after the size)
-        // Format: "npm notice 1.2kB  filename" or "npm notice 982B  filename" or "npm notice 189.7kB  filename"
-        const parts = line.trim().split(/\s+/);
-        // The last part is the filename
-        const filename = parts[parts.length - 1];
-        if (filename && filename !== '📦' && !filename.startsWith('@lincoln504/')) {
-          files.push(filename);
-        }
-      }
-    }
-
-    return files;
+    const parsed = JSON.parse(output) as Array<{ files?: Array<{ path?: string }> }>;
+    return (parsed[0]?.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === 'string');
   }
 
   it('should include package.json', () => {

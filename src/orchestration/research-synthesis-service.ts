@@ -13,6 +13,7 @@ import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks, type GlobalCitation } from '../utils/citation-utils.ts';
 import { lastCitedLinksHeaderIndex } from '../utils/text-utils.ts';
 import { getScrapedLinks, isTranscribedLink, normalizeUrl } from '../utils/shared-links.ts';
+import { stripTrailingLlmPunctuation } from '../utils/url-utils.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
@@ -25,6 +26,125 @@ import type { SteeringMessage } from './session-state.ts';
 // rather than letting an uncited report read as if it were sourced.
 const NO_SOURCES_NOTE =
   'CITED LINKS\n_No web sources were successfully retrieved for this report — searches or page fetches may have been blocked (for example by site bot-protection) or returned no usable results. Treat the findings above as unverified._';
+
+// Appended when the model wrote its own links but the run retrieved nothing we could
+// verify them against. The block is kept (it may still be a useful lead) but must not
+// read as though the engine checked it.
+const UNVERIFIED_LINKS_NOTE =
+  '_None of the links above could be verified: no page fetch succeeded this session and no citation could be matched to retrieved content. They may be inaccurate or invented — check each one before relying on it._';
+
+/**
+ * Largest `[N]` treated as a citation marker. Inline markers index a source list
+ * that is realistically well under this; the bound exists so an ordinary bracketed
+ * number in prose — a year (`[2023]`), an issue id, an array index — is left alone
+ * instead of being silently deleted as a "dangling citation".
+ */
+const MAX_PLAUSIBLE_CITATION_MARKER = 200;
+
+/**
+ * Rewrite inline `[N]` citation markers in a prose body: renumber the ones we can
+ * map, delete the ones known to dangle, leave everything else untouched.
+ *
+ * Deletion is whitespace-aware rather than followed by a global space collapse.
+ * A blanket `text.replace(/  +/g, ' ')` also eats *leading* indentation, which
+ * silently flattens nested list levels into one and turns 4-space indented code
+ * blocks into paragraphs — corrupting the structure of every report that contains
+ * them. So the pad preceding a deleted marker is consumed only when the marker is
+ * mid-line (i.e. real prose spacing); line-leading indentation is preserved.
+ *
+ * Code is skipped entirely. A report may quote code containing bracketed integers
+ * (`items[12]`), and on the no-CITED-LINKS path *every* out-of-range marker is treated
+ * as dangling — so without this guard a quoted array index would be silently deleted
+ * from the user's code sample. Fenced blocks are tracked across lines; single-backtick
+ * spans are detected by an odd backtick count earlier on the same line.
+ *
+ * @param remap  local marker number → verified global id
+ * @param isDangling  whether a marker not present in `remap` should be deleted
+ */
+function rewriteCitationMarkers(
+  text: string,
+  remap: Map<number, number>,
+  isDangling: (n: number) => boolean,
+): string {
+  const inFence = fencedCodeMask(text);
+  return text.replace(/([ \t]*)\[(\d+)\]/g, (match, pad: string, digits: string, offset: number) => {
+    const n = parseInt(digits, 10);
+    const mapped = remap.get(n);
+    if (mapped !== undefined) return `${pad}[${mapped}]`;
+    // Citation numbering is 1-based; `[0]` is always an index or a literal, never a marker.
+    if (n < 1 || n > MAX_PLAUSIBLE_CITATION_MARKER || !isDangling(n)) return match;
+    if (inFence(offset) || inInlineCodeSpan(text, offset)) return match;
+    // Preserve indentation when nothing but whitespace precedes on this line;
+    // otherwise drop the pad too so no double space is left behind.
+    const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+    return text.slice(lineStart, offset).trim() === '' ? pad : '';
+  });
+}
+
+/**
+ * Build an `offset → is inside a ``` fenced block` predicate for `text`.
+ *
+ * Computed once per rewrite (a single line scan) rather than per marker, so marker
+ * rewriting stays linear in the body length.
+ */
+function fencedCodeMask(text: string): (offset: number) => boolean {
+  const ranges: Array<[number, number]> = [];
+  let open = -1;
+  let pos = 0;
+  for (const line of text.split('\n')) {
+    if (/^\s{0,3}(```|~~~)/.test(line)) {
+      if (open < 0) open = pos;
+      else {
+        ranges.push([open, pos + line.length]);
+        open = -1;
+      }
+    }
+    pos += line.length + 1; // +1 for the '\n' consumed by split
+  }
+  // An unterminated fence runs to the end of the body — treat the remainder as code.
+  if (open >= 0) ranges.push([open, text.length]);
+  return (offset: number) => ranges.some(([start, end]) => offset >= start && offset < end);
+}
+
+/** Whether `offset` sits inside a single-backtick code span on its own line. */
+function inInlineCodeSpan(text: string, offset: number): boolean {
+  const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+  let ticks = 0;
+  for (let i = lineStart; i < offset; i++) if (text[i] === '`') ticks++;
+  return ticks % 2 === 1;
+}
+
+/**
+ * Redact inline `https?://` tokens in synthesis prose whose URL was NOT retrieved
+ * this session (absent from `trusted`, a set of normalized verified-source URLs).
+ *
+ * The synthesis body is otherwise passed through verbatim, so an unverified inline
+ * URL is the one channel by which a fabricated source can reach the user — and
+ * inline URLs violate the required format (links belong in CITED LINKS only).
+ * Legitimate inline references to real sources are preserved (they are present in
+ * `trusted`). Returns the (possibly) redacted text.
+ */
+function redactUnverifiedProseUrls(text: string, trusted: Set<string>): string {
+  if (trusted.size === 0) return text;
+  let removed = 0;
+  // Brackets are NOT excluded from the token: a bare `[^\s)\]>"']+` truncates
+  // `.../Python_(programming_language)` at the first `)`, so the truncated form
+  // never matches its own entry in `trusted` and a perfectly good Wikipedia link
+  // gets redacted. Instead take the greedy token and split off exactly the
+  // trailing punctuation `normalizeUrl` itself discards — so the compared string
+  // and the redacted span always agree — restoring that tail afterwards.
+  const result = text.replace(/https?:\/\/[^\s<>"']+/gi, (token) => {
+    const core = stripTrailingLlmPunctuation(token);
+    const tail = token.slice(core.length);
+    if (!core || trusted.has(normalizeUrl(core))) return token;
+    removed++;
+    return `[link removed: not found in retrieved sources]${tail}`;
+  });
+  if (removed > 0) {
+    logger.warn(`[ResearchSynthesisService] Redacted ${removed} unverified inline URL(s) from synthesis prose (not present in retrieved sources).`);
+  }
+  return result;
+}
 
 /**
  * Research Synthesis Service
@@ -178,6 +298,18 @@ export class ResearchSynthesisService implements IService {
     let globalCitations: GlobalCitation[] =
       reports.size > 0 ? normalizeCitations(reports).globalCitations : [];
 
+    // NOTE: a "provenance gate" previously DROPPED citations tagged Scrape/Transcript
+    // whose URL was absent from the session's successful-scrape pool. It was REMOVED
+    // because it conflated a failed/blocked scrape (real URL, content unretrieved) with
+    // fabrication: under the common high scrape-failure rate (bot blocks on GitHub /
+    // Microsoft / etc.) it mass-dropped legitimate citations, and the remap below then
+    // neutralized their inline [N] markers into a broken '[removed]' token that reached
+    // users. We now KEEP every parsed citation (deduped by URL) and never emit
+    // '[removed]'; a dangling inline marker is removed cleanly instead. Fabrication
+    // defense rests on the URL dedup + the prose-URL sweep, which do not punish failed
+    // scrapes. (The successful-scrape pool is still reconciled below to FOLD IN any
+    // sources the researchers scraped but failed to cite.)
+
     // Robustness fallback: reconcile against ground-truth provenance — the URLs
     // ACTUALLY, successfully scraped this session (registerScrapedLinks only records
     // HTTP-success fetches). This runs even when SOME citations parsed: a
@@ -216,6 +348,7 @@ export class ResearchSynthesisService implements IService {
 
     if (globalCitations.length > 0) {
       const verifiedLinksSection = formatCitedLinks(globalCitations);
+      const trustedUrls = new Set(globalCitations.map((c) => normalizeUrl(c.url)));
       // Replace an existing CITED LINKS section with the verified version — but only
       // a line-leading, all-caps "CITED LINKS" header marks the section. An
       // unanchored /CITED LINKS[\s\S]*$/i would also fire on an incidental
@@ -225,31 +358,48 @@ export class ResearchSynthesisService implements IService {
       if (citedHeaderIdx >= 0) {
         logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
         // The verified list is renumbered (dedup by URL, implausible entries dropped),
-        // but the body's inline [N] markers were authored against the list being
-        // replaced. Remap them by URL identity — parse the synthesis's own list and
-        // map each written number to the global id of the same normalized URL. In
-        // deep mode the numbering already matches and this is a no-op; in quick mode
-        // (where the model's own list is what gets replaced) it prevents every
-        // marker after a dropped/deduped entry from pointing at the wrong source.
+        // but the body's inline [N] markers were authored against the list being replaced.
+        // Remap them by URL identity — parse the synthesis's own list and map each
+        // written number to the global id of the same normalized URL. In deep mode
+        // the numbering already matches and this is a no-op; in quick mode (where the
+        // model's own list is what gets replaced) it prevents every marker after a
+        // dropped/deduped entry from pointing at the wrong source.
         const ownCitations = parseCitations(synthesis);
         const urlToGlobalId = new Map(globalCitations.map((c) => [normalizeUrl(c.url), c.id]));
         const localToGlobal = new Map<number, number>();
+        // own-citation numbers whose URL is absent from the verified list. Their inline
+        // [N] markers are REMOVED cleanly (never '[removed]') so the prose reads
+        // naturally. A marker can dangle only if the lead cited a URL absent from the
+        // rebuilt list (e.g. it invented one not in any researcher report); removing it
+        // beats shipping a broken token or silently retargeting it at the wrong source.
+        const droppedNumbers = new Set<number>();
         ownCitations.forEach((cit, index) => {
+          const localKey = cit.number ?? index + 1;
           const globalId = urlToGlobalId.get(normalizeUrl(cit.url));
-          if (globalId !== undefined) localToGlobal.set(cit.number ?? index + 1, globalId);
+          if (globalId !== undefined) localToGlobal.set(localKey, globalId);
+          else droppedNumbers.add(localKey);
         });
         let body = synthesis.slice(0, citedHeaderIdx).trimEnd();
-        const needsRemap = [...localToGlobal].some(([local, global]) => local !== global);
-        if (needsRemap) {
-          body = body.replace(/\[(\d+)\]/g, (match, p1) => {
-            const globalId = localToGlobal.get(parseInt(p1, 10));
-            return globalId !== undefined ? `[${globalId}]` : match;
-          });
+        if (localToGlobal.size > 0 || droppedNumbers.size > 0) {
+          body = rewriteCitationMarkers(body, localToGlobal, (n) => droppedNumbers.has(n));
         }
+        // Defense-in-depth: redact unverified inline URLs in the prose body. The body
+        // is otherwise passed through verbatim, so this is the one channel by which a
+        // fabricated source can still reach the user; inline URLs also violate the
+        // required format. Verified inline references (in `trustedUrls`) are kept.
+        body = redactUnverifiedProseUrls(body, trustedUrls);
         return `${body}\n\n${verifiedLinksSection}`;
       }
       logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
-      return `${synthesis.trim()}\n\n${verifiedLinksSection}`;
+      // No existing CITED LINKS header: the synthesis is all prose. The model's
+      // inline [N] markers were authored without a list we could remap against, so
+      // REMOVE any that fall outside the verified range (1..K) — they point at sources
+      // absent from the rebuilt list — before sweeping for unverified inline URLs and
+      // appending the verified section. Removed cleanly (never '[removed]').
+      const validIds = new Set(globalCitations.map((c) => c.id));
+      let prose = rewriteCitationMarkers(synthesis.trim(), new Map(), (n) => !validIds.has(n));
+      prose = redactUnverifiedProseUrls(prose, trustedUrls);
+      return `${prose}\n\n${verifiedLinksSection}`;
     }
 
     // Genuinely no sources were retrieved (e.g. every search/scrape was blocked by
@@ -257,7 +407,13 @@ export class ResearchSynthesisService implements IService {
     // uncited report that looks sourced — but also never destroy a CITED LINKS block
     // the model may have written that we simply could not parse (preserve as-is).
     if (/CITED LINKS/i.test(synthesis)) {
-      return synthesis;
+      // Preserved, but NOT silently: reaching here means no citation parsed AND no
+      // scrape succeeded, so every link in that block is unverified by construction.
+      // Returning it untouched shipped a fully sourced-looking report with no caveat —
+      // the worst case for a reader, since an unretrievable session is precisely when
+      // a model's links are most likely to be invented.
+      logger.warn('[ResearchSynthesisService] Preserving an unparseable CITED LINKS block from a run that retrieved no sources — flagging it as unverified.');
+      return `${synthesis.trimEnd()}\n\n${UNVERIFIED_LINKS_NOTE}`;
     }
     logger.warn('[ResearchSynthesisService] No citations and no scrape provenance — appending explicit no-sources note.');
     return `${synthesis.trim()}\n\n${NO_SOURCES_NOTE}`;

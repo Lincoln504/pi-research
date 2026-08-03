@@ -139,7 +139,7 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
 
         if (oldScheduler && 'schedulerId' in oldScheduler && oldScheduler.schedulerId) {
             if (oldScheduler instanceof BrowserTaskScheduler) {
-                const shutdownPromise: Promise<void> = oldScheduler.shutdown().catch((err: unknown) => {
+                const shutdownPromise: Promise<void> = oldScheduler.shutdown('leadership-lost').catch((err: unknown) => {
                     logger.warn('[Scheduler] Error during old scheduler shutdown after restart:', err);
                 });
                 schedulerService.setPendingShutdownPromise(shutdownPromise);

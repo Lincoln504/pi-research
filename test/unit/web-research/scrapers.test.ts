@@ -229,6 +229,87 @@ describe('scrapers', () => {
     });
   });
 
+  describe('scrapeSingle — fetch-layer transient retry', () => {
+    // The fetch layer is the only scrape layer without a retry, and its fallback is
+    // a stealth browser render 10–30× more expensive. One cheap retry is worth it —
+    // but only for genuinely transient failures, and it must not turn one failure
+    // into two tracked errors.
+    const okHtml = '<h1>Title</h1><p>' + 'Word word word word word word word word word word '.repeat(6) + '.</p>';
+    const okResponse = () => ({
+      ok: true,
+      headers: { get: () => 'text/html; charset=utf-8' },
+      text: async () => okHtml,
+      arrayBuffer: async () => new TextEncoder().encode(okHtml).buffer,
+    });
+
+    it('retries once and succeeds without ever reaching the browser', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { code: 'ECONNRESET' }))
+        .mockResolvedValue(okResponse());
+      vi.stubGlobal('fetch', fetchMock);
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
+
+      const result = await scrapeSingle('https://some-site.org/blip');
+
+      expect(result.success).toBe(true);
+      expect(result.source).toBe('fetch');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // The whole point: no browser render was paid for.
+      expect(runBrowserTask).not.toHaveBeenCalled();
+    });
+
+    it('does NOT retry a non-transient failure (an HTTP 404 is not a blip)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => 'text/html' },
+        body: null,
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
+      vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser failed'));
+
+      await scrapeSingle('https://some-site.org/missing');
+
+      // One attempt only — retrying a 404 just doubles the latency of every dead link.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops retrying when the caller has already aborted', async () => {
+      const controller = new AbortController();
+      const fetchMock = vi.fn().mockImplementation(async () => {
+        controller.abort();
+        throw Object.assign(new TypeError('fetch failed'), { code: 'ECONNRESET' });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
+      vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser failed'));
+
+      await scrapeSingle('https://some-site.org/cancelled', controller.signal);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('files one tracked error per failed URL, not one per attempt', async () => {
+      const { errorTracker } = await import('../../../src/utils/error-tracker.ts');
+      const trackSpy = vi.spyOn(errorTracker, 'trackError');
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { code: 'ECONNRESET' })));
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
+      vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser failed'));
+
+      await scrapeSingle('https://some-site.org/always-down');
+
+      // Two fetch attempts were made; tracking them separately would double every
+      // fetch-layer error count read during an incident.
+      const fetchLayerErrors = trackSpy.mock.calls.filter(
+        ([, ctx]) => (ctx as { layer?: string } | undefined)?.layer === 'fetch',
+      );
+      expect(fetchLayerErrors).toHaveLength(1);
+      trackSpy.mockRestore();
+    });
+  });
+
   describe('scrapeSingle — browser fallback', () => {
     it('falls back to browser when fetch fails', async () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network failure')));

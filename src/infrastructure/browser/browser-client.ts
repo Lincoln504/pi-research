@@ -103,7 +103,25 @@ export class BrowserClient implements IScheduler {
                     const duration = Date.now() - start;
                     try {
                         const parsed = JSON.parse(body);
-                        if (res.statusCode !== 200) {
+                        if (res.statusCode === 503 && parsed?.error === 'draining') {
+                            // Planned leadership handover, not a fault. Distinct message so
+                            // isServerDrainingError can classify it: retry paths treat it as
+                            // transient and the circuit breaker ignores it. Logged at DEBUG,
+                            // not ERROR, so a routine re-election doesn't read as an incident.
+                            // It is still recorded in the error tracker (this file records every
+                            // non-200 uniformly) under its own `draining` errorType, which is
+                            // what keeps handovers distinguishable from real 503s in forensics.
+                            const error = new Error(
+                                `Browser pool leader is draining (${parsed.reason || 'leadership-lost'}) — re-elect and retry`,
+                            );
+                            logger.debug(`[BrowserClient] Leader draining on ${path}; re-election required.`);
+                            errorTracker.trackError(error, {
+                                component: 'browser-manager',
+                                operation,
+                                errorType: 'draining',
+                            });
+                            reject(error);
+                        } else if (res.statusCode !== 200) {
                             const error = new Error(parsed.error || `HTTP ${res.statusCode}`);
                             errorTracker.trackError(error, {
                                 component: 'browser-manager',
