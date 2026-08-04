@@ -10,7 +10,7 @@
  */
 
 import { parseCitations } from '../utils/text-utils.ts';
-import { normalizeCitations, formatCitedLinks, type GlobalCitation } from '../utils/citation-utils.ts';
+import { normalizeCitations, formatCitedLinks, rewriteCitationMarkers, type GlobalCitation } from '../utils/citation-utils.ts';
 import { lastCitedLinksHeaderIndex } from '../utils/text-utils.ts';
 import { getScrapedLinks, isTranscribedLink, normalizeUrl } from '../utils/shared-links.ts';
 import { stripTrailingLlmPunctuation } from '../utils/url-utils.ts';
@@ -33,86 +33,6 @@ const NO_SOURCES_NOTE =
 const UNVERIFIED_LINKS_NOTE =
   '_None of the links above could be verified: no page fetch succeeded this session and no citation could be matched to retrieved content. They may be inaccurate or invented — check each one before relying on it._';
 
-/**
- * Largest `[N]` treated as a citation marker. Inline markers index a source list
- * that is realistically well under this; the bound exists so an ordinary bracketed
- * number in prose — a year (`[2023]`), an issue id, an array index — is left alone
- * instead of being silently deleted as a "dangling citation".
- */
-const MAX_PLAUSIBLE_CITATION_MARKER = 200;
-
-/**
- * Rewrite inline `[N]` citation markers in a prose body: renumber the ones we can
- * map, delete the ones known to dangle, leave everything else untouched.
- *
- * Deletion is whitespace-aware rather than followed by a global space collapse.
- * A blanket `text.replace(/  +/g, ' ')` also eats *leading* indentation, which
- * silently flattens nested list levels into one and turns 4-space indented code
- * blocks into paragraphs — corrupting the structure of every report that contains
- * them. So the pad preceding a deleted marker is consumed only when the marker is
- * mid-line (i.e. real prose spacing); line-leading indentation is preserved.
- *
- * Code is skipped entirely. A report may quote code containing bracketed integers
- * (`items[12]`), and on the no-CITED-LINKS path *every* out-of-range marker is treated
- * as dangling — so without this guard a quoted array index would be silently deleted
- * from the user's code sample. Fenced blocks are tracked across lines; single-backtick
- * spans are detected by an odd backtick count earlier on the same line.
- *
- * @param remap  local marker number → verified global id
- * @param isDangling  whether a marker not present in `remap` should be deleted
- */
-function rewriteCitationMarkers(
-  text: string,
-  remap: Map<number, number>,
-  isDangling: (n: number) => boolean,
-): string {
-  const inFence = fencedCodeMask(text);
-  return text.replace(/([ \t]*)\[(\d+)\]/g, (match, pad: string, digits: string, offset: number) => {
-    const n = parseInt(digits, 10);
-    const mapped = remap.get(n);
-    if (mapped !== undefined) return `${pad}[${mapped}]`;
-    // Citation numbering is 1-based; `[0]` is always an index or a literal, never a marker.
-    if (n < 1 || n > MAX_PLAUSIBLE_CITATION_MARKER || !isDangling(n)) return match;
-    if (inFence(offset) || inInlineCodeSpan(text, offset)) return match;
-    // Preserve indentation when nothing but whitespace precedes on this line;
-    // otherwise drop the pad too so no double space is left behind.
-    const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
-    return text.slice(lineStart, offset).trim() === '' ? pad : '';
-  });
-}
-
-/**
- * Build an `offset → is inside a ``` fenced block` predicate for `text`.
- *
- * Computed once per rewrite (a single line scan) rather than per marker, so marker
- * rewriting stays linear in the body length.
- */
-function fencedCodeMask(text: string): (offset: number) => boolean {
-  const ranges: Array<[number, number]> = [];
-  let open = -1;
-  let pos = 0;
-  for (const line of text.split('\n')) {
-    if (/^\s{0,3}(```|~~~)/.test(line)) {
-      if (open < 0) open = pos;
-      else {
-        ranges.push([open, pos + line.length]);
-        open = -1;
-      }
-    }
-    pos += line.length + 1; // +1 for the '\n' consumed by split
-  }
-  // An unterminated fence runs to the end of the body — treat the remainder as code.
-  if (open >= 0) ranges.push([open, text.length]);
-  return (offset: number) => ranges.some(([start, end]) => offset >= start && offset < end);
-}
-
-/** Whether `offset` sits inside a single-backtick code span on its own line. */
-function inInlineCodeSpan(text: string, offset: number): boolean {
-  const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
-  let ticks = 0;
-  for (let i = lineStart; i < offset; i++) if (text[i] === '`') ticks++;
-  return ticks % 2 === 1;
-}
 
 /**
  * Redact inline `https?://` tokens in synthesis prose whose URL was NOT retrieved

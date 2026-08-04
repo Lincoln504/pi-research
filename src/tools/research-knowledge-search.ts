@@ -481,7 +481,10 @@ export async function runBackgroundExtraction(
       const delay = KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS * attempt;
       metrics.increment('research_knowledge_search_synthesis_retries_total', 1);
       logger.warn(`[research-knowledge-search] Synthesis attempt ${attempt}/${KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS} failed transiently (${msg}); retrying in ${delay}ms`);
-      await abortableDelay(delay, signal);
+      // keepAlive=true: the retry is already committed and the next attempt must
+      // run, so this sleep is foreground work. An unref'd timer here can be the
+      // only pending handle and let the process exit mid-retry (see abortableDelay).
+      await abortableDelay(delay, signal, true);
     }
   }
 
@@ -625,7 +628,10 @@ export async function triageRelevantUrls(
       const delay = KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS * attempt;
       metrics.increment('research_knowledge_search_triage_retries_total', 1);
       logger.warn(`[research-knowledge-search] Triage attempt ${attempt}/${KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS} failed transiently (${msg}); retrying in ${delay}ms`);
-      await abortableDelay(delay, signal);
+      // keepAlive=true: the retry is already committed and the next attempt must
+      // run, so this sleep is foreground work. An unref'd timer here can be the
+      // only pending handle and let the process exit mid-retry (see abortableDelay).
+      await abortableDelay(delay, signal, true);
     }
   }
 

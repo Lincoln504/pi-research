@@ -78,6 +78,26 @@ export class CircuitBreaker {
       metrics.observe('circuit_breaker_call_duration_ms', duration, { breaker: this.options.name, status: 'error' });
       if (this.options.isTransientError(error)) {
         this.onFailure(error);
+      } else if (admittedAsProbe && this.state === 'HALF_OPEN') {
+        // The trial probe failed for a reason this breaker does not count. That is
+        // INCONCLUSIVE, not healthy — so re-open and wait out another reset window
+        // rather than staying HALF_OPEN.
+        //
+        // Without this the breaker pins permanently: onFailure is the only path to
+        // OPEN, and it is skipped for non-counted errors, while transitionTo(HALF_OPEN)
+        // never re-arms nextAttemptTime. The admission gate above then fast-fails every
+        // caller beyond halfOpenMaxCalls (default 1) forever. This is not a corner case
+        // for the browser pool: DEFAULT_BREAKER_CONFIG.isTransientError deliberately
+        // excludes pool-shutdown, draining, Cloudflare and task-timeout errors — exactly
+        // what a recovering or blocked pool returns — so the probe most likely to run is
+        // also the one most likely to pin the breaker. Observed effect: 19 of a 20-query
+        // parallel burst fast-failing instantly, surfacing to the researcher as
+        // "your query may be too narrow".
+        logger.warn(
+          `[CircuitBreaker] '${this.options.name}' HALF_OPEN probe failed with a non-counted error; ` +
+            `treating as inconclusive and re-opening: ${error instanceof Error ? error.message : String(error)}`
+        );
+        this.transitionTo('OPEN');
       }
       throw error;
     } finally {

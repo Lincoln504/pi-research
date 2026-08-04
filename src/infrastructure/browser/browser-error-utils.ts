@@ -109,7 +109,13 @@ export function isPoolShutdownError(error: unknown): boolean {
     return typeof err.message === 'string' && (
         err.message.includes('Worker pool is shutting down') ||
         err.message.includes('Cannot execute a task on destroying pool') ||
-        err.message.includes('destroying pool')
+        err.message.includes('destroying pool') ||
+        // worker-pool-manager throws this when auto-recovery is still swapping the
+        // pool. Its own text says "please retry", but until it was listed here no
+        // classifier matched it, so the first attempt rethrew instead of retrying —
+        // and auto-recovery fires only after 3 consecutive worker failures, i.e.
+        // exactly when a burst of tasks is in flight and would all die together.
+        err.message.includes('Worker pool is being reset')
     );
 }
 

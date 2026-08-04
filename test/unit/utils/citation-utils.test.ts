@@ -47,6 +47,62 @@ describe('citation-utils', () => {
       expect(normalizedReports.get('res1')).not.toContain('https://www');
     });
 
+    /**
+     * Regression guard for a silent misattribution bug.
+     *
+     * An unmapped marker used to be left verbatim. Because global ids are assigned
+     * densely from 1, a surviving `[1]` stops meaning "this report's first source"
+     * and instead resolves against the RENUMBERED global list — pointing at an
+     * unrelated document. The normalized body feeds the synthesis prompt, which is
+     * told the numbering is already global, so the model reproduces the wrong
+     * attribution and the regenerated CITED LINKS looks consistent with it.
+     *
+     * The prior assertion in the test above ("not.toContain('https://www')") could
+     * never catch this: it is structurally guaranteed by the CITED-LINKS slice
+     * regardless of how markers are handled.
+     */
+    it('drops a dangling marker instead of silently retargeting it at another source', () => {
+      const reports = new Map([
+        [
+          'res1',
+          'Finding A is supported by evidence [1]. Finding B is separate [2].\n\n' +
+            'CITED LINKS\n' +
+            '[1] http://localhost:8080/internal — dropped: hostname has no dot\n' +
+            '[2] https://example.com/real-source — Real',
+        ],
+      ]);
+
+      const { normalizedReports, globalCitations } = normalizeCitations(reports);
+      const body = normalizedReports.get('res1')!;
+
+      // Only the plausible URL survives, and it becomes global [1].
+      expect(globalCitations).toHaveLength(1);
+      expect(globalCitations[0]!.url).toBe('https://example.com/real-source');
+
+      // Finding B keeps its (remapped) citation...
+      expect(body).toContain('Finding B is separate [1].');
+      // ...and Finding A must NOT have inherited it. Before the fix this read
+      // "Finding A is supported by evidence [1]." — citing a source that never
+      // supported it.
+      expect(body).toContain('Finding A is supported by evidence.');
+      expect(body).not.toMatch(/evidence\s*\[1\]/);
+    });
+
+    it('leaves bracketed integers inside code spans alone when dropping dangling markers', () => {
+      const reports = new Map([
+        [
+          'res1',
+          'Use `items[12]` to index.\n\n```js\nconst x = arr[7];\n```\n\nReal cite [1].\n\n' +
+            'CITED LINKS\n[1] https://example.com/a — A',
+        ],
+      ]);
+
+      const body = normalizeCitations(reports).normalizedReports.get('res1')!;
+      expect(body).toContain('`items[12]`');
+      expect(body).toContain('arr[7]');
+      expect(body).toContain('Real cite [1].');
+    });
+
     it('should handle different local IDs for the same URL', () => {
       const reports = new Map([
         ['res1', 'Info [1].\n\nCITED LINKS\n[1] https://common.com — Common'],

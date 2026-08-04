@@ -141,6 +141,11 @@ export function withTimeout<T>(
     // aborted before we start means an external (user) cancellation, not a timeout —
     // a clean stop, so log at debug, not error.
     if (combinedSignal.aborted) {
+      // `promise` is a parameter, so the caller already started it. Returning here
+      // skips the promise.then(...) attachment below, leaving its eventual rejection
+      // with no handler — and Node 22 defaults to --unhandled-rejections=throw, so
+      // that kills the process. Adopt the rejection before bailing out.
+      void promise.catch(() => undefined);
       logger.debug(`[withTimeout] ${label} already aborted at start (external cancellation)`);
       return reject(new Error(`${label} cancelled or timed out`));
     }
@@ -319,7 +324,14 @@ export async function retryWithBackoff<T>(
       // the full backoff. If the wait is aborted, surface the original transient
       // error (not the synthetic AbortError) so callers see the real cause.
       try {
-        await abortableDelay(delay, opts.signal);
+        // keepAlive=true: this sleep IS the operation. The retry has already been
+        // decided and the next attempt must run, so the timer must hold the event
+        // loop open. Without it, a transient network failure — which by its nature
+        // leaves no referenced socket handle — can make the backoff the sole pending
+        // handle, and Node drains the loop and exits mid-retry. The attempt never
+        // runs, and no error surfaces: in the CLI neither branch of the top-level
+        // handler fires, so the user gets a bare exit with no report.
+        await abortableDelay(delay, opts.signal, true);
       } catch {
         metrics.increment('retry_aborted_total', 1, { label: opts.label });
         throw lastError;
