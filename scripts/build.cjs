@@ -106,13 +106,31 @@ const TARGETS = {
     copyWebGpuProbe();
     copyPrompts();
   },
-  skill: () =>
-    esbuild.build({
+  skill: () => {
+    const entry = p('skills', 'pi-research', 'scripts', 'run.ts');
+    const outfile = p('skills', 'pi-research', 'scripts', 'run.mjs');
+    // The published package ships the BUILT run.mjs and deliberately excludes its
+    // run.ts source (package.json "files": "!skills/pi-research/scripts/run.ts"),
+    // yet it also ships prepare.cjs + build.cjs — and `prepare` runs `build.cjs all`.
+    // On any install that executes prepare against the shipped tree (npm install
+    // <dir>, file:, npm link, pi install <dir>) this target had no entry point and
+    // aborted the whole install with "Could not resolve run.ts". Registry .tgz and
+    // npx installs were unaffected only because prepare does not run there.
+    // Nothing to do when the artifact is already present and its source is not.
+    if (!fs.existsSync(entry)) {
+      if (fs.existsSync(outfile)) {
+        console.log('[build] skill: run.ts absent and run.mjs already built (published tree) — skipping');
+        return Promise.resolve();
+      }
+      throw new Error(`[build] skill: neither ${entry} nor a prebuilt ${outfile} exists`);
+    }
+    return esbuild.build({
       ...COMMON,
-      entryPoints: [p('skills', 'pi-research', 'scripts', 'run.ts')],
-      outfile: p('skills', 'pi-research', 'scripts', 'run.mjs'),
+      entryPoints: [entry],
+      outfile,
       banner: { js: SHEBANG },
-    }),
+    });
+  },
 };
 
 // The cli target's copyThreadWorker step depends on the worker output existing,

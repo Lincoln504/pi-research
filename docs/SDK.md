@@ -33,13 +33,16 @@ global file entirely and run purely from defaults + `process.env` + `options.con
 > `enum` and constructor parameter properties, which Node's strip-only mode
 > (`--experimental-strip-types`, the default since Node 23.6) rejects with
 > `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. Use one of:
-> - the pi host, which loads it natively;
-> - **`node --experimental-transform-types your-script.ts`** — must be passed
->   explicitly; full transform is not the default on any current Node release;
+> - the pi host, which loads it natively (via `jiti`);
 > - a loader such as `tsx` or `ts-node`.
 >
-> Plain `node script.js` doing `require('@lincoln504/pi-research/sdk')`, or
-> `--experimental-strip-types`, will not work. (`engines.node` is `>=22.19.0`.)
+> **Bare Node cannot load it at all, with any flag.** Node refuses to strip or
+> transform TypeScript that lives under `node_modules` — as an installed
+> dependency's source does — failing with
+> `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`. That applies to
+> `--experimental-transform-types` exactly as it does to
+> `--experimental-strip-types`, so neither flag helps here; a loader (or the pi
+> host) is mandatory. (`engines.node` is `>=22.19.0`.)
 
 ```typescript
 import {

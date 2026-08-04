@@ -147,9 +147,23 @@ describe('SDK Lifecycle Integration', () => {
   });
 
   it('throws when model string is not found in pi config', async () => {
-    await expect(
-      initResearchSDK({ model: 'nonexistent-provider/nonexistent-model' })
-    ).rejects.toThrow('not found in pi\'s configured model registry');
+    const attempt = initResearchSDK({ model: 'nonexistent-provider/nonexistent-model' });
+    await expect(attempt).rejects.toThrow(/not found in pi's model registry/);
+  });
+
+  // The remedy text is part of the contract, not incidental prose: pointing users at
+  // models.json for a provider pi ships built in is what led them to hand-write
+  // `models[]` entries, which REPLACE pi's catalog entry and silently zero out its
+  // pricing and context limits. The message must name the credential path first.
+  it('directs the user to credentials, not to hand-editing models.json', async () => {
+    try {
+      await initResearchSDK({ model: 'nonexistent-provider/nonexistent-model' });
+      throw new Error('expected initResearchSDK to reject');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      expect(msg).toMatch(/\/login|auth\.json|environment variable/);
+      expect(msg).toMatch(/modelOverrides/);
+    }
   });
 
   it('throws when model string format is invalid (no slash)', async () => {
