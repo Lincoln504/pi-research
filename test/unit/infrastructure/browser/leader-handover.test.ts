@@ -29,12 +29,12 @@ vi.mock('../../../../src/infrastructure/browser/browser-lifecycle.ts', () => ({
   waitForBrowserPoolIdle: vi.fn(async () => undefined),
 }));
 
-const getSchedulerMock = vi.fn();
-const forceSchedulerRestartMock = vi.fn(async () => undefined);
+const getSchedulerMock = vi.fn<(config?: unknown, container?: unknown) => Promise<unknown>>();
+const forceSchedulerRestartMock = vi.fn<(force?: unknown, container?: unknown) => Promise<void>>();
 
 vi.mock('../../../../src/infrastructure/browser/scheduler-factory.ts', () => ({
-  getScheduler: (...a: unknown[]) => getSchedulerMock(...a),
-  forceSchedulerRestart: (...a: unknown[]) => forceSchedulerRestartMock(...a),
+  getScheduler: (config?: unknown, container?: unknown) => getSchedulerMock(config, container),
+  forceSchedulerRestart: (force?: unknown, container?: unknown) => forceSchedulerRestartMock(force, container),
 }));
 
 // Resolve the factory *service* lookup to nothing so the code falls back to the
