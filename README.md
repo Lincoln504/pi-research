@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Free web research &amp; knowledge store</strong>
+  <strong>Local web research and knowledge store</strong>
 </p>
 
 <p align="center">
@@ -30,14 +30,14 @@ knowledge store on your machine.
 
 ### How it works
 
-A research run is a loop of agent teams:
+A research run is a loop of agent teams: a coordinator plans the work and runs an
+opening search, parallel researcher agents scrape and read sources through a fixed,
+sandboxed toolkit (no filesystem or shell access), and an evaluator decides whether
+to run another round or synthesize — returning one cited Markdown report while its
+sources are saved to the knowledge store in the background.
 
-1. A **coordinator** plans the work into tracks and runs an opening search.
-2. **Researchers** fan out in parallel — each scrapes and reads a set of sources through a fixed, sandboxed toolkit (search, scrape, YouTube transcripts, security databases, Stack Exchange, local `grep` / `read`), and **cannot** touch your filesystem, shell, or the network beyond those tools.
-3. An **evaluator** reviews the round and decides whether to run another or **synthesize**.
-4. The result is **one cited Markdown report**, and its sources are saved into the knowledge store in the background.
-
-Three depth levels — **normal · deep · ultra** — set the team size and number of rounds. Ask in natural language and the tool picks the right one:
+Three depth levels — normal, deep, ultra — set the team size and number of rounds;
+ask in natural language and the tool picks the right one:
 
 ![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
 
