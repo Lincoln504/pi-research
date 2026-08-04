@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Limitless research and knowledge store — for pi, agent skill, or SDK.</strong>
+  <strong>Free web research &amp; knowledge store</strong>
 </p>
 
 <p align="center">
@@ -24,9 +24,20 @@
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
-Research is broken into subtasks automatically, with each sub-researcher given a high volume of sources to investigate. Then, evaluator decides whether the answer is complete or an additional round of research is needed. The final result is a synthesized cited report.
+**Free, unlimited web search &amp; scraping — no monthly quota, no subscription.**
+You pay only for the LLM tokens you use, and it builds your own private, searchable
+knowledge store on your machine.
 
-Ask in natural language — the tool understands the depth needed:
+### How it works
+
+A research run is a loop of agent teams:
+
+1. A **coordinator** plans the work into tracks and runs an opening search.
+2. **Researchers** fan out in parallel — each scrapes and reads a set of sources through a fixed, sandboxed toolkit (search, scrape, YouTube transcripts, security databases, Stack Exchange, local `grep` / `read`), and **cannot** touch your filesystem, shell, or the network beyond those tools.
+3. An **evaluator** reviews the round and decides whether to run another or **synthesize**.
+4. The result is **one cited Markdown report**, and its sources are saved into the knowledge store in the background.
+
+Three depth levels — **normal · deep · ultra** — set the team size and number of rounds. Ask in natural language and the tool picks the right one:
 
 ![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
 
@@ -39,12 +50,13 @@ Ask in natural language — the tool understands the depth needed:
 - Using the pi-research agent skill as OpenClaw's web access.
 - Building agent systems that identify and examine web sources.
 
-### Advantages
+### Why pi-research
 
-- Unlimited search and scrape, for free — you only pay for LLM tokens.
-- Context-efficient — it returns a synthesized, cited report to the chat instead of dumping raw web content into the conversation.
-- Safe by design — web access runs inside a specialized, limited research agent with no filesystem or shell access.
-- Search a little or a lot — three depth levels in the pi tool (four via the SDK and standalone CLI, which add the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
+- **Free, unlimited search &amp; scrape — no quota, no monthly fee.** Most AI-search providers cap free searches per month and then charge; results run on *their* index on *their* servers. pi-research's search and scraping layer (DuckDuckGo via a stealth browser) is free and unlimited — you pay only for the LLM tokens you use, never per search or per month.
+- **You own your index.** Every finding is written into a local [LanceDB](https://lancedb.com) knowledge store on *your* machine — a persistent, searchable index you control and keep, which also seeds future runs so repeat questions get faster, cheaper answers. No borrowed, server-side index you can't keep or query.
+- **Cited reports, not raw dumps.** It returns one synthesized, sourced Markdown report to the chat instead of dumping raw web content into the conversation — context-efficient and easy to verify.
+- **Sandboxed by design.** Web access runs inside a specialized, limited research agent with no filesystem or shell access — safe to point at anything.
+- **Search a little or a lot** — three depth levels in the pi tool (four via the SDK and standalone CLI, which add the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
 
 ### Requirements / limitations
 
