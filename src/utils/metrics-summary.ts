@@ -283,8 +283,15 @@ export function buildResearchSummary(stats: ResearchStats): string {
   if (stats.tokens > 0) {
     resourceParts.push(`**${formatTokens(stats.tokens)}** tokens`);
   }
-  if (stats.cost > 0) {
-    const costStr = stats.cost < 0.01 ? '<$0.01' : `$${stats.cost.toFixed(2)}`;
+  // Render the cost whenever tokens were actually billed-through, INCLUDING when it
+  // is exactly zero. Gating on `cost > 0` hid a real defect for weeks: a model whose
+  // price table is all zeros (an unpriced or catalog-overwritten entry) produced no
+  // cost line at all, so a misconfiguration was indistinguishable from a run that
+  // simply had not reported yet. "$0.00" beside a large token count is conspicuous;
+  // silence is not. Zero is also the honest figure for flat-rate and local providers.
+  if (stats.tokens > 0 || stats.cost > 0) {
+    const costStr =
+      stats.cost === 0 ? '$0.00' : stats.cost < 0.01 ? '<$0.01' : `$${stats.cost.toFixed(2)}`;
     resourceParts.push(`**${costStr}**`);
   }
   if (stats.durationMs > 0) {
@@ -317,6 +324,9 @@ export interface SessionStats {
   totalUrlsDiscovered: number;
   totalSearchQueries: number;
   totalTokens: number;
+  /** Summed LLM cost across the session's runs. The Session Metrics UI advertises
+   *  "API cost estimates"; without this field it had no cost to show. */
+  totalCost: number;
   totalToolUsage: {
     searches: number;
     scrapes: number;
@@ -339,6 +349,7 @@ export function aggregateSessionStats(
   let totalUrlsDiscovered = 0;
   let totalSearchQueries = 0;
   let totalTokens = 0;
+  let totalCost = 0;
   const totalToolUsage = {
     searches: 0,
     scrapes: 0,
@@ -359,6 +370,7 @@ export function aggregateSessionStats(
       totalUrlsDiscovered += stats.urlsDiscovered;
       totalSearchQueries += stats.searchQueries;
       totalTokens += stats.tokens;
+      totalCost += stats.cost;
       totalToolUsage.searches += stats.toolUsage.searches;
       totalToolUsage.scrapes += stats.toolUsage.scrapes;
       totalToolUsage.securitySearches += stats.toolUsage.securitySearches;
@@ -377,6 +389,7 @@ export function aggregateSessionStats(
     totalUrlsDiscovered,
     totalSearchQueries,
     totalTokens,
+    totalCost,
     totalToolUsage,
   };
 }
@@ -403,6 +416,16 @@ export function buildSessionOverview(stats: SessionStats): string {
   }
   if (stats.totalTokens > 0) {
     overviewParts.push(`**${formatTokens(stats.totalTokens)}** tokens`);
+    // Shown alongside tokens even at exactly $0.00 — the Session Metrics view
+    // advertises cost estimates, and a silent omission is what let an unpriced
+    // model table go unnoticed. Zero is correct for flat-rate and local providers.
+    const costStr =
+      stats.totalCost === 0
+        ? '$0.00'
+        : stats.totalCost < 0.01
+          ? '<$0.01'
+          : `$${stats.totalCost.toFixed(2)}`;
+    overviewParts.push(`**${costStr}**`);
   }
   if (stats.totalDurationMs > 0) {
     overviewParts.push(`**${formatDuration(stats.totalDurationMs)}** total research time`);

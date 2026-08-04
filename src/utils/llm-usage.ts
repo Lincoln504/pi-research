@@ -13,7 +13,43 @@
 
 import type { Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
+import { logger } from '../logger.ts';
 import { metrics } from './metrics.ts';
+
+/** Models already warned about, so the notice fires at most once per model per process. */
+const unpricedModelsWarned = new Set<string>();
+
+/**
+ * Warn once when a model bills tokens but carries an all-zero price table.
+ *
+ * Cost is never read off the wire — pi computes it as tokens × the model's local
+ * price table — so an unpriced table yields $0.00 silently and indefinitely. That
+ * is legitimate for flat-rate plans and local servers, but it is also exactly what
+ * a misconfiguration looks like: a hand-written `models[]` entry in models.json
+ * REPLACES pi's catalog entry for the same id, discarding its pricing. This
+ * happened in practice and went unnoticed for weeks because every display site
+ * suppressed a zero cost. The message deliberately does not assert a fault — it
+ * states the condition and names the usual cause.
+ */
+function warnIfUnpriced(model: Model<any>, tokens: number, cost: number): void {
+  if (tokens <= 0 || cost > 0) return;
+  const m = model as unknown as { provider?: string; id?: string; cost?: Record<string, number> };
+  const key = `${m.provider ?? 'unknown'}/${m.id ?? 'unknown'}`;
+  if (unpricedModelsWarned.has(key)) return;
+
+  const table = m.cost;
+  const allZero =
+    !table || Object.values(table).every((v) => typeof v !== 'number' || v === 0);
+  if (!allZero) return;
+
+  unpricedModelsWarned.add(key);
+  logger.warn(
+    `[LlmUsage] Model "${key}" consumed ${tokens} tokens but reports $0.00 — its price table is all zeros. ` +
+      `Expected for flat-rate plans and local servers. Otherwise the price data is missing: a hand-written ` +
+      `"models" entry in ~/.pi/agent/models.json replaces pi's catalog entry (and its pricing) for the same ` +
+      `model id — remove it and let pi's catalog supply the model, or use "modelOverrides", which merges.`
+  );
+}
 
 /** Structural subset of the run observer — just the token sink. Kept structural (rather
  *  than importing ResearchObserver from core/) so this foundation-layer helper does not
@@ -43,6 +79,7 @@ export function recordLlmUsage(
 ): { tokens: number; cost: number } {
   if (!rawUsage) return { tokens: 0, cost: 0 };
   const { tokens, cost } = extractUsage(model, rawUsage);
+  warnIfUnpriced(model, tokens, cost);
   if (tokens > 0 || cost > 0) {
     const labels: Record<string, string> = { component: opts.component };
     if (opts.complexity !== undefined) labels['complexity'] = String(opts.complexity);

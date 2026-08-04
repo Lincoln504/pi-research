@@ -63,4 +63,66 @@ describe('recordLlmUsage', () => {
     });
     expect(sumCounter(reg.getSnapshot().counters, 'llm_tokens_total')).toBe(150);
   });
+
+  /**
+   * Regression guard for a real, weeks-long silent failure: a model whose price
+   * table is all zeros bills tokens but reports $0.00 forever, because cost is
+   * computed locally as tokens x price rather than read off the wire. Every display
+   * site suppressed the zero, so the misconfiguration was invisible. The tests above
+   * deliberately supply an explicit cost (see the comment on `usage`), which is
+   * exactly why they never exercised this path.
+   */
+  describe('unpriced-model warning', () => {
+    // No `cost.total`, so extractUsage must fall back to the model's price table.
+    const usageNoCost = { input: 100, output: 50, totalTokens: 150 };
+    const unpriced = {
+      provider: 'openrouter',
+      id: 'unpriced-model',
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    } as any;
+
+    it('warns once per model when tokens are billed against an all-zero price table', async () => {
+      const { logger } = await import('../../../src/logger');
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(unpriced, usageNoCost, { component: 'researcher' });
+        recordLlmUsage(unpriced, usageNoCost, { component: 'researcher' });
+      });
+
+      const hits = warn.mock.calls.filter((c) => String(c[0]).includes('price table is all zeros'));
+      expect(hits).toHaveLength(1);
+      expect(String(hits[0]?.[0])).toContain('openrouter/unpriced-model');
+      // Tokens must still be recorded — the warning is diagnostic, not a bail-out.
+      expect(sumCounter(reg.getSnapshot().counters, 'llm_tokens_total')).toBe(300);
+      warn.mockRestore();
+    });
+
+    it('does not warn when the model carries real pricing', async () => {
+      const { logger } = await import('../../../src/logger');
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const priced = {
+        provider: 'openrouter',
+        id: 'priced-model',
+        cost: { input: 0.07, output: 0.34, cacheRead: 0, cacheWrite: 0 },
+      } as any;
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(priced, { ...usageNoCost, cost: { total: 0.0002 } }, { component: 'researcher' });
+      });
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('price table is all zeros'))).toHaveLength(0);
+      warn.mockRestore();
+    });
+
+    it('does not warn when no tokens were consumed', async () => {
+      const { logger } = await import('../../../src/logger');
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(unpriced, { input: 0, output: 0, totalTokens: 0 }, { component: 'researcher' });
+      });
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('price table is all zeros'))).toHaveLength(0);
+      warn.mockRestore();
+    });
+  });
 });

@@ -137,9 +137,19 @@ function makeProgressObserver(): HeadlessObserverOptions {
         case 'evaluation_decision':
           toStderr(`  • evaluator: ${data?.action}\n`);
           break;
-        case 'tokens_consumed':
-          if (data?.cost) toStderr(`  • tokens: ${data?.tokens ?? 0} ($${Number(data.cost).toFixed(4)})\n`);
+        case 'tokens_consumed': {
+          // A truthiness check on cost used to gate this whole line, so a model with
+          // an all-zero price table suppressed the TOKEN count as well — the run
+          // looked like it consumed nothing. Tokens stand on their own; cost is
+          // appended whenever it is a number, including 0.
+          const consumed = Number(data?.tokens ?? 0);
+          const costVal = typeof data?.cost === 'number' ? data.cost : undefined;
+          if (consumed > 0 || costVal !== undefined) {
+            const costPart = costVal === undefined ? '' : ` ($${costVal.toFixed(4)})`;
+            toStderr(`  • tokens: ${consumed}${costPart}\n`);
+          }
           break;
+        }
         case 'complete':
           toStderr(`  • complete (${data?.result?.length ?? 0} chars)\n`);
           break;

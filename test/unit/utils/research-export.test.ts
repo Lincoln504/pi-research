@@ -184,13 +184,19 @@ describe('appendExportMessage', () => {
     expect(final).toContain('Total cost: $0.05');
   });
 
-  it('should NOT show cost when totalCost is 0', () => {
+  // This assertion used to be inverted ("should NOT show cost when totalCost is 0"),
+  // which pinned a real defect in place: a model with an all-zero price table bills
+  // tokens and computes $0.00, so suppressing zero made a misconfiguration look
+  // identical to a run that reported no cost at all. A *defined* zero is a fact worth
+  // printing — and it is the honest figure for flat-rate plans and local models.
+  // Absent (undefined) still prints nothing; that case is covered below.
+  it('shows $0.00 when totalCost is defined but zero (unpriced model / flat-rate plan)', () => {
     const result = 'Research content';
     const filepath = '/tmp/test.md';
 
     const final = appendExportMessage(result, filepath, 0);
 
-    expect(final).not.toContain('Total cost');
+    expect(final).toContain('Total cost: $0.00');
     expect(final).toContain('Research report saved to');
   });
 

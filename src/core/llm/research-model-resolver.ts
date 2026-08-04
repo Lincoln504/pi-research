@@ -9,7 +9,7 @@ import { type Model } from '@earendil-works/pi-ai';
 import { type ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { getConfig } from '../../config.ts';
 import { logger } from '../../logger.ts';
-import { pickPreferredAvailable, readModelsJsonProviderOrder, safeGetAll, safeGetAvailable } from './model-registry-factory.ts';
+import { buildNoModelAvailableMessage, pickPreferredAvailable, readModelsJsonProviderOrder, safeGetAll, safeGetAvailable } from './model-registry-factory.ts';
 
 /**
  * Resolve the research model with standardized priority:
@@ -87,5 +87,5 @@ export function resolveResearchModel(options: {
     return pickPreferredAvailable(anyModel, readModelsJsonProviderOrder()) as Model<any>;
   }
 
-  throw new Error('No LLM model available for research. Please configure your model registry (~/.pi/agent/models.json).');
+  throw new Error(buildNoModelAvailableMessage());
 }

@@ -219,6 +219,13 @@ export function constructMinimalModel(provider: string, modelId: string, _apiKey
     baseUrl: '', // Provider-specific base URLs are handled by pi-ai internal registry
     reasoning: false,
     input: ['text'],
+    // No catalog is available on this path, so there is no price data and no real
+    // context/output ceiling to read. The zeros below are "unknown", NOT "free":
+    // cost reporting for this model will read $0.00 (see warnIfUnpriced in
+    // utils/llm-usage.ts), and the window figures are conservative guesses, not the
+    // model's true limits — so docs/CONFIGURATION.md's "clamped to the model's real
+    // ceiling" guarantee does not hold here. Anyone relying on accurate cost or the
+    // full context window should give pi a credential so it can fetch the real catalog.
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 32_768,
@@ -253,7 +260,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
         return constructMinimalModel(prov, modelId, apiKey);
       }
       
-      throw new Error(`Model "${modelSpec}" not found in pi's configured model registry. Check ${path.join(getAgentDir(), 'models.json')}.`);
+      throw new Error(buildModelNotFoundMessage(modelSpec));
     }
     
     // Validate format: must contain a slash OR be found as a bare model ID.
@@ -306,9 +313,39 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
     return constructMinimalModel(provider, modelSpec, apiKey);
   }
 
-  throw new Error(
-    `No LLM model available. Please configure your model registry (${path.join(getAgentDir(), 'models.json')}) or provide an explicit apiKey.`,
+  throw new Error(buildNoModelAvailableMessage());
+}
+
+/**
+ * Credential-first guidance for model-resolution failures.
+ *
+ * These messages used to say only "Check ~/.pi/agent/models.json", which is the
+ * WRONG remedy for a provider pi ships built in: the fix there is a credential,
+ * after which pi fetches the provider's catalog (with real pricing and context
+ * limits) on its own. Following the old advice, users hand-wrote `models[]`
+ * entries — and because such an entry REPLACES pi's catalog entry wholesale
+ * rather than merging into it, that silently zeroed out pricing and capped
+ * context/output windows. Lead with the credential path; scope models.json to
+ * genuinely custom providers; name `modelOverrides` for single-field tweaks.
+ */
+function credentialGuidance(): string {
+  const agentDir = getAgentDir();
+  return (
+    `  • Provider pi supports built-in (openrouter, anthropic, openai, …): add a credential — run \`pi\` and use /login, ` +
+    `set the provider's API-key environment variable, or add it to ${path.join(agentDir, 'auth.json')}. ` +
+    `pi then fetches that provider's model catalog automatically.\n` +
+    `  • Custom or self-hosted provider (Ollama, vLLM, a proxy): declare it in ${path.join(agentDir, 'models.json')}.\n` +
+    `    Note: a models.json entry REPLACES pi's catalog entry for the same model id, discarding its pricing and\n` +
+    `    context/output limits. To adjust a single field of a built-in model, use "modelOverrides" instead — it merges.`
   );
+}
+
+export function buildModelNotFoundMessage(modelSpec: string): string {
+  return `Model "${modelSpec}" not found in pi's model registry.\n${credentialGuidance()}`;
+}
+
+export function buildNoModelAvailableMessage(): string {
+  return `No LLM model available.\n${credentialGuidance()}\n  • Or pass an explicit apiKey.`;
 }
 
 /**
