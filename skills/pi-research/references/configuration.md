@@ -52,7 +52,7 @@ shared store — the default), `project` (scoped to the current directory), or `
 
 ```sh
 node "<SKILL_DIR>/scripts/run.mjs" knowledge-config                     # current mode + its source
-node "<SKILL_DIR>/scripts/run.mjs" knowledge-config set none|project|global
+node "<SKILL_DIR>/scripts/run.mjs" knowledge-config set <none|project|global>   # pick ONE value
 ```
 
 `set` persists to the per-directory project registry (`~/.pi/research/state/

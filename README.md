@@ -32,7 +32,7 @@ knowledge store on your machine.
 
 A research run is a loop of agent teams: a coordinator plans the work and runs an
 opening search, parallel researcher agents scrape and read sources through a fixed,
-sandboxed toolkit (no filesystem or shell access), and an evaluator decides whether
+sandboxed toolkit (no shell access, and no ability to write or modify files), and an evaluator decides whether
 to run another round or synthesize — returning one cited Markdown report while its
 sources are saved to the knowledge store in the background.
 
@@ -55,7 +55,7 @@ ask in natural language and the tool picks the right one:
 - **Free, unlimited search &amp; scrape — no quota, no monthly fee.** Most AI-search providers cap free searches per month and then charge; results run on *their* index on *their* servers. pi-research's search and scraping layer (DuckDuckGo via a stealth browser) is free and unlimited — you pay only for the LLM tokens you use, never per search or per month.
 - **You own your index.** Every finding is written into a local [LanceDB](https://lancedb.com) knowledge store on *your* machine — a persistent, searchable index you control and keep, which also seeds future runs so repeat questions get faster, cheaper answers. No borrowed, server-side index you can't keep or query. Findings can also be kept **globally**, scoped to a **single project**, or **not kept at all** — set per directory, changed whenever you like. The optionality is the point: the store is yours to build, partition, or switch off.
 - **Cited reports, not raw dumps.** It returns one synthesized, sourced Markdown report to the chat instead of dumping raw web content into the conversation — context-efficient and easy to verify.
-- **Sandboxed by design.** Web access runs inside a specialized, limited research agent with no filesystem or shell access — safe to point at anything.
+- **Sandboxed by design.** Web access runs inside a specialized, limited research agent that cannot run shell commands or write, edit, or delete anything. It can read and search files in the working directory, so scope that directory as you would for any coding agent.
 - **Search a little or a lot** — three depth levels in the pi tool (four via the SDK and standalone CLI, which add the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
 
 ### Requirements / limitations

@@ -218,7 +218,7 @@ set the knowledge-store mode per directory directly:
 
 ```sh
 pi-research knowledge-config                       # show the mode here and where it comes from
-pi-research knowledge-config set none|project|global
+pi-research knowledge-config set <none|project|global>   # pick ONE value
 ```
 
 Under the agent skill you don't have to run this yourself — you ask the agent (e.g. "disable the

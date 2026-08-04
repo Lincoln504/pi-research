@@ -63,7 +63,7 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 | Exit | Meaning | Action |
 |------|---------|--------|
 | `0` | Success | Read stdout; cite sources; relay any "saved to: <path>" line. |
-| `78` on `knowledge` | Store disabled/unconfigured | Silent; proceed to `research`. |
+| `78` on `knowledge` | Two cases — **read stderr to tell them apart.** | Says the store is **disabled**: silent; proceed to `research`. Mentions **credentials/model/API key**: this is the same hard config failure as `78` on `research` — **stop and relay full stderr**; don't silently continue, `research` will fail the same way. |
 | `78` on `research` | Engine missing or no model/key | **Stop. Relay full stderr** (it shows where to configure). Don't retry until fixed. |
 | `75` | Machine at capacity — other research runs are already using every slot | **Nothing is broken.** Wait for an in-flight run to finish, then retry this query once. Don't reconfigure anything and don't retry in a tight loop. |
 | `70` | Runtime error | Relay stderr; suggest one retry for transient failures (network, rate limit). |
@@ -81,7 +81,7 @@ the new setting. Check the current one first if useful:
 
 ```
 node "<SKILL_DIR>/scripts/run.mjs" knowledge-config                    # current mode + where it's set
-node "<SKILL_DIR>/scripts/run.mjs" knowledge-config set none|project|global
+node "<SKILL_DIR>/scripts/run.mjs" knowledge-config set <none|project|global>   # pick ONE value
 ```
 
 The change applies to the current directory on the next run. Never change it unprompted.

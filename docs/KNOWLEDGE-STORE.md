@@ -44,7 +44,7 @@ a project-scoped setting you can change per directory:
 | `none` | The store is disabled — nothing is read or written, the `research_knowledge_search` tool is not advertised to the agent, and `/knowledge-store` is unavailable. Re-enabling needs no restart (see [PI-EXTENSION.md](PI-EXTENSION.md) for the registration mechanics). |
 
 Change the mode for the current directory with the `/research-config` TUI (Knowledge Mode)
-in the pi extension, or with `pi-research knowledge-config set none|project|global` on the
+in the pi extension, or with `pi-research knowledge-config set <none|project|global>` (pick one value) on the
 standalone CLI. The setting persists to the per-directory project registry — see
 [CONFIGURATION.md](CONFIGURATION.md) for the full precedence chain. The change applies on
 the next run — no restart.
