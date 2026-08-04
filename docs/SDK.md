@@ -85,6 +85,15 @@ report caused by a sparse topic apart from one where most researchers failed). B
 > Concurrency: a single initialized SDK instance runs one research call at a time.
 > Overlapping `runDeepResearch`/`runQuickResearch` calls on the same instance throw
 > — run them sequentially, or use a separate process per concurrent run.
+>
+> Separate processes are additionally bounded by a **machine-wide run cap**
+> (`PI_RESEARCH_MAX_CONCURRENT_RUNS`, default 3) covering every pi-research process
+> on the host, because they all share one leader-elected browser/embedding pool. A
+> run over the cap queues for up to `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS` (default
+> 10 min) and only then rejects with `ResearchRunCapacityError` — a temporary
+> "try again shortly" condition, surfaced by the CLI as exit code `75`. Supply an
+> observer with `onRunQueued(slots, maxWaitMs)` to tell a waiting user the run is
+> queued rather than hung.
 
 The SDK does not write report files. Report export is a front-end concern — the pi
 extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.

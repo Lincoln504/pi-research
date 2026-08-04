@@ -24,7 +24,12 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as pathmod from 'node:path';
-import { ResearchRunSemaphore, ResearchRunCapacityError } from '../../../src/infrastructure/research-run-semaphore.ts';
+import {
+  ResearchRunSemaphore,
+  ResearchRunCapacityError,
+  DEFAULT_MAX_CONCURRENT_RUNS,
+  DEFAULT_ACQUIRE_TIMEOUT_MS,
+} from '../../../src/infrastructure/research-run-semaphore.ts';
 
 /** A PID guaranteed not to exist (far beyond any real pid_max) → signal(0) → ESRCH → dead. */
 const DEAD_PID = 2147483647;
@@ -194,6 +199,61 @@ describe('ResearchRunSemaphore', () => {
     expect(setGauge).toHaveBeenCalledWith('research_run_slots_held', 1, { slot: '0' });
     await a.release();
     expect(setGauge).toHaveBeenCalledWith('research_run_slots_held', 0, { slot: '0' });
+  });
+
+  describe('production defaults', () => {
+    // These are the values that decide what a user actually experiences under
+    // contention, so they are asserted explicitly rather than left implicit.
+    it('caps concurrent runs at 3 and QUEUES rather than failing fast', () => {
+      expect(DEFAULT_MAX_CONCURRENT_RUNS).toBe(3);
+      // A zero default would turn every contended run into an immediate hard
+      // failure — the behaviour this release exists to fix.
+      expect(DEFAULT_ACQUIRE_TIMEOUT_MS).toBeGreaterThan(0);
+      expect(DEFAULT_ACQUIRE_TIMEOUT_MS).toBe(600_000);
+    });
+
+    it('applies the queueing default when no explicit wait is passed', async () => {
+      const dir = await makeTempDir();
+      dirs.push(dir);
+      // maxSlots pinned, wait left to the default → must wait, not fail fast.
+      const sem = new ResearchRunSemaphore(dir, null, 1);
+      await sem.initialize();
+      const a = await sem.acquire();
+      setTimeout(() => { void a.release(); }, 150);
+      const b = await sem.acquire(); // would reject instantly under a 0ms default
+      expect(b.slotIndex).toBe(0);
+      await b.release();
+    });
+  });
+
+  describe('queue notification', () => {
+    it('announces queueing exactly once, with the cap and the wait budget', async () => {
+      const { sem } = await newSemaphore(1, 5000);
+      const a = await sem.acquire();
+      const onQueued = vi.fn();
+      setTimeout(() => { void a.release(); }, 400); // several poll ticks of waiting
+      const b = await sem.acquire(undefined, undefined, onQueued);
+      expect(onQueued).toHaveBeenCalledTimes(1);
+      expect(onQueued).toHaveBeenCalledWith(1, 5000);
+      await b.release();
+    });
+
+    it('does not announce when a slot is free immediately', async () => {
+      const { sem } = await newSemaphore(1, 5000);
+      const onQueued = vi.fn();
+      const a = await sem.acquire(undefined, undefined, onQueued);
+      expect(onQueued).not.toHaveBeenCalled();
+      await a.release();
+    });
+
+    it('a throwing notification callback never breaks the acquire', async () => {
+      const { sem } = await newSemaphore(1, 5000);
+      const a = await sem.acquire();
+      setTimeout(() => { void a.release(); }, 150);
+      const b = await sem.acquire(undefined, undefined, () => { throw new Error('front-end blew up'); });
+      expect(b.slotIndex).toBe(0);
+      await b.release();
+    });
   });
 
   describe('cancellation', () => {

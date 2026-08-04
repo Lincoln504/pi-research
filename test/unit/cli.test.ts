@@ -6,7 +6,7 @@
  * paths that can run without a live model (help, version, bad args).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawnSync, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 // on import because the _isMain guard prevents top-level execution.
 import { parseArgs, UsageError, EXIT, reportError } from '../../src/cli.ts';
 import { createResearchStopError } from '../../src/orchestration/session-state.ts';
+import { ResearchRunCapacityError } from '../../src/infrastructure/research-run-semaphore.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(ROOT, 'dist', 'cli.mjs');
@@ -380,6 +381,40 @@ describe('reportError — exit-code classification', () => {
   it('classifies an unrelated runtime error as SOFTWARE', async () => {
     const exitCode = await reportError(new Error('Worker pool is shutting down'), 'research', true);
     expect(exitCode).toBe(EXIT.SOFTWARE);
+  });
+
+  // Run-cap exhaustion means "the machine is busy with other healthy runs", which
+  // a caller must be able to tell apart from "this run crashed" — otherwise an
+  // agent retries a perfectly-fine install as though it were broken, or gives up.
+  it('classifies run-cap exhaustion as TEMPFAIL, not SOFTWARE', async () => {
+    const err = new ResearchRunCapacityError(3, 600_000);
+    const exitCode = await reportError(err, 'research', true);
+    expect(exitCode).toBe(EXIT.TEMPFAIL);
+    expect(EXIT.TEMPFAIL).not.toBe(EXIT.SOFTWARE);
+  });
+
+  // The capacity message names PI_RESEARCH_MAX_CONCURRENT_RUNS; the config
+  // heuristic must not read that as a credentials problem and send the user off
+  // to reconfigure a working install.
+  it('does not misclassify the capacity message as a CONFIG error', async () => {
+    const err = new ResearchRunCapacityError(3, 0);
+    const exitCode = await reportError(err, 'research', true);
+    expect(exitCode).not.toBe(EXIT.CONFIG);
+  });
+
+  it('marks capacity exhaustion retryable in --json output', async () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    try {
+      await reportError(new ResearchRunCapacityError(3, 600_000), 'research', true);
+    } finally {
+      spy.mockRestore();
+    }
+    const payload = JSON.parse(writes.join(''));
+    expect(payload).toMatchObject({ ok: false, exitCode: EXIT.TEMPFAIL, retryable: true });
   });
 });
 

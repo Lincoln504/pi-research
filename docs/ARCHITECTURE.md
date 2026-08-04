@@ -203,6 +203,30 @@ Cross-session, cross-process state (active sessions, browser status, metrics) li
 `StateManagerService` (`src/infrastructure/state/`), which serializes concurrent writes
 with file-based locking (`FileLockService`).
 
+### Concurrent runs (the run cap)
+
+Every pi-research process on a machine — CLI, agent skill, pi extension, SDK — shares
+one leader-elected browser pool and one embedding model. Letting an unbounded number of
+research runs onto that shared pool does not slow runs down gracefully; it saturates the
+priority queue and degrades *all* of them at once.
+
+`ResearchRunSemaphore` (`src/infrastructure/research-run-semaphore.ts`) therefore gates
+every `runResearch()` entry on one of N slots, realized as N well-known lock files in the
+state directory and coordinated by the same `FileLockService`. Because slot ownership is
+recorded as PID + process start time, a slot held by a crashed run is reclaimed
+immediately by the next acquire, while a *live* holder is never stolen — a legitimate run
+holds its slot for minutes, and stealing it would admit the (N+1)th run the cap exists to
+prevent.
+
+Runs beyond the cap **queue** rather than fail: the acquire polls until a slot frees,
+announcing itself once through the observer (`onRunQueued`, surfaced by the CLI as
+`• queued: …`) so a waiting run is never mistaken for a hung one. Only if nothing frees
+within the whole queue window does it raise `ResearchRunCapacityError` — a temporary
+condition the CLI reports as exit code `75`, distinct from a crash. The cap fails *open*
+on any internal or IO error, so a fault in the semaphore itself can never prevent research
+from running. Both the cap and the queue window are configurable
+(`PI_RESEARCH_MAX_CONCURRENT_RUNS`, `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS`).
+
 ### TUI
 
 The live progress panel uses `@earendil-works/pi-tui`, which handles terminal state

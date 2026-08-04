@@ -95,6 +95,10 @@ export class HeadlessObserver implements ResearchObserver {
     this.emit('start', { query, complexity });
   }
 
+  onRunQueued(slots: number, maxWaitMs: number): void {
+    this.emit('run_queued', { slots, maxWaitMs });
+  }
+
   onPlanningStart(attempt: number): void {
     this.emit('planning_start', { attempt });
   }

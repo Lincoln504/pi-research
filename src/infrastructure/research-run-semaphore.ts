@@ -21,9 +21,10 @@
  *   configured as a *try-take* (`lockTimeout: 0`): it either wins the slot (free,
  *   or reclaimed from a *dead* owner) immediately or throws as soon as it sees a
  *   *live* owner. If every slot is held by a live process, the loop waits
- *   `pollDelayMs` and retries until `maxWaitMs` elapses, then rejects with
- *   {@link ResearchRunCapacityError} (fail-fast with a clear message rather than
- *   a 60-error degraded run).
+ *   `pollDelayMs` and retries until `maxWaitMs` elapses (by default
+ *   {@link DEFAULT_ACQUIRE_TIMEOUT_MS} — extra runs **queue** behind the in-flight
+ *   ones instead of failing), then rejects with {@link ResearchRunCapacityError}
+ *   rather than degrading into a 60-error run.
  * - **Release** unlinks the slot file via the captured slot service.
  * - **Crash recovery** is automatic and PID-reuse-safe: a slot held by a process
  *   that has died (killed, crashed, SIGKILLed by earlyoom) is reclaimed
@@ -69,9 +70,21 @@ import type { IService } from '../core/service-registry.ts';
 import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
 
 /** Default maximum number of concurrent research runs across all processes. */
-export const DEFAULT_MAX_CONCURRENT_RUNS = 2;
-/** Default per-acquire wait before failing fast when all slots are busy (0 = fail-fast). */
-export const DEFAULT_ACQUIRE_TIMEOUT_MS = 0;
+export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
+/**
+ * Default per-acquire wait before giving up when all slots are held by live runs.
+ *
+ * This is deliberately a *queue*, not a fail-fast. The cap exists to stop N runs
+ * saturating the shared browser/embedding pool — but an extra run is a legitimate
+ * request to do work, not an error, so the correct response to contention is to
+ * serialize it behind the in-flight runs rather than to fail it. With a depth-1 run
+ * measured at ~2-3 minutes, 10 minutes absorbs a backlog of roughly three further
+ * runs per slot while still resolving well inside the agent-skill's documented
+ * command timeouts (so a queued run never looks like a hang to the caller).
+ *
+ * Set `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS=0` to restore strict fail-fast.
+ */
+export const DEFAULT_ACQUIRE_TIMEOUT_MS = 600_000;
 /** Poll interval between full slot sweeps while waiting for a slot. */
 const POLL_DELAY_MS = 250;
 
@@ -84,9 +97,10 @@ export class ResearchRunCapacityError extends Error {
   readonly slots: number;
   constructor(slots: number, maxWaitMs: number) {
     super(
-      `Maximum concurrent research runs (${slots}) reached${maxWaitMs > 0 ? ` after waiting ${maxWaitMs}ms` : ''}; ` +
-        `wait for an in-progress run to finish and retry. ` +
-        `(Override with PI_RESEARCH_MAX_CONCURRENT_RUNS.)`,
+      `Maximum concurrent research runs (${slots}) reached${maxWaitMs > 0 ? ` and still busy after queueing for ${Math.round(maxWaitMs / 1000)}s` : ''}; ` +
+        `another run is still in progress. This is temporary — retry shortly. ` +
+        `(Raise the cap with PI_RESEARCH_MAX_CONCURRENT_RUNS, or the queue wait with ` +
+        `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS.)`,
     );
     this.name = 'ResearchRunCapacityError';
     this.slots = slots;
@@ -209,10 +223,17 @@ export class ResearchRunSemaphore implements IService {
    * @param signal aborts the wait. Without it a run started under a long
    *   `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS` would ignore Ctrl-C until the deadline
    *   passed, because the wait happens before any orchestrator exists to cancel.
+   * @param onQueued invoked at most once, when the first full sweep finds every
+   *   slot busy and the call is about to wait. Lets a front-end tell the user the
+   *   run is queued rather than hung. Never allowed to break the acquire.
    * @throws {ResearchRunCapacityError} if no slot frees within `maxWaitMs`.
    * @throws {Error} named `AbortError` if `signal` aborts while waiting.
    */
-  async acquire(maxWaitMs: number = this.defaultMaxWaitMs, signal?: AbortSignal): Promise<RunSlotAcquisition> {
+  async acquire(
+    maxWaitMs: number = this.defaultMaxWaitMs,
+    signal?: AbortSignal,
+    onQueued?: (slots: number, maxWaitMs: number) => void,
+  ): Promise<RunSlotAcquisition> {
     if (!this._initialized) await this.initialize();
     if (signal?.aborted) {
       metrics.increment('research_run_acquire_total', 1, { status: 'aborted' });
@@ -220,6 +241,7 @@ export class ResearchRunSemaphore implements IService {
     }
 
     const deadline = Date.now() + Math.max(0, maxWaitMs);
+    let announcedQueued = false;
     for (;;) {
       // Round-robin from a rotating start so contending processes don't synchronize on slot 0.
       const start = this.nextStartIndex;
@@ -237,6 +259,17 @@ export class ResearchRunSemaphore implements IService {
       if (Date.now() >= deadline) {
         metrics.increment('research_run_acquire_total', 1, { status: 'exhausted' });
         throw new ResearchRunCapacityError(this.maxSlots, maxWaitMs);
+      }
+      // Announce the queue exactly once, on the first sweep that found nothing free.
+      // A throwing front-end callback must never fail the acquire.
+      if (!announcedQueued) {
+        announcedQueued = true;
+        logger.info(`[ResearchRunSemaphore] All ${this.maxSlots} run slot(s) busy — queueing for up to ${maxWaitMs}ms.`);
+        try {
+          onQueued?.(this.maxSlots, maxWaitMs);
+        } catch (err) {
+          logger.debug(`[ResearchRunSemaphore] onQueued callback threw: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       // Count the aborted outcome too, so acquired + exhausted + aborted accounts for
       // every acquire attempt. A cancel that vanished from the counter would make the

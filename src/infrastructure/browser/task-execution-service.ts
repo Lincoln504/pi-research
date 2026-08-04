@@ -23,6 +23,46 @@ let lastRestartTime = 0;
 const RESTART_COOLDOWN_MS = 10000;
 
 /**
+ * Extra attempts reserved for a *leader handover* — the elected browser-pool leader
+ * exiting while this process still has work in flight ("Worker pool is shutting
+ * down" / "draining").
+ *
+ * This has its own budget because it is not a random socket blip: it is a known,
+ * self-healing window that lasts as long as a fresh election takes (measured at
+ * ~4 s on a loaded machine), and it hits *every* in-flight task of the affected
+ * run at once. With only the single generic retry, a whole 20-query search burst
+ * could be wiped out by one leader exiting — the run then failed outright with
+ * "all N queries encountered worker errors", seconds before the new leader came up.
+ * Spending these attempts is strictly cheaper than losing the run.
+ */
+const LEADER_HANDOVER_RETRIES = 3;
+/** Backoff between handover attempts — long enough for an election to complete. */
+const HANDOVER_BACKOFF_MS = 1200;
+
+/**
+ * Recover from a leader handover before retrying.
+ *
+ * Critically this DROPS the cached scheduler handle. A pool-shutdown error means
+ * the leader we are connected to is going away, so the cached client points at a
+ * corpse; simply waiting and retrying reconnects to the same dead port (observed
+ * as a retry logging "Connecting to existing scheduler" with the *same* version id
+ * and failing identically). Clearing it forces the next `getScheduler()` to
+ * re-resolve — joining the new leader, or winning the election itself.
+ *
+ * `forceSchedulerRestart(false)` keeps its own liveness probe and in-progress
+ * guard, so concurrent callers coalesce instead of stampeding.
+ */
+async function recoverFromLeaderHandover(container: ServiceContainer): Promise<void> {
+    logger.warn('[BrowserManager] Leader handover detected (pool draining) — dropping stale scheduler handle and re-resolving...');
+    await forceSchedulerRestart(false, container).catch((err) =>
+        logger.debug('[BrowserManager] Scheduler re-resolve during handover failed (non-fatal):', err),
+    );
+    await waitForBrowserPoolIdle(15000).catch((err) =>
+        logger.debug('Wait for browser idle timed out or failed:', err),
+    );
+}
+
+/**
  * Get the scheduler from the factory, optionally using a specific container.
  */
 async function getScheduler(config?: Config, container: ServiceContainer = getServiceContainer()): Promise<IScheduler> {
@@ -56,7 +96,8 @@ export async function runBrowserTask<T>(
     config?: Config,
     signal?: AbortSignal,
     retries = 1,
-    container: ServiceContainer = getServiceContainer()
+    container: ServiceContainer = getServiceContainer(),
+    handoverRetries = LEADER_HANDOVER_RETRIES,
 ): Promise<T> {
     if (signal?.aborted) throw new Error('Aborted');
 
@@ -84,6 +125,23 @@ export async function runBrowserTask<T>(
     } catch (error: unknown) {
         if (signal?.aborted || (error instanceof Error && error.message === 'Aborted')) throw new Error('Aborted', { cause: error });
 
+        // A leader handover gets its own budget: it is a recoverable, seconds-long
+        // window that strikes every in-flight task at once, so it must not be
+        // charged against (or limited by) the single generic transient retry.
+        const isHandover = isPoolShutdownError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error);
+        if (isHandover && handoverRetries > 0) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: type,
+                taskType: type,
+                errorType: 'leader_handover',
+            });
+            logger.warn(`[BrowserManager] Leader handover during ${type} task (handover attempts left: ${handoverRetries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            await recoverFromLeaderHandover(container);
+            await new Promise((resolve) => setTimeout(resolve, HANDOVER_BACKOFF_MS + Math.floor(Math.random() * 400)));
+            return runBrowserTask<T>(taskOrUrl, type, config, signal, retries, container, handoverRetries - 1);
+        }
+
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
@@ -92,9 +150,9 @@ export async function runBrowserTask<T>(
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
-            
+
             if (isPoolShutdownError(error)) {
-                // Pool is temporarily draining — wait for the drain to finish.
+                // Handover budget already spent — fall back to a plain drain wait.
                 logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
@@ -120,7 +178,7 @@ export async function runBrowserTask<T>(
             // Retry with jitter (100-500ms) to prevent thundering herd
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runBrowserTask<T>(taskOrUrl, type, config, signal, retries - 1, container);
+            return runBrowserTask<T>(taskOrUrl, type, config, signal, retries - 1, container, handoverRetries);
         }
         throw error;
     }
@@ -143,9 +201,12 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
-            
+
             if (isPoolShutdownError(error)) {
-                await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                // Same stale-handle trap as the task paths: waiting alone leaves the
+                // cached client aimed at the departing leader, so the retry re-probes
+                // a corpse and reports the pool unhealthy during a routine handover.
+                await recoverFromLeaderHandover(container);
             } else {
                 // See runBrowserTask: don't force-clear remote leader state on a bare
                 // transient socket error — let the liveness probe inside
@@ -172,7 +233,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
 /**
  * Run a worker search query with retry logic.
  */
-export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<SearchResult[]> {
+export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string, container: ServiceContainer = getServiceContainer(), handoverRetries = LEADER_HANDOVER_RETRIES): Promise<SearchResult[]> {
     if (signal?.aborted) throw new Error('Aborted');
     
     const breaker = sessionId ? getBrowserCircuitBreaker(sessionId) : browserCircuitBreaker;
@@ -186,6 +247,22 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
     } catch (error: unknown) {
         if (signal?.aborted || (error instanceof Error && error.message === 'Aborted')) throw new Error('Aborted', { cause: error });
 
+        // See runBrowserTask: a leader handover wipes out an entire search burst at
+        // once, so it gets its own attempts rather than the single generic retry.
+        const isHandover = isPoolShutdownError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error);
+        if (isHandover && handoverRetries > 0) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                errorType: 'leader_handover',
+            });
+            logger.warn(`[BrowserManager] Leader handover during search (handover attempts left: ${handoverRetries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            await recoverFromLeaderHandover(container);
+            await new Promise((resolve) => setTimeout(resolve, HANDOVER_BACKOFF_MS + Math.floor(Math.random() * 400)));
+            return runWorkerSearch(query, config, signal, retries, sessionId, container, handoverRetries - 1);
+        }
+
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
@@ -194,7 +271,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
-            
+
             if (isPoolShutdownError(error)) {
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
@@ -214,7 +291,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
 
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runWorkerSearch(query, config, signal, retries - 1, sessionId, container);
+            return runWorkerSearch(query, config, signal, retries - 1, sessionId, container, handoverRetries);
         }
         throw error;
     }

@@ -90,9 +90,18 @@ export function isServerDrainingError(error: unknown): boolean {
 
 /**
  * Check if an error is specifically a pool-shutdown / pool-drain error.
- * For these errors the scheduler itself is fine — only the WorkerPool is temporarily
- * draining. The correct recovery is to wait for the drain to finish and retry,
- * NOT to call forceSchedulerRestart (which would start another drain cycle).
+ *
+ * These are never counted against the circuit breaker: the pool recovers on its own.
+ *
+ * NOTE: this was once documented as "wait for the drain to finish and retry, NOT
+ * forceSchedulerRestart". That is right only when the draining pool is *local*. In the
+ * common case the pool belongs to another process — the elected leader — which is
+ * exiting, so waiting alone leaves the cached client pointed at a dead port and the
+ * retry fails identically (this cost whole search bursts; see the v1.1.0 changelog).
+ * Recovery must also drop the cached scheduler handle so the next call re-resolves the
+ * new leader; `recoverFromLeaderHandover` in task-execution-service.ts does exactly
+ * that, using `forceSchedulerRestart(false)` whose liveness probe and in-progress guard
+ * prevent the restart churn the old note was warning about.
  */
 export function isPoolShutdownError(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;

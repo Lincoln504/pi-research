@@ -22,8 +22,16 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 - **stderr** = progress + errors — relay errors, suppress routine progress.
 - **Always set a generous command timeout** so a stalled run can't block forever, but
   leave plenty of headroom — a real run should finish well inside it:
-  `knowledge` 600000ms · `research --depth 1` 900000ms · `--depth 2` 1200000ms · `--depth 3` 1800000ms.
+  `knowledge` 600000ms · `research --depth 1` 1500000ms · `--depth 2` 1800000ms · `--depth 3` 2400000ms.
+  These already include headroom for the run to sit **queued** behind other runs on a
+  busy machine (see below); don't shorten them on the assumption a slot is free.
 - **Background**: append `&` and keep the PID to work while a run completes; otherwise it runs foreground (blocks). Timeouts apply either way.
+- **Several at once is fine.** Up to 3 runs execute concurrently machine-wide (shared
+  with any other tool or agent on this machine); further runs **queue** for a slot and
+  report `• queued: …` on stderr — that is normal, not a stall. Only if nothing frees
+  up within the queue window does a run exit `75` (see *Exit codes*). Prefer one
+  `research` call with a well-scoped query over splitting one topic into many parallel
+  calls — depth 1 already parallelises internally.
 
 ## Workflow
 
@@ -57,6 +65,7 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 | `0` | Success | Read stdout; cite sources; relay any "saved to: <path>" line. |
 | `78` on `knowledge` | Store disabled/unconfigured | Silent; proceed to `research`. |
 | `78` on `research` | Engine missing or no model/key | **Stop. Relay full stderr** (it shows where to configure). Don't retry until fixed. |
+| `75` | Machine at capacity — other research runs are already using every slot | **Nothing is broken.** Wait for an in-flight run to finish, then retry this query once. Don't reconfigure anything and don't retry in a tight loop. |
 | `70` | Runtime error | Relay stderr; suggest one retry for transient failures (network, rate limit). |
 | `64` | Bad arguments | Fix args; don't surface unless the query itself is malformed. |
 

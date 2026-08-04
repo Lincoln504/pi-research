@@ -18,6 +18,15 @@ export interface HeadlessObserverOptions {
 export interface ResearchObserver {
   onStart?(query: string, complexity: number): void;
 
+  /**
+   * Fired once when the run cannot start immediately because every concurrent-run
+   * slot is held, and it is about to queue. Without this a queued run is silent
+   * for as long as the acquire wait allows, which is indistinguishable from a hang.
+   * @param slots  the machine-wide concurrent-run cap
+   * @param maxWaitMs how long the run will queue before giving up
+   */
+  onRunQueued?(slots: number, maxWaitMs: number): void;
+
   // Coordinator/Planning phase
   onPlanningStart?(attempt: number): void;
   onPlanningProgress?(status: string): void;

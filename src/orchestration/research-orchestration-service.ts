@@ -108,17 +108,27 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
     const researchStart = Date.now();
 
-    // Cross-process run-cap (Phase 1): acquire one of N slots so concurrent
-    // research runs can't saturate the shared leader-elected browser/embedding
-    // pool and degrade into ~60-error failures. Fail-OPEN on internal/IO errors
-    // (a semaphore bug must never break research); only a genuine
-    // ResearchRunCapacityError (all slots held by live processes) propagates,
-    // failing the run fast with a clear message. The slot is released in finally.
+    // Cross-process run-cap: acquire one of N slots so concurrent research runs
+    // can't saturate the shared leader-elected browser/embedding pool and degrade
+    // into ~60-error failures. Over-cap runs QUEUE for a slot (announced once via
+    // the observer) rather than failing, because an extra run is a legitimate
+    // request to do work, not an error. Fail-OPEN on internal/IO errors (a
+    // semaphore bug must never break research); only a genuine
+    // ResearchRunCapacityError — nothing freed within the whole queue window —
+    // propagates. The slot is released in finally.
     let runSlot: { slotIndex: number; release(): Promise<void> } | null = null;
     try {
       const container = tryGetServiceContainerFromCtx(ctx);
       const semaphore = await getService<ResearchRunSemaphore>(ServiceNames.RESEARCH_RUN_SEMAPHORE, ctx, container);
-      runSlot = await semaphore.acquire(undefined, signal);
+      runSlot = await semaphore.acquire(undefined, signal, (slots, maxWaitMs) => {
+        // The queue notice fires BEFORE any orchestrator exists, so `observer` is
+        // still exactly what the caller passed: either a ResearchObserver, or the
+        // HeadlessObserverOptions bag (only `onProgress`) that the CLI supplies and
+        // the orchestrator would normally wrap later. Dispatch to whichever shape
+        // is present — handling only the former silently drops the notice on the
+        // CLI, which is the very front-end that most needs it.
+        notifyRunQueued(observer, slots, maxWaitMs);
+      });
       logger.info(`[ResearchOrchestrationService] Acquired research run slot ${runSlot.slotIndex} (cap ${semaphore.getMaxSlots()}).`);
     } catch (err) {
       if (err instanceof ResearchRunCapacityError) throw err; // capacity exhausted → fail fast
@@ -581,5 +591,30 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     } catch (err) {
       logger.warn('[ResearchOrchestrationService] Failed to check health status:', err);
     }
+  }
+}
+
+/**
+ * Deliver the "your run is queued behind other runs" notice to whichever observer
+ * shape the caller supplied.
+ *
+ * This fires before the orchestrator normalizes the observer, so both forms are
+ * live here: a {@link ResearchObserver} instance (SDK / pi extension) or the
+ * {@link HeadlessObserverOptions} bag carrying only `onProgress` (the CLI and
+ * agent skill). A queued run is otherwise completely silent for the whole acquire
+ * wait, which is indistinguishable from a hang.
+ *
+ * Never throws: a front-end callback must not be able to fail the run it is
+ * merely reporting on.
+ */
+function notifyRunQueued(observer: unknown, slots: number, maxWaitMs: number): void {
+  try {
+    const obs = observer as
+      | { onRunQueued?: (s: number, w: number) => void; onProgress?: (e: string, d?: unknown) => void }
+      | undefined;
+    if (typeof obs?.onRunQueued === 'function') obs.onRunQueued(slots, maxWaitMs);
+    else if (typeof obs?.onProgress === 'function') obs.onProgress('run_queued', { slots, maxWaitMs });
+  } catch (err) {
+    logger.debug(`[ResearchOrchestrationService] run_queued notification threw: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

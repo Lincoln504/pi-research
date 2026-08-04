@@ -76,6 +76,14 @@ export const EXIT = {
   CONFIG: 78,
   /** Something went wrong at runtime (network, provider, internal). */
   SOFTWARE: 70,
+  /**
+   * Temporary failure — the request was well-formed and the install is healthy,
+   * but the machine is at capacity right now (all research run slots held by
+   * live runs). Distinct from SOFTWARE so a calling agent can tell "busy, try
+   * again shortly" apart from "this run crashed" and back off instead of
+   * re-running a broken command.
+   */
+  TEMPFAIL: 75,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -107,6 +115,12 @@ function makeProgressObserver(): HeadlessObserverOptions {
       switch (event) {
         case 'planning_success':
           toStderr(`  • plan: ${data?.plan?.researchers?.length ?? '?'} researcher(s)\n`);
+          break;
+        case 'run_queued':
+          toStderr(
+            `  • queued: ${data?.slots ?? '?'} concurrent run(s) already active — waiting up to ` +
+              `${Math.round((data?.maxWaitMs ?? 0) / 1000)}s for a slot…\n`,
+          );
           break;
         case 'round_start':
           toStderr(`  • round ${data?.round}\n`);
@@ -829,9 +843,19 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // research-stop — regardless of real cause — as a config error (exit 78).
   const isTaggedResearchStop = (err as { code?: unknown } | undefined)?.code === RESEARCH_STOPPED_ERROR_CODE;
 
+  // Run-cap exhaustion is an operational state, not a fault: every slot is held by
+  // another *healthy* live run. Matched on the error name rather than `instanceof`
+  // so it survives bundling (dist/cli.mjs) and any duplicate module instance.
+  // Checked ahead of the substring heuristics below rather than relying on the
+  // current wording of the message: capacity text is config-shaped (it names two
+  // PI_RESEARCH_* env vars), so an exact classification must not depend on that
+  // message never drifting into one of the credential keywords. Misreading a busy
+  // machine as a setup problem would send the user to reconfigure a working install.
+  const isCapacity = err instanceof Error && err.name === 'ResearchRunCapacityError';
+
   // Auth / model / config-shaped errors → CONFIG exit + config block.
   const isConfigError =
-    !isTaggedResearchStop && (
+    !isTaggedResearchStop && !isCapacity && (
     lower.includes('no llm model available') ||
     lower.includes('not found in pi') ||
     lower.includes('no api key') ||
@@ -846,16 +870,30 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // classifying that as a setup problem sends the user to reconfigure a
   // perfectly working key instead of waiting out the limit.
   const isRateLimit = lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests');
-  const exitCode = isConfigError && !isRateLimit ? EXIT.CONFIG : EXIT.SOFTWARE;
+  const exitCode = isCapacity
+    ? EXIT.TEMPFAIL
+    : isConfigError && !isRateLimit
+      ? EXIT.CONFIG
+      : EXIT.SOFTWARE;
 
   // --json: emit a structured error on stdout so a machine consumer never has to
   // special-case plain-text stderr. Mirrors the { ok: true, ... } success shape.
   if (json) {
     const payload: Record<string, unknown> = { ok: false, error: msg, exitCode };
+    // Machine-readable "this will succeed later" flag, so a consumer can back off
+    // and retry without string-matching the human message.
+    if (isCapacity || isRateLimit) payload['retryable'] = true;
     if (process.env['PI_RESEARCH_DEBUG'] === 'true' && err instanceof Error && err.stack) {
       payload['stack'] = err.stack;
     }
     toStdout(pretty(payload));
+    return exitCode;
+  }
+
+  // Capacity exhaustion is a healthy-machine "busy" state — report it as such and
+  // never with a stack trace, which would read as a crash for a routine condition.
+  if (isCapacity) {
+    toStderr(`\nError: pi-research ${what} did not start: ${msg}\n`);
     return exitCode;
   }
 
