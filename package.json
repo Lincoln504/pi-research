@@ -96,6 +96,7 @@
     "version": "node -e \"const fs=require('fs');const p=require('./package.json');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/\\\"version\\\": \\\"[^\\\"]*\\\"/,'\\\"version\\\": \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('✔ synced SKILL.md to v'+p.version)\" && git add skills/pi-research/SKILL.md",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
+    "cleanup": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "deps:check": "depcruise --config config/tooling/dependency-cruiser.cjs --output-type err-long src",

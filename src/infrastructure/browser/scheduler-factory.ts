@@ -282,6 +282,25 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
             let wonElection = false;
             let winnerPort = port;
             let winnerAuthSecret: string | undefined;
+            // Read our start-time BEFORE taking the state lock (the lookup can shell
+            // out on macOS/Windows; getCurrentProcessStartTime caches, so this is a
+            // single cheap read). Recording it alongside the PID is what makes
+            // StateManager.isPidAlive's PID-reuse guard work: that guard passes
+            // `state.browserServer.startTime` as expectedStartTime, so an election
+            // that writes only the PID leaves it permanently undefined and the guard
+            // degrades to a bare signal-0 check — which a recycled PID passes,
+            // making every follower adopt an unrelated process as the browser leader.
+            // Null on a platform where it cannot be read → the entry omits it and
+            // liveness falls back to that bare check, same as pre-existing entries.
+            const myStartTime = await (async () => {
+                try {
+                    const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
+                    return await processLifecycle.getCurrentProcessStartTime();
+                } catch (err) {
+                    logger.debug('[Scheduler] Could not read own process start time (PID-reuse guard degrades to signal-0):', err);
+                    return null;
+                }
+            })();
             try {
                 await stateManager.updateState(async (state) => {
                     if (state.browserServer) {
@@ -294,7 +313,13 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                         }
                     }
                     const secret = getBrowserServerAuthSecret();
-                    state.browserServer = { port, pid: process.pid, schedulerId, authSecret: secret };
+                    state.browserServer = {
+                        port,
+                        pid: process.pid,
+                        schedulerId,
+                        authSecret: secret,
+                        ...(myStartTime !== null ? { startTime: myStartTime } : {}),
+                    };
                     state.schedulerVersion = schedulerVersion;
                     wonElection = true;
                     return state;

@@ -83,8 +83,15 @@ Install in External Agents. The installer:
 2. Symlinks `skills/pi-research/` into each present agent, never overwriting an
    unrelated skill already in that slot.
 3. Records what it created in a manifest, so Remove from External Agents
-   removes only its own links. Stale links are also garbage-collected on startup and
-   on `npm uninstall`.
+   removes only its own links. Stale links are also garbage-collected on startup.
+
+> **Uninstalling removes nothing on its own.** The package ships a `preuninstall`
+> script, but **npm 7 and newer do not run `preuninstall`** — verified against
+> npm 11: `postinstall` fires, `preuninstall` does not. So `npm uninstall
+> @lincoln504/pi-research` leaves the skill links, the state directory
+> (`~/.pi/research/state`) and the cache directory (`~/.cache/pi-research`,
+> including downloaded embedding models) in place. Run `pi-research skill uninstall`
+> **before** removing the package to take the links with you.
 
 Standalone (no pi extension). `pi-research skill install` and `pi-research skill uninstall`
 do exactly the same from the CLI — same agent detection, same manifest, same

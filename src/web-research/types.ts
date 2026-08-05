@@ -12,10 +12,23 @@ export type { SearchResult, ScrapeResult };
 export interface QueryResultWithError {
   query: string;
   results: SearchResult[];
-  error?: {
-    type: 'empty_results' | 'service_unavailable' | 'timeout' | 'network_error' | 'unknown';
-    message: string;
-  };
+  error?: QueryFailure;
+}
+
+/**
+ * Why one query yielded nothing.
+ *
+ * The distinction matters to the *researcher agent*, which reads these messages
+ * and decides what to do next: `empty_results` is genuine feedback about the
+ * query (rewrite it, broaden it), while a timeout or a dead worker says nothing
+ * at all about the query and should prompt a retry instead. Collapsing the two —
+ * reporting every zero-result query as "the query may be too narrow" — sent the
+ * agent off rewriting perfectly good queries whenever the browser pool was the
+ * thing that failed.
+ */
+export interface QueryFailure {
+  type: 'empty_results' | 'service_unavailable' | 'timeout' | 'network_error' | 'unknown';
+  message: string;
 }
 
 // Scraper types

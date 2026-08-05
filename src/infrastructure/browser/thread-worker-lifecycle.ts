@@ -206,14 +206,50 @@ export function setupOrphanProtection(): void {
     return;
   }
 
-  if (!process.ppid) {
+  // Capture the parent PID ONCE, at setup. `process.ppid` is re-read from the OS
+  // on every access, so on POSIX it changes the moment we are orphaned — and that
+  // change, not a liveness probe, is the reliable signal (see checkOrphan).
+  const originalPpid = process.ppid;
+  if (!originalPpid) {
     return;
   }
 
+  /** Tear down the browser and exit. Shared by both orphan signals below. */
+  const exitAsOrphan = async () => {
+    // FIX: Await cleanup to prevent browser/context leaks
+    if (cleanupBrowser) {
+      await cleanupBrowser().catch(err => {
+        logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during orphan exit:`, err);
+      });
+    }
+    // Clear the orphan check timer
+    cleanupOrphanProtection();
+    process.env['PI_PROCESS_EXITING'] = '1';
+    process.exit(1);
+  };
+
   const checkOrphan = async () => {
     try {
-      // signal 0 checks if the process is alive
-      process.kill(process.ppid, 0);
+      // Re-parenting is the authoritative orphan signal on POSIX. When the parent
+      // dies the kernel immediately re-parents us — to PID 1, or to the nearest
+      // subreaper (a user systemd instance, a container init). Probing the CURRENT
+      // ppid cannot see that: PID 1 always exists, and signalling it from an
+      // unprivileged process raises EPERM, which the handler below correctly reads
+      // as "alive but not ours to signal". Net effect on Linux was that this guard
+      // never fired at all and orphaned workers kept their browsers running.
+      // Comparing against the PID captured at setup detects it directly.
+      // Windows does not re-parent, so the liveness probe below remains the
+      // mechanism there and this check simply never trips.
+      if (process.ppid !== originalPpid) {
+        logToDebugFile('WARN', `[Worker-${workerId}] Re-parented (${originalPpid} -> ${process.ppid}): parent died, shutting down...`);
+        await exitAsOrphan();
+        return;
+      }
+
+      // signal 0 checks if the process is alive. Probe the ORIGINAL ppid, never
+      // `process.ppid` — after a re-parent the latter points at init, not at the
+      // process whose liveness we actually care about.
+      process.kill(originalPpid, 0);
 
       // Schedule next check
       orphanCheckTimer = setTimeout(checkOrphan, 10000);
@@ -231,16 +267,7 @@ export function setupOrphanProtection(): void {
       }
       // If error is thrown, the parent process is likely dead or unreachable
       logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
-      // FIX: Await cleanup to prevent browser/context leaks
-      if (cleanupBrowser) {
-        await cleanupBrowser().catch(err => {
-          logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during orphan exit:`, err);
-        });
-      }
-      // Clear the orphan check timer
-      cleanupOrphanProtection();
-      process.env['PI_PROCESS_EXITING'] = '1';
-      process.exit(1);
+      await exitAsOrphan();
     }
   };
 

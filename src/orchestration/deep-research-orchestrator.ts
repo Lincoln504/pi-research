@@ -218,6 +218,17 @@ export class DeepResearchOrchestrator {
                 excludeTools: this.options.excludeTools,
                 steeringMessages: steeringTexts,
             });
+        } else if (this.currentRound >= maxRounds) {
+            // Last iteration: the `plan.action === 'synthesize' || currentRound >=
+            // maxRounds` break below fires no matter what the evaluator decides, and
+            // the forced-synthesis path after the loop runs updatePlanForRound again
+            // with mustSynthesize. So on every capped run whose evaluator would have
+            // said `delegate` — the common case, since it is being cut off mid-plan —
+            // this call is a second full-context coordinator request whose result is
+            // discarded. Break straight to the forced synthesis: exactly one
+            // coordinator call either way, and the same outcome.
+            logger.log(`[DeepOrchestrator] Round cap (${maxRounds}) reached — skipping the evaluator and going straight to final synthesis ${this.elapsed()}`);
+            break;
         } else {
             const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
             observer?.onEvaluationStart?.(this.currentRound);

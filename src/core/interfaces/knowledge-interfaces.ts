@@ -120,7 +120,12 @@ export interface IKnowledgeStore extends IService {
   /** Extended operations */
   addDocuments(docs: StoreDocument[]): Promise<void>;
   deleteByUrl(url: string): Promise<void>;
-  deleteByUrlAndType(url: string, ingestionType: string): Promise<void>;
+  /**
+   * @param olderThan When set, only rows with `timestamp < olderThan` are removed —
+   *   lets a refresh insert its replacement first and prune the superseded rows
+   *   afterwards, so a failed insert can never leave the URL with nothing.
+   */
+  deleteByUrlAndType(url: string, ingestionType: string, olderThan?: number): Promise<void>;
   isStoreClosed?(): boolean;
 
   /**

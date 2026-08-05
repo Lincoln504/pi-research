@@ -172,7 +172,12 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
         if (gpCall === 1) return { action: 'wait' };
         return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
       });
-      mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      // Mirror the real PlanningService: `mustSynthesize` FORCES action to
+      // 'synthesize' (planning-service.ts), so the forced final call can never come
+      // back as a 'wait'. Without honouring that here the mock's call counter, not
+      // the orchestrator, decides the outcome.
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+        if (opts?.mustSynthesize) return { action: 'synthesize', content: 'Interleaved' };
         upfrCall++;
         if (upfrCall === 1) return { action: 'wait' };
         return { action: 'synthesize', content: 'Interleaved' };

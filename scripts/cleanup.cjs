@@ -1,5 +1,20 @@
 #!/usr/bin/env node
 
+/**
+ * Uninstall-time cleanup: skill links, cache tree, state tree.
+ *
+ * IMPORTANT — this does NOT run on `npm uninstall`. npm removed the
+ * `preuninstall`/`postuninstall` lifecycle for the package being removed in
+ * npm 7; verified against npm 11, where `postinstall` fires on install but
+ * `preuninstall` never fires on uninstall. The `preuninstall` entry in
+ * package.json is retained for package managers that still honour it, but it
+ * must not be treated as the cleanup path.
+ *
+ * The supported paths are `pi-research skill uninstall` (removes the skill
+ * links via the same owned-only manifest logic) and running this script
+ * directly:  node <package-root>/scripts/cleanup.cjs
+ */
+
 const { execSync } = require('child_process');
 const { rmSync, existsSync, lstatSync, readlinkSync, readFileSync, writeFileSync, unlinkSync } = require('fs');
 const os = require('os');

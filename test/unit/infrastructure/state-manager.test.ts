@@ -222,20 +222,47 @@ describe('StateManager Integration-style Tests', () => {
     expect(state.sessions).toEqual({});
   });
 
-  it('should recover from an unknown future state version', async () => {
-    // A `version: 2` file written by a newer build must not throw against the
-    // Type.Literal(1) schema — treat it as corruption and recover to default.
+  it('quarantines a newer-build state file and never writes over it', async () => {
+    // A `version: 2` file was written by a NEWER build that is very likely still
+    // running against it. It must not throw against the Type.Literal(1) schema —
+    // but "recover" here explicitly does NOT mean "overwrite with a fresh
+    // default", which would destroy that build's live sessions, browser lease and
+    // authSecret. The contract is: serve an in-memory default, quarantine a copy,
+    // and suppress every write for the rest of this process's life.
+    //
+    // Asserting only the returned default would leave the destructive
+    // implementation passing too — the write suppression below is the part of the
+    // contract that actually protects the other build's data.
     const stateFile = path.join(testDir, 'research-state.json');
     await fs.mkdir(path.dirname(stateFile), { recursive: true });
-    await fs.writeFile(
-      stateFile,
-      JSON.stringify({ version: 2, containerId: '', containerName: '', port: 0, sessions: {}, lastUpdated: Date.now() }),
-      'utf-8',
-    );
+    const futureState = {
+      version: 2,
+      containerId: 'newer-build',
+      containerName: 'newer-build',
+      port: 0,
+      sessions: { 'live-session-of-newer-build': { lastSeen: Date.now() } },
+      lastUpdated: Date.now(),
+    };
+    await fs.writeFile(stateFile, JSON.stringify(futureState), 'utf-8');
 
+    // Reads degrade to an in-memory default rather than throwing.
     const state = await manager.readState();
     expect(state.version).toBe(1);
     expect(state.sessions).toEqual({});
+
+    // ...and a subsequent WRITE must be suppressed, leaving the newer file byte-intact.
+    await manager.updateState((s) => {
+      s.containerId = 'older-build-tried-to-write';
+      return s;
+    });
+    const onDisk = JSON.parse(await fs.readFile(stateFile, 'utf-8'));
+    expect(onDisk.version).toBe(2);
+    expect(onDisk.containerId).toBe('newer-build');
+    expect(Object.keys(onDisk.sessions)).toEqual(['live-session-of-newer-build']);
+
+    // A forensic copy is retained, named after the version that triggered it.
+    const entries = await fs.readdir(path.join(testDir, 'backups'));
+    expect(entries.some((e) => e.startsWith('research-state-future-v2-') && e.endsWith('.quarantine'))).toBe(true);
   });
 
   it('should cleanup stale sessions (timeout)', async () => {

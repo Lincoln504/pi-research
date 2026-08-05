@@ -151,33 +151,37 @@ describe('browser-search', () => {
   });
 
   describe('abort handling', () => {
-    it('should respect abort signal', async () => {
+    it('reports a cancelled search as cancelled, not as an infrastructure failure', async () => {
       const controller = new AbortController();
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
         await new Promise(r => setTimeout(r, 100));
         return mockSearchResults;
       });
 
-      // Abort immediately - this will result in empty results and total failure error
       controller.abort();
-      
-      await expect(performSearch(['test'], undefined, controller.signal))
-        .rejects.toThrow('Search completely failed');
+
+      // Every query aborts with zero results, which looks identical to a dead
+      // browser pool. It must NOT be reported as one: the old message told the
+      // user "Browser workers may be unavailable, DuckDuckGo is unreachable, or
+      // the system is under extreme load" when all they did was press Ctrl-C.
+      const attempt = performSearch(['test'], undefined, controller.signal);
+      await expect(attempt).rejects.toThrow('Aborted');
+      await expect(attempt).rejects.not.toThrow('Search completely failed');
     });
 
-    it('should handle partial abort', async () => {
+    it('discards partial results when the caller cancels mid-flight', async () => {
       const controller = new AbortController();
+      // Note this mock ignores the signal, so queries DO return results — the
+      // rejection below is driven by the cancellation itself, not by emptiness.
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
         await new Promise(r => setTimeout(r, 50));
         return mockSearchResults;
       });
 
-      // Abort after some delay
       setTimeout(() => controller.abort(), 25);
-      const result = await performSearch(['q1', 'q2'], undefined, controller.signal);
 
-      // Behavior may vary, but should handle gracefully
-      expect(result).toBeInstanceOf(Map);
+      await expect(performSearch(['q1', 'q2'], undefined, controller.signal))
+        .rejects.toThrow('Aborted');
     });
   });
 

@@ -721,12 +721,20 @@ export class KnowledgeStore implements IKnowledgeStore {
     }
   }
 
-  async deleteByUrlAndType(url: string, ingestionType: string): Promise<void> {
+  /**
+   * @param olderThan When set, only rows with `timestamp < olderThan` are removed.
+   *   This is what lets a refresh write the replacement chunks FIRST and prune the
+   *   superseded ones after, instead of deleting first and losing the entry
+   *   outright if the insert then fails. `timestamp` is used as the discriminator
+   *   because it is a real (indexed) column — `contentHash` lives inside the
+   *   JSON-encoded `metadata` blob and cannot be filtered on.
+   */
+  async deleteByUrlAndType(url: string, ingestionType: string, olderThan?: number): Promise<void> {
     // Coordinate with close() — see deleteByUrl.
-    return this.trackOperation('deleteByUrlAndType', undefined, () => this.deleteByUrlAndTypeInner(url, ingestionType));
+    return this.trackOperation('deleteByUrlAndType', undefined, () => this.deleteByUrlAndTypeInner(url, ingestionType, olderThan));
   }
 
-  private async deleteByUrlAndTypeInner(url: string, ingestionType: string): Promise<void> {
+  private async deleteByUrlAndTypeInner(url: string, ingestionType: string, olderThan?: number): Promise<void> {
     let retryCount = 0;
     const MAX_RETRIES = 5;
     const BASE_DELAY = 100;
@@ -738,11 +746,15 @@ export class KnowledgeStore implements IKnowledgeStore {
       try {
         const escapedUrl = url.replace(/'/g, "''");
         const escapedType = ingestionType.replace(/'/g, "''");
-        await table.delete(`url = '${escapedUrl}' AND ingestion_type = '${escapedType}' AND (${scopeFilter})`);
+        // Integer-coerced so the predicate can never carry anything but digits.
+        const ageClause = Number.isFinite(olderThan as number)
+          ? ` AND timestamp < ${Math.floor(olderThan as number)}`
+          : '';
+        await table.delete(`url = '${escapedUrl}' AND ingestion_type = '${escapedType}' AND (${scopeFilter})${ageClause}`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
         metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
-        logger.log(`[store] Deleted ${ingestionType} chunks for ${url} (scoped)`);
+        logger.log(`[store] Deleted ${ingestionType} chunks for ${url} (scoped)${ageClause ? ' older than the replacement' : ''}`);
         return;
       } catch (err) {
         if (isLanceCommitConflict(err)) {

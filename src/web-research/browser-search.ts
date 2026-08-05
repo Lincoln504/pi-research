@@ -9,7 +9,7 @@ import { getMaxWorkers } from '../infrastructure/browser/config.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { normalizeUrl } from '../utils/url-utils.ts';
-import type { SearchResult } from './types.ts';
+import type { SearchResult, QueryFailure } from './types.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getServiceContainer } from '../core/service-registry.ts';
@@ -21,11 +21,20 @@ import type { ServiceContainer } from '../core/service-registry.ts';
  * Each worker maintains its own "warm" browser process.
  */
 export async function performSearch(
-    queries: string[], 
+    queries: string[],
     config?: Config,
     signal?: AbortSignal,
     onProgress?: (links: number) => void,
-    container: ServiceContainer = getServiceContainer()
+    container: ServiceContainer = getServiceContainer(),
+    /**
+     * Optional sink for per-query FAILURES (timeout / worker error). Populated as
+     * an out-param rather than folded into the return value because the returned
+     * map's `query -> results` shape is what every caller consumes; a query absent
+     * from this map produced zero results with no failure, i.e. the search really
+     * did come back empty. Without this the caller cannot tell those apart and
+     * reports every empty query as a too-narrow query.
+     */
+    failures?: Map<string, QueryFailure>,
 ): Promise<Map<string, SearchResult[]>> {
     const startTime = Date.now();
     const resultMap = new Map<string, SearchResult[]>();
@@ -146,11 +155,19 @@ export async function performSearch(
             
             if (isTimeout) {
                 logger.warn(`[Search] Query timed out after ${QUERY_TIMEOUT_MS}ms — likely starved waiting for a free browser worker under concurrent load, or a slow/blocked search provider: "${query}"`);
+                failures?.set(query, {
+                    type: 'timeout',
+                    message: `Search timed out after ${QUERY_TIMEOUT_MS}ms before returning anything. This says nothing about the query — the browser pool was saturated or the search provider was slow/blocked. Retrying the same query later is reasonable.`,
+                });
             } else {
                 const msg = error instanceof Error ? error.message : String(error);
                 if (msg !== 'Aborted') {
                     if (!sampleWorkerError) sampleWorkerError = msg;
                     logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+                    failures?.set(query, {
+                        type: 'service_unavailable',
+                        message: `The search backend failed for this query (${msg}). This is an infrastructure failure, not a signal about the query itself — do not rewrite the query in response to it.`,
+                    });
                 }
             }
             resultMap.set(query, []);
@@ -161,6 +178,18 @@ export async function performSearch(
     });
 
     await Promise.all(searchTasks);
+
+    // A cancelled run is not a broken one. Every query aborts with zero results,
+    // which walks straight into the total-failure branch below and reports
+    // "Browser workers may be unavailable, DuckDuckGo is unreachable, or the
+    // system is under extreme load" — an infrastructure outage the user never had.
+    // They pressed Ctrl-C. Check this BEFORE the outage heuristic, and surface the
+    // codebase's standard abort signature so the callers that already special-case
+    // it (task-execution-service, the orchestrator, the CLI classifier) see a
+    // cancellation rather than a failure.
+    if (signal?.aborted) {
+        throw new Error('Aborted');
+    }
 
     // Detect total failure: if every valid query returned empty, the worker pool is likely dead.
     const totalResults = Array.from(resultMap.values()).reduce((sum, r) => sum + r.length, 0);

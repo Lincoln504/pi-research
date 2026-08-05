@@ -84,6 +84,17 @@ export const EXIT = {
    * re-running a broken command.
    */
   TEMPFAIL: 75,
+  /**
+   * The run was CANCELLED — Ctrl-C, SIGTERM, or a programmatic abort. 130 is the
+   * conventional 128+SIGINT.
+   *
+   * Distinct from SOFTWARE for the same reason TEMPFAIL is: a deliberate stop is
+   * not a fault. Reported as SOFTWARE (70), a cancel matched the skill contract's
+   * "runtime error — suggest one retry for transient failures", so an agent
+   * relaying the result would offer to re-run the very research the user had just
+   * interrupted, and a --json consumer could not tell a cancel from a crash.
+   */
+  CANCELLED: 130,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -863,9 +874,20 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // machine as a setup problem would send the user to reconfigure a working install.
   const isCapacity = err instanceof Error && err.name === 'ResearchRunCapacityError';
 
+  // Cancellation. Primary signal is the latch set by the SIGINT/SIGTERM handler —
+  // an exact fact, unlike the message, which varies by whichever subsystem noticed
+  // the abort first ('Aborted' from the search layer, 'Research aborted' /
+  // 'Research cancelled' from the orchestrator). The message check only covers a
+  // programmatic abort via the caller's own AbortSignal, where no signal arrived.
+  // Checked before everything below: an abort can unwind through a provider call
+  // and surface wording that the config/rate-limit heuristics would otherwise claim.
+  const isCancellation =
+    cancellationRequested ||
+    (err instanceof Error && (err.name === 'AbortError' || /^(aborted|research (aborted|cancelled))$/i.test(msg)));
+
   // Auth / model / config-shaped errors → CONFIG exit + config block.
   const isConfigError =
-    !isTaggedResearchStop && !isCapacity && (
+    !isTaggedResearchStop && !isCapacity && !isCancellation && (
     lower.includes('no llm model available') ||
     lower.includes('not found in pi') ||
     lower.includes('no api key') ||
@@ -879,12 +901,14 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // "api key" in its body (e.g. "rate limit exceeded for this api key"), and
   // classifying that as a setup problem sends the user to reconfigure a
   // perfectly working key instead of waiting out the limit.
-  const isRateLimit = lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests');
-  const exitCode = isCapacity
-    ? EXIT.TEMPFAIL
-    : isConfigError && !isRateLimit
-      ? EXIT.CONFIG
-      : EXIT.SOFTWARE;
+  const isRateLimit = !isCancellation && (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests'));
+  const exitCode = isCancellation
+    ? EXIT.CANCELLED
+    : isCapacity
+      ? EXIT.TEMPFAIL
+      : isConfigError && !isRateLimit
+        ? EXIT.CONFIG
+        : EXIT.SOFTWARE;
 
   // --json: emit a structured error on stdout so a machine consumer never has to
   // special-case plain-text stderr. Mirrors the { ok: true, ... } success shape.
@@ -893,10 +917,19 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
     // Machine-readable "this will succeed later" flag, so a consumer can back off
     // and retry without string-matching the human message.
     if (isCapacity || isRateLimit) payload['retryable'] = true;
+    // A cancel is emphatically NOT retryable-by-default: the user asked to stop.
+    if (isCancellation) payload['cancelled'] = true;
     if (process.env['PI_RESEARCH_DEBUG'] === 'true' && err instanceof Error && err.stack) {
       payload['stack'] = err.stack;
     }
     toStdout(pretty(payload));
+    return exitCode;
+  }
+
+  // Cancellation is a completed intention, not a failure — never a stack trace,
+  // and never the word "failed".
+  if (isCancellation) {
+    toStderr(`\npi-research ${what} cancelled.\n`);
     return exitCode;
   }
 
@@ -1269,6 +1302,21 @@ const flushAndExit = (code: number): void => {
 // outlives that one run.
 let activeResearchAbortController: AbortController | null = null;
 
+/**
+ * Set once SIGINT/SIGTERM has been handled. Read by reportError so a cancellation
+ * is classified by the fact that we were signalled, not by pattern-matching the
+ * message an aborted subsystem happened to throw.
+ */
+let cancellationRequested = false;
+
+/** Test seams for the module-level cancellation latch (set only by onSignal). */
+export function _resetCancellationLatchForTests(): void {
+  cancellationRequested = false;
+}
+export function _markCancellationForTests(): void {
+  cancellationRequested = true;
+}
+
 async function main(argv: string[]): Promise<number> {
   // Register signal handlers so SIGINT/SIGTERM always trigger SDK shutdown
   // before the process exits. safeShutdown() is idempotent — safe to call
@@ -1277,6 +1325,7 @@ async function main(argv: string[]): Promise<number> {
   const onSignal = (sig: string) => {
     if (_signalCleanupDone) return;
     _signalCleanupDone = true;
+    cancellationRequested = true;
     toStderr(`\n[pi-research] ${sig} — cleaning up…\n`);
     // Abort the in-flight research run FIRST (synchronously ahead of the shutdown
     // teardown below) so the orchestrator's existing signal-aware cancellation path
@@ -1286,7 +1335,7 @@ async function main(argv: string[]): Promise<number> {
     // Fire-and-forget: we can't await here, but safeShutdown swallows errors
     // and the finally blocks in each command handler also call it. Drain via
     // flushAndExit (not a bare process.exit) so buffered stdout isn't truncated.
-    void safeShutdown().finally(() => flushAndExit(EXIT.SOFTWARE));
+    void safeShutdown().finally(() => flushAndExit(EXIT.CANCELLED));
   };
   process.once('SIGINT', () => onSignal('SIGINT'));
   process.once('SIGTERM', () => onSignal('SIGTERM'));

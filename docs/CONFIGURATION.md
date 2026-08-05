@@ -154,7 +154,7 @@ Diagnostics & platform
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | _(unset)_ | Set `1`/`true` to skip the pre-flight browser/embedding health check and rely on per-task timeouts. |
 | `PI_RESEARCH_USE_XVFB` | _(unset)_ | Linux only. Bare-TTY runs are true-headless and need no X server; set `true` to opt into a virtual framebuffer (`sudo apt install xvfb`). |
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Override the bundled research-skill source directory used by the skill installer. |
-| `PI_RESEARCH_PURGE_BROWSERS` | _(unset)_ | Set `1` during `npm uninstall` to also delete the shared camoufox browser cache (kept by default because other installs may use it). |
+| `PI_RESEARCH_PURGE_BROWSERS` | _(unset)_ | Read by the bundled `scripts/cleanup.cjs`: set `1` to also delete the shared camoufox browser cache (kept by default because other installs may use it). Note npm ≥7 does not run `preuninstall`, so that script does not fire on `npm uninstall` — see [AGENT-SKILL.md](AGENT-SKILL.md). |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _(unset)_ | Set `1` during `npm install` to skip the camoufox browser download (fetched lazily on first use instead; standard Playwright convention). |
 | `PLAYWRIGHT_INSTALL_DEPS` | _(unset)_ | Linux only. Set `true` during `npm install` to also install system libraries via `npx playwright install-deps` (same as `npm run install:system-deps`). |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |

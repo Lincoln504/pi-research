@@ -16,7 +16,7 @@ interface WriterQueueOptions {
   store: {
     isStoreClosed?: () => boolean;
     findByUrl: (url: string) => Promise<StoreDocument[]>;
-    deleteByUrlAndType: (url: string, type: string) => Promise<void>;
+    deleteByUrlAndType: (url: string, type: string, olderThan?: number) => Promise<void>;
     addDocuments: (docs: StoreDocument[]) => Promise<void>;
   };
   chunker: Chunker | null;
@@ -179,15 +179,15 @@ export class WriterQueue implements IWriterQueue {
       return;
     }
 
-    if (sameType.length > 0) {
-      await this.options.store.deleteByUrlAndType(normalizedUrl, incomingType);
-    }
-
     const rawChunks = this.options.chunker
       ? this.options.chunker.chunk(item.markdown)
       : [{ text: item.markdown, actual_overlap: 0 }];
 
     if (rawChunks.length === 0) return;
+
+    // Single timestamp shared by every chunk of this write: it is both the row's
+    // recency value and the boundary used to prune the rows this write replaces.
+    const insertedAt = Date.now();
 
     const docs: StoreDocument[] = rawChunks.map((chunk, i) => ({
       url: normalizedUrl,
@@ -203,10 +203,27 @@ export class WriterQueue implements IWriterQueue {
         chunkIndex: i,
         totalChunks: rawChunks.length,
       },
-      timestamp: Date.now(),
+      timestamp: insertedAt,
     }));
 
+    // Write the replacement BEFORE removing what it replaces. Deleting first made
+    // the refresh destructive: addDocuments can fail (embedder unreachable, ENOSPC,
+    // store closing mid-write) and the perfectly good previous entry was already
+    // gone, so a failed refresh left the URL with no entry at all rather than a
+    // stale one. In this order a failure leaves the old entry intact and the retry
+    // simply tries again.
     await this.options.store.addDocuments(docs);
+
+    if (sameType.length > 0) {
+      // Prune only rows older than this write, so the delete cannot take the rows
+      // just inserted. Failing here leaves duplicate chunks — visible but harmless,
+      // and cleaned up by the next successful ingest of this URL — which is a far
+      // better outcome than throwing away a write that already succeeded.
+      await this.options.store.deleteByUrlAndType(normalizedUrl, incomingType, insertedAt).catch((err) => {
+        logger.warn(`[writer-queue] Replacement for ${normalizedUrl} (${incomingType}) is stored, but pruning the superseded chunks failed; duplicates remain until the next refresh:`, err);
+        metrics.increment('knowledge_ingest_stale_prune_failed_total', 1);
+      });
+    }
   }
 
   async drain(timeoutMs?: number): Promise<void> {

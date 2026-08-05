@@ -17,6 +17,7 @@ import { getServiceContainer, getService } from '../../core/service-registry.ts'
 import type { ServiceContainer } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerFactory, IScheduler } from '../../core/scheduler-factory.ts';
+import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 
 // Cooldown to prevent cascading scheduler restarts (thundering herd)
 let lastRestartTime = 0;
@@ -60,6 +61,52 @@ async function recoverFromLeaderHandover(container: ServiceContainer): Promise<v
     await waitForBrowserPoolIdle(15000).catch((err) =>
         logger.debug('Wait for browser idle timed out or failed:', err),
     );
+}
+
+/**
+ * Is the leader currently registered in state still a live process?
+ *
+ * Used only to decide whether the restart cooldown below may be honoured.
+ * Anything that prevents a confident "yes" (no registered leader, an unreadable
+ * state file, a service-resolution failure) answers `false`, because the cost of
+ * an unnecessary re-resolve is one cheap round-trip while the cost of skipping a
+ * needed one is a task failure against a dead port.
+ */
+async function isRegisteredLeaderAlive(container: ServiceContainer): Promise<boolean> {
+    try {
+        const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
+        const info = await stateManager.getBrowserServer();
+        if (!info) return false;
+        return await stateManager.isPidAlive(info.pid, info.schedulerId);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Drop the scheduler handle and wait for the pool to settle, subject to a
+ * cooldown that stops N concurrent task failures from each restarting.
+ *
+ * The cooldown is only safe while the registered leader is still alive: then the
+ * cached handle points at a working process and skipping the restart costs
+ * nothing. It is NOT safe when the leader is gone. A hard leader kill (SIGKILL,
+ * OOM) surfaces to clients as ECONNREFUSED, which `isTransientSocketError`
+ * matches but `isPoolShutdownError` does not — so it lands here rather than on
+ * the handover path, and a bare wait leaves the cached client aimed at a corpse.
+ * The retry then re-resolves to the same dead port and fails identically: the
+ * exact stale-handle failure the leader-handover work fixed for the *graceful*
+ * shutdown case. So the cooldown yields whenever the leader is not confirmed alive.
+ */
+async function restartSchedulerWithHerdGuard(container: ServiceContainer): Promise<void> {
+    const now = Date.now();
+    if (now - lastRestartTime > RESTART_COOLDOWN_MS || !(await isRegisteredLeaderAlive(container))) {
+        lastRestartTime = now;
+        logger.warn('[BrowserManager] Forcing scheduler restart and retrying...');
+        await forceSchedulerRestart(false, container);
+    } else {
+        logger.warn('[BrowserManager] Scheduler restart triggered recently and the registered leader is still alive — waiting for pool idle instead...');
+    }
+    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
 }
 
 /**
@@ -163,16 +210,7 @@ export async function runBrowserTask<T>(
                 // PID+start-time liveness probe confirms the registered leader is
                 // actually gone; it only skips clearing when that probe finds the
                 // leader alive, which is exactly the case we must not disturb.
-                const now = Date.now();
-                if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
-                    lastRestartTime = now;
-                    logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(false, container);
-                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
-                } else {
-                    logger.warn(`[BrowserManager] Scheduler restart recently triggered, waiting for pool idle...`);
-                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
-                }
+                await restartSchedulerWithHerdGuard(container);
             }
 
             // Retry with jitter (100-500ms) to prevent thundering herd
@@ -211,15 +249,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
                 // See runBrowserTask: don't force-clear remote leader state on a bare
                 // transient socket error — let the liveness probe inside
                 // forceSchedulerRestart decide.
-                const now = Date.now();
-                if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
-                    lastRestartTime = now;
-                    logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(false, container);
-                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
-                } else {
-                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
-                }
+                await restartSchedulerWithHerdGuard(container);
             }
 
             const jitter = 100 + Math.floor(Math.random() * 400);
@@ -278,15 +308,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 // See runBrowserTask: don't force-clear remote leader state on a bare
                 // transient socket error — let the liveness probe inside
                 // forceSchedulerRestart decide.
-                const now = Date.now();
-                if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
-                    lastRestartTime = now;
-                    logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(false, container);
-                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
-                } else {
-                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
-                }
+                await restartSchedulerWithHerdGuard(container);
             }
 
             const jitter = 100 + Math.floor(Math.random() * 400);

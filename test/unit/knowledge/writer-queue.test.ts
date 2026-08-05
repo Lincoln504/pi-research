@@ -102,7 +102,50 @@ describe('WriterQueue', () => {
     });
     await queue.drain();
 
-    expect(mockStore.deleteByUrlAndType).toHaveBeenCalledWith('https://test.com', 'synthesis-description');
+    expect(mockStore.addDocuments).toHaveBeenCalled();
+    // The superseded rows are pruned with an `olderThan` boundary equal to the new
+    // rows' timestamp, so the prune cannot remove what was just written.
+    const [url, type, olderThan] = vi.mocked(mockStore.deleteByUrlAndType).mock.calls[0]!;
+    expect(url).toBe('https://test.com');
+    expect(type).toBe('synthesis-description');
+    const written = vi.mocked(mockStore.addDocuments).mock.calls[0]![0] as Array<{ timestamp: number }>;
+    expect(olderThan).toBe(written[0]!.timestamp);
+  });
+
+  it('writes the replacement BEFORE pruning what it replaces', async () => {
+    // Deleting first made a refresh destructive: if addDocuments then failed
+    // (embedder unreachable, ENOSPC, store closing) the perfectly good previous
+    // entry was already gone, so a failed refresh left the URL with nothing at all.
+    const order: string[] = [];
+    vi.mocked(mockStore.addDocuments).mockImplementation(async () => { order.push('add'); });
+    vi.mocked(mockStore.deleteByUrlAndType).mockImplementation(async () => { order.push('delete'); });
+    vi.mocked(mockStore.findByUrl).mockResolvedValueOnce([{
+      url: 'https://test.com',
+      text: 'stale description',
+      metadata: { contentHash: 'a-different-hash', ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }]);
+
+    queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
+    await queue.drain();
+
+    expect(order).toEqual(['add', 'delete']);
+  });
+
+  it('keeps the stored replacement when pruning the superseded rows fails', async () => {
+    // The write already succeeded; a failed prune leaves duplicates (harmless, and
+    // cleaned up by the next refresh) and must NOT be reported as a dropped ingest.
+    vi.mocked(mockStore.deleteByUrlAndType).mockRejectedValueOnce(new Error('lance commit conflict'));
+    vi.mocked(mockStore.findByUrl).mockResolvedValueOnce([{
+      url: 'https://test.com',
+      text: 'stale description',
+      metadata: { contentHash: 'a-different-hash', ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }]);
+
+    queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
+    await expect(queue.drain()).resolves.toBeUndefined();
+
     expect(mockStore.addDocuments).toHaveBeenCalled();
   });
 
@@ -240,7 +283,11 @@ describe('WriterQueue', () => {
     queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
     await queue.drain();
 
-    expect(mockStore.deleteByUrlAndType).toHaveBeenCalledWith('https://test.com', 'synthesis-description');
+    expect(mockStore.deleteByUrlAndType).toHaveBeenCalledWith(
+      'https://test.com',
+      'synthesis-description',
+      expect.any(Number),
+    );
     expect(mockStore.addDocuments).toHaveBeenCalled();
   });
 });

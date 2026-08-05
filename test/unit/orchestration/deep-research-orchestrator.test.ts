@@ -410,10 +410,14 @@ describe('DeepResearchOrchestrator', () => {
     expect(result).toContain('Final synthesis');
 
     // With 2 queued messages and cap=2, the budget extends from 2 → 4 rounds.
-    // updatePlanForRound is called once per round 2..N and once more for the
-    // forced final synthesis: so 3 in-loop evaluator calls + 1 forced = 4.
+    // Rounds 2..maxRounds-1 each run an in-loop evaluator call; the LAST round does
+    // not — it would break to the forced final synthesis regardless of what the
+    // evaluator said, so the orchestrator skips it. Budget 4 → rounds 2,3 evaluate
+    // in-loop (2 calls) + 1 forced synthesis = 3.
     const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
-    expect(updateCalls.length).toBe(4);
+    expect(updateCalls.length).toBe(3);
+    // Exactly one of them is the forced final synthesis.
+    expect(updateCalls.filter((c) => (c[0] as any)?.mustSynthesize).length).toBe(1);
   });
 
   it('should NOT extend round budget when no queued steering messages exist', async () => {
@@ -437,9 +441,13 @@ describe('DeepResearchOrchestrator', () => {
     const result = await orchestrator.run();
 
     expect(result).toContain('Base synthesis');
-    // Base budget 2 rounds → 1 in-loop evaluator call (round 2) + 1 forced = 2.
+    // Base budget 2 rounds. Round 2 IS the cap, so it skips the in-loop evaluator
+    // and goes straight to the forced final synthesis: 0 in-loop + 1 forced = 1.
+    // Contrast with the extended-budget case above (3) — the difference is what
+    // makes this test discriminate a 2-round budget from a 4-round one.
     const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
-    expect(updateCalls.length).toBe(2);
+    expect(updateCalls.length).toBe(1);
+    expect((updateCalls[0]![0] as any)?.mustSynthesize).toBe(true);
   });
 
   it('should cap extra rounds at MAX_EXTRA_ROUNDS_WITH_STEERING even with many queued messages', async () => {
@@ -471,9 +479,11 @@ describe('DeepResearchOrchestrator', () => {
     const result = await orchestrator.run();
 
     expect(result).toContain('Capped synthesis');
-    // Cap=2 + base=2 = 4 rounds → 3 in-loop calls + 1 forced = 4.
+    // Cap=2 + base=2 = 4 rounds → rounds 2,3 evaluate in-loop (the 4th is the cap
+    // and skips straight to synthesis) + 1 forced = 3. Same total as the 2-message
+    // case above, which is the point: the cap held.
     const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
-    expect(updateCalls.length).toBe(4);
+    expect(updateCalls.length).toBe(3);
   });
 
   it('should report round progress to observer', async () => {

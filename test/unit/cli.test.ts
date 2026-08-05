@@ -6,7 +6,7 @@
  * paths that can run without a live model (help, version, bad args).
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { spawnSync, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
@@ -20,7 +20,14 @@ import { fileURLToPath } from 'node:url';
 // Guard: skip mocked-module bleed from other test files by importing after
 // all vi.mock() calls.  parseArgs and UsageError are pure — no side effects
 // on import because the _isMain guard prevents top-level execution.
-import { parseArgs, UsageError, EXIT, reportError } from '../../src/cli.ts';
+import {
+  parseArgs,
+  UsageError,
+  EXIT,
+  reportError,
+  _resetCancellationLatchForTests,
+  _markCancellationForTests,
+} from '../../src/cli.ts';
 import { createResearchStopError } from '../../src/orchestration/session-state.ts';
 import { ResearchRunCapacityError } from '../../src/infrastructure/research-run-semaphore.ts';
 
@@ -391,6 +398,59 @@ describe('reportError — exit-code classification', () => {
     const exitCode = await reportError(err, 'research', true);
     expect(exitCode).toBe(EXIT.TEMPFAIL);
     expect(EXIT.TEMPFAIL).not.toBe(EXIT.SOFTWARE);
+  });
+
+  // A deliberate stop is not a fault. Reported as SOFTWARE (70) it matched the
+  // skill contract's "runtime error — suggest one retry", so an agent relaying the
+  // result would offer to re-run the research the user had just interrupted.
+  describe('cancellation', () => {
+    afterEach(() => _resetCancellationLatchForTests());
+
+    it.each([
+      ['Aborted'],
+      ['Research aborted'],
+      ['Research cancelled'],
+    ])('classifies a programmatic abort (%s) as CANCELLED, not SOFTWARE', async (message) => {
+      const exitCode = await reportError(new Error(message), 'research', true);
+      expect(exitCode).toBe(EXIT.CANCELLED);
+      expect(EXIT.CANCELLED).not.toBe(EXIT.SOFTWARE);
+    });
+
+    it('classifies an AbortError by name regardless of its message', async () => {
+      const err = new Error('The operation was aborted because of some provider detail');
+      err.name = 'AbortError';
+      expect(await reportError(err, 'research', true)).toBe(EXIT.CANCELLED);
+    });
+
+    it('marks the --json payload cancelled rather than retryable', async () => {
+      const out: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+        out.push(String(chunk));
+        return true;
+      });
+      try {
+        await reportError(new Error('Aborted'), 'research', true);
+      } finally {
+        spy.mockRestore();
+      }
+      const payload = JSON.parse(out.join(''));
+      expect(payload).toMatchObject({ ok: false, exitCode: EXIT.CANCELLED, cancelled: true });
+      expect(payload.retryable).toBeUndefined();
+    });
+
+    // An abort can unwind through an in-flight provider call and surface with that
+    // call's wording. The classifier must not then read it as a setup problem or a
+    // rate limit and send the user off reconfiguring a working install.
+    it('wins over the config and rate-limit heuristics once a signal was received', async () => {
+      _markCancellationForTests();
+      expect(await reportError(new Error('Invalid API key provided'), 'research', true)).toBe(EXIT.CANCELLED);
+      expect(await reportError(new Error('429 rate limit exceeded'), 'research', true)).toBe(EXIT.CANCELLED);
+    });
+
+    it('does not swallow ordinary failures when no cancellation occurred', async () => {
+      expect(await reportError(new Error('Worker pool is shutting down'), 'research', true)).toBe(EXIT.SOFTWARE);
+      expect(await reportError(new Error('Invalid API key provided'), 'research', true)).toBe(EXIT.CONFIG);
+    });
   });
 
   // The capacity message names PI_RESEARCH_MAX_CONCURRENT_RUNS; the config

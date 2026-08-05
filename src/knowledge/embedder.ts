@@ -68,6 +68,14 @@ export class Embedder {
   private idleTimer: NodeJS.Timeout | null = null;
   private readonly IDLE_TIMEOUT_MS = 60 * 1000;
   private activeEmbeddings = 0;
+  /**
+   * Why the in-flight dispose was started. An IDLE dispose is a memory-reclaim
+   * pause that a later embed is expected to undo, so initialize() waits it out and
+   * re-initializes. A TERMINAL dispose (shutdown, config change, explicit
+   * disposal) must never be undone — re-initializing there would resurrect the
+   * ONNX pipeline during teardown. Only meaningful while state === 'disposing'.
+   */
+  private disposeReason: 'idle' | 'terminal' = 'terminal';
 
   constructor(options: EmbedderOptions) {
     this.model = options.model;
@@ -113,7 +121,7 @@ export class Embedder {
       }
       if (this.state === 'ready') {
         logger.info(`[embedder] Idle timeout reached (${this.IDLE_TIMEOUT_MS}ms), releasing GPU memory...`);
-        this.dispose().catch(err => logger.warn('[embedder] Failed to dispose on idle:', err));
+        this.dispose('idle').catch(err => logger.warn('[embedder] Failed to dispose on idle:', err));
       }
     }, this.IDLE_TIMEOUT_MS);
     if (this.idleTimer) safeUnref(this.idleTimer);
@@ -129,7 +137,26 @@ export class Embedder {
   async initialize(): Promise<void> {
     if (this.state === 'ready') return;
     if (this.state === 'disposing') {
-      throw new Error('Cannot initialize while disposing');
+      // An IDLE dispose is a pause, not an end: the pipeline was released purely
+      // to reclaim GPU/host memory and the next embed is meant to bring it back.
+      // Throwing here lost that race — the idle timer fires, dispose() flips the
+      // state, and a document that arrives during the (up to ~5s) teardown got
+      // "Cannot initialize while disposing", which nothing classifies as
+      // transient, so the writer queue dropped it with no retry. Wait the dispose
+      // out and re-initialize instead.
+      if (this.disposeReason === 'idle') {
+        logger.debug('[embedder] initialize() raced an idle dispose — waiting for it to finish, then re-initializing.');
+        await this.disposePromise?.catch(() => { /* a failed idle dispose must not block the revive */ });
+        // Re-check: another caller may have revived (or terminally disposed) the
+        // embedder while we waited.
+        if ((this.state as EmbedderState) === 'ready') return;
+        if ((this.state as EmbedderState) === 'disposing') {
+          throw new Error('Cannot initialize while disposing');
+        }
+      } else {
+        // Terminal dispose (shutdown / config change): must NOT be revived.
+        throw new Error('Cannot initialize while disposing');
+      }
     }
 
     if (this.initializingPromise) {
@@ -529,14 +556,26 @@ export class Embedder {
     }
   }
 
-  async dispose(): Promise<void> {
+  /**
+   * @param reason `'idle'` for the memory-reclaim pause driven by the idle timer —
+   *   a later embed is allowed to revive the embedder. Anything else is terminal
+   *   (shutdown, config change, explicit disposal) and must never be revived, so
+   *   the default is deliberately the safe one: callers that do not opt in get
+   *   terminal semantics.
+   */
+  async dispose(reason: 'idle' | 'terminal' = 'terminal'): Promise<void> {
     if (this.state === 'idle') return;
     this.stopIdleTimer();
 
     if (this.state === 'disposing' && this.disposePromise) {
+      // A terminal dispose landing on top of an in-flight idle dispose must
+      // downgrade the reason, so a concurrent initialize() cannot revive what is
+      // now a shutdown. Never the reverse.
+      if (reason === 'terminal') this.disposeReason = 'terminal';
       return this.disposePromise;
     }
 
+    this.disposeReason = reason;
     this.state = 'disposing';
     this.disposePromise = (async () => {
       // Wait for all active embeddings to complete
