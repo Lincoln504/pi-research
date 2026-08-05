@@ -22,6 +22,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -85,8 +86,13 @@ export const EXIT = {
    */
   TEMPFAIL: 75,
   /**
-   * The run was CANCELLED — Ctrl-C, SIGTERM, or a programmatic abort. 130 is the
-   * conventional 128+SIGINT.
+   * The run was CANCELLED via a programmatic abort (the caller's AbortSignal),
+   * with no OS signal involved. 130 — 128+SIGINT — is the conventional
+   * "interrupted" code and the natural default when there is no signal number to
+   * derive one from.
+   *
+   * A cancellation caused by an actual SIGNAL does NOT use this constant: see
+   * exitCodeForSignal below, which reports the true 128+N.
    *
    * Distinct from SOFTWARE for the same reason TEMPFAIL is: a deliberate stop is
    * not a fault. Reported as SOFTWARE (70), a cancel matched the skill contract's
@@ -96,6 +102,29 @@ export const EXIT = {
    */
   CANCELLED: 130,
 } as const;
+
+/**
+ * Exit code for a run stopped by `sig`, following the POSIX 128+N convention that
+ * a shell uses when reporting a signal-terminated child (SIGINT → 130,
+ * SIGTERM → 143, SIGHUP → 129, SIGQUIT → 131).
+ *
+ * Why derive it per-signal instead of returning a single "cancelled" code: this
+ * process INSTALLS handlers for those signals, so it is never actually killed by
+ * them — it catches them and exits deliberately. If it exited a flat 130, the code
+ * a wrapper observes would depend on whether our handler won the race against a
+ * force-kill: handler wins → 130, handler loses → the shell's 143. Deriving 128+N
+ * makes the handler transparent, so the same user action reports the same number
+ * either way.
+ *
+ * Every value lands in 129..143, safely inside the 0-255 range a POSIX wait status
+ * preserves — nothing here can be truncated to a false 0. Windows does not
+ * implement the 128+N convention at all (its exit codes are 32-bit and carry no
+ * signal semantics), so there these are simply our documented contract values.
+ */
+export function exitCodeForSignal(sig: NodeJS.Signals): number {
+  const signum = (os.constants.signals as Record<string, number | undefined>)[sig];
+  return typeof signum === 'number' ? 128 + signum : EXIT.CANCELLED;
+}
 
 // ---------------------------------------------------------------------------
 // Output helpers
@@ -1062,7 +1091,8 @@ EXIT CODES
   75  at capacity — every concurrent run slot is busy; nothing is broken, retry later
   78  not configured — message prints the exact locations to fix
       (on \`knowledge\`, also returned when the store is deliberately disabled)
-  130 cancelled — Ctrl-C or SIGTERM; nothing failed, do not auto-retry
+  130 cancelled — Ctrl-C; nothing failed, do not auto-retry
+      (other stop signals report POSIX 128+N: 143 SIGTERM, 129 SIGHUP, 131 SIGQUIT)
   70  runtime error (network, provider, internal)
 `;
 }
@@ -1336,7 +1366,10 @@ async function main(argv: string[]): Promise<number> {
     // Fire-and-forget: we can't await here, but safeShutdown swallows errors
     // and the finally blocks in each command handler also call it. Drain via
     // flushAndExit (not a bare process.exit) so buffered stdout isn't truncated.
-    void safeShutdown().finally(() => flushAndExit(EXIT.CANCELLED));
+    // 128+N, not a flat CANCELLED: see exitCodeForSignal. Because we handle these
+    // signals rather than dying from them, a fixed code would make the observed
+    // exit status depend on whether this handler beat a force-kill.
+    void safeShutdown().finally(() => flushAndExit(exitCodeForSignal(sig as NodeJS.Signals)));
   };
   process.once('SIGINT', () => onSignal('SIGINT'));
   process.once('SIGTERM', () => onSignal('SIGTERM'));

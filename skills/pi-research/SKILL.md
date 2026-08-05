@@ -66,7 +66,7 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 | `78` on `knowledge` | Two cases — **read stderr to tell them apart.** | Says the store is **disabled**: silent; proceed to `research`. Mentions **credentials/model/API key**: this is the same hard config failure as `78` on `research` — **stop and relay full stderr**; don't silently continue, `research` will fail the same way. |
 | `78` on `research` | Engine missing or no model/key | **Stop. Relay full stderr** (it shows where to configure). Don't retry until fixed. |
 | `75` | Machine at capacity — other research runs are already using every slot | **Nothing is broken.** Wait for an in-flight run to finish, then retry this query once. Don't reconfigure anything and don't retry in a tight loop. |
-| `130` | Cancelled — the run was interrupted (Ctrl-C / SIGTERM) | **Nothing is broken and nothing failed.** Say the research was cancelled. **Do NOT re-run it** unless the user asks; they stopped it deliberately. |
+| `130` (and `129`/`131`/`143`) | Cancelled — the run was interrupted. These are the POSIX `128 + signal` codes: `130` Ctrl-C/SIGINT, `143` SIGTERM, `129` SIGHUP, `131` SIGQUIT. Treat **any exit ≥ 128 as a cancellation.** | **Nothing is broken and nothing failed.** Say the research was cancelled. **Do NOT re-run it** unless the user asks; they stopped it deliberately. |
 | `70` | Runtime error | Relay stderr; suggest one retry for transient failures (network, rate limit). |
 | `64` | Bad arguments | Fix args; don't surface unless the query itself is malformed. |
 

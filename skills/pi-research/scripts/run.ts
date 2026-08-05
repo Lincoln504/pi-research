@@ -18,7 +18,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -34,12 +34,23 @@ const EXIT = { OK: 0, USAGE: 64, CONFIG: 78, SOFTWARE: 70, CANCELLED: 130 } as c
 
 /**
  * Signals that mean "someone asked this to stop" rather than "this broke".
- * The engine maps its own cancellation to 130; this launcher must agree, or a
- * harness that SIGTERMs a run on timeout would report 70 — which the skill
- * contract documents as a retryable runtime error, prompting the caller to
- * re-run research it deliberately stopped.
+ * Without this, a harness that SIGTERMs a run on timeout got exit 70 — which the
+ * skill contract documents as a retryable runtime error, prompting the caller to
+ * re-run research it had deliberately stopped.
  */
 const CANCELLING_SIGNALS = new Set(['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']);
+
+/**
+ * Exit code for a child stopped by `sig`: the POSIX 128+N a shell would itself
+ * report for that signal (SIGINT → 130, SIGTERM → 143, SIGHUP → 129,
+ * SIGQUIT → 131), matching what the engine reports on its own signal path.
+ * Collapsing them all to 130 would make this launcher contradict both the shell
+ * and the engine about which signal actually stopped the run.
+ */
+function exitCodeForSignal(sig: string): number {
+  const signum = (osConstants.signals as Record<string, number | undefined>)[sig];
+  return typeof signum === 'number' ? 128 + signum : EXIT.CANCELLED;
+}
 
 // ---------------------------------------------------------------------------
 // Argument plumbing (subcommand passthrough to the engine)
@@ -339,10 +350,10 @@ function launch(engine: ResolvedEngine): void {
   child.on('exit', (code, signal) => {
     if (signal) {
       if (CANCELLING_SIGNALS.has(signal)) {
-        // Not an error: report it as the cancellation it is, on the same exit
-        // code the engine uses for its own Ctrl-C path.
+        // Not an error: report it as the cancellation it is, on the same 128+N
+        // the shell (and the engine's own signal path) would report.
         process.stderr.write(`\npi-research cancelled (${signal}).\n`);
-        process.exit(EXIT.CANCELLED);
+        process.exit(exitCodeForSignal(signal));
       }
       process.stderr.write(`\nError: pi-research killed by ${signal}\n`);
       process.exit(EXIT.SOFTWARE);

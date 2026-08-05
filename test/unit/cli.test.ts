@@ -25,6 +25,7 @@ import {
   UsageError,
   EXIT,
   reportError,
+  exitCodeForSignal,
   _resetCancellationLatchForTests,
   _markCancellationForTests,
 } from '../../src/cli.ts';
@@ -450,6 +451,36 @@ describe('reportError — exit-code classification', () => {
     it('does not swallow ordinary failures when no cancellation occurred', async () => {
       expect(await reportError(new Error('Worker pool is shutting down'), 'research', true)).toBe(EXIT.SOFTWARE);
       expect(await reportError(new Error('Invalid API key provided'), 'research', true)).toBe(EXIT.CONFIG);
+    });
+  });
+
+  // The CLI installs handlers for these signals, so it is never actually killed by
+  // them — it catches them and exits deliberately. Emitting a FIXED code would make
+  // the status a wrapper observes depend on whether our handler beat a force-kill
+  // (handler wins → fixed code, handler loses → the shell's 128+N). Deriving 128+N
+  // makes the handler transparent: the same user action reports the same number
+  // either way. Every value must also stay inside 0-255, or a POSIX wait status
+  // truncates it — 256 would become a false success.
+  describe('exitCodeForSignal — POSIX 128+N', () => {
+    it.each([
+      ['SIGHUP', 129],
+      ['SIGINT', 130],
+      ['SIGQUIT', 131],
+      ['SIGTERM', 143],
+    ] as const)('%s → %i', (sig, expected) => {
+      expect(exitCodeForSignal(sig)).toBe(expected);
+    });
+
+    it('falls back to CANCELLED for a signal this platform does not define', () => {
+      expect(exitCodeForSignal('SIGNOTAREALSIGNAL' as NodeJS.Signals)).toBe(EXIT.CANCELLED);
+    });
+
+    it('never produces a code outside 0-255 (a POSIX wait status would truncate it)', () => {
+      for (const sig of ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'] as const) {
+        const code = exitCodeForSignal(sig);
+        expect(code).toBeGreaterThan(128);
+        expect(code).toBeLessThanOrEqual(255);
+      }
     });
   });
 

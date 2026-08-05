@@ -129,10 +129,18 @@ run itself — check your own signal, not just the promise. Exactly one of
 
 The CLI mirrors this: cancelling a run that had already collected material prints
 that partial report and exits `0`, while cancelling one with nothing to show exits
-**130** (`pi-research --help` lists the full set; the agent-facing contract is the
-exit-code table in [`SKILL.md`](../skills/pi-research/SKILL.md)). `130` is
-deliberately not the `70` runtime-error code and never carries `retryable: true` —
-a cancel is a completed intention, not a fault to retry.
+in the cancellation range — **`128 + signal`** (`130` for Ctrl-C/SIGINT, `143` for
+SIGTERM), or `130` for a programmatic abort where no signal was involved. Treat any
+code ≥ 128 as a cancellation; `pi-research --help` lists the full set, and the
+agent-facing contract is the exit-code table in
+[`SKILL.md`](../skills/pi-research/SKILL.md).
+
+These are deliberately not the `70` runtime-error code and never carry
+`retryable: true` — a cancel is a completed intention, not a fault to retry. The
+codes are derived per-signal rather than fixed because the CLI *handles* those
+signals rather than dying from them: a fixed code would make the observed exit
+status depend on whether the handler beat a force-kill, whereas `128 + N` matches
+what the shell reports either way.
 
 You still must call `shutdownResearchSDK()` afterwards: aborting a run releases
 that run, not the browser pool, LanceDB handles or worker processes.
