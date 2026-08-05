@@ -66,6 +66,13 @@ interface ChildHandle {
   exited: Promise<number | null>;
   /** Resolves once an event of the given type is seen (or rejects on timeout). */
   waitFor(event: SemEvent['event'], timeoutMs?: number): Promise<SemEvent>;
+  /**
+   * Resolves on the first event matching ANY of the given types. Needed to wait
+   * for a child to *settle* when the outcome is the thing under test: a herd
+   * contender ends on either `acquired` or `capacity`, and racing two `waitFor`
+   * calls would leave the losing one to reject unhandled.
+   */
+  waitForAny(events: Array<SemEvent['event']>, timeoutMs?: number): Promise<SemEvent>;
 }
 
 let childBundle: string;
@@ -129,7 +136,7 @@ function spawnChild(opts: ChildOptions): ChildHandle {
   live.add(proc);
 
   const events: SemEvent[] = [];
-  const waiters: Array<{ event: SemEvent['event']; resolve: (e: SemEvent) => void }> = [];
+  const waiters: Array<{ events: Array<SemEvent['event']>; resolve: (e: SemEvent) => void }> = [];
   let buffered = '';
   // Retained purely for diagnostics: a child that dies before emitting anything
   // (bad bundle, unresolvable import) otherwise fails as a bare timeout with no
@@ -156,7 +163,7 @@ function spawnChild(opts: ChildOptions): ChildHandle {
       }
       events.push(parsed);
       for (let i = waiters.length - 1; i >= 0; i--) {
-        if (waiters[i]!.event === parsed.event) waiters.splice(i, 1)[0]!.resolve(parsed);
+        if (waiters[i]!.events.includes(parsed.event)) waiters.splice(i, 1)[0]!.resolve(parsed);
       }
     }
   });
@@ -168,35 +175,38 @@ function spawnChild(opts: ChildOptions): ChildHandle {
     });
   });
 
+  function waitForAny(wanted: Array<SemEvent['event']>, timeoutMs = 20000): Promise<SemEvent> {
+    const already = events.find((e) => wanted.includes(e.event));
+    if (already) return Promise.resolve(already);
+    return new Promise<SemEvent>((resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `[${opts.label}] timed out waiting for "${wanted.join('" or "')}" ` +
+                `(saw: ${events.map((e) => e.event).join(', ') || 'nothing'})` +
+                (stderr ? `\n--- child stderr ---\n${stderr.slice(0, 2000)}` : ''),
+            ),
+          ),
+        timeoutMs,
+      );
+      waiters.push({
+        events: wanted,
+        resolve: (e) => {
+          clearTimeout(timer);
+          resolve(e);
+        },
+      });
+    });
+  }
+
   return {
     proc,
     label: opts.label,
     events,
     exited,
-    waitFor(event, timeoutMs = 20000) {
-      const already = events.find((e) => e.event === event);
-      if (already) return Promise.resolve(already);
-      return new Promise<SemEvent>((resolve, reject) => {
-        const timer = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `[${opts.label}] timed out waiting for "${event}" ` +
-                  `(saw: ${events.map((e) => e.event).join(', ') || 'nothing'})` +
-                  (stderr ? `\n--- child stderr ---\n${stderr.slice(0, 2000)}` : ''),
-              ),
-            ),
-          timeoutMs,
-        );
-        waiters.push({
-          event,
-          resolve: (e) => {
-            clearTimeout(timer);
-            resolve(e);
-          },
-        });
-      });
-    },
+    waitForAny,
+    waitFor: (event, timeoutMs) => waitForAny([event], timeoutMs),
   };
 }
 
@@ -212,29 +222,60 @@ describe('ResearchRunSemaphore — real multi-process behaviour', () => {
     const MAX = 2;
     const HERD = 6;
 
-    // Winners hold well past the point where every contender has attempted, so
-    // the losers genuinely observe a full slot table rather than racing a release.
+    // Winners hold UNTIL KILLED so that "at most MAX hold at once" is a
+    // deterministic invariant rather than a timing hope — the same fix already
+    // applied to the "distinct slot assignments" test below.
+    //
+    // With a finite hold this test asserted the wrong thing: it counted
+    // *cumulative* `acquired` events but is named for, and exists to prove, the
+    // *concurrent* cap. The six children start staggered (Windows CI especially),
+    // so a late contender can boot after an early winner's hold has already
+    // elapsed, legitimately win the freed slot, and push the cumulative count to
+    // MAX+1 while the cap was never actually exceeded. That is exactly how this
+    // failed on Windows CI ("expected length 2 but got 3"). Holding until killed
+    // removes the free slot entirely, so `acquired.length` now counts genuinely
+    // simultaneous holders — a strictly stronger assertion, and a real cap
+    // violation still fails it.
     const children = Array.from({ length: HERD }, (_, i) =>
-      spawnChild({ label: `herd-${i}`, slotDir, maxSlots: MAX, maxWaitMs: 0, holdMs: 4000 }),
+      spawnChild({ label: `herd-${i}`, slotDir, maxSlots: MAX, maxWaitMs: 0, holdMs: -1 }),
     );
 
-    const codes = await Promise.all(children.map((c) => c.exited));
+    // Each contender settles as either a winner (`acquired`, then holds forever)
+    // or a loser (`capacity`, then exits 3). Wait for that decision from all six
+    // before asserting, so no child is still mid-attempt.
+    await Promise.all(children.map((c) => c.waitForAny(['acquired', 'capacity', 'error'], 60000)));
+
     const acquired = children.flatMap((c) => c.events.filter((e) => e.event === 'acquired'));
     const capacity = children.flatMap((c) => c.events.filter((e) => e.event === 'capacity'));
     const errors = children.flatMap((c) => c.events.filter((e) => e.event === 'error'));
 
-    expect(errors).toEqual([]);
-    expect(acquired).toHaveLength(MAX);
-    expect(capacity).toHaveLength(HERD - MAX);
-    // Winners exit 0; capacity-rejected children exit 3.
-    expect(codes.filter((c) => c === 0)).toHaveLength(MAX);
-    expect(codes.filter((c) => c === 3)).toHaveLength(HERD - MAX);
+    // Rendered into every assertion below so a future failure self-diagnoses
+    // instead of reporting a bare length mismatch.
+    const timeline = children
+      .map(
+        (c) =>
+          `  ${c.label}: ` +
+          (c.events.map((e) => (e.slot === undefined ? e.event : `${e.event}#${e.slot}`)).join(' → ') ||
+            '(silent)'),
+      )
+      .join('\n');
 
-    // The two winners must be on *distinct* slots — the same slot handed to two
+    expect(errors, `children reported errors:\n${timeline}`).toEqual([]);
+    expect(acquired, `concurrent holders exceeded the cap:\n${timeline}`).toHaveLength(MAX);
+    expect(capacity, `wrong number of refusals:\n${timeline}`).toHaveLength(HERD - MAX);
+
+    // The winners must be on *distinct* slots — the same slot handed to two
     // processes would mean the cap is nominal only.
-    expect(new Set(acquired.map((a) => a.slot)).size).toBe(MAX);
+    expect(new Set(acquired.map((a) => a.slot)).size, `winners shared a slot:\n${timeline}`).toBe(MAX);
 
-    await rm(slotDir, { recursive: true, force: true });
+    // Losers exit 3 on capacity refusal; the winners are still holding, so kill
+    // them and let the slot dir tear down cleanly.
+    const losers = children.filter((c) => c.events.some((e) => e.event === 'capacity'));
+    expect(await Promise.all(losers.map((c) => c.exited))).toEqual(Array(HERD - MAX).fill(3));
+    for (const c of children) c.proc.kill('SIGKILL');
+    await Promise.all(children.map((c) => c.exited));
+
+    await rm(slotDir, { recursive: true, force: true }).catch(() => {});
   }, 120000);
 
   it('hands a released slot to a waiting process', async () => {
