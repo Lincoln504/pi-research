@@ -30,7 +30,16 @@ const PKG = '@lincoln504/pi-research';
 // it here so the user gets the same clean, actionable exit-78 message as a missing
 // engine instead of a stack trace.
 const REQUIRED_DEP = '@earendil-works/pi-coding-agent';
-const EXIT = { OK: 0, USAGE: 64, CONFIG: 78, SOFTWARE: 70 } as const;
+const EXIT = { OK: 0, USAGE: 64, CONFIG: 78, SOFTWARE: 70, CANCELLED: 130 } as const;
+
+/**
+ * Signals that mean "someone asked this to stop" rather than "this broke".
+ * The engine maps its own cancellation to 130; this launcher must agree, or a
+ * harness that SIGTERMs a run on timeout would report 70 — which the skill
+ * contract documents as a retryable runtime error, prompting the caller to
+ * re-run research it deliberately stopped.
+ */
+const CANCELLING_SIGNALS = new Set(['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']);
 
 // ---------------------------------------------------------------------------
 // Argument plumbing (subcommand passthrough to the engine)
@@ -329,6 +338,12 @@ function launch(engine: ResolvedEngine): void {
 
   child.on('exit', (code, signal) => {
     if (signal) {
+      if (CANCELLING_SIGNALS.has(signal)) {
+        // Not an error: report it as the cancellation it is, on the same exit
+        // code the engine uses for its own Ctrl-C path.
+        process.stderr.write(`\npi-research cancelled (${signal}).\n`);
+        process.exit(EXIT.CANCELLED);
+      }
       process.stderr.write(`\nError: pi-research killed by ${signal}\n`);
       process.exit(EXIT.SOFTWARE);
     }

@@ -72,7 +72,7 @@ async function recoverFromLeaderHandover(container: ServiceContainer): Promise<v
  * an unnecessary re-resolve is one cheap round-trip while the cost of skipping a
  * needed one is a task failure against a dead port.
  */
-async function isRegisteredLeaderAlive(container: ServiceContainer): Promise<boolean> {
+async function isRegisteredLeaderAliveUncached(container: ServiceContainer): Promise<boolean> {
     try {
         const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
         const info = await stateManager.getBrowserServer();
@@ -81,6 +81,36 @@ async function isRegisteredLeaderAlive(container: ServiceContainer): Promise<boo
     } catch {
         return false;
     }
+}
+
+/**
+ * Coalesce concurrent liveness probes.
+ *
+ * This runs on the failure path, where a whole query burst fails at once: a
+ * 20-query search losing its leader calls it up to 19 times within milliseconds
+ * (the first caller restarts and the rest land inside the cooldown). The probe is
+ * cheap on Linux — a `/proc/<pid>/stat` read — but on Windows the PID-reuse guard
+ * resolves the process start time by spawning `powershell -NoProfile`, so an
+ * uncoalesced burst would fan out into ~19 concurrent PowerShell processes on the
+ * slowest platform we support. The window is deliberately far shorter than
+ * RESTART_COOLDOWN_MS: it exists to collapse one burst, not to cache a verdict.
+ */
+const LEADER_LIVENESS_COALESCE_MS = 1000;
+let leaderLivenessProbe: { startedAt: number; result: Promise<boolean> } | null = null;
+
+async function isRegisteredLeaderAlive(container: ServiceContainer): Promise<boolean> {
+    const now = Date.now();
+    if (leaderLivenessProbe && now - leaderLivenessProbe.startedAt < LEADER_LIVENESS_COALESCE_MS) {
+        return leaderLivenessProbe.result;
+    }
+    const result = isRegisteredLeaderAliveUncached(container);
+    leaderLivenessProbe = { startedAt: now, result };
+    return result;
+}
+
+/** Test seam: drop the coalesced liveness probe. */
+export function _resetLeaderLivenessProbeForTests(): void {
+    leaderLivenessProbe = null;
 }
 
 /**

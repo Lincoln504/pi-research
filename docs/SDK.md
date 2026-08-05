@@ -98,6 +98,45 @@ report caused by a sparse topic apart from one where most researchers failed). B
 > observer with `onRunQueued(slots, maxWaitMs)` to tell a waiting user the run is
 > queued rather than hung.
 
+### Cancellation
+
+`runDeepResearch`, `runQuickResearch`, `verifyUrl` and `scrapeUrl` all take an
+optional `AbortSignal` as their **last positional argument** (not a field of the
+options object):
+
+```js
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 60_000);
+
+const markdown = await runDeepResearch('…', { depth: 2 }, controller.signal);
+```
+
+The orchestrator checks the signal at every round boundary and threads it into
+search, scraping and the LLM calls, so an abort stops work rather than merely
+detaching from it.
+
+**An abort does not always reject.** The outcome depends on whether anything was
+collected before the signal arrived:
+
+| State when aborted | Result | Observer |
+|---|---|---|
+| At least one researcher report collected | **Resolves** with a partial synthesis built from what was gathered | `onComplete` |
+| Nothing collected yet | **Rejects** (`Research aborted` / `Research cancelled`) | `onError` |
+
+So a caller must not treat "resolved" as "ran to completion" when it aborted the
+run itself — check your own signal, not just the promise. Exactly one of
+`onComplete` / `onError` fires either way.
+
+The CLI mirrors this: cancelling a run that had already collected material prints
+that partial report and exits `0`, while cancelling one with nothing to show exits
+**130** (`pi-research --help` lists the full set; the agent-facing contract is the
+exit-code table in [`SKILL.md`](../skills/pi-research/SKILL.md)). `130` is
+deliberately not the `70` runtime-error code and never carries `retryable: true` —
+a cancel is a completed intention, not a fault to retry.
+
+You still must call `shutdownResearchSDK()` afterwards: aborting a run releases
+that run, not the browser pool, LanceDB handles or worker processes.
+
 The SDK does not write report files. Report export is a front-end concern — the pi
 extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
 

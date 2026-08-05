@@ -1057,12 +1057,13 @@ CONFIGURE
   Run \`${BINARY_NAME} status\` to see exactly what is detected.
 
 EXIT CODES
-  0  success
-  64 bad arguments
-  75 at capacity — every concurrent run slot is busy; nothing is broken, retry later
-  78 not configured — message prints the exact locations to fix
-     (on \`knowledge\`, also returned when the store is deliberately disabled)
-  70 runtime error (network, provider, internal)
+  0   success
+  64  bad arguments
+  75  at capacity — every concurrent run slot is busy; nothing is broken, retry later
+  78  not configured — message prints the exact locations to fix
+      (on \`knowledge\`, also returned when the store is deliberately disabled)
+  130 cancelled — Ctrl-C or SIGTERM; nothing failed, do not auto-retry
+  70  runtime error (network, provider, internal)
 `;
 }
 
