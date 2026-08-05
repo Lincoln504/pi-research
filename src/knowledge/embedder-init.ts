@@ -252,7 +252,7 @@ export async function purgeModelCache(model: string): Promise<void> {
       logger.warn(`[embedder] Refusing to purge unsafe model-cache path for model id ${JSON.stringify(model)}`);
       return;
     }
-    await rm(modelDir, { recursive: true, force: true });
+    await rm(modelDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     logger.warn(`[embedder] Purged corrupt model cache at ${modelDir}`);
   } catch (err) {
     logger.warn('[embedder] Failed to purge model cache:', err);

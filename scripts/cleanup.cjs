@@ -67,7 +67,7 @@ function removeInstalledSkills() {
     if (!owned) { kept.push(e); continue; }
     try {
       if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
-      else rmSync(p, { recursive: true, force: true });
+      else rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       console.log(`pi-research: removed skill install at ${p}`);
     } catch (err) {
       kept.push(e);
@@ -133,7 +133,7 @@ if (process.env.PI_RESEARCH_PURGE_BROWSERS === '1') {
 const legacyCacheDir = path.join(projectRoot, '.browser');
 if (existsSync(legacyCacheDir)) {
   try {
-    rmSync(legacyCacheDir, { recursive: true, force: true });
+    rmSync(legacyCacheDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   } catch (error) {
     console.warn(`pi-research: could not remove ${legacyCacheDir}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -150,7 +150,7 @@ if (existsSync(legacyCacheDir)) {
 function removeOwnedScratchDir(label, dir) {
   if (!dir || !existsSync(dir)) return;
   try {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     console.log(`pi-research: removed ${label} ${dir}`);
   } catch (error) {
     console.warn(`pi-research: could not remove ${label} ${dir}: ${error instanceof Error ? error.message : String(error)}`);

@@ -12,6 +12,7 @@ import { logger } from '../../logger.ts';
 import { captureStdio } from '../../utils/stdio-capture.ts';
 import { buildDefaultDebugLogPath } from '../../utils/log-utils.ts';
 import { DiskSpaceChecker } from '../../utils/disk-space-checker.ts';
+import { Utf8Body } from '../../utils/http-body.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import type { Embedder } from '../../knowledge/embedder.ts';
@@ -473,11 +474,15 @@ export class EmbeddingServer implements IEmbedder {
 
     const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
 
-    let body = '';
+    // Buffered, then decoded once: `body += chunk` would split multi-byte UTF-8
+    // across chunk boundaries and silently replace both halves with U+FFFD — and
+    // the text arriving here is exactly what gets embedded, so that corruption
+    // would be baked into the vectors. See Utf8Body.
+    const collected = new Utf8Body();
     let oversized = false;
     req.on('data', (chunk: Buffer) => {
-      body += chunk;
-      if (body.length > MAX_BODY_SIZE) {
+      collected.push(chunk);
+      if (collected.byteLength > MAX_BODY_SIZE) {
         oversized = true;
         req.destroy(new Error('Payload too large'));
       }
@@ -523,7 +528,7 @@ export class EmbeddingServer implements IEmbedder {
             return;
           }
 
-          const data = JSON.parse(body);
+          const data = JSON.parse(collected.toString());
 
           switch (req.url) {
             case '/embed': {

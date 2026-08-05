@@ -55,8 +55,10 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 - **Cite the report's sources.** Carry its URLs/`[n]` references into your answer;
   attribute each non-trivial claim. Never present researched facts as unsourced;
   never invent or substitute sources.
-- **Surface the saved file.** If stderr/stdout ends with `Research report saved to: <path>`,
-  give the user that exact path. If absent, no file was written — say nothing about one.
+- **Surface the saved file.** Look for a saved-report line: stdout's report footer ends
+  with `Research report saved to: <path>`, and stderr carries `[pi-research] report saved
+  to: <path>`. Give the user that exact path. If neither appears, no file was written —
+  say nothing about one.
 
 ## Exit codes
 

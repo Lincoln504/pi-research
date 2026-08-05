@@ -9,8 +9,9 @@ const DEFAULT_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
  * Firefox/Camoufox profile lock files, cross-platform. A live browser holds:
  *  - Unix:   `lock` — a SYMLINK whose target encodes the owner: "<ip>:+<pid>" or "+<pid>",
  *            plus `.parentlock` (an fcntl-locked empty file).
- *  - Windows: `parent.lock` — a file kept OPEN by the live process (so the OS refuses to
- *            delete it, which is itself a safety net against reclaiming an in-use profile).
+ *  - Windows: `parent.lock` — a file kept OPEN by the live process. That is a liveness
+ *            SIGNAL (see isWindowsParentLockHeld), not a safety net: a recursive delete
+ *            has already removed the rest of the profile before it reaches this file.
  * The previous code checked for `.lock`, which Firefox/Camoufox never creates, so its
  * lock-awareness was inert. These are the real names.
  */
@@ -19,6 +20,37 @@ const LOCK_FILE_NAMES = ['lock', '.parentlock', 'parent.lock'];
 /** Treat a lock whose owner PID we cannot read as "live" only if touched this recently,
  *  so a just-starting concurrent run is not reclaimed out from under itself. */
 const LOCK_FRESHNESS_MS = 2 * 60 * 1000;
+
+/**
+ * Windows: is `parent.lock` still held open by a live browser?
+ *
+ * Firefox opens this file with no sharing, so while the browser runs ANY other
+ * open of it fails with a sharing violation. That makes the probe positive
+ * evidence of a live owner — the same standing as the Unix `lock` symlink's PID.
+ *
+ * Recency cannot substitute for it here: `parent.lock`'s mtime is stamped once at
+ * browser startup and never refreshed, so every browser alive longer than
+ * LOCK_FRESHNESS_MS read as dead — the normal case for a minutes-long research
+ * run. Nor does "the OS refuses to delete a held-open file" save the profile:
+ * `fs.rm({recursive:true})` unlinks entries one at a time, so prefs, cookies and
+ * places are already gone by the time it reaches the locked file and fails.
+ *
+ * Returns null when the answer is not knowable, which callers treat as live —
+ * sparing a leaked profile costs disk, deleting a live one corrupts a running run.
+ */
+async function isWindowsParentLockHeld(lockPath: string): Promise<boolean | null> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(lockPath, 'r');
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT') return false; // vanished — no live owner
+    if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') return true; // held open
+    return null; // unexpected — don't guess
+  }
+  await handle.close().catch(() => {});
+  return false;
+}
 
 /** Parse the owner PID out of a Firefox `lock` symlink target ("<ip>:+<pid>" / "+<pid>"). */
 function parsePidFromLockTarget(target: string): number | null {
@@ -62,9 +94,15 @@ async function isProfileLive(profileDir: string): Promise<boolean> {
         // unreadable symlink — fall back to freshness below
       }
     }
-    // `.parentlock` / `parent.lock` (no PID encoded), or an unreadable `lock`: use recency
-    // as the liveness proxy. On Windows the file is also held open, so an attempted delete
-    // of a genuinely-live profile fails harmlessly regardless of this heuristic.
+    // Windows has no `lock` symlink, so `parent.lock` is the only signal there. Probe
+    // whether it is still held open — authoritative, unlike recency, which reads every
+    // browser older than LOCK_FRESHNESS_MS as dead because the mtime is never refreshed.
+    if (process.platform === 'win32' && name === 'parent.lock') {
+      const held = await isWindowsParentLockHeld(lockPath);
+      if (held !== null) return held;
+      return true; // indeterminate — spare the profile
+    }
+    // `.parentlock` (no PID encoded) or an unreadable `lock`: use recency as the proxy.
     return Date.now() - lst.mtimeMs < LOCK_FRESHNESS_MS;
   }
   return false;
@@ -127,7 +165,7 @@ export async function cleanupStaleProfiles(
             logger.debug(`[Cleanup] Skipping profile ${entry} — owned by a live browser`);
             continue;
           }
-          await fs.rm(fullPath, { recursive: true, force: true });
+          await fs.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
           removed++;
           continue;
         }
@@ -135,7 +173,7 @@ export async function cleanupStaleProfiles(
         // Unrecognized entry (only reachable with an explicit baseDir): be conservative —
         // only reclaim if both old AND not live, so we never delete something unknown promptly.
         if (now - stats.mtimeMs > staleMs && !(await isProfileLive(fullPath))) {
-          await fs.rm(fullPath, { recursive: true, force: true });
+          await fs.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
           removed++;
         }
       } catch (_e) {

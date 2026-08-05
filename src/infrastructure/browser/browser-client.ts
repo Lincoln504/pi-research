@@ -11,6 +11,7 @@ import type { SearchResult } from '../../web-research/types.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
+import { Utf8Body } from '../../utils/http-body.ts';
 import { getClientAgent } from './client-agent.ts';
 import type { NodeError } from '../../types/index.ts';
 
@@ -93,8 +94,11 @@ export class BrowserClient implements IScheduler {
                 // when headers arrive, but the body is still streaming — clearing
                 // now would let a stalled body hang forever and make an external
                 // abort a no-op. Keep both armed until 'end' or 'error'.
-                let body = '';
-                res.on('data', chunk => body += chunk);
+                // This response carries scraped page content, so per-chunk decoding
+                // would corrupt every non-ASCII page that exceeds one chunk. Collect
+                // bytes and decode once. See Utf8Body.
+                const collected = new Utf8Body();
+                res.on('data', (chunk: Buffer) => collected.push(chunk));
                 res.on('end', () => {
                     if (resolved) return;
                     resolved = true;
@@ -102,7 +106,7 @@ export class BrowserClient implements IScheduler {
                     abortCleanup?.();
                     const duration = Date.now() - start;
                     try {
-                        const parsed = JSON.parse(body);
+                        const parsed = JSON.parse(collected.toString());
                         if (res.statusCode === 503 && parsed?.error === 'draining') {
                             // Planned leadership handover, not a fault. Distinct message so
                             // isServerDrainingError can classify it: retry paths treat it as
@@ -135,7 +139,8 @@ export class BrowserClient implements IScheduler {
                         }
                     } catch (_e) {
                         // FIX (#23): Truncate response body in error to prevent data leakage
-                        const preview = body.length > 200 ? body.slice(0, 200) + '...' : body;
+                        const raw = collected.toString();
+                        const preview = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
                         const error = new Error(`Failed to parse response (status ${res.statusCode}): ${preview}`);
                         errorTracker.trackError(error, {
                             component: 'browser-manager',

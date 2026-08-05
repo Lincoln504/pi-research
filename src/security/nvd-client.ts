@@ -24,6 +24,7 @@ import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readJsonCapped, BodyTooLargeError, MAX_BULK_JSON_BODY_BYTES } from '../utils/http-body.ts';
 import {
   isWeaknessDescription,
   isWeakness,
@@ -396,11 +397,17 @@ async function fetchPaginated(
     const response = await fetchWithRetry(url, signal);
     let data: unknown;
     try {
-      data = await response.json();
-    } catch {
+      // A page can legitimately carry up to MAX_RESULTS_PER_PAGE (2000) full CVE
+      // records, so pagination reads against the bulk cap rather than the default.
+      data = await readJsonCapped(response, MAX_BULK_JSON_BODY_BYTES);
+    } catch (err) {
       // A 200 with a truncated/HTML body (proxy or CDN error page) would otherwise
-      // throw and discard this whole term. Stop paginating this term instead.
-      metrics.increment('nvd_search_errors_total', 1, { error_type: 'malformed_json' });
+      // throw and discard this whole term. Stop paginating this term instead —
+      // the pages already gathered are kept. An over-cap body degrades the same
+      // way but is counted separately so the cause stays diagnosable.
+      metrics.increment('nvd_search_errors_total', 1, {
+        error_type: err instanceof BodyTooLargeError ? 'body_too_large' : 'malformed_json',
+      });
       break;
     }
 

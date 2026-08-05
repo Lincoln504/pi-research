@@ -12,7 +12,7 @@ in two distinct ways, and it is an optional cache — research works without it:
   store; instead the orchestrator hands each researcher the previously useful URLs for
   its goal as starting points to re-scrape live.
 
-![Knowledge-store hit — a cached answer returned without a live run](media/03-knowledge-store.gif)
+![Knowledge-store hit — a cached answer returned without a live run](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/03-knowledge-store.gif)
 
 Together these make repeat work faster and cheaper.
 
@@ -177,8 +177,9 @@ built with, the store is migrated according to `PI_RESEARCH_MIGRATION_STRATEGY`:
 If `re-embed` fails, pi-research falls back to `backup`. A failed `backup` (or
 `drop`) aborts the migration instead: the store stays on the old model and the
 next open retries — data is never dropped unless `drop` was chosen explicitly.
-Changing the model from the `/research-config` menu always clears the current
-store and starts fresh.
+Changing the model from the `/research-config` menu prompts for confirmation
+before clearing the current store and starting fresh; declining reverts the model
+change and leaves the store intact.
 
 ### Managing the store
 

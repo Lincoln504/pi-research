@@ -40,6 +40,29 @@ afterEach(() => {
   try { fs.rmSync(HOME, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
+/**
+ * Can this machine actually create a symlink?
+ *
+ * installSkill's default is symlink, but it falls back to copy when symlinkSync
+ * fails — which is the NORMAL outcome on Windows without Developer Mode or an
+ * elevated shell. Asserting a hard 'symlink' therefore failed on correct behaviour
+ * for any non-admin Windows developer. GitHub's windows-latest runners are admin,
+ * so CI never showed it. Probing keeps the assertion at full strength wherever
+ * symlinks work, and validates the fallback where they do not.
+ */
+function symlinksAvailable(): boolean {
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-symlink-probe-'));
+  try {
+    fs.symlinkSync(probeDir, path.join(probeDir, 'link'), 'junction');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true, maxRetries: 3 });
+  }
+}
+const EXPECTED_DEFAULT_TYPE = symlinksAvailable() ? 'symlink' : 'copy';
+
 function mkHarnessBase(id: string) {
   const def = HARNESSES.find(h => h.id === id)!;
   fs.mkdirSync(path.join(HOME, def.baseDir), { recursive: true });
@@ -138,21 +161,28 @@ describe('installSkill — symlink (default)', () => {
     mkHarnessBase('claude');
     const r1 = installSkill(['claude'], opts());
     expect(r1[0]!.status).toBe('installed');
-    expect(r1[0]!.type).toBe('symlink');
+    expect(r1[0]!.type).toBe(EXPECTED_DEFAULT_TYPE);
 
     const sp = skillPathFor('claude');
-    expect(fs.lstatSync(sp).isSymbolicLink()).toBe(true);
-    expect(path.resolve(path.dirname(sp), fs.readlinkSync(sp))).toBe(path.resolve(SKILL_SRC));
+    if (EXPECTED_DEFAULT_TYPE === 'symlink') {
+      expect(fs.lstatSync(sp).isSymbolicLink()).toBe(true);
+      // path.resolve, not a raw compare: libuv returns a Windows junction's target
+      // with a trailing separator, so the raw string never equals the source path.
+      expect(path.resolve(path.dirname(sp), fs.readlinkSync(sp))).toBe(path.resolve(SKILL_SRC));
+    } else {
+      expect(fs.lstatSync(sp).isSymbolicLink()).toBe(false);
+    }
 
-    // The skill is usable through the link.
+    // Either way the skill is usable at the destination.
     expect(fs.existsSync(path.join(sp, 'SKILL.md'))).toBe(true);
 
     const manifest = readManifest(opts());
     expect(manifest.entries).toHaveLength(1);
-    expect(manifest.entries[0]).toMatchObject({ tool: 'claude', path: sp, type: 'symlink' });
+    expect(manifest.entries[0]).toMatchObject({ tool: 'claude', path: sp, type: EXPECTED_DEFAULT_TYPE });
 
-    // Detection now reports it as owned.
-    expect(detectHarnesses(opts()).find(d => d.id === 'claude')!.installed).toBe('owned-symlink');
+    // Detection now reports it as owned, in whichever mode was actually used.
+    expect(detectHarnesses(opts()).find(d => d.id === 'claude')!.installed)
+      .toBe(`owned-${EXPECTED_DEFAULT_TYPE}`);
 
     // Second install is a no-op (already-installed), manifest stays size 1.
     const r2 = installSkill(['claude'], opts());
@@ -321,7 +351,10 @@ describe('reconcileSkillInstalls (startup self-heal)', () => {
     const dest = manualInstall('claude', foreign); // dest does NOT match owned layout
     reconcileSkillInstalls(opts());
     expect(fs.existsSync(dest)).toBe(true);
-    expect(fs.readlinkSync(dest)).toBe(foreign); // unchanged
+    // path.resolve both sides: libuv returns a Windows junction's SubstituteName
+    // verbatim, trailing separator included, so a raw string compare fails there
+    // even when the link is untouched. Every readlinkSync in the source resolves.
+    expect(path.resolve(fs.readlinkSync(dest))).toBe(path.resolve(foreign)); // unchanged
   });
 
   it('is a no-op when there is no manifest', () => {

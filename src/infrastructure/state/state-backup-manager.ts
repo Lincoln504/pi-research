@@ -8,6 +8,7 @@ import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import { logger } from '../../logger.ts';
+import { replaceFile } from '../../utils/atomic-replace.ts';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
@@ -253,15 +254,12 @@ export class StateBackupManager implements IService {
       await fh.close();
     }
     try {
-      await fs.rename(tempPath, this.stateFilePath);
-    } catch (renameErr) {
-      if (process.platform === 'win32') {
-        await fs.copyFile(tempPath, this.stateFilePath);
+      if (await replaceFile(tempPath, this.stateFilePath) === 'copied') {
         await fs.unlink(tempPath).catch(() => { /* best-effort cleanup */ });
-      } else {
-        await fs.unlink(tempPath).catch(() => { /* best-effort cleanup */ });
-        throw renameErr;
       }
+    } catch (renameErr) {
+      await fs.unlink(tempPath).catch(() => { /* best-effort cleanup */ });
+      throw renameErr;
     }
   }
 

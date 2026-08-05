@@ -177,3 +177,34 @@ export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 10;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 15;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 20;
+
+/**
+ * Tools excluded from every researcher unless the caller says otherwise.
+ *
+ * `grep` is developer-only: during WEB research a high-capability model otherwise
+ * spends turns searching the local filesystem instead of the internet.
+ */
+export const DEFAULT_EXCLUDED_TOOLS: readonly string[] = ['grep'];
+
+/**
+ * Resolve the effective researcher exclusion list.
+ *
+ * An EMPTY array is "no preference", not "exclude nothing". The two front-ends
+ * express no-preference differently — the pi extension always builds an array
+ * (`[...new Set([...])]`, often empty) while the CLI omits the key entirely — so a
+ * plain truthiness test made the same user input mean opposite things: grep was
+ * available in the extension and excluded on the CLI, regardless of depth.
+ *
+ * `configDisabled` (PI_RESEARCH_DISABLED_TOOLS) is strictly ADDITIVE. Folding it in
+ * as a replacement meant disabling any unrelated tool silently ENABLED grep, so a
+ * subtract-only setting could grant a capability.
+ */
+export function resolveExcludedTools(
+  callerExclusions: readonly string[] | undefined,
+  configDisabled: readonly string[] = [],
+): string[] {
+  const base = callerExclusions && callerExclusions.length > 0
+    ? callerExclusions
+    : DEFAULT_EXCLUDED_TOOLS;
+  return [...new Set([...base, ...configDisabled])];
+}

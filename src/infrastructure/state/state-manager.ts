@@ -23,6 +23,7 @@ import * as crypto from 'node:crypto';
 import process from 'node:process';
 import { getGlobalConfigDir } from '../../config.ts';
 import { logger } from '../../logger.ts';
+import { replaceFile } from '../../utils/atomic-replace.ts';
 import { metrics } from '../../utils/metrics.ts';
 import type { IProcessLifecycle } from '../../core/interfaces/process-interfaces.ts';
 import type {
@@ -350,25 +351,23 @@ export class StateManager {
       } finally {
         await fh.close();
       }
-      try {
-        await fs.rename(tempFilePath, this.stateFilePath);
-      } catch (renameErr) {
-        // fs.rename fails on Windows if target exists (NTFS). Fall back to copy+delete.
-        if (process.platform === 'win32') {
-          await fs.copyFile(tempFilePath, this.stateFilePath);
-          // copyFile succeeded → the state IS persisted. Make the temp-file removal
-          // best-effort: a transient AV lock on the temp would otherwise throw here and
-          // fall through to the catch below, reporting "Failed to write state" (status:
-          // error) for a write that actually succeeded — a caller that retries/aborts on
-          // the false failure would act wrongly.
-          const tmp = tempFilePath;
-          tempFilePath = null;
-          await fs.unlink(tmp).catch((err) => {
-            logger.warn('[StateManager] Failed to remove temp file after copy fallback (write succeeded):', err);
-          });
-        } else {
-          throw renameErr;
-        }
+      // Atomic where the platform allows; on Windows a third-party lock on the target
+      // is retried before conceding to a non-atomic copy (see replaceFile).
+      const outcome = await replaceFile(tempFilePath, this.stateFilePath);
+      if (outcome === 'copied') {
+        logger.warn(
+          '[StateManager] State written via non-atomic copy: the rename was blocked by another ' +
+          'process holding the state file. A concurrent reader may observe a partial file.',
+        );
+        metrics.increment('state_write_non_atomic_total', 1);
+        // The state IS persisted, so removing the temp is best-effort: a transient AV lock
+        // on the temp would otherwise throw and report "Failed to write state" for a write
+        // that actually succeeded — a caller retrying or aborting on that would act wrongly.
+        const tmp = tempFilePath;
+        tempFilePath = null;
+        await fs.unlink(tmp).catch((err) => {
+          logger.warn('[StateManager] Failed to remove temp file after copy fallback (write succeeded):', err);
+        });
       }
       tempFilePath = null;
       await this.backupManager.cleanupOldBackups();

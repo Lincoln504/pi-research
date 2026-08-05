@@ -52,7 +52,13 @@ node "<skill_dir>/scripts/run.mjs" status  # verify detection
 Recommended. From the pi extension, run `/research-config` and choose
 Install in External Agents. It detects Claude, Codex, and OpenClaw and
 symlinks this skill into each one that is installed. Remove from External Agents
-removes those symlinks (cleanup also runs automatically on `npm uninstall`).
+removes those symlinks.
+
+Uninstalling the npm package does **not** remove them: npm 7 and newer do not run a
+package's own `preuninstall` script (verified against npm 11). Use Remove from
+External Agents first, or run `node scripts/cleanup.cjs` from the package directory,
+otherwise the symlinks, `~/.pi/research/state` and the `~/.cache/pi-research` model
+cache are all left behind.
 
 Cursor is not auto-installed — it has no global skills directory and only reads
 project-level `.cursor/skills/`. Symlink it per-project instead (see the table).
@@ -82,7 +88,8 @@ node "<skill_dir>/scripts/run.mjs" status
 ### Files
 
 - `SKILL.md` — the skill definition + system prompt (what agents read).
-- `scripts/run.mjs` — the launcher (compiled from `run.ts`).
+- `scripts/run.mjs` — the launcher (built from `run.ts`, which is a repo-only source
+  file and is not shipped in the npm package).
 - `references/configuration.md` — model/key setup and the full variable reference.
 
 ### License

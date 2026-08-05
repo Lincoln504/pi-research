@@ -10,6 +10,7 @@ import type { Vulnerability, CisaKevResult } from './types.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readJsonCapped, BodyTooLargeError, MAX_BULK_JSON_BODY_BYTES } from '../utils/http-body.ts';
 
 const CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
 
@@ -183,10 +184,16 @@ export async function searchCisaKev(
 
     let data: unknown;
     try {
-      data = await response.json();
-    } catch {
+      // The KEV feed is the whole catalogue in one document — legitimately tens of
+      // megabytes and growing — so it reads against the bulk cap, not the default.
+      data = await readJsonCapped(response, MAX_BULK_JSON_BODY_BYTES);
+    } catch (err) {
+      if (err instanceof BodyTooLargeError) {
+        metrics.increment('cisa_kev_errors_total', 1, { error_type: 'body_too_large' });
+        throw err;
+      }
       metrics.increment('cisa_kev_errors_total', 1, { error_type: 'malformed_json' });
-      throw new Error('CISA KEV feed returned a malformed JSON response.');
+      throw new Error('CISA KEV feed returned a malformed JSON response.', { cause: err });
     }
 
     // CISA KEV format is an array of vulnerability objects or nested in a response object

@@ -21,6 +21,7 @@ import { withTimeout, retryWithBackoff, createTimeoutSignal } from '../web-resea
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readTextCapped } from '../utils/http-body.ts';
 import { mintPoTokens } from './potoken.ts';
 import { watchUrl } from './video-id.ts';
 
@@ -255,7 +256,10 @@ async function fetchOne(
             void response.body?.cancel()?.catch(() => { /* best-effort */ });
             throw new Error(`HTTP ${response.status} from timedtext endpoint`);
           }
-          const body = await response.text();
+          // A timedtext document is kilobytes; the cap only bounds a hostile or
+          // malfunctioning response, which this path is directly exposed to because
+          // base_url comes out of a parsed getInfo() payload.
+          const body = await readTextCapped(response);
           const text = parseJson3(body);
 
           // Empty-body guard: HTTP 200 + empty body == silent PoToken failure.

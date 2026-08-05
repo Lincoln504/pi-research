@@ -41,7 +41,7 @@ On Windows, run `pi-research` from `cmd` or use `pi-research.cmd`: PowerShell's 
 execution policy (`Restricted`) blocks npm's `.ps1` shims ("running scripts is
 disabled"); or run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
 
-![Installing the research skill into external agents](media/05-agent-skill.gif)
+![Installing the research skill into external agents](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/05-agent-skill.gif)
 
 ### How it works
 
@@ -142,7 +142,7 @@ npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status   # verify the engine is detected
 ```
 
-![One-command health and readiness check](media/06-health-check.gif)
+![One-command health and readiness check](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/06-health-check.gif)
 
 Once installed, ask the agent to research something — its skill system activates
 pi-research automatically. The in-package readme (`skills/pi-research/README.md`) and

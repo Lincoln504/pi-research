@@ -447,7 +447,7 @@ export function uninstallSkill(toolIds?: string[], opts: InstallOptions = {}): U
     }
     try {
       if (isSymlinkPresent(skillPath)) fs.unlinkSync(skillPath);
-      else fs.rmSync(skillPath, { recursive: true, force: true });
+      else fs.rmSync(skillPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       results.push({ tool, path: skillPath, status: 'removed' });
     } catch (err: any) {
       results.push({ tool, path: skillPath, status: 'error', message: err?.message ?? String(err) });
@@ -523,7 +523,7 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
       const stale = currentVersion !== null && e.version !== currentVersion;
       if (stale && source !== null && fs.existsSync(e.path) && isOwnedCopy(e.path)) {
         try {
-          fs.rmSync(e.path, { recursive: true, force: true });
+          fs.rmSync(e.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
           copyDir(source, e.path);
           keep.push({ ...e, source, version: currentVersion });
           result.refreshed.push(e.path);

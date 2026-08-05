@@ -62,8 +62,12 @@ outranks both (the command says so when that happens).
 
 ### Exit codes
 
-`0` success · `64` bad arguments · `78` not configured (engine missing or no
-model/key; message lists the fix) · `70` runtime error (network/provider/internal).
+`0` success · `64` bad arguments · `70` runtime error (network/provider/internal) ·
+`75` machine at capacity — every concurrent-run slot is taken; wait and retry once ·
+`78` not configured (engine missing or no model/key; message lists the fix).
+
+A run stopped by a signal exits `128 + N`: `130` Ctrl-C (SIGINT), `143` SIGTERM,
+`129` SIGHUP, `131` SIGQUIT. See SKILL.md for the full table.
 
 ### Troubleshooting
 

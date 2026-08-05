@@ -149,11 +149,18 @@ export class PriorityTaskQueue {
         // on its own; we swallow its late settlement and free the slot now so the
         // queue can dispatch the next task immediately.
         let onAbort: (() => void) | undefined;
-        const fnPromise = task.fn();
-        // Prevent an unhandled rejection if abort wins the race and fn() rejects later.
-        fnPromise.catch(() => { /* handled via the race below or abandoned on abort */ });
 
         try {
+            // task.fn() is invoked INSIDE the try: a non-async fn that throws
+            // synchronously would otherwise escape before the finally that decrements
+            // activeCount, permanently inflating the active count (starving the queue
+            // by one slot each time) and leaving the caller's enqueue() promise
+            // unsettled. Every fn today is async, so this is a latent shape defect
+            // rather than a live one — but the correct placement costs nothing.
+            const fnPromise = task.fn();
+            // Prevent an unhandled rejection if abort wins the race and fn() rejects later.
+            fnPromise.catch(() => { /* handled via the race below or abandoned on abort */ });
+
             let result: any;
             if (task.signal) {
                 const abortPromise = new Promise<never>((_, rej) => {

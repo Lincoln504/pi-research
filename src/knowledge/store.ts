@@ -1093,7 +1093,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       for (const name of migrationDirs) {
         const fullPath = path.join(this.options.dbDir, name);
         logger.info(`[store] Removing orphaned migration temp directory: ${name}`);
-        await fsPromises.rm(fullPath, { recursive: true, force: true });
+        await fsPromises.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       }
 
       // `_backup_` dirs are intentional, user-recoverable snapshots from the
@@ -1106,7 +1106,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         for (const name of backupDirs.slice(0, -1)) {
           const fullPath = path.join(this.options.dbDir, name);
           logger.info(`[store] Removing superseded backup directory: ${name}`);
-          await fsPromises.rm(fullPath, { recursive: true, force: true });
+          await fsPromises.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
         }
       }
     } catch (err) {

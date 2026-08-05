@@ -6,7 +6,7 @@ model. This document covers the
 settings exposed in the `/research-config` TUI first, then the complete
 environment-variable reference, and finally how the configuration layers resolve.
 
-![The /research-config settings TUI](media/04-config.gif)
+![The /research-config settings TUI](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/04-config.gif)
 
 ### Settings in the TUI
 
@@ -79,7 +79,7 @@ Research
 | `PI_RESEARCH_MAX_CONCURRENT_RUNS` | `3` | ≥1 | Machine-wide cap on research runs executing at the same time, across **every** process (CLI, agent skill, pi extension, SDK). Runs beyond the cap queue rather than fail. All concurrent runs share one leader-elected browser/embedding pool, so oversubscribing it degrades every run at once. |
 | `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS` | `600000` | ≥0 | How long a run queues for a free slot before failing with "maximum concurrent research runs reached" (CLI exit `75`). `0` = fail immediately instead of queueing. |
 | `PI_RESEARCH_MODEL` | _(pi: session model; CLI/skill: required)_ | — | The model research runs on. **Required for the standalone CLI / agent skill** — they use only this configured model (never the model selected inside the pi extension) and refuse to start without one (the CLI's per-run `--model` flag also satisfies this). On the SDK it selects the session model when no `model` option is given. In the pi extension it overrides researcher sub-agents and knowledge synthesis, while the coordinator and evaluator keep using the session model. Accepts `provider/id` or a bare model id. |
-| `PI_RESEARCH_DISABLED_TOOLS` | _(none)_ | — | Comma-separated research tools to disable for a run (`search`, `scrape`, `security_search`, `stackexchange`, `youtube_transcript`, `grep`). Removed from every researcher's toolset and named in the coordinator/evaluator prompt. |
+| `PI_RESEARCH_DISABLED_TOOLS` | _(none)_ | — | Comma-separated research tools to disable for a run (`search`, `scrape`, `security_search`, `stackexchange`, `youtube_transcript`, `grep`). Removed from every researcher's toolset and named in the coordinator/evaluator prompt. Strictly additive — it can only remove capabilities, never grant one, and it stacks on top of the default exclusions rather than replacing them. |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` (TUI) | `false` | — | Front-ends write a Markdown report to disk and surface its path. |
 | `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the agent skill, which runs from the host agent's arbitrary directory. |
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
@@ -151,11 +151,13 @@ Diagnostics & platform
 | `PI_RESEARCH_TMP_DIR` | `~/.cache/pi-research/profiles` | Transient per-worker browser-profile directory. Disk-backed by default (kept off a RAM-backed `/tmp` so per-worker profiles don't add memory pressure). Point under the system temp dir to opt into tmpfs/RAM. |
 | `PI_RESEARCH_STATE_DIR` | `~/.pi/research/state` | Override the state directory (active sessions, browser status, project registry). |
 | `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `100` | TUI refresh debounce (0–1000 ms). |
-| `PI_RESEARCH_SKIP_HEALTHCHECK` | _(unset)_ | Set `1`/`true` to skip the pre-flight browser/embedding health check and rely on per-task timeouts. |
+| `PI_RESEARCH_SKIP_HEALTHCHECK` | _(unset)_ | Set `1`/`true` to skip the pre-flight browser/embedding health check and rely on per-task timeouts. **Depth 0 (quick) only** — depth 1-3 runs have no such pre-flight check, so this has no effect on them. |
 | `PI_RESEARCH_USE_XVFB` | _(unset)_ | Linux only. Bare-TTY runs are true-headless and need no X server; set `true` to opt into a virtual framebuffer (`sudo apt install xvfb`). |
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Override the bundled research-skill source directory used by the skill installer. |
 | `PI_RESEARCH_PURGE_BROWSERS` | _(unset)_ | Read by the bundled `scripts/cleanup.cjs`: set `1` to also delete the shared camoufox browser cache (kept by default because other installs may use it). Note npm ≥7 does not run `preuninstall`, so that script does not fire on `npm uninstall` — see [AGENT-SKILL.md](AGENT-SKILL.md). |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _(unset)_ | Set `1` during `npm install` to skip the camoufox browser download (fetched lazily on first use instead; standard Playwright convention). |
+| `PLAYWRIGHT_BROWSERS_PATH` | _(user cache)_ | Standard Playwright variable, honoured here too: overrides where the camoufox binary is stored and looked up, and is passed through to browser workers. |
+| `XDG_CACHE_HOME` | `~/.cache` | Standard XDG variable. When set, every `~/.cache/pi-research/...` path below is rooted at `$XDG_CACHE_HOME/pi-research/...` instead. |
 | `PLAYWRIGHT_INSTALL_DEPS` | _(unset)_ | Linux only. Set `true` during `npm install` to also install system libraries via `npx playwright install-deps` (same as `npm run install:system-deps`). |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
 
@@ -165,7 +167,7 @@ Testing only — never enable in production
 |----------|-------------|
 | `PI_RESEARCH_MOCK_SEARCH` | Return fabricated search results instead of real web data. |
 | `PI_RESEARCH_MOCK_SCRAPE` | Return fabricated scrape results instead of real page content. |
-| `PI_RESEARCH_FORCE_READY` | Bypass readiness checks and run even when critical services failed to initialize. |
+| `PI_RESEARCH_FORCE_READY` | Bypass readiness checks and run even when critical services failed to initialize. **pi extension only** — the CLI, agent skill and SDK do not consult it. |
 | `PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE` | Permit scraping loopback/private/internal addresses, bypassing SSRF protection. |
 
 ### How configuration is layered
@@ -245,8 +247,8 @@ All pi-research state lives under its own namespace, `~/.pi/research/`:
 | `~/.pi/research/state/project-settings.json` | Project registry (per-directory settings). |
 | `~/.pi/research/state/` | Active sessions, browser status, locks. |
 | `~/.pi/research/knowledge_db/` | The knowledge store (LanceDB), unless `PI_RESEARCH_KNOWLEDGE_DIR` is set. |
-| `~/.cache/pi-research/profiles/` | Transient browser profiles, unless `PI_RESEARCH_TMP_DIR` is set. |
-| `~/.cache/pi-research/webgpu-viability.json` | Cached WebGPU-viability verdict (see the knowledge store doc). |
+| `~/.cache/pi-research/profiles/` | Transient browser profiles, unless `PI_RESEARCH_TMP_DIR` is set. Rooted at `$XDG_CACHE_HOME` when that is set. |
+| `~/.cache/pi-research/webgpu-viability.json` | Cached WebGPU-viability verdict (see the knowledge store doc). Rooted at `$XDG_CACHE_HOME` when that is set. |
 
 Paths can be relocated with `PI_RESEARCH_STATE_DIR`, `PI_RESEARCH_KNOWLEDGE_DIR`,
 and `PI_RESEARCH_TMP_DIR`.

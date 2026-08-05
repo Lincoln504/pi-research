@@ -71,15 +71,19 @@ describe('isProcessAlive — permission errors are not death', () => {
   // user raises EPERM. Treating that as "dead" would let a caller reclaim a lock,
   // run slot or leader from a live owner on any shared host — the same class of
   // mistake the orphan guard explicitly avoids.
-  it('treats an EPERM process (PID 1, unprivileged) as ALIVE, not dead', async () => {
+  it('treats an EPERM process (PID 1, unprivileged) as ALIVE, not dead', async (ctx) => {
     let permissionDenied = false;
     try {
       process.kill(1, 0);
     } catch (err) {
       permissionDenied = (err as NodeJS.ErrnoException).code === 'EPERM';
     }
-    // Only meaningful when we genuinely lack permission (i.e. not running as root).
-    if (!permissionDenied) return;
+    // Only meaningful when we genuinely lack permission. As root, and on Windows where
+    // PID 1 is not an ordinary process, there is no EPERM to observe. SKIP rather than
+    // return: a bare return reports this as PASSED with zero assertions, so the guard
+    // it protects would look covered in every root container and on the whole Windows
+    // leg while actually being unexercised.
+    if (!permissionDenied) ctx.skip();
 
     await expect(svc.isProcessAlive(1)).resolves.toBe(true);
     expect(svc.isProcessAliveSync(1)).toBe(true);

@@ -14,6 +14,7 @@ import { getConfigDirName } from './utils/host-config.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { normalizeWorkspacePath } from './utils/text-utils.ts';
+import { replaceFileSync } from './utils/atomic-replace.ts';
 
 /**
  * Validates configuration schema using TypeBox.
@@ -870,15 +871,12 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     const tmpPath = `${p}.tmp.${process.pid}.${Date.now()}`;
     fs.writeFileSync(tmpPath, outLines.join('\n'), { encoding: 'utf-8', mode: 0o600 });
     try {
-      fs.renameSync(tmpPath, p);
-    } catch (renameErr) {
-      if (process.platform === 'win32') {
-        fs.copyFileSync(tmpPath, p);
+      if (replaceFileSync(tmpPath, p) === 'copied') {
         try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
-      } else {
-        try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
-        throw renameErr;
       }
+    } catch (renameErr) {
+      try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+      throw renameErr;
     }
     // Tighten regardless of how the file came to exist (fresh rename, Windows copy over
     // an existing file, or a pre-hardening 0644 file that the rename replaced-in-place).

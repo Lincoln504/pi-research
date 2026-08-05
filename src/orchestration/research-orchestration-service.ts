@@ -14,7 +14,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
-import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
+import { RESEARCHER_LAUNCH_DELAY_MS, resolveExcludedTools } from '../constants.ts';
 import { search } from '../web-research/search.ts';
 import { parseCitations } from '../utils/text-utils.ts';
 import { logger, resetLogger } from '../logger.ts';
@@ -98,9 +98,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const configDisabledTools = researchConfig.DISABLED_TOOLS
       ? researchConfig.DISABLED_TOOLS.split(',').map((s) => s.trim()).filter(Boolean)
       : [];
-    const mergedExcludeTools = configDisabledTools.length > 0
-      ? [...new Set([...(excludeTools ?? []), ...configDisabledTools])]
-      : excludeTools;
+    const mergedExcludeTools = resolveExcludedTools(excludeTools, configDisabledTools);
 
     // Resolve model using centralized priority logic
     const selectedModel = await this.resolveResearchModel(options);

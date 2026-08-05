@@ -119,11 +119,19 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
       return _embeddingInstance;
     }
     logger.info(`[EmbeddingFactory] Configuration change detected (${_cachedModel} on ${_cachedDevice} -> ${cfg.EMBEDDING_MODEL} on ${cfg.EMBEDDING_DEVICE}). Disposing stale instance.`);
-    await _embeddingInstance.dispose?.();
+    // Claim the instance SYNCHRONOUSLY, before the first await. Two callers that
+    // resolve different EMBEDDING_MODEL/EMBEDDING_DEVICE values would otherwise both
+    // observe it, both await dispose() on the same live EmbeddingServer (double
+    // close(), double embedder dispose) and both proceed to init().
+    const stale = _embeddingInstance;
     _embeddingInstance = null;
+    await stale.dispose?.();
   }
 
-  if (_embeddingInitPromise) return _embeddingInitPromise;
+  // An internal retry (_attempt > 0) is re-entering from INSIDE the promise stored
+  // here, so handing that promise back would make it await itself. Only a fresh
+  // external call may join an in-flight init.
+  if (_embeddingInitPromise && _attempt === 0) return _embeddingInitPromise;
 
   let p: Promise<IEmbedder>;
 
@@ -244,8 +252,12 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
         }
       }
 
-      // Timed out or candidate died — attempt to claim candidacy ourselves (tail-call)
-      _embeddingInitPromise = null;
+      // Timed out or candidate died — attempt to claim candidacy ourselves (tail-call).
+      // The in-flight marker is deliberately LEFT in place: clearing it here, while
+      // this very promise is still running, let a concurrent getEmbedder() see no
+      // instance and no init in flight and start a second, competing election in the
+      // same process. The retry re-enters with _attempt > 0, which skips the join
+      // above, so leaving it set cannot deadlock.
       if (_attempt + 1 >= MAX_LEADER_WAIT_RETRIES) {
         throw new Error(
           `[EmbeddingFactory] Could not obtain an embedding server after ${MAX_LEADER_WAIT_RETRIES} attempts ` +
@@ -300,11 +312,13 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
   // between init resolving and this microtask, re-assigning would resurrect the
   // disposed instance and hand it to the next getEmbedder() caller. Only clear
   // the in-flight promise marker.
-  p.then(() => {
-    _embeddingInitPromise = null;
-  }).catch(() => {
-    _embeddingInitPromise = null;
-  });
+  // Clear the marker only if it is STILL ours. An unconditional clear let a settling
+  // promise wipe a newer caller's in-flight marker — admitting yet another election,
+  // and cascading. Same guard as scheduler-factory's initialization promise.
+  const clearIfCurrent = (): void => {
+    if (_embeddingInitPromise === p) _embeddingInitPromise = null;
+  };
+  p.then(clearIfCurrent).catch(clearIfCurrent);
   return p;
 }
 

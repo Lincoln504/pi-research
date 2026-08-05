@@ -22,7 +22,7 @@ Three slash commands are also registered:
 | `/research-config` | Opens the interactive TUI settings dashboard. |
 | `/knowledge-store <query>` | Searches the local knowledge store for a query and returns a synthesised answer from previously researched findings. Unavailable when Knowledge Mode is `none`. The store auto-manages its own compaction, so there is no maintenance subcommand. |
 
-![Running a live investigation with the /research slash command](media/01-slash-research.gif)
+![Running a live investigation with the /research slash command](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/01-slash-research.gif)
 
 ### Tools
 

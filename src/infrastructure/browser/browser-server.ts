@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import * as crypto from 'node:crypto';
 import { logger } from '../../logger.ts';
+import { Utf8Body } from '../../utils/http-body.ts';
 import type { SearchResult } from '../../web-research/types.ts';
 import { isCloudflareBlockError, isPoolShutdownError } from './browser-error-utils.ts';
 
@@ -117,13 +118,16 @@ export class BrowserServer {
                     return;
                 }
 
-                let body = '';
+                // Decoded once at 'end' rather than per chunk: `body += chunk`
+                // mangles any multi-byte character that straddles a chunk boundary.
+                // See Utf8Body.
+                const collected = new Utf8Body();
                 let oversized = false;
                 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
 
-                req.on('data', chunk => {
-                    body += chunk;
-                    if (body.length > MAX_BODY_SIZE) {
+                req.on('data', (chunk: Buffer) => {
+                    collected.push(chunk);
+                    if (collected.byteLength > MAX_BODY_SIZE) {
                         oversized = true;
                         req.destroy(new Error('Payload too large'));
                     }
@@ -144,7 +148,7 @@ export class BrowserServer {
 
                 req.on('end', async () => {
                     try {
-                        const data = JSON.parse(body);
+                        const data = JSON.parse(collected.toString());
                         let result: any;
 
                         switch (req.url) {

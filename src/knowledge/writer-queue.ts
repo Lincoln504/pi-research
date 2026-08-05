@@ -73,50 +73,58 @@ export class WriterQueue implements IWriterQueue {
     if (this.processing) return;
     this.processing = true;
 
-    while (this.queue.length > 0) {
-      const item = this.queue.shift()!;
-      try {
-        // FIX (#2): Chain per-URL to serialize concurrent ingests of the same URL.
-        // process() already runs sequentially, so we chain only for the race case
-        // where two enqueue() calls trigger concurrent process() calls.
-        const urlKey = normalizeUrl(item.url);
-        const prev = this.inflightByUrl.get(urlKey) ?? Promise.resolve();
-        const inflight = prev.then(() => this._ingestInner(item));
-        this.inflightByUrl.set(urlKey, inflight);
+    // try/finally around the whole drain: the latch and the drain notification used
+    // to sit on the normal exit path only. Anything escaping the loop — including
+    // from the catch block below, which itself awaits and logs — left `processing`
+    // stuck true forever: no further item would ever be ingested, drain() would never
+    // resolve, and dispose() would burn its full timeout on every later shutdown.
+    // enqueue() swallows this promise's rejection, so the wedge was silent.
+    try {
+      while (this.queue.length > 0) {
+        const item = this.queue.shift()!;
         try {
-          await inflight;
-        } finally {
-          if (this.inflightByUrl.get(urlKey) === inflight) {
-            this.inflightByUrl.delete(urlKey);
-          }
-        }
-      } catch (err) {
-        if (isEmbedderUnreachable(err)) {
-          logger.warn(`[writer-queue] Embedder unreachable for ${item.url}, retrying once after 2s...`);
-          await new Promise(r => setTimeout(r, 2000));
+          // FIX (#2): Chain per-URL to serialize concurrent ingests of the same URL.
+          // process() already runs sequentially, so we chain only for the race case
+          // where two enqueue() calls trigger concurrent process() calls.
+          const urlKey = normalizeUrl(item.url);
+          const prev = this.inflightByUrl.get(urlKey) ?? Promise.resolve();
+          const inflight = prev.then(() => this._ingestInner(item));
+          this.inflightByUrl.set(urlKey, inflight);
           try {
-            await this.ingest(item);
-          } catch (retryErr) {
-            logger.error(`[writer-queue] Retry failed for ${item.url}, dropping:`, retryErr);
-            metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'embedder_unreachable' });
+            await inflight;
+          } finally {
+            if (this.inflightByUrl.get(urlKey) === inflight) {
+              this.inflightByUrl.delete(urlKey);
+            }
           }
-        } else if (isNoSpace(err)) {
-          logger.error(`[writer-queue] ENOSPC: disk full — dropping ${item.url}. Free up disk space to resume knowledge ingestion.`);
-          metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'enospc' });
-        } else {
-          logger.error(`[writer-queue] Failed to ingest ${item.url}:`, err);
-          metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'ingest_error' });
+        } catch (err) {
+          if (isEmbedderUnreachable(err)) {
+            logger.warn(`[writer-queue] Embedder unreachable for ${item.url}, retrying once after 2s...`);
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+              await this.ingest(item);
+            } catch (retryErr) {
+              logger.error(`[writer-queue] Retry failed for ${item.url}, dropping:`, retryErr);
+              metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'embedder_unreachable' });
+            }
+          } else if (isNoSpace(err)) {
+            logger.error(`[writer-queue] ENOSPC: disk full — dropping ${item.url}. Free up disk space to resume knowledge ingestion.`);
+            metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'enospc' });
+          } else {
+            logger.error(`[writer-queue] Failed to ingest ${item.url}:`, err);
+            metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'ingest_error' });
+          }
         }
       }
-    }
+    } finally {
+      this.processing = false;
 
-    this.processing = false;
-    
-    // Notify all drain callers
-    const resolvers = [...this.drainResolvers];
-    this.drainResolvers = [];
-    for (const resolve of resolvers) {
-      resolve();
+      // Notify all drain callers
+      const resolvers = [...this.drainResolvers];
+      this.drainResolvers = [];
+      for (const resolve of resolvers) {
+        resolve();
+      }
     }
   }
 

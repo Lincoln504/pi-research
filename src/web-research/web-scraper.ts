@@ -26,6 +26,7 @@ import {
 import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, formatErrorWithCause, isBenignScrapeFailure, } from './scraper-utils.ts';
 import { isTransientError, abortableDelay } from './retry-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
+import { readBodyCapped, BodyTooLargeError } from '../utils/http-body.ts';
 import { getServiceContainer } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
 import { cacheScrapedContent } from '../utils/shared-links.ts';
@@ -144,56 +145,12 @@ function decodeHtmlBody(bytes: Uint8Array, contentTypeHeader: string): string {
   }
 }
 
-/** Thrown by readBodyCapped when a streamed body crosses its byte cap. */
-class BodyTooLargeError extends Error {
-  constructor(public readonly bytesRead: number, public readonly maxBytes: number) {
-    super(`Response body exceeded ${maxBytes} byte cap`);
-    this.name = 'BodyTooLargeError';
-  }
-}
-
-/**
- * Read a response body with a HARD byte cap, streaming chunk-by-chunk so an
- * over-limit body aborts the moment the cap is crossed. The Content-Length
- * pre-screen above is advisory only: a chunked (or lying) response carries no
- * usable length header, and `response.arrayBuffer()` would otherwise buffer the
- * entire body — potentially hundreds of MB from a hostile server — into the
- * main process before any size check ran.
- *
- * A body-less response (test doubles, some mocks) falls back to arrayBuffer();
- * callers keep their post-read size checks as the belt for that path.
- */
-async function readBodyCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
-  const body = response.body;
-  // Also tolerate non-standard doubles that expose a body without getReader.
-  if (!body || typeof body.getReader !== 'function') {
-    return new Uint8Array(await response.arrayBuffer());
-  }
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total > maxBytes) throw new BodyTooLargeError(total, maxBytes);
-        chunks.push(value);
-      }
-    }
-  } finally {
-    // Over-cap or downstream throw: release the connection instead of leaving
-    // the socket open (and the server still sending) until GC. No-op after a
-    // clean done=true read.
-    try { await reader.cancel(); } catch { /* already closed */ }
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) { out.set(c, offset); offset += c.byteLength; }
-  return out;
-}
+// readBodyCapped / BodyTooLargeError live in utils/http-body.ts — the scraper
+// pioneered the streaming cap, and the JSON API clients now share that one
+// implementation instead of each carrying a near-copy. The Content-Length
+// pre-screen above stays advisory only: chunked responses carry no usable length
+// header and the header is freely falsifiable, so the streamed cap is the check
+// that actually bounds the allocation.
 
 /**
  * Record a fetch-layer failure exactly once per URL.

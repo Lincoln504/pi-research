@@ -10,7 +10,7 @@ import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons } from './session-state.ts';
-import { MAX_EXTRA_ROUNDS_WITH_STEERING } from '../constants.ts';
+import { MAX_EXTRA_ROUNDS_WITH_STEERING, resolveExcludedTools } from '../constants.ts';
 import {
   getMaxRounds,
 } from '../core/planning-utils.ts';
@@ -393,7 +393,7 @@ export class DeepResearchOrchestrator {
                 options: {
                     ...this.options,
                     config: this.config,
-                    excludeTools: this.options.excludeTools || ['grep'],
+                    excludeTools: resolveExcludedTools(this.options.excludeTools),
                     observer: this.observer,
                 },
                 currentRound: this.currentRound,

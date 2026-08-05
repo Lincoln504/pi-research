@@ -18,7 +18,7 @@ import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
-import { getMaxScrapeBatches } from '../constants.ts';
+import { getMaxScrapeBatches, resolveExcludedTools } from '../constants.ts';
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
@@ -180,7 +180,7 @@ export class QuickResearchOrchestrator {
           modelRegistry: ctx.modelRegistry,
           systemPrompt: prompt,
           extensionCtx: ctx,
-          excludeTools: this.options.excludeTools || ['grep'],
+          excludeTools: resolveExcludedTools(this.options.excludeTools),
           config: this.config,
           getGlobalState: (): SystemResearchState => ({
             version: 1,

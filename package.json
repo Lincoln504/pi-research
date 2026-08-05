@@ -93,7 +93,7 @@
     "build": "node scripts/build.cjs all",
     "prepublishOnly": "node scripts/build.cjs all && node scripts/verify-package.cjs manifest",
     "prepare": "node scripts/prepare.cjs",
-    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/\\\"version\\\": \\\"[^\\\"]*\\\"/,'\\\"version\\\": \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('✔ synced SKILL.md to v'+p.version)\" && git add skills/pi-research/SKILL.md",
+    "version": "node scripts/sync-skill-version.cjs && git add skills/pi-research/SKILL.md",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
     "cleanup": "node scripts/cleanup.cjs",
@@ -127,7 +127,7 @@
     "pdf-oxide-wasm": "^0.3.75",
     "playwright-core": "1.60.0",
     "poolifier": "^5.3.2",
-    "typebox": "1.1.38",
+    "typebox": "1.3.7",
     "undici": "^8.9.0",
     "youtubei.js": "^17.2.0"
   },

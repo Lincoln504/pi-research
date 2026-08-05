@@ -1373,6 +1373,18 @@ async function main(argv: string[]): Promise<number> {
   };
   process.once('SIGINT', () => onSignal('SIGINT'));
   process.once('SIGTERM', () => onSignal('SIGTERM'));
+  // SIGHUP (terminal closed) and, on Windows, SIGBREAK (Ctrl+Break). Without these
+  // the run dies without cancelling: no abort of the in-flight research, no browser
+  // or embedding-server teardown, and no 128+N exit code. On Windows it matters
+  // most — SIGTERM is never delivered there (process.kill maps to TerminateProcess),
+  // so Ctrl-C and Ctrl+Break are the only signals that reach this handler at all.
+  // The SDK already registers both (see _addSignalHandlers); the CLI did not, which
+  // left the SDK's handler to tear the container down underneath a live orchestrator
+  // — exactly the race the CLI installs its own handlers to avoid.
+  process.once('SIGHUP', () => onSignal('SIGHUP'));
+  if (process.platform === 'win32') {
+    process.once('SIGBREAK', () => onSignal('SIGBREAK'));
+  }
 
   let parsed: ParsedArgs;
   try {

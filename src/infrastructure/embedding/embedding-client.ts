@@ -8,6 +8,7 @@
 import * as http from 'node:http';
 import { logger } from '../../logger.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
+import { Utf8Body } from '../../utils/http-body.ts';
 
 export class EmbeddingClient implements IEmbedder {
   // Public so store.ts can set the dimension from existing table schema
@@ -109,21 +110,21 @@ export class EmbeddingClient implements IEmbedder {
         (res) => {
           // Keep the timeout armed through the body read — clearing it on headers
           // would let a stalled body hang for the full process lifetime.
-          let body = '';
-          res.on('data', (chunk: Buffer) => { body += chunk; });
+          const collected = new Utf8Body();
+          res.on('data', (chunk: Buffer) => { collected.push(chunk); });
           res.on('end', () => {
             if (resolved) return;
             resolved = true;
             clearTimeout(timer);
             try {
-              const parsed = JSON.parse(body) as T;
+              const parsed = JSON.parse(collected.toString()) as T;
               if (res.statusCode !== 200) {
                 reject(new Error(`[EmbeddingClient] GET ${path} returned HTTP ${res.statusCode}`));
               } else {
                 resolve(parsed);
               }
             } catch (_e) {
-              reject(new Error(`[EmbeddingClient] Failed to parse GET ${path} response: ${body}`));
+              reject(new Error(`[EmbeddingClient] Failed to parse GET ${path} response: ${collected.toString()}`));
             }
           });
           res.on('error', (err) => {
@@ -177,14 +178,14 @@ export class EmbeddingClient implements IEmbedder {
         },
         (res) => {
           // Keep the timeout armed through the body read (see getRequest).
-          let responseBody = '';
-          res.on('data', (chunk: Buffer) => { responseBody += chunk; });
+          const collected = new Utf8Body();
+          res.on('data', (chunk: Buffer) => { collected.push(chunk); });
           res.on('end', () => {
             if (resolved) return;
             resolved = true;
             clearTimeout(timer);
             try {
-              const parsed = JSON.parse(responseBody) as T;
+              const parsed = JSON.parse(collected.toString()) as T;
               if (res.statusCode !== 200) {
                 const msg = (parsed as Record<string, unknown>)?.['error'];
                 reject(new Error(typeof msg === 'string' ? msg : `HTTP ${res.statusCode}`));
@@ -192,7 +193,7 @@ export class EmbeddingClient implements IEmbedder {
                 resolve(parsed);
               }
             } catch (_e) {
-              reject(new Error(`[EmbeddingClient] Failed to parse POST ${path} response: ${responseBody}`));
+              reject(new Error(`[EmbeddingClient] Failed to parse POST ${path} response: ${collected.toString()}`));
             }
           });
           res.on('error', (err) => {

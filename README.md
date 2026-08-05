@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/banner.jpg" alt="pi-research" width="100%" />
+  <img src="https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/banner.jpg" alt="pi-research" width="100%" />
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ sources are saved to the knowledge store in the background.
 Three depth levels — normal, deep, ultra — set the team size and number of rounds;
 ask in natural language and the tool picks the right one:
 
-![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
+![Prompt-driven multi-round research in the pi TUI](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/02-prompt-research.gif)
 
 ### Use cases
 

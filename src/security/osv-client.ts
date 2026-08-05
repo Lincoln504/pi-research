@@ -14,6 +14,7 @@ import { logger } from '../logger.ts';
 import { OSV_TIMEOUT_MS, DEFAULT_MAX_RETRIES, DEFAULT_INITIAL_DELAY_MS, DEFAULT_MAX_DELAY_MS } from '../constants.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readJsonCapped, BodyTooLargeError } from '../utils/http-body.ts';
 import {
   isOsvVulnerability,
   isOsvQueryResponse,
@@ -137,10 +138,17 @@ export async function searchOSV(
 
       let data: unknown;
       try {
-        data = await response.json();
-      } catch {
+        data = await readJsonCapped(response);
+      } catch (err) {
+        // An over-cap body is a size failure, not a syntax one. Rethrowing it
+        // unwrapped keeps the diagnosis honest instead of reporting a 40MB reply
+        // as malformed JSON.
+        if (err instanceof BodyTooLargeError) {
+          metrics.increment('osv_search_errors_total', 1, { error_type: 'body_too_large' });
+          throw err;
+        }
         metrics.increment('osv_search_errors_total', 1, { error_type: 'malformed_json' });
-        throw new Error(`OSV returned a malformed JSON response for "${term}".`);
+        throw new Error(`OSV returned a malformed JSON response for "${term}".`, { cause: err });
       }
 
       let items: OsvVulnerability[];

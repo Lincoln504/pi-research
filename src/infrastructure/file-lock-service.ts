@@ -24,6 +24,14 @@ import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts
 const lockContext = new AsyncLocalStorage<Set<string>>();
 
 /**
+ * How long cleanup() waits for an in-flight critical section to release normally
+ * before forcing the teardown. Long enough for an ordinary state write (temp file
+ * + fsync + rename) to finish, short enough that shutdown still makes progress
+ * when the holder is wedged.
+ */
+const CLEANUP_DRAIN_TIMEOUT_MS = 5_000;
+
+/**
  * Lock configuration options
  */
 export interface FileLockOptions {
@@ -83,6 +91,9 @@ export class FileLockService implements IService {
   // PID reuse. Null when unavailable (no processLifecycle, or lookup failed) —
   // then lock content omits startTime and readers treat us as a legacy owner.
   private ownStartTime: number | null = null;
+  // Set by cleanup(). A retired instance no longer manages the lock file, so
+  // acquiring through it would hand out exclusivity it cannot honour.
+  private _retired = false;
 
   constructor(options: FileLockOptions) {
     this.lockFilePath = options.lockFilePath;
@@ -176,6 +187,42 @@ export class FileLockService implements IService {
   }
 
   /**
+   * Hand our turn back to the next caller in the FIFO queue.
+   *
+   * Every path that stops holding the lock must run this, including the ones that
+   * find the handle already gone. `acquireLock` parks on `await previous` with no
+   * timeout of its own — the lockTimeout only starts counting once the turn has
+   * been granted — so a turn that is never resolved is not a slow acquire, it is a
+   * permanent one.
+   */
+  private _releaseTurn(): void {
+    const resolve = this.resolveTurn;
+    this.resolveTurn = null;
+    if (resolve) resolve();
+  }
+
+  /**
+   * Wait, bounded, for an in-flight critical section to finish.
+   *
+   * Yanking a held lock is not a clean teardown: unlinking the file while the
+   * holder is still mid read-modify-write drops cross-process exclusion, and a peer
+   * that acquires in that window loses the holder's update — precisely the hazard
+   * the lock exists to prevent. Since every caller of {@link cleanup} is a shutdown
+   * path, waiting briefly for a normal release is both safe and correct.
+   *
+   * Bounded because shutdown must make progress regardless: if the holder is wedged
+   * (or is itself the caller, which would otherwise deadlock), we give up and force
+   * the teardown, which is the pre-existing behaviour.
+   */
+  private async _drainHeldLock(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.lockHandle !== null && Date.now() < deadline) {
+      await this.sleep(Math.min(25, this.lockRetryDelay));
+    }
+    return this.lockHandle === null;
+  }
+
+  /**
    * Clean up any stale lock files on initialization.
    * This handles cases where locks weren't released due to crashes.
    */
@@ -232,6 +279,9 @@ export class FileLockService implements IService {
    * @throws Error if unable to acquire lock within timeout
    */
   async acquireLock(): Promise<void> {
+    if (this._retired) {
+      throw new Error(`Cannot acquire lock at ${this.lockFilePath}: service has been disposed`);
+    }
     const heldLocks = lockContext.getStore();
     const lockKey = `${this.lockFilePath}:${this.lockUuid}`;
 
@@ -268,6 +318,14 @@ export class FileLockService implements IService {
       // Release our turn immediately so the next caller can proceed.
       if (myResolve) myResolve();
       return;
+    }
+
+    // Re-check after the wait: cleanup() may have retired the instance while we
+    // were queued. Hand the turn straight on rather than acquiring a lock file this
+    // instance no longer owns.
+    if (this._retired) {
+      myResolve();
+      throw new Error(`Cannot acquire lock at ${this.lockFilePath}: service was disposed while queued`);
     }
 
     // Capture resolve function so we can trigger it in releaseLock() or on failure
@@ -368,13 +426,25 @@ export class FileLockService implements IService {
                   } catch { /* ignore */ }
                   continue;
                 }
-              } catch (_statError) {
-                const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
-                try {
-                  await fs.rename(this.lockFilePath, trashPath);
-                  await fs.unlink(trashPath);
-                  continue;
-                } catch { /* ignore */ }
+              } catch (inspectError) {
+                // We could not READ the lock, which says nothing about whether its
+                // owner is alive. Destroying it here — as this branch used to,
+                // with neither a UUID check nor a liveness check, unlike the
+                // verified path above — turns any transient fs failure (EMFILE
+                // under fd pressure, EACCES, EBUSY on Windows) into a stolen lock
+                // and two concurrent writers on the same file.
+                //
+                // ENOENT is the exception and the common case: the lock was
+                // released between our open() and our read, so there is nothing to
+                // destroy and retrying immediately is correct.
+                const code = (inspectError as NodeJS.ErrnoException | undefined)?.code;
+                if (code === 'ENOENT') continue;
+                logger.warn(
+                  `[FileLockService] Could not inspect contended lock at ${this.lockFilePath} ` +
+                  `(${code ?? 'unknown'}); backing off rather than reclaiming it.`,
+                );
+                metrics.increment('state_lock_inspect_failed_total', 1, { code: code ?? 'unknown' });
+                // Fall through to the timeout check + backoff below.
               }
 
               if (Date.now() - startTime >= this.lockTimeout) {
@@ -400,10 +470,7 @@ export class FileLockService implements IService {
     } catch (err) {
       // If acquisition failed (timeout/error), we MUST release our turn in the 
       // queue so the next caller can try.
-      if (this.resolveTurn) {
-        this.resolveTurn();
-        this.resolveTurn = null;
-      }
+      this._releaseTurn();
       throw err;
     }
   }
@@ -413,6 +480,11 @@ export class FileLockService implements IService {
    */
   async releaseLock(): Promise<void> {
     if (this.lockHandle === null) {
+      // cleanup() can tear the handle down underneath an in-flight critical
+      // section, so withLock()'s finally lands here with the handle already gone.
+      // The queue turn is still ours to hand back — returning without doing so
+      // leaves every queued waiter blocked on `await previous` for good.
+      this._releaseTurn();
       return;
     }
 
@@ -443,11 +515,7 @@ export class FileLockService implements IService {
       metrics.setGauge('state_lock_held', 0);
     } finally {
       // 4. Signal the next caller in the queue that it's their turn.
-      const resolve = this.resolveTurn;
-      this.resolveTurn = null;
-      if (resolve) {
-        resolve();
-      }
+      this._releaseTurn();
     }
   }
 
@@ -477,9 +545,28 @@ export class FileLockService implements IService {
   }
 
   /**
-   * Force clean up any lock files owned by this instance.
+   * Clean up any lock file owned by this instance, and retire the instance.
+   *
+   * Called only from shutdown paths (`dispose`, `StateManager.cleanup`). It first
+   * gives an in-flight critical section a bounded chance to release normally, then
+   * forces the teardown if it has not. After this the instance is retired:
+   * `acquireLock` fails fast rather than blocking on a queue nothing will ever
+   * drain, which is what makes forcing the teardown safe to do at all.
    */
   async cleanup(): Promise<void> {
+    const drained = await this._drainHeldLock(CLEANUP_DRAIN_TIMEOUT_MS);
+    if (!drained) {
+      logger.warn(
+        `[FileLockService] Lock at ${this.lockFilePath} still held after ${CLEANUP_DRAIN_TIMEOUT_MS}ms; forcing teardown. ` +
+        'A concurrent writer in another process may observe the lock as free.',
+      );
+      metrics.increment('state_lock_forced_teardown_total', 1);
+    }
+
+    // Retire BEFORE releasing the turn, so a waiter woken below re-checks and
+    // fails fast instead of acquiring a lock this instance no longer manages.
+    this._retired = true;
+
     if (this.lockHandle) {
       try {
         const content = await fs.readFile(this.lockFilePath, 'utf8').catch(() => '');
@@ -494,6 +581,8 @@ export class FileLockService implements IService {
       this.lockHandle = null;
     }
     this.lockCount = 0;
+    // Unblock anyone parked on `await previous`; they will now see _retired and throw.
+    this._releaseTurn();
   }
 
   /**

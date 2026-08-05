@@ -19,7 +19,7 @@ copyleft). It is resolved at install time and **not bundled** into this package'
 artifacts (the bundled entry points are built `--packages=external`), so no MPL-covered source is
 combined into or redistributed by this MIT package. It is used in-process only to
 configure and launch the Camoufox (Firefox-fork) browser **binary as a separate
-operating-system process**, which this package then drives over the Playwright/CDP
+operating-system process**, which this package then drives over the Playwright/Juggler
 protocol. The Camoufox binary is downloaded and run separately and is subject to its
 own license.
 

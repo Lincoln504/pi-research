@@ -115,7 +115,7 @@ export async function forceDeleteKnowledgeStore(config?: Config, workspace?: str
   const dbDir = getDbDir(config, workspace);
   if (fs.existsSync(dbDir)) {
     try {
-      fs.rmSync(dbDir, { recursive: true, force: true });
+      fs.rmSync(dbDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       fs.mkdirSync(dbDir, { recursive: true });
       logger.info(`[knowledge] Knowledge store at ${dbDir} forcefully deleted and recreated.`);
     } catch (err) {

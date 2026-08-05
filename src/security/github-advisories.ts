@@ -17,6 +17,7 @@ import { normalizeEcosystem } from './ecosystem.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readJsonCapped, BodyTooLargeError } from '../utils/http-body.ts';
 import { logger } from '../logger.ts';
 import {
   isGitHubAdvisoryRaw,
@@ -153,10 +154,16 @@ export async function searchGitHubAdvisories(
 
       let data: unknown;
       try {
-        data = await response.json();
-      } catch {
+        data = await readJsonCapped(response);
+      } catch (err) {
+        // Size failures keep their own identity rather than being reported as a
+        // syntax error, which would point diagnosis at the wrong thing entirely.
+        if (err instanceof BodyTooLargeError) {
+          metrics.increment('github_search_errors_total', 1, { error_type: 'body_too_large' });
+          throw err;
+        }
         metrics.increment('github_search_errors_total', 1, { error_type: 'malformed_json' });
-        throw new Error('GitHub API returned a malformed JSON response (repo advisories).');
+        throw new Error('GitHub API returned a malformed JSON response (repo advisories).', { cause: err });
       }
       let repoAdvisories: readonly GitHubAdvisoryRaw[] = [];
 
@@ -244,10 +251,14 @@ export async function searchGitHubAdvisories(
         // A 404 on a direct GHSA/CVE lookup means "no such advisory", not failure.
         let data: unknown;
         try {
-          data = await response.json();
-        } catch {
+          data = await readJsonCapped(response);
+        } catch (err) {
+          if (err instanceof BodyTooLargeError) {
+            metrics.increment('github_search_errors_total', 1, { error_type: 'body_too_large', endpoint: endpointType });
+            throw err;
+          }
           metrics.increment('github_search_errors_total', 1, { error_type: 'malformed_json', endpoint: endpointType });
-          throw new Error(`GitHub API returned a malformed JSON response for term "${term}".`);
+          throw new Error(`GitHub API returned a malformed JSON response for term "${term}".`, { cause: err });
         }
         let items: readonly GitHubAdvisoryRaw[] = [];
 

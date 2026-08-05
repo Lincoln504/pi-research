@@ -7,6 +7,7 @@ import type { StackExchangeWrapper } from './types.ts';
 import { logger } from '../logger.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readJsonCapped, BodyTooLargeError } from '../utils/http-body.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 
@@ -99,7 +100,7 @@ export class StackExchangeClient {
 
         // NB: the timeout is cleared in `finally`, not here. Clearing it now —
         // when only the headers have arrived — would leave the body read
-        // (response.json() below) with no timeout, so a stalled body could hang
+        // (readJsonCapped below) with no timeout, so a stalled body could hang
         // for the whole process lifetime.
 
         // The SE API returns a structured JSON wrapper (with error_id) even for
@@ -109,8 +110,11 @@ export class StackExchangeClient {
         // "Unexpected token <" SyntaxError that hides the real cause.
         let data: StackExchangeWrapper<T>;
         try {
-          data = await response.json() as StackExchangeWrapper<T>;
+          data = await readJsonCapped<StackExchangeWrapper<T>>(response);
         } catch (parseErr) {
+          // An over-cap body is a size failure, not a malformed-JSON one: rethrow
+          // it unwrapped so it can't be relabelled as an HTTP-status error below.
+          if (parseErr instanceof BodyTooLargeError) throw parseErr;
           if (!response.ok) throw new Error(`HTTP ${response.status} from Stack Exchange API`, { cause: parseErr });
           throw parseErr;
         }
