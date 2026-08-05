@@ -326,7 +326,7 @@ describe('reconcileSkillInstalls (startup self-heal)', () => {
 
   it('is a no-op when there is no manifest', () => {
     const r = reconcileSkillInstalls(opts());
-    expect(r).toEqual({ pruned: [], repointed: [] });
+    expect(r).toEqual({ pruned: [], repointed: [], refreshed: [] });
   });
 });
 

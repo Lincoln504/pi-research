@@ -41,7 +41,11 @@ describe('parseEtime — POSIX ps elapsed-time format', () => {
     },
   );
 
-  it('agrees with this platform\'s real ps output', () => {
+  // POSIX only. The `ps` fallback is unreachable on Windows — that platform
+  // resolves start time via PowerShell — and Windows runners carry a Git-Bash `ps`
+  // that does not implement `-o` at all, so running this there tests nothing and
+  // fails on the harness rather than on the code.
+  it.skipIf(process.platform === 'win32')('agrees with this platform\'s real ps output', () => {
     // Guards the regex against the actual column format on the host, whichever
     // ps implementation that is.
     const raw = execFileSync('ps', ['-o', 'etime=', '-p', String(process.pid)], { encoding: 'utf8' });

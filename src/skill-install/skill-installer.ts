@@ -58,6 +58,24 @@ const SKILL_NAME = 'pi-research';
 const PACKAGE_NAME = '@lincoln504/pi-research';
 
 /**
+ * This package's version, used to stamp manifest entries so a stale COPY can be
+ * detected and refreshed. Read from the SKILL.md we are about to install rather
+ * than from package.json: that file is the copied artifact, its metadata line is
+ * kept in sync by the `version` npm script, and it is present in every layout
+ * (repo, published tarball, installed copy). Returns null if unreadable, which
+ * simply means "cannot tell" — the entry is then always treated as stale, which
+ * refreshes rather than skips.
+ */
+function readSkillVersion(sourceDir: string): string | null {
+  try {
+    const md = fs.readFileSync(path.join(sourceDir, 'SKILL.md'), 'utf-8');
+    return /"version"\s*:\s*"([^"]+)"/.exec(md)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The coding agents the in-app installer (the /research-config TUI) targets:
  * Claude, Codex, and OpenClaw. Each loads skills from a home-directory
  * `~/.<agent>/skills/` path — OpenClaw reads `~/.openclaw/skills` as a managed
@@ -81,6 +99,22 @@ export interface ManifestEntry {
   /** Absolute path of the skill source this was linked/copied from. */
   source: string;
   createdAt: string;
+  /**
+   * Package version that produced this entry.
+   *
+   * Only load-bearing for `copy` entries: a symlink re-reads the package on every
+   * use and so is always current, but a COPY is a point-in-time snapshot that
+   * nothing ever refreshed — reconcile skipped non-symlinks entirely, and the
+   * entry recorded no version, so drift was undetectable by construction. Copies
+   * are not rare: they happen on Windows without symlink privilege, cross-device,
+   * with `--copy`, and via the documented OpenClaw install route. Those users kept
+   * the SKILL.md their engine shipped with *forever* — including its exit-code
+   * contract — while the engine underneath them changed.
+   *
+   * Optional so manifests written before this field are still valid; an entry with
+   * no version simply reads as "not current" and is refreshed once.
+   */
+  version?: string;
 }
 
 interface Manifest {
@@ -293,6 +327,7 @@ export function installSkill(toolIds: string[], opts: InstallOptions = {}): Inst
   const manifest = readManifest(opts);
   const results: InstallResult[] = [];
   const now = new Date().toISOString();
+  const skillVersion = readSkillVersion(source);
 
   for (const id of toolIds) {
     const def = HARNESSES.find(h => h.id === id);
@@ -317,14 +352,14 @@ export function installSkill(toolIds: string[], opts: InstallOptions = {}): Inst
           if (dest !== path.resolve(source)) {
             fs.unlinkSync(absSkillPath);
             fs.symlinkSync(source, absSkillPath, process.platform === 'win32' ? 'junction' : 'dir');
-            upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'symlink', source, createdAt: now });
+            upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'symlink', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
             results.push({ tool: id, path: absSkillPath, type: 'symlink', status: 'installed', message: 're-pointed stale symlink to current source' });
             continue;
           }
         }
       } catch { /* fall through to already-installed below */ }
       results.push({ tool: id, path: absSkillPath, type, status: 'already-installed' });
-      upsertEntry(manifest, { tool: id, path: absSkillPath, type: isSymlinkPresent(absSkillPath) ? 'symlink' : 'copy', source, createdAt: now });
+      upsertEntry(manifest, { tool: id, path: absSkillPath, type: isSymlinkPresent(absSkillPath) ? 'symlink' : 'copy', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
       continue;
     }
     if (fs.existsSync(absSkillPath) || isSymlinkPresent(absSkillPath)) {
@@ -344,14 +379,14 @@ export function installSkill(toolIds: string[], opts: InstallOptions = {}): Inst
         } catch (err: any) {
           // Windows without privilege, or cross-device: fall back to copy.
           copyDir(source, absSkillPath);
-          upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'copy', source, createdAt: now });
+          upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'copy', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
           results.push({ tool: id, path: absSkillPath, type: 'copy', status: 'installed', message: `symlink unavailable (${err?.code ?? err?.message}); copied instead` });
           continue;
         }
       } else {
         copyDir(source, absSkillPath);
       }
-      upsertEntry(manifest, { tool: id, path: absSkillPath, type, source, createdAt: now });
+      upsertEntry(manifest, { tool: id, path: absSkillPath, type, source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
       results.push({ tool: id, path: absSkillPath, type, status: 'installed' });
     } catch (err: any) {
       results.push({ tool: id, path: absSkillPath, type, status: 'error', message: err?.message ?? String(err) });
@@ -441,6 +476,12 @@ export interface ReconcileResult {
   pruned: string[];
   /** Stale/dangling owned symlinks re-pointed to the current package source. */
   repointed: string[];
+  /**
+   * Owned COPIES refreshed because the package version moved on. A symlink tracks
+   * the package automatically; a copy does not, so without this an upgrade left
+   * copy-installed users on the previous SKILL.md indefinitely.
+   */
+  refreshed: string[];
 }
 
 /**
@@ -460,17 +501,40 @@ export interface ReconcileResult {
  * Foreign (non-owned) paths and self-contained copies are never touched.
  */
 export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResult {
-  const result: ReconcileResult = { pruned: [], repointed: [] };
+  const result: ReconcileResult = { pruned: [], repointed: [], refreshed: [] };
   const manifest = readManifest(opts);
   if (manifest.entries.length === 0) return result;
 
   let source: string | null;
   try { source = resolveSkillSourceDir(opts.skillSourceDir); } catch { source = null; }
 
+  const currentVersion = source !== null ? readSkillVersion(source) : null;
+
   const keep: ManifestEntry[] = [];
   for (const e of manifest.entries) {
-    // Copies are self-contained (no target to dangle); leave them as-is.
-    if (e.type !== 'symlink') { keep.push(e); continue; }
+    // A COPY has no target to dangle, but it is a point-in-time snapshot: unlike a
+    // symlink it does not track the package, so an engine upgrade leaves it serving
+    // the OLD SKILL.md — including its exit-code contract — indefinitely. Refresh it
+    // when the stamped version differs from what we now ship. An entry written
+    // before versions were stamped has none, so it reads as stale and is refreshed
+    // once. Ownership is re-checked first: a foreign directory at this path is
+    // never overwritten.
+    if (e.type !== 'symlink') {
+      const stale = currentVersion !== null && e.version !== currentVersion;
+      if (stale && source !== null && fs.existsSync(e.path) && isOwnedCopy(e.path)) {
+        try {
+          fs.rmSync(e.path, { recursive: true, force: true });
+          copyDir(source, e.path);
+          keep.push({ ...e, source, version: currentVersion });
+          result.refreshed.push(e.path);
+        } catch {
+          keep.push(e); // retry next startup rather than losing the entry
+        }
+      } else {
+        keep.push(e);
+      }
+      continue;
+    }
 
     // Link the user deleted by hand — nothing on disk; drop the stale entry.
     if (!isSymlinkPresent(e.path)) { result.pruned.push(e.path); continue; }
