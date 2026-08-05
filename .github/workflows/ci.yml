@@ -308,8 +308,15 @@ jobs:
         # camoufox-js's postinstall fetch queries the GitHub releases API; the
         # token lifts the 60/hr unauthenticated limit that rate-limits shared
         # macOS/Windows runner IPs.
+        #
+        # PI_RESEARCH_STRICT_SETUP makes setup.cjs exit non-zero on a failed browser
+        # install instead of degrading silently. Users must keep the graceful exit 0
+        # (the browser is fetched lazily on first use), but that left the Windows and
+        # macOS branches of setup.cjs with no way to fail a build — a broken launcher
+        # produced a green `npm ci`. This is the one place they are enforced.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PI_RESEARCH_STRICT_SETUP: '1'
       # Repair npm's optional-dependency bug (npm/cli#4828) before the integration
       # suite, which exercises the real knowledge store (needs the @lancedb/lancedb
       # native binding). See scripts/ensure-native-deps.cjs.
@@ -488,7 +495,21 @@ jobs:
           fi
 
   validate:
-    runs-on: ubuntu-latest
+    # Matrix, not ubuntu-only: this is the ONLY job that packs the tarball, installs it
+    # with the real postinstall, and executes the shipped entry points. Running it on
+    # Linux alone meant the npm-generated Windows `.cmd`/`.ps1` bin shim was never
+    # generated or invoked anywhere in CI, and `verify-package.cjs installed` never ran
+    # off-Linux — for a package whose whole delivery contract is cross-platform.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        # Git Bash on the Windows runners, so the one script body below works everywhere
+        # instead of needing a PowerShell transliteration that could drift from it.
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -547,3 +568,19 @@ jobs:
           node "$INSTALLED_DIR/dist/cli.mjs" --help > /dev/null
           node "$INSTALLED_DIR/skills/pi-research/scripts/run.mjs" --help > /dev/null
           echo "OK: installed CLI and skill launcher both execute"
+      - name: Run the generated bin shim (the path a real user invokes)
+        # `node dist/cli.mjs` bypasses the shim npm writes for the "bin" field. On
+        # Windows that shim is a .cmd/.ps1 pair with its own quoting and interpreter
+        # resolution, and it is what `npx pi-research` and a PATH invocation actually
+        # run — so it is the part most able to break without anything else noticing.
+        run: |
+          "$(dirname "$INSTALLED_DIR")/.bin/pi-research" --version
+          echo "OK: bin shim executes"
+          # On Windows the line above runs the bash wrapper npm writes, which is NOT the
+          # file a cmd.exe / PowerShell user gets. pi-research.cmd is, with its own
+          # quoting and interpreter resolution, so exercise it too — via cygpath, since
+          # cmd.exe cannot resolve the MSYS-style path bash is using here.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd //c "$(cygpath -w "$(dirname "$INSTALLED_DIR")/.bin/pi-research.cmd")" --version
+            echo "OK: pi-research.cmd executes"
+          fi

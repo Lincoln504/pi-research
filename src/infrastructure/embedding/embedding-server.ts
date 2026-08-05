@@ -507,6 +507,19 @@ export class EmbeddingServer implements IEmbedder {
         finish();
       });
 
+      // A client that goes away mid-request emits 'aborted'/'close' and does NOT
+      // reliably emit 'error', so neither handler above would fire and this promise
+      // would dangle forever — retaining req, res and the buffered body for the rest
+      // of the process's life. That is not an exotic case: EmbeddingClient destroys
+      // the request on its own 120s timeout, which is the same as this server's
+      // SerialQueue soft timeout, so a slow embed reliably produces one. handleRequest
+      // is invoked with `void`, so nothing else would ever observe the leak.
+      // On a normal request this fires after 'end' and finish() is already a no-op;
+      // nothing follows this await (the caller invokes handleRequest with `void`), so
+      // an early resolve is inert either way — the 'end' handler still writes the
+      // response on its own.
+      req.on('close', finish);
+
       req.on('end', async () => {
         try {
           if (req.method === 'GET' && req.url === '/health') {

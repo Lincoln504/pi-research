@@ -419,10 +419,14 @@ async function fetchPaginated(
     const admitted = rawEntries.filter(admitEntry).map((entry) => parseNVDEntry(entry, options));
 
     if (rawEntries.length === 0) {
-      metrics.increment('nvd_cache_misses_total', 1, { term });
+      // No `term` label: the metrics registry keys counters by label set and is only
+      // cleared by an explicit clearSession(), so labelling by the raw search term made
+      // every distinct security query add a permanent entry for the life of a pi host
+      // session — unbounded growth driven straight by user input.
+      metrics.increment('nvd_cache_misses_total', 1);
       break;
     }
-    metrics.increment('nvd_cache_hits_total', 1, { term });
+    metrics.increment('nvd_cache_hits_total', 1);
 
     allVulnerabilities.push(...admitted);
 

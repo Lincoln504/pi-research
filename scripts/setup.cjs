@@ -119,7 +119,14 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
       console.error('ERROR: Camoufox browser install failed — pi-research will not work.');
       console.error('Run manually to fix: npx camoufox-js fetch');
       console.error(`Reason: ${msg}`);
-      process.exit(0);
+      // Exit 0 by default: the browser is fetched lazily on first use, so a restrictive
+      // network must not fail a user's install. But that also meant nothing here could
+      // ever turn CI red — a broken Windows launcher yielded a green `npm ci`. CI sets
+      // PI_RESEARCH_STRICT_SETUP=1 so the platform-specific spawn paths above are
+      // actually enforced somewhere.
+      const strict = process.env.PI_RESEARCH_STRICT_SETUP === '1' ||
+                     process.env.PI_RESEARCH_STRICT_SETUP === 'true';
+      process.exit(strict ? 1 : 0);
     }
   } else {
     browsersInstalled = true;

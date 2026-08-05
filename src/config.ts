@@ -502,7 +502,7 @@ export function describeKnowledgeStoreMode(
     let registryHasKey = false;
     try {
       const registry = loadProjectSettingsRegistry();
-      registryHasKey = registry[normalizeWorkspacePath(cwd)]?.[KEY] !== undefined;
+      registryHasKey = findRegistryEntry(registry, normalizeWorkspacePath(cwd))?.[KEY] !== undefined;
     } catch { /* unreadable registry → not the origin */ }
     if (registryHasKey) origin = 'this directory (project settings)';
     else if (iface && fileHasKey(getInterfaceEnvFilePath(iface))) origin = `${iface}.env overlay`;
@@ -547,12 +547,48 @@ export function parseDotEnv(content: string): Record<string, string> {
  * Load environment variables from global and local files.
  * Order: Global File < Interface overlay < Legacy .env < Centralized Registry (WINS)
  */
+/**
+ * Look up a directory's entry in the project-settings registry, tolerating case.
+ *
+ * On Windows and on macOS's default (case-insensitive) filesystem, `C:\\Users\\Bob\\Proj`
+ * and `c:\\users\\bob\\proj` are the SAME directory but different object keys, so a shell
+ * that reports a different casing than the one the settings were saved under made those
+ * settings silently vanish. normalizeWorkspacePath only resolves and strips a trailing
+ * separator; it does not fold case, and it must not start doing so — the key it produces
+ * is persisted, so folding it would orphan every entry already on disk.
+ *
+ * Resolving at READ time instead fixes the lookup without touching stored data: exact
+ * match first (the only path taken on Linux, and the fast path everywhere), then a
+ * case-insensitive scan as a fallback.
+ */
+function findRegistryKey(
+  registry: Record<string, Record<string, string>>,
+  normalizedCwd: string,
+): string | undefined {
+  if (registry[normalizedCwd] !== undefined) return normalizedCwd;
+  // Only case-insensitive filesystems can produce this mismatch; skip the scan elsewhere.
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return undefined;
+  const lowered = normalizedCwd.toLowerCase();
+  for (const key of Object.keys(registry)) {
+    if (key.toLowerCase() === lowered) return key;
+  }
+  return undefined;
+}
+
+function findRegistryEntry(
+  registry: Record<string, Record<string, string>>,
+  normalizedCwd: string,
+): Record<string, string> | undefined {
+  const key = findRegistryKey(registry, normalizedCwd);
+  return key === undefined ? undefined : registry[key];
+}
+
 function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, string> {
   const merged: Record<string, string> = {};
   const globalPath = getGlobalEnvFilePath();
   const registry = loadProjectSettingsRegistry();
   const normalizedCwd = normalizeWorkspacePath(cwd);
-  const homeRegistry = registry[normalizeWorkspacePath(os.homedir())];
+  const homeRegistry = findRegistryEntry(registry, normalizeWorkspacePath(os.homedir()));
 
   // 1. ONE-TIME MIGRATION: Populate config.env from HOME registry if missing
   try {
@@ -614,15 +650,17 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
         Object.entries(legacyEnv).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
       );
       const existingLocal = Object.fromEntries(
-        Object.entries(registry[normalizedCwd] ?? {}).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
+        Object.entries(findRegistryEntry(registry, normalizedCwd) ?? {}).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
       );
       if (Object.keys(legacyLocal).length > 0 && JSON.stringify(existingLocal) !== JSON.stringify(legacyLocal)) {
         logger.info(`[config] Migrating legacy .pi-research.env settings from ${cwd} to central registry...`);
         // Persist under the registry lock, reading the latest on-disk state so a concurrent
         // write isn't lost; also reflect the merge in the in-memory `registry` used just below.
-        registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyLocal };
+        const mergeKey = findRegistryKey(registry, normalizedCwd) ?? normalizedCwd;
+        registry[mergeKey] = { ...registry[mergeKey], ...legacyLocal };
         updateProjectSettingsRegistry((disk) => {
-          disk[normalizedCwd] = { ...disk[normalizedCwd], ...legacyLocal };
+          const diskKey = findRegistryKey(disk, normalizedCwd) ?? normalizedCwd;
+          disk[diskKey] = { ...disk[diskKey], ...legacyLocal };
         });
       }
     } catch (err) {
@@ -634,8 +672,9 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
   //    LOCAL_SCOPE_KEYS are applied (and may override), never user-scoped keys — those belong to
   //    config.env. Any non-local key present here is stale pollution (e.g. a pre-fix legacy
   //    migration) and is ignored rather than allowed to override the user's global settings.
-  if (registry[normalizedCwd]) {
-    for (const [key, val] of Object.entries(registry[normalizedCwd])) {
+  const cwdEntry = findRegistryEntry(registry, normalizedCwd);
+  if (cwdEntry) {
+    for (const [key, val] of Object.entries(cwdEntry)) {
       if (LOCAL_SCOPE_KEYS.has(key)) {
         // Don't interpolate values in warnings — a config key could carry a secret and
         // redactSecrets won't catch short/non-standard tokens. Key + winner is enough.
@@ -764,7 +803,11 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     // Read-merge-write under one lock so a concurrent local write to another directory
     // isn't lost (the merge onto the existing entry happens against the latest on-disk state).
     updateProjectSettingsRegistry((registry) => {
-      registry[normalizedCwd] = { ...(registry[normalizedCwd] ?? {}), ...newValues };
+      // Merge into the entry that already represents THIS directory, even if it was
+      // written with different casing on a case-insensitive filesystem. Writing a
+      // second key would leave the earlier settings stranded and unreachable.
+      const key = findRegistryKey(registry, normalizedCwd) ?? normalizedCwd;
+      registry[key] = { ...(registry[key] ?? {}), ...newValues };
     });
 
     logger.debug(`[config] Saved project settings for ${normalizedCwd} to central registry.`);

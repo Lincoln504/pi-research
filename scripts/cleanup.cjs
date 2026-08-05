@@ -160,7 +160,12 @@ function removeOwnedScratchDir(label, dir) {
 // Cache tree: browser profiles, webgpu-viability probe, downloaded embedding models.
 // Same resolution as config.ts (XDG_CACHE_HOME || ~/.cache, then pi-research) on
 // every platform. Shared camoufox binaries live in ~/.cache/camoufox (handled above).
-const cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+// A RELATIVE XDG_CACHE_HOME is ignored, exactly as embedder-utils.ts does at runtime.
+// Honouring one here would rmSync a cwd-relative `pi-research` tree — deleting whatever
+// happens to sit there — while leaving the real cache untouched. This script's whole job
+// is deletion, so it must not resolve paths more loosely than the code that created them.
+const xdgCache = process.env.XDG_CACHE_HOME;
+const cacheHome = xdgCache && path.isAbsolute(xdgCache) ? xdgCache : path.join(os.homedir(), '.cache');
 removeOwnedScratchDir('cache dir', path.join(cacheHome, 'pi-research'));
 
 // State tree: transient run state, locks, backups, project-settings. Now lives in

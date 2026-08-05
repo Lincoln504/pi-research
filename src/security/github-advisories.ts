@@ -270,7 +270,7 @@ export async function searchGitHubAdvisories(
           items = data.items.filter(isGitHubAdvisoryRaw);
         }
 
-        metrics.increment(items.length > 0 ? 'github_cache_hits_total' : 'github_cache_misses_total', 1, { term, endpoint: endpointType });
+        metrics.increment(items.length > 0 ? 'github_cache_hits_total' : 'github_cache_misses_total', 1, { endpoint: endpointType });
 
         return items.map(mapGitHubAdvisory);
       };

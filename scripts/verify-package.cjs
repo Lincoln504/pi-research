@@ -206,7 +206,9 @@ function verifyInstalled(pkgDir) {
   for (const rel of ['dist/cli.mjs', 'skills/pi-research/scripts/run.mjs']) {
     const full = path.join(pkgDir, rel);
     if (!fs.existsSync(full)) continue; // already reported missing above
-    const firstLine = fs.readFileSync(full, 'utf8').split('\n', 1)[0];
+    // Strip a trailing \r: a CRLF checkout (or a Windows-side pack) would otherwise fail
+    // this on a shebang that is perfectly valid.
+    const firstLine = fs.readFileSync(full, 'utf8').split('\n', 1)[0].replace(/\r$/, '');
     if (firstLine !== SHEBANG) {
       fail(`Executable ${rel} is missing the '${SHEBANG}' shebang (first line: ${JSON.stringify(firstLine)}). It will not run as a bin on Linux/macOS.`);
     }

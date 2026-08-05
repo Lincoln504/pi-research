@@ -162,7 +162,9 @@ export async function searchOSV(
       }
 
       const endpoint = isIdLookup ? 'vulns_by_id' : 'query';
-      metrics.increment(items.length > 0 ? 'osv_cache_hits_total' : 'osv_cache_misses_total', 1, { term, endpoint });
+      // `endpoint` only — see the nvd-client note: a raw-term label grows the counter
+      // registry without bound across a session.
+      metrics.increment(items.length > 0 ? 'osv_cache_hits_total' : 'osv_cache_misses_total', 1, { endpoint });
 
       const vulns: Vulnerability[] = [];
       for (const item of items) {
