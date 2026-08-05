@@ -281,8 +281,12 @@ src/
 
 ### Key design decisions
 
-Sandboxed researchers — researcher agents are limited to the tool set above. They cannot
-write files, spawn processes, or make arbitrary network calls.
+Read-only researchers — researcher agents are limited to the tool set above. They cannot
+write files, spawn processes, or make arbitrary network calls. They *can* read and grep
+files: `read` and `grep` are registered unconditionally and the researcher exclusion list
+(`bash`, `write`, `edit`, `repl`, `git`, `terminal`) does not cover them. The `cwd` passed
+to those tools is a resolution base, not a jail — an absolute path resolves to itself — so
+the boundary is "no mutation", not "only this directory".
 
 Worker pool over direct browser — browser processes are isolated in workers so a crash
 in one cannot affect the orchestrator or other sessions.

@@ -16,7 +16,9 @@ export interface GlobalCitation extends Citation {
  * @param reports - Map of researcher ID to report content
  * @returns Object containing normalized reports and the global citation list
  */
-export function normalizeCitations(reports: Map<string, string>): {
+// ReadonlyMap: this only reads `reports` (it returns a NEW normalizedReports map),
+// and callers now pass a read-only view to avoid create-on-read side effects.
+export function normalizeCitations(reports: ReadonlyMap<string, string>): {
   normalizedReports: Map<string, string>;
   globalCitations: GlobalCitation[];
 } {

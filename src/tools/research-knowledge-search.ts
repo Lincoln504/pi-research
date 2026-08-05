@@ -962,6 +962,21 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         return buildSteeringResult(result, urls);
       } catch (error) {
         const durationMs = Date.now() - startTime;
+        const msg = error instanceof Error ? error.message : String(error);
+
+        // A CANCELLED search is not an empty store. Reporting the miss string here
+        // told the calling agent, definitively, that the knowledge store has
+        // nothing on this topic — so it would go straight to full live research,
+        // the very work the user just interrupted. Propagate the abort instead;
+        // the run is ending either way. (Same misclassification as the search
+        // layer's "browser workers may be unavailable" on Ctrl-C.)
+        if (signal?.aborted || (error instanceof Error && error.name === 'AbortError') || /^(aborted|research (aborted|cancelled))$/i.test(msg)) {
+          metrics.observe('research_knowledge_search_duration_ms', durationMs, { status: 'cancelled' });
+          metrics.increment('research_knowledge_search_total', 1, { status: 'cancelled' });
+          logger.debug('[research-knowledge-search] Cancelled mid-search — propagating rather than reporting an empty store.');
+          throw error;
+        }
+
         metrics.observe('research_knowledge_search_duration_ms', durationMs, { status: 'error' });
         metrics.increment('research_knowledge_search_total', 1, { status: 'error' });
 

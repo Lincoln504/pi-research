@@ -11,6 +11,7 @@ import type { ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { logger } from './logger.ts';
+import { checkPiCompatibility } from './core/pi-version.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
@@ -98,25 +99,17 @@ export default async function (pi: ExtensionAPI) {
   // 0.80.8+ host auto-building its ModelRuntime. This in-host check is the real
   // enforcement point: when running as an extension the host's version is NOT
   // constrained by npm's resolution of our own package.json range.
-  const versionParts = PI_VERSION.split('.').map(Number);
-  const major = versionParts[0] ?? 0;
-  const minor = versionParts[1] ?? 0;
-  const patch = versionParts[2] ?? 0;
-  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
-    throw new Error(
-      `[pi-research] Cannot parse pi-coding-agent version "${PI_VERSION}". ` +
-      `Please ensure pi-coding-agent is installed correctly.`,
-    );
+  // Two thresholds, not one — see src/core/pi-version.ts. Below the floor the APIs
+  // we call do not exist, so we refuse. Above the last TESTED line we warn and
+  // continue: pi is pre-1.0, a minor bump can break anything under semver (0.83.0
+  // already extended the ResourceLoader contract), and our own dependency range
+  // cannot constrain the host at all when running as an extension.
+  const compat = checkPiCompatibility(PI_VERSION);
+  if (compat.fatal) {
+    throw new Error(compat.message ?? `[pi-research] Unsupported pi-coding-agent version "${PI_VERSION}".`);
   }
-  const minMajor = 0, minMinor = 80, minPatch = 8;
-  const tooOld = major < minMajor
-    || (major === minMajor && minor < minMinor)
-    || (major === minMajor && minor === minMinor && patch < minPatch);
-  if (tooOld) {
-    throw new Error(
-      `[pi-research] pi-coding-agent v${PI_VERSION} is too old. ` +
-      `Requires v${minMajor}.${minMinor}.${minPatch}+. Please update pi-coding-agent.`,
-    );
+  if (compat.message) {
+    logger.warn(compat.message);
   }
 
   // Re-register the beforeExit safety net (deactivate() strips event listeners during reload).

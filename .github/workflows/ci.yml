@@ -199,6 +199,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Each OS leg uses the pinned .nvmrc version (node: '' selects the file).
+        node: ['']
+        include:
+          # package.json declares `engines.node: ">=22.19.0"`, but every job pinned
+          # .nvmrc (22.19.0) — so the ONLY Node version ever tested was the floor,
+          # while consumers on a newer major were unverified. One extra leg on the
+          # current LTS covers the top of the declared range without tripling the
+          # matrix; a break there means either the code or `engines` is wrong.
+          - os: ubuntu-latest
+            node: '24'
     runs-on: ${{ matrix.os }}
     # Skip the browser download during `npm ci` postinstall — unit tests mock the
     # browser layer and never launch Camoufox.
@@ -213,7 +223,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
-          node-version-file: '.nvmrc'
+          # matrix.node is empty for the standard legs → fall back to .nvmrc.
+          node-version: ${{ matrix.node }}
+          node-version-file: ${{ matrix.node == '' && '.nvmrc' || '' }}
       - uses: actions/cache@v6
         id: cache-modules
         with:
@@ -223,7 +235,11 @@ jobs:
           # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
           # which dropped the platform @lancedb/lancedb native binding from a
           # saved node_modules tree. See scripts/ensure-native-deps.cjs.
-          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # matrix.node is part of the key because node_modules carries native
+          # bindings: without it the two ubuntu legs (pinned .nvmrc and current
+          # LTS) would share one cache, and whichever ran first would decide what
+          # the other tested against — defeating the point of the extra leg.
+          key: node-modules-v2-${{ runner.os }}-node${{ matrix.node || 'nvmrc' }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       # Repair npm's optional-dependency bug (npm/cli#4828): a fresh `npm ci` or a

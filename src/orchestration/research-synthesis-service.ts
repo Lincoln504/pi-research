@@ -108,6 +108,25 @@ export class ResearchSynthesisService implements IService {
   }
 
   /**
+   * Read a session's reports WITHOUT creating an entry for an unknown id.
+   *
+   * The read-only accessors below must not go through `getSessionReports`: that
+   * is create-on-read, so a query for an id we have never seen inserts an empty
+   * map — and at MAX_SESSIONS that insert evicts the current head. The LRU touch
+   * protects sessions that are read or written, but an in-flight run whose
+   * researchers are all still executing (reports stored early, nothing touched
+   * since) is exactly the stalest key, so a stray read for an unknown session
+   * could evict a live run's reports and silently shrink its final synthesis.
+   *
+   * Returns a shared empty map for unknown ids — callers here only read.
+   */
+  private peekSessionReports(sessionId: string): ReadonlyMap<string, string> {
+    return this.sessions.get(sessionId) ?? ResearchSynthesisService.EMPTY_REPORTS;
+  }
+
+  private static readonly EMPTY_REPORTS: ReadonlyMap<string, string> = new Map<string, string>();
+
+  /**
    * Store a researcher report
    * @param sessionId - Session identifier
    * @param id - Report identifier (typically "round.researcherId")
@@ -121,14 +140,14 @@ export class ResearchSynthesisService implements IService {
    * Get a report by ID
    */
   getReport(sessionId: string, id: string): string | undefined {
-    return this.getSessionReports(sessionId).get(id);
+    return this.peekSessionReports(sessionId).get(id);
   }
 
   /**
    * Get all reports
    */
   getAllReports(sessionId: string): Map<string, string> {
-    return new Map(this.getSessionReports(sessionId));
+    return new Map(this.peekSessionReports(sessionId));
   }
 
   /**
@@ -137,7 +156,7 @@ export class ResearchSynthesisService implements IService {
   getReportsForRound(sessionId: string, round: number): Map<string, string> {
     const roundReports = new Map<string, string>();
     const prefix = `${round}.`;
-    for (const [key, report] of this.getSessionReports(sessionId).entries()) {
+    for (const [key, report] of this.peekSessionReports(sessionId).entries()) {
       if (key.startsWith(prefix)) {
         roundReports.set(key, report);
       }
@@ -149,14 +168,14 @@ export class ResearchSynthesisService implements IService {
    * Get total number of reports
    */
   getReportCount(sessionId: string): number {
-    return this.getSessionReports(sessionId).size;
+    return this.peekSessionReports(sessionId).size;
   }
 
   /**
    * Check if there are any reports
    */
   hasReports(sessionId: string): boolean {
-    return this.getSessionReports(sessionId).size > 0;
+    return this.peekSessionReports(sessionId).size > 0;
   }
 
   /**
@@ -177,7 +196,7 @@ export class ResearchSynthesisService implements IService {
    * @returns Fallback synthesis string
    */
   buildFallbackSynthesis(sessionId: string, currentRound: number = 0): string {
-    const reports = this.getSessionReports(sessionId);
+    const reports = this.peekSessionReports(sessionId);
     const reportCount = reports.size;
     const roundInfo = currentRound > 0 ? ` (up to Round ${currentRound})` : '';
     let synthesis = `Research Findings${roundInfo}\n\n`;
@@ -211,7 +230,7 @@ export class ResearchSynthesisService implements IService {
    * @returns Synthesis with guaranteed and verified CITED LINKS section
    */
   ensureCitedLinks(sessionId: string, synthesis: string): string {
-    const reports = this.getSessionReports(sessionId);
+    const reports = this.peekSessionReports(sessionId);
 
     // Primary source: citations the researchers wrote into their reports. These are
     // the richest (they carry descriptions and source tags), so they win when present.
@@ -374,7 +393,7 @@ export class ResearchSynthesisService implements IService {
   extractAllCitations(sessionId: string): Array<{ url: string; description: string; source?: string }> {
     const seen = new Set<string>();
     const allCitations: Array<{ url: string; description: string; source?: string }> = [];
-    const reports = this.getSessionReports(sessionId);
+    const reports = this.peekSessionReports(sessionId);
 
     for (const report of reports.values()) {
       const citations = parseCitations(report);

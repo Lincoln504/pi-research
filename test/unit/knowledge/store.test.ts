@@ -235,6 +235,34 @@ describe('KnowledgeStore', () => {
     await expect(store.findByUrl("https://example.com/it's-a-test")).resolves.toBeDefined();
   });
 
+  // Predicate escaping is quote-doubling only (`'` → `''`). That is sufficient
+  // ONLY if the query dialect does not also treat backslash as a string-literal
+  // escape — if it did, `x\' OR 1=1 --` would terminate the literal early and the
+  // rest would become an always-true predicate, bypassing the workspace scope
+  // filter and leaking cached page content from other projects into this run.
+  // `rebuildDocument` is reachable with an unvalidated string (the scrape tool's
+  // `urls` are arbitrary strings, and normalizeUrl's fallback preserves both `\`
+  // and `'`), so this is the one path where it would matter.
+  //
+  // Verified against the real engine: the predicate is parsed as an ordinary
+  // literal that matches nothing, NOT as an injected always-true clause. This
+  // test exists so a change to the escaping — or a dialect change upstream —
+  // cannot silently make it exploitable.
+  it('does not let a backslash-quote payload escape the string literal', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/kept', text: 'sentinel', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+    ]);
+
+    const payload = "x\\' OR 1=1 --";
+    const matched = await store.findByUrl(payload);
+
+    // An injection would make the predicate always-true and return the sentinel.
+    expect(matched).toEqual([]);
+    // ...and the sentinel must still be there afterwards.
+    expect(await store.findByUrl('https://example.com/kept')).toHaveLength(1);
+  });
+
   it('deleteByUrl removes all chunks for a URL and leaves others intact', async () => {
     await store.open();
     await store.addDocuments([
