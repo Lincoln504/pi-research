@@ -168,7 +168,11 @@ describe('Error Recovery and Resilience', () => {
     // read-only directory bit does not block writes by the DB engine, so the
     // "failure" never occurs and the contract cannot be exercised. The recovery
     // path is covered on Linux/macOS; skip on Windows rather than assert falsely.
-    it.skipIf(process.platform === 'win32')('should recover from write failures gracefully', async () => {
+    // Mode bits are also ignored for uid 0, so under a root container the write
+    // simply succeeds and this FAILS rather than skipping — the same vacuous-guard
+    // hazard the cleanup-utils suite documents. Skip both cases explicitly.
+    it.skipIf(process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0))(
+      'should recover from write failures gracefully', async () => {
       const dbPath = path.join(testDbDir, `write-fail-${randomUUID()}`);
       const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();

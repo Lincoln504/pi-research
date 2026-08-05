@@ -243,7 +243,18 @@ describe('ResearchRunSemaphore — real multi-process behaviour', () => {
     // Each contender settles as either a winner (`acquired`, then holds forever)
     // or a loser (`capacity`, then exits 3). Wait for that decision from all six
     // before asserting, so no child is still mid-attempt.
-    await Promise.all(children.map((c) => c.waitForAny(['acquired', 'capacity', 'error'], 60000)));
+    // Windows gets a longer settle window, and the reason is structural rather than
+    // "CI is slow": every PID+start-time liveness probe there spawns a full PowerShell
+    // (`Get-Process`), each attempt builds a fresh FileLockService with its own probe
+    // memo, and six contending children multiply that. A process start time is
+    // immutable but a RECYCLED pid's is not, so caching those lookups across instances
+    // would defeat the very PID-reuse guard they exist to provide — the cost is
+    // deliberate. What this test asserts is the cap, not the latency, so the settle
+    // window is sized to the platform instead of weakening the guard to fit it.
+    // Kept under the suite's 180s testTimeout so THIS wait fails first, with the
+    // per-child timeline in the message, rather than as a bare vitest timeout.
+    const SETTLE_MS = process.platform === 'win32' ? 150_000 : 60_000;
+    await Promise.all(children.map((c) => c.waitForAny(['acquired', 'capacity', 'error'], SETTLE_MS)));
 
     const acquired = children.flatMap((c) => c.events.filter((e) => e.event === 'acquired'));
     const capacity = children.flatMap((c) => c.events.filter((e) => e.event === 'capacity'));

@@ -26,7 +26,10 @@ describe('scripts/setup.cjs integration tests', () => {
     stderr: string;
   }> {
     return new Promise((resolve, reject) => {
-      const child = spawn('node', [setupScriptPath, ...args], {
+      // process.execPath, not a bare 'node': the rest of this suite already does
+      // this, and a PATH lookup can resolve a different interpreter (nvm-windows,
+      // Volta, a portable Node) than the one running the tests.
+      const child = spawn(process.execPath, [setupScriptPath, ...args], {
         env: { ...process.env, ...env },
         cwd: process.cwd(),
       });

@@ -187,6 +187,33 @@ export class FileLockService implements IService {
   }
 
   /**
+   * Put a lock file back after a trash-and-verify decided not to reclaim it.
+   *
+   * The old form linked it back inside a swallowing catch and then unlinked the
+   * trash copy unconditionally — so any link failure other than "a peer already
+   * re-created it" DESTROYED the lock this branch exists to preserve. Distinguish
+   * the two: if the path is occupied again the peer's lock wins and ours is dropped;
+   * otherwise move ours back rather than deleting it.
+   */
+  private async _restoreLockFile(trashPath: string): Promise<void> {
+    try {
+      await fs.link(trashPath, this.lockFilePath);
+      await fs.unlink(trashPath).catch(() => { /* link succeeded; copy is redundant */ });
+      return;
+    } catch { /* fall through to the two cases below */ }
+
+    const peerHoldsIt = await fs.access(this.lockFilePath).then(() => true).catch(() => false);
+    if (peerHoldsIt) {
+      // Someone re-created the lock while we were checking. Theirs is authoritative.
+      await fs.unlink(trashPath).catch(() => { /* best effort */ });
+      return;
+    }
+    // Nothing there and link failed (EPERM, cross-device, Windows link limits):
+    // move ours back. A restored lock is always better than a destroyed one.
+    await fs.rename(trashPath, this.lockFilePath).catch(() => { /* best effort */ });
+  }
+
+  /**
    * Hand our turn back to the next caller in the FIFO queue.
    *
    * Every path that stops holding the lock must run this, including the ones that
@@ -254,8 +281,7 @@ export class FileLockService implements IService {
           const trashParsed = this._parseLockContent(trashContent);
           if ((trashParsed?.uuid ?? '') !== expectedUuid) {
             // Lock changed hands mid-check — restore it and back off.
-            try { await fs.link(trashPath, this.lockFilePath); } catch { /* ignore */ }
-            await fs.unlink(trashPath);
+            await this._restoreLockFile(trashPath);
             return;
           }
           await fs.unlink(trashPath);
@@ -418,8 +444,7 @@ export class FileLockService implements IService {
                     const trashContent = await fs.readFile(trashPath, 'utf-8');
                     const trashParsed = this._parseLockContent(trashContent);
                     if ((trashParsed?.uuid ?? '') !== lockUuid) {
-                      try { await fs.link(trashPath, this.lockFilePath); } catch { /* ignore */ }
-                      await fs.unlink(trashPath);
+                      await this._restoreLockFile(trashPath);
                       continue;
                     }
                     await fs.unlink(trashPath);
@@ -523,8 +548,13 @@ export class FileLockService implements IService {
    * Execute a function within the scope of a filesystem lock.
    * This is the preferred way to use the lock service.
    * Safe re-entrancy is supported within the same async flow.
+   *
+   * The acquire timeout is the one given to the constructor (`lockTimeout`). This
+   * used to take a second `_timeout` argument that was accepted and then ignored
+   * entirely — a caller passing 5000 silently got the constructed 20000 — so it is
+   * gone rather than left to mislead. No caller was passing it.
    */
-  async withLock<T>(callback: () => Promise<T> | T, _timeout: number = 30000): Promise<T> {
+  async withLock<T>(callback: () => Promise<T> | T): Promise<T> {
     const heldLocks = lockContext.getStore();
     const lockKey = `${this.lockFilePath}:${this.lockUuid}`;
 
