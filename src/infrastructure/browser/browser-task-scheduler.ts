@@ -198,10 +198,14 @@ export class BrowserTaskScheduler implements IScheduler {
             // This ensures that even if the queue is saturated, we won't hang forever.
             result = await Promise.race([
                 queue.enqueue('search', async () => {
-                    return await Promise.race([
-                        pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                        timeoutPromise
-                    ]);
+                    // The shared timeoutPromise is deliberately NOT raced in here. Its timer is
+                    // cleared by this method's `finally` as soon as the OUTER race settles —
+                    // on abort, or on a queue capacity rejection. A task still QUEUED at that
+                    // moment gets dispatched afterwards and would then be racing a promise that
+                    // can never settle: a guard that silently stopped guarding, while holding a
+                    // queue concurrency slot. The pool call below carries taskTimeoutMs, so the
+                    // worker bounds itself; the outer race bounds the caller.
+                    return await pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs });
                 }, signal),
                 timeoutPromise
             ]);
@@ -269,10 +273,14 @@ export class BrowserTaskScheduler implements IScheduler {
             const queue = this.getPriorityQueue(config);
             result = await Promise.race([
                 queue.enqueue('scrape', async () => {
-                    return await Promise.race([
-                        pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                        timeoutPromise
-                    ]);
+                    // The shared timeoutPromise is deliberately NOT raced in here. Its timer is
+                    // cleared by this method's `finally` as soon as the OUTER race settles —
+                    // on abort, or on a queue capacity rejection. A task still QUEUED at that
+                    // moment gets dispatched afterwards and would then be racing a promise that
+                    // can never settle: a guard that silently stopped guarding, while holding a
+                    // queue concurrency slot. The pool call below carries taskTimeoutMs, so the
+                    // worker bounds itself; the outer race bounds the caller.
+                    return await pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs });
                 }, signal),
                 timeoutPromise
             ]);
@@ -328,12 +336,16 @@ export class BrowserTaskScheduler implements IScheduler {
             const queue = this.getPriorityQueue(config);
             result = await Promise.race([
                 queue.enqueue('healthcheck', async () => {
+                    // The shared timeoutPromise is deliberately NOT raced in here. Its timer is
+                    // cleared by this method's `finally` as soon as the OUTER race settles —
+                    // on abort, or on a queue capacity rejection. A task still QUEUED at that
+                    // moment gets dispatched afterwards and would then be racing a promise that
+                    // can never settle: a guard that silently stopped guarding, while holding a
+                    // queue concurrency slot. The pool call below carries taskTimeoutMs, so the
+                    // worker bounds itself; the outer race bounds the caller.
                     const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
                     execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));
-                    return await Promise.race([
-                        execPromise,
-                        timeoutPromise
-                    ]);
+                    return await execPromise;
                 }, signal),
                 timeoutPromise
             ]) as { success: boolean; error?: string };
