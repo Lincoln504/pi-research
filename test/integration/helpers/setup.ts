@@ -5,7 +5,7 @@
  * Allows tests to skip gracefully when dependencies (e.g. camoufox) are not available.
  */
 
-import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.ts';
+import { isBrowserAvailable, getCamoufoxBinaryPath } from '../../../src/infrastructure/browser/config.ts';
 import { stopBrowserManager } from '../../../src/infrastructure/browser/index.ts';
 import { type Embedder } from '../../../src/knowledge/embedder.ts';
 import { createHash } from 'node:crypto';
@@ -45,6 +45,19 @@ export async function setupLifecycle(): Promise<TestContext> {
   const { logger } = await importLogger();
   
   if (!isBrowserAvailable()) {
+    // In CI the browser IS installed, so "not available" there means our mirrored
+    // cache path has drifted from camoufox-js's — and the whole browser integration
+    // leg would then report green while running nothing. The workflow's separate
+    // launch check cannot catch that: it goes through camoufox-js's OWN resolution,
+    // so it passes on exactly the paths this one gets wrong. Fail loudly instead.
+    if (process.env['PI_RESEARCH_REQUIRE_BROWSER'] === '1') {
+      throw new Error(
+        '[test] PI_RESEARCH_REQUIRE_BROWSER=1 but isBrowserAvailable() is false. ' +
+        `Expected the camoufox binary at ${getCamoufoxBinaryPath()} on ${process.platform}. ` +
+        'Either the download failed or getBrowserCacheDir() no longer mirrors camoufox-js — ' +
+        'the latter silently empties this entire suite.',
+      );
+    }
     logger.warn('[test] Browser not available for integration tests (camoufox missing or FULL_MOCK_MODE active)');
     return createUninitializedContext(logger);
   }

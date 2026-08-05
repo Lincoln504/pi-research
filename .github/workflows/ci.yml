@@ -429,6 +429,15 @@ jobs:
           # so isBrowserAvailable() returns true and browser tests actually execute.
           # Setting both mock vars triggers isFullMockMode() which causes all serial
           # browser tests to silently skip (false-green).
+          #
+          # And enforce that: the browser IS installed on this job, so if
+          # isBrowserAvailable() is false here it means our mirrored camoufox cache
+          # path has drifted from camoufox-js's own — which would empty this entire
+          # suite while still reporting green. The "Verify camoufox launches" step
+          # cannot catch that, because it resolves the binary through camoufox-js
+          # rather than through our path. NOT set on the parallel group above, where
+          # full-mock mode makes an unavailable browser the intended state.
+          PI_RESEARCH_REQUIRE_BROWSER: "1"
           PI_RESEARCH_WORKER_THREADS: "2"
           # Skip the live-network E2E suites (concurrent DuckDuckGo searches, deep
           # research) in CI: shared CI datacenter IPs are rate-limited/blocked by
@@ -554,6 +563,9 @@ jobs:
           npm init -y >/dev/null
           npm install "./$TAR_FILE"
           echo "INSTALLED_DIR=$WORK/node_modules/@lincoln504/pi-research" >> "$GITHUB_ENV"
+          # npm places a SCOPED package's bin shim in node_modules/.bin, not
+          # node_modules/@scope/.bin — export it rather than deriving it downstream.
+          echo "BIN_DIR=$WORK/node_modules/.bin" >> "$GITHUB_ENV"
       - name: Verify installed package layout (entry points, bundles, worker, prompts)
         run: node scripts/verify-package.cjs installed "$INSTALLED_DIR"
       - name: Run the installed CLI (resolution smoke-test)
@@ -574,13 +586,13 @@ jobs:
         # resolution, and it is what `npx pi-research` and a PATH invocation actually
         # run — so it is the part most able to break without anything else noticing.
         run: |
-          "$(dirname "$INSTALLED_DIR")/.bin/pi-research" --version
+          "$BIN_DIR/pi-research" --version
           echo "OK: bin shim executes"
           # On Windows the line above runs the bash wrapper npm writes, which is NOT the
           # file a cmd.exe / PowerShell user gets. pi-research.cmd is, with its own
           # quoting and interpreter resolution, so exercise it too — via cygpath, since
           # cmd.exe cannot resolve the MSYS-style path bash is using here.
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cmd //c "$(cygpath -w "$(dirname "$INSTALLED_DIR")/.bin/pi-research.cmd")" --version
+            cmd //c "$(cygpath -w "$BIN_DIR/pi-research.cmd")" --version
             echo "OK: pi-research.cmd executes"
           fi
