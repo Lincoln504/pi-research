@@ -18,6 +18,7 @@
  * only written on explicit opt-in (callers must pass them deliberately).
  */
 
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -350,6 +351,12 @@ export function installSkill(toolIds: string[], opts: InstallOptions = {}): Inst
         if (lst.isSymbolicLink()) {
           const dest = path.resolve(path.dirname(absSkillPath), fs.readlinkSync(absSkillPath));
           if (dest !== path.resolve(source)) {
+            // dryRun means "plan only, touch nothing" — the re-point is a real
+            // unlink+symlink and must honour it like the fresh-install path does.
+            if (opts.dryRun) {
+              results.push({ tool: id, path: absSkillPath, type: 'symlink', status: 'planned', message: 'would re-point stale symlink to current source' });
+              continue;
+            }
             fs.unlinkSync(absSkillPath);
             fs.symlinkSync(source, absSkillPath, process.platform === 'win32' ? 'junction' : 'dir');
             upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'symlink', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
@@ -522,14 +529,51 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
     if (e.type !== 'symlink') {
       const stale = currentVersion !== null && e.version !== currentVersion;
       if (stale && source !== null && fs.existsSync(e.path) && isOwnedCopy(e.path)) {
+        // Build-then-swap, never rm-then-copy. The old shape (rmSync, then
+        // copyDir) destroyed the install permanently when the copy failed
+        // (ENOSPC, a locked file): the retry guard requires the path to exist,
+        // so a vanished install was never retried either. The staging names are
+        // dot-prefixed so a crash mid-swap cannot leave a directory a skill
+        // scanner would pick up as a duplicate skill.
+        const dir = path.dirname(e.path);
+        const base = path.basename(e.path);
+        // Sweep leftovers from a previous crashed swap before starting a new one.
         try {
-          fs.rmSync(e.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-          copyDir(source, e.path);
-          keep.push({ ...e, source, version: currentVersion });
-          result.refreshed.push(e.path);
+          for (const name of fs.readdirSync(dir)) {
+            if (name.startsWith(`.${base}.new-`) || name.startsWith(`.${base}.old-`)) {
+              fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+            }
+          }
+        } catch { /* hygiene only */ }
+        const suffix = crypto.randomBytes(4).toString('hex');
+        const fresh = path.join(dir, `.${base}.new-${suffix}`);
+        const retired = path.join(dir, `.${base}.old-${suffix}`);
+        try {
+          copyDir(source, fresh);
         } catch {
-          keep.push(e); // retry next startup rather than losing the entry
+          try { fs.rmSync(fresh, { recursive: true, force: true }); } catch { /* best effort */ }
+          keep.push(e); // source unreadable / disk full — install intact, retry next startup
+          continue;
         }
+        try {
+          fs.renameSync(e.path, retired);
+        } catch {
+          try { fs.rmSync(fresh, { recursive: true, force: true }); } catch { /* best effort */ }
+          keep.push(e); // could not move the old copy aside (locked on Windows) — intact
+          continue;
+        }
+        try {
+          fs.renameSync(fresh, e.path);
+        } catch {
+          // Put the old copy back — an old skill is strictly better than none.
+          try { fs.renameSync(retired, e.path); } catch { /* skills dir itself broken */ }
+          try { fs.rmSync(fresh, { recursive: true, force: true }); } catch { /* best effort */ }
+          keep.push(e);
+          continue;
+        }
+        try { fs.rmSync(retired, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* leaked dot-dir; swept next reconcile */ }
+        keep.push({ ...e, source, version: currentVersion });
+        result.refreshed.push(e.path);
       } else {
         keep.push(e);
       }
@@ -578,6 +622,24 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Recursive copy at the JS level — deliberately NOT fs.cpSync. cpSync's native
+ * implementation (std::filesystem) ABORTS the whole process on an unreadable
+ * directory instead of throwing a catchable error (observed on Node 25:
+ * "terminate called after throwing an instance of
+ * 'std::filesystem::__cxx11::filesystem_error'"). This runs inside
+ * reconcileSkillInstalls at every startup, where a copy failure must be caught
+ * and rolled back — never take the host down. statSync/copyFileSync follow
+ * symlinks, matching the dereference behaviour cpSync was given.
+ */
 function copyDir(src: string, dest: string): void {
-  fs.cpSync(src, dest, { recursive: true, dereference: true });
+  const st = fs.statSync(src);
+  if (st.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const name of fs.readdirSync(src)) {
+      copyDir(path.join(src, name), path.join(dest, name));
+    }
+  } else {
+    fs.copyFileSync(src, dest);
+  }
 }

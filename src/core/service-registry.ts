@@ -246,10 +246,22 @@ export class ServiceContainer {
       // Re-initialize if ctx is provided and service supports it
       if (ctx && registration.instance.initialize) {
         // Wrap in initializationContext so nested get() calls are tracked
-        return initializationContext.run(name, async () => {
+        const reinit = initializationContext.run(name, async () => {
           await registration.instance!.initialize!(ctx);
           return registration.instance as T;
         });
+        // Recorded like a first init: a re-init is just as in-flight. Without
+        // this, disposeAll's settle-wait cannot see it (it would dispose the
+        // instance under a running initialize()), and concurrent callers
+        // received the instance mid-re-initialization.
+        registration.initializationPromise = reinit as Promise<IService>;
+        const clearIfCurrent = () => {
+          if (registration.initializationPromise === (reinit as Promise<IService>)) {
+            registration.initializationPromise = null;
+          }
+        };
+        reinit.then(clearIfCurrent, clearIfCurrent);
+        return reinit;
       }
       return registration.instance as T;
     }
@@ -332,6 +344,15 @@ export class ServiceContainer {
       throw new Error(`Service '${name}' is not registered`);
     }
 
+    // Settle an in-flight initialization first. Disposing the early-published
+    // instance while its initialize() is still running hands the awaiting get()
+    // caller a service that was disposed under it — observed as store-closed
+    // errors when /research-config cleared the knowledge store during a
+    // concurrent first search.
+    if (registration.initializationPromise) {
+      await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
+    }
+
     if (registration.instance && registration.instance.dispose) {
       await registration.instance.dispose().catch((err: unknown) => {
         logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
@@ -353,6 +374,11 @@ export class ServiceContainer {
     const registration = this.services.get(name);
     if (!registration) {
       throw new Error(`Service '${name}' is not registered`);
+    }
+
+    // Settle an in-flight initialization before swapping — see clear().
+    if (registration.initializationPromise) {
+      await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
     }
 
     // Dispose old instance if present
@@ -523,12 +549,15 @@ export class ServiceContainer {
       return null;
     }
 
-    if (registration.instance) {
-      return ServiceLifecycle.INITIALIZED;
-    }
-
+    // Promise first: the instance is published BEFORE its initialize() completes
+    // (the early publish that lets dependency cycles resolve), so instance-first
+    // ordering reported a mid-initialization service as INITIALIZED.
     if (registration.initializationPromise) {
       return ServiceLifecycle.INITIALIZING;
+    }
+
+    if (registration.instance) {
+      return ServiceLifecycle.INITIALIZED;
     }
 
     return ServiceLifecycle.UNINITIALIZED;

@@ -22,6 +22,13 @@ export interface SemverParts {
   major: number;
   minor: number;
   patch: number;
+  /**
+   * True when the version carried a pre-release tag (`-rc.1`). Semver orders a
+   * pre-release BELOW its release, so `0.80.8-rc.1` predates the `0.80.8` floor
+   * and may lack the APIs the floor exists for. Only the floor comparison uses
+   * this; the tested-ceiling check compares lines and ignores it.
+   */
+  prerelease?: boolean;
 }
 
 /**
@@ -31,13 +38,15 @@ export interface SemverParts {
  * explicit "cannot determine" rather than to a silently wrong comparison.
  */
 export function parsePiVersion(version: string): SemverParts | null {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? '').trim());
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(-)?/.exec(String(version ?? '').trim());
   if (!m) return null;
   const major = Number(m[1]);
   const minor = Number(m[2]);
   const patch = Number(m[3]);
   if ([major, minor, patch].some((n) => !Number.isFinite(n))) return null;
-  return { major, minor, patch };
+  // The flag is emitted only when set, so a plain release parses to the exact
+  // {major, minor, patch} shape existing comparisons and tests expect.
+  return m[4] === '-' ? { major, minor, patch, prerelease: true } : { major, minor, patch };
 }
 
 /** Ordering comparison: negative if a < b, 0 if equal, positive if a > b. */
@@ -96,7 +105,9 @@ export function checkPiCompatibility(
     };
   }
 
-  if (compareVersions(parsed, min) < 0) {
+  // A pre-release OF the floor version orders below the floor (0.80.8-rc.1 <
+  // 0.80.8) and may predate the very APIs the floor guards.
+  if (compareVersions(parsed, min) < 0 || (compareVersions(parsed, min) === 0 && parsed.prerelease === true)) {
     return {
       level: 'too-old',
       fatal: true,

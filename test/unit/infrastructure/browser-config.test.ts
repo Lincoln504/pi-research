@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 
 // Deterministically control os.platform() so every platform branch of the
 // path-resolution logic is exercised on any host. CI runs on Linux, so without
@@ -116,8 +117,15 @@ describe('browser-config', () => {
         });
 
         it('honours the config.TMP_DIR (PI_RESEARCH_TMP_DIR) override', () => {
-            const custom = join(homedir(), '.cache', 'pi-research', 'profiles-test-override');
-            expect(getBrowserProfileDir({ TMP_DIR: custom } as any)).toBe(custom);
+            // Under the OS tmpdir, NOT the real ~/.cache/pi-research:
+            // getBrowserProfileDir mkdirs its result, and a unit test must not
+            // leave artifacts in the user's actual cache tree.
+            const custom = join(tmpdir(), 'pi-research-test', 'profiles-test-override');
+            try {
+                expect(getBrowserProfileDir({ TMP_DIR: custom } as any)).toBe(custom);
+            } finally {
+                rmSync(join(tmpdir(), 'pi-research-test'), { recursive: true, force: true });
+            }
         });
     });
 

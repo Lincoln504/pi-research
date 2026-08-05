@@ -150,6 +150,16 @@ export class Embedder {
         // Re-check: another caller may have revived (or terminally disposed) the
         // embedder while we waited.
         if ((this.state as EmbedderState) === 'ready') return;
+        // A terminal dispose landed as a DOWNGRADE onto the idle dispose we just
+        // awaited: state is 'idle', but reviving is forbidden — pre-fix this fell
+        // through to a full model load during process teardown. (A LATER, fresh
+        // initialize()/embed() after the completed dispose never enters this
+        // branch and stays revivable — that re-use is pinned behaviour.) The cast
+        // defeats control-flow narrowing, which cannot see the awaited dispose
+        // mutating the field — same idiom as the state re-checks around it.
+        if ((this.disposeReason as 'idle' | 'terminal') === 'terminal') {
+          throw new Error('Cannot initialize while disposing');
+        }
         if ((this.state as EmbedderState) === 'disposing') {
           throw new Error('Cannot initialize while disposing');
         }

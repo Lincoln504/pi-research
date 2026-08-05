@@ -24,8 +24,10 @@ describe('parsePiVersion', () => {
     ['v0.83.0', { major: 0, minor: 83, patch: 0 }],
     ['1.2.3', { major: 1, minor: 2, patch: 3 }],
     // pi has shipped pre-release and build-metadata suffixes; the numeric core is
-    // what matters, and refusing these would hard-fail a working host.
-    ['0.84.0-rc.1', { major: 0, minor: 84, patch: 0 }],
+    // what matters, and refusing these would hard-fail a working host. The
+    // pre-release flag is carried so the FLOOR comparison can order 0.80.8-rc.1
+    // below 0.80.8; build metadata does not affect ordering and carries none.
+    ['0.84.0-rc.1', { major: 0, minor: 84, patch: 0, prerelease: true }],
     ['0.84.0+build.5', { major: 0, minor: 84, patch: 0 }],
     ['  0.81.2  ', { major: 0, minor: 81, patch: 2 }],
   ])('parses %s', (input, expected) => {
@@ -70,6 +72,19 @@ describe('checkPiCompatibility', () => {
     expect(r.level).toBe('ok');
     expect(r.fatal).toBe(false);
     expect(r.message).toBeNull();
+  });
+
+  it('rejects a PRE-RELEASE of the floor version — semver orders it below the floor', () => {
+    // 0.80.8-rc.1 predates 0.80.8 and may lack the very APIs the floor guards
+    // (ModelRuntime landed IN 0.80.8). Discarding the tag let it pass as ok.
+    const r = checkPiCompatibility('0.80.8-rc.1');
+    expect(r.level).toBe('too-old');
+    expect(r.fatal).toBe(true);
+  });
+
+  it('accepts a pre-release ABOVE the floor inside the tested window', () => {
+    const r = checkPiCompatibility('0.81.0-beta.1');
+    expect(r.level).toBe('ok');
   });
 
   it('rejects an unparseable version as fatal rather than guessing', () => {

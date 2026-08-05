@@ -22,6 +22,13 @@ import type { NodeError } from '../../types/index.ts';
 export class BrowserClient implements IScheduler {
     private readonly authSecret: string;
 
+    /** The leader port this client was built for — lets the herd-guard cooldown
+     * verify the cached handle still targets the REGISTERED leader, not a
+     * predecessor that died inside the cooldown window. */
+    get targetPort(): number {
+        return this.port;
+    }
+
     constructor(private readonly port: number, authSecret?: string) {
         this.authSecret = authSecret ?? process.env['PI_BROWSER_AUTH_SECRET'] ?? '';
         logger.log(`[BrowserClient] Connecting to global scheduler at http://127.0.0.1:${port}`);

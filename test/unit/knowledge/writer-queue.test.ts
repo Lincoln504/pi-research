@@ -84,6 +84,42 @@ describe('WriterQueue', () => {
     expect(mockStore.addDocuments).not.toHaveBeenCalled();
   });
 
+  it('dedups against the NEWEST generation, not whichever row the store returns first', async () => {
+    // After a failed prune two generations coexist and findByUrl's row order is
+    // arbitrary. Matching the OLD generation's hash (returned first here) must
+    // NOT skip the refresh — the incoming content differs from the CURRENT one.
+    const oldHash = createHash('sha256').update('description').update('stale content').digest('hex');
+    const newHash = createHash('sha256').update('description').update('current content').digest('hex');
+    mockStore.findByUrl.mockResolvedValue([
+      { url: 'https://test.com', text: 'description', metadata: { contentHash: oldHash, ingestionType: 'synthesis-description' }, timestamp: 1000 },
+      { url: 'https://test.com', text: 'description', metadata: { contentHash: newHash, ingestionType: 'synthesis-description' }, timestamp: 2000 },
+    ]);
+
+    // Incoming content matches the OLD generation — a real change vs the newest.
+    queue.enqueue({ url: 'https://test.com', markdown: 'description', content: 'stale content', metadata: { ingestionType: 'synthesis-description' } });
+    await queue.drain();
+
+    expect(mockStore.addDocuments).toHaveBeenCalled();
+  });
+
+  it('sweeps leftover older generations on the unchanged-content skip path', async () => {
+    // With stable content, the skip path is the only code that ever looks at
+    // this URL again — pre-fix, duplicates left by a failed prune survived
+    // every subsequent refresh forever.
+    const hash = createHash('sha256').update('description').update('').digest('hex');
+    mockStore.findByUrl.mockResolvedValue([
+      { url: 'https://test.com', text: 'description', metadata: { contentHash: 'older-generation', ingestionType: 'synthesis-description' }, timestamp: 1000 },
+      { url: 'https://test.com', text: 'description', metadata: { contentHash: hash, ingestionType: 'synthesis-description' }, timestamp: 2000 },
+    ]);
+
+    queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
+    await queue.drain();
+
+    expect(mockStore.addDocuments).not.toHaveBeenCalled(); // still a skip
+    // ...but the stale generation is collected, bounded by the newest timestamp.
+    expect(mockStore.deleteByUrlAndType).toHaveBeenCalledWith('https://test.com', 'synthesis-description', 2000);
+  });
+
   it('should re-ingest when content changes even if description is the same', async () => {
     const hash = createHash('sha256').update('description').update('old content').digest('hex');
     mockStore.findByUrl.mockResolvedValue([{

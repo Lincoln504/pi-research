@@ -78,6 +78,33 @@ describe('Embedder — idle dispose is a pause, not an end', () => {
     expect((embedder as any).state).toBe('idle');
   });
 
+  it('an initialize() ALREADY PARKED on the idle dispose does not resurrect after a terminal downgrade', async () => {
+    // The waiter re-checks state after awaiting the dispose, sees it completed
+    // ('idle'), and pre-fix fell through to a full model load during process
+    // teardown — the exact resurrection the downgrade exists to prevent. It must
+    // re-read the (downgraded) reason too. A LATER fresh initialize()/embed()
+    // after the completed dispose stays revivable — that re-use is pinned by
+    // embedder.test.ts ("re-initialize when calling embed after dispose").
+    const embedder = newEmbedder();
+    await embedder.initialize();
+
+    const idle = embedder.dispose('idle');
+    await Promise.resolve();
+    expect((embedder as any).state).toBe('disposing');
+
+    // Parks on the in-flight idle dispose (the revive path)...
+    const parked = embedder.initialize();
+    const rejection = expect(parked).rejects.toThrow('Cannot initialize while disposing');
+
+    // ...then shutdown lands while it is parked.
+    const terminal = embedder.dispose('terminal');
+
+    await Promise.all([idle, terminal]);
+    await rejection;
+    expect((embedder as any).state).toBe('idle');
+    expect((embedder as any).pipeline).toBeNull();
+  });
+
   it('embed() after an idle dispose works rather than surfacing an unclassified error', async () => {
     const embedder = newEmbedder();
     await embedder.initialize();

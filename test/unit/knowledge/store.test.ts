@@ -294,6 +294,40 @@ describe('KnowledgeStore', () => {
     expect(remaining.length).toBeGreaterThan(0);
   });
 
+  it('deleteByUrlAndType with olderThan removes strictly-older rows and spares the boundary row', async () => {
+    // Pins the add-then-prune contract against the real engine: the prune is
+    // bounded by the replacement's own timestamp, so `timestamp < olderThan`
+    // must be strict — a row stamped AT the boundary is the replacement itself.
+    await store.open();
+    const url = 'https://example.com/boundary';
+    await store.addDocuments([
+      { url, text: 'old generation', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description', contentHash: 'old' }, timestamp: 1000 },
+      { url, text: 'replacement', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description', contentHash: 'new' }, timestamp: 2000 },
+    ]);
+
+    await store.deleteByUrlAndType(url, 'synthesis-description', 2000);
+
+    const remaining = await store.findByUrl(url);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.text).toBe('replacement');
+    expect(Number(remaining[0]!.timestamp)).toBe(2000);
+  });
+
+  it('rebuildDocument serves the NEWEST generation when a failed prune left duplicates', async () => {
+    await store.open();
+    const url = 'https://example.com/dupes';
+    await store.addDocuments([
+      { url, text: 'stale text', content: 'stale content', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description', description: 'stale' }, timestamp: 1000 },
+    ]);
+    await store.addDocuments([
+      { url, text: 'fresh text', content: 'fresh content', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description', description: 'fresh' }, timestamp: 2000 },
+    ]);
+
+    const rebuilt = await store.rebuildDocument(url);
+    expect(rebuilt).not.toBeNull();
+    expect(rebuilt!.text).toBe('fresh content');
+  });
+
   it('rebuildDocument returns the content field from a synthesis-description row', async () => {
     await store.open();
     const fullPageContent = 'Hello world this is the full document content.';

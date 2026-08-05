@@ -93,6 +93,12 @@ export class BrowserServer {
                 const expected = Buffer.from(getOrCreateAuthSecret(), 'utf8');
                 const actual = Buffer.from(authHeader ?? '', 'utf8');
                 if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+                    // Drain the request before answering (mirrors the embedding
+                    // server's 403 path): without it a still-arriving body leaves
+                    // the request half-read and Node destroys the socket after the
+                    // response flush, so the client can see ECONNRESET instead of
+                    // the status.
+                    req.resume();
                     res.writeHead(403, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Unauthorized' }));
                     return;
@@ -104,6 +110,7 @@ export class BrowserServer {
                 // stops the client reusing this socket for a retry that would
                 // only 503 again.
                 if (this.draining) {
+                    req.resume(); // drain before answering — see the 403 path
                     res.writeHead(503, {
                         'Content-Type': 'application/json',
                         'Connection': 'close',
@@ -113,6 +120,7 @@ export class BrowserServer {
                 }
 
                 if (req.method !== 'POST') {
+                    req.resume(); // drain before answering — see the 403 path
                     res.writeHead(405);
                     res.end('Method Not Allowed');
                     return;

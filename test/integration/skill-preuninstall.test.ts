@@ -25,10 +25,22 @@ beforeEach(() => { HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-skill-int-')
 afterEach(() => { try { fs.rmSync(HOME, { recursive: true, force: true }); } catch { /* ignore */ } });
 
 function runCleanup() {
-  return spawnSync(process.execPath, [CLEANUP], {
-    encoding: 'utf-8',
-    env: { ...process.env, HOME, USERPROFILE: HOME },
-  });
+  // cleanup.cjs deletes real trees, and it resolves them from XDG_CACHE_HOME,
+  // PI_RESEARCH_STATE_DIR and PI_RESEARCH_CONFIG_DIR_NAME BEFORE falling back to
+  // the homedir — so overriding HOME alone does not confine it. On a dev machine
+  // with XDG_CACHE_HOME exported (any configured Linux desktop) the un-sanitized
+  // spawn deleted the user's real ~/.cache/pi-research on every suite run.
+  // Pin every path the script honours inside the throwaway HOME.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME,
+    USERPROFILE: HOME,
+    XDG_CACHE_HOME: path.join(HOME, '.cache'),
+  };
+  delete env.PI_RESEARCH_STATE_DIR;
+  delete env.PI_RESEARCH_CONFIG_DIR_NAME;
+  delete env.PI_RESEARCH_PURGE_BROWSERS;
+  return spawnSync(process.execPath, [CLEANUP], { encoding: 'utf-8', env });
 }
 const claudeSkill = () => path.join(HOME, '.claude', 'skills', 'pi-research');
 const manifest = () => path.join(HOME, '.pi', 'research', 'installed-skills.json');

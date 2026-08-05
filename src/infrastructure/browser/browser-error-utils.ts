@@ -115,7 +115,12 @@ export function isPoolShutdownError(error: unknown): boolean {
         // classifier matched it, so the first attempt rethrew instead of retrying —
         // and auto-recovery fires only after 3 consecutive worker failures, i.e.
         // exactly when a burst of tasks is in flight and would all die together.
-        err.message.includes('Worker pool is being reset')
+        err.message.includes('Worker pool is being reset') ||
+        // poolifier's wording once destroy() has COMPLETED (vs "destroying pool"
+        // while it is in progress). A queued closure holding a pool captured before
+        // an auto-recovery destroy dispatches into exactly this window; it is the
+        // same transient swap the "being reset" string covers, not a hard fault.
+        err.message.includes('Cannot execute a task on not started pool')
     );
 }
 

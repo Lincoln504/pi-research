@@ -25,6 +25,52 @@ import { raceWithDeadline } from '../../utils/safe-unref.ts';
 import { PriorityTaskQueue } from './priority-task-queue.ts';
 
 /**
+ * Grace added to the worker's own task budget before the dead-worker backstop
+ * fires, so a live worker's more informative timeout always answers first.
+ */
+export const WORKER_DEATH_BACKSTOP_GRACE_MS = 5000;
+
+/**
+ * Execute a pool task with a dead-worker backstop.
+ *
+ * poolifier (measured on 5.3.2) never settles an in-flight execute() whose worker
+ * dies — not when the worker exits, not when a replacement is respawned, not even
+ * when the pool is destroyed. The worker enforces taskTimeoutMs on itself, but only
+ * while it is alive; an OOM-killed worker leaves the promise pending forever, and
+ * with it the PriorityTaskQueue concurrency slot the dispatched closure holds. Each
+ * such death would permanently shrink the queue until the leader serves nothing but
+ * timeouts.
+ *
+ * The backstop timer is created inside the dispatched closure, so it shares no
+ * lifetime with the caller's outer race — whose `finally` clearing a shared timer
+ * is exactly how a QUEUED task once lost its guard. Armed at dispatch, it fires
+ * only when nothing is left to answer; its rejection frees the queue slot (the
+ * caller has already been answered by the outer race).
+ */
+export async function executePoolTaskWithDeathBackstop<T>(
+    execute: () => Promise<T>,
+    taskTimeoutMs: number,
+    label: string,
+): Promise<T> {
+    const backstopMs = taskTimeoutMs + WORKER_DEATH_BACKSTOP_GRACE_MS;
+    let backstopId: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race([
+            execute(),
+            new Promise<never>((_, reject) => {
+                backstopId = setTimeout(
+                    () => reject(new Error(`${label} task unanswered after ${backstopMs}ms — worker likely died mid-task`)),
+                    backstopMs,
+                );
+                if (backstopId.unref) backstopId.unref();
+            }),
+        ]);
+    } finally {
+        if (backstopId) clearTimeout(backstopId);
+    }
+}
+
+/**
  * Browser task scheduler - manages the worker pool and executes tasks.
  * Only the leader process has an instance of this scheduler.
  */
@@ -192,21 +238,29 @@ export class BrowserTaskScheduler implements IScheduler {
 
         logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
         let result: any;
+        // Settling the outer race must also release the task's queue claim: a task
+        // still QUEUED when the caller is answered is cancelled before it consumes
+        // a slot, and a RUNNING one frees its slot instead of keeping it (plus a
+        // fresh worker budget) for a result nobody will consume. The abort-while-
+        // queued/running semantics are the queue's own, pinned by its tests.
+        const settled = new AbortController();
+        const queueSignal = signal ? AbortSignal.any([signal, settled.signal]) : settled.signal;
         try {
             const queue = this.getPriorityQueue(config);
             // Race the enqueue call against the timeoutPromise.
             // This ensures that even if the queue is saturated, we won't hang forever.
             result = await Promise.race([
                 queue.enqueue('search', async () => {
-                    // The shared timeoutPromise is deliberately NOT raced in here. Its timer is
-                    // cleared by this method's `finally` as soon as the OUTER race settles —
-                    // on abort, or on a queue capacity rejection. A task still QUEUED at that
-                    // moment gets dispatched afterwards and would then be racing a promise that
-                    // can never settle: a guard that silently stopped guarding, while holding a
-                    // queue concurrency slot. The pool call below carries taskTimeoutMs, so the
-                    // worker bounds itself; the outer race bounds the caller.
-                    return await pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs });
-                }, signal),
+                    // The shared timeoutPromise is deliberately NOT raced in here (its timer
+                    // dies with the outer race); the backstop below carries its own timer, so
+                    // a QUEUED task can never be dispatched against a disarmed guard, and a
+                    // worker dying mid-task cannot pin the queue slot forever.
+                    return await executePoolTaskWithDeathBackstop(
+                        () => pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                        timeoutMs,
+                        'Search',
+                    );
+                }, queueSignal),
                 timeoutPromise
             ]);
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
@@ -230,6 +284,7 @@ export class BrowserTaskScheduler implements IScheduler {
             throw error;
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
+            settled.abort();
         }
 
         const duration = Date.now() - startTime;
@@ -269,19 +324,20 @@ export class BrowserTaskScheduler implements IScheduler {
         });
 
         let result: any;
+        // See runSearch: outer settle releases the queue claim; the backstop bounds
+        // a dead worker's never-settling execute().
+        const settled = new AbortController();
+        const queueSignal = signal ? AbortSignal.any([signal, settled.signal]) : settled.signal;
         try {
             const queue = this.getPriorityQueue(config);
             result = await Promise.race([
                 queue.enqueue('scrape', async () => {
-                    // The shared timeoutPromise is deliberately NOT raced in here. Its timer is
-                    // cleared by this method's `finally` as soon as the OUTER race settles —
-                    // on abort, or on a queue capacity rejection. A task still QUEUED at that
-                    // moment gets dispatched afterwards and would then be racing a promise that
-                    // can never settle: a guard that silently stopped guarding, while holding a
-                    // queue concurrency slot. The pool call below carries taskTimeoutMs, so the
-                    // worker bounds itself; the outer race bounds the caller.
-                    return await pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs });
-                }, signal),
+                    return await executePoolTaskWithDeathBackstop(
+                        () => pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                        timeoutMs,
+                        'Scrape',
+                    );
+                }, queueSignal),
                 timeoutPromise
             ]);
         } catch (error) {
@@ -300,6 +356,7 @@ export class BrowserTaskScheduler implements IScheduler {
             throw error;
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
+            settled.abort();
         }
 
         const duration = Date.now() - startTime;
@@ -332,21 +389,20 @@ export class BrowserTaskScheduler implements IScheduler {
         });
 
         let result: { success: boolean; error?: string };
+        // See runSearch: outer settle releases the queue claim; the backstop bounds
+        // a dead worker's never-settling execute().
+        const settled = new AbortController();
+        const queueSignal = signal ? AbortSignal.any([signal, settled.signal]) : settled.signal;
         try {
             const queue = this.getPriorityQueue(config);
             result = await Promise.race([
                 queue.enqueue('healthcheck', async () => {
-                    // The shared timeoutPromise is deliberately NOT raced in here. Its timer is
-                    // cleared by this method's `finally` as soon as the OUTER race settles —
-                    // on abort, or on a queue capacity rejection. A task still QUEUED at that
-                    // moment gets dispatched afterwards and would then be racing a promise that
-                    // can never settle: a guard that silently stopped guarding, while holding a
-                    // queue concurrency slot. The pool call below carries taskTimeoutMs, so the
-                    // worker bounds itself; the outer race bounds the caller.
-                    const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
-                    execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));
-                    return await execPromise;
-                }, signal),
+                    return await executePoolTaskWithDeathBackstop(() => {
+                        const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
+                        execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));
+                        return execPromise;
+                    }, timeoutMs, 'Healthcheck');
+                }, queueSignal),
                 timeoutPromise
             ]) as { success: boolean; error?: string };
         } catch (error) {
@@ -365,6 +421,7 @@ export class BrowserTaskScheduler implements IScheduler {
             throw error;
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
+            settled.abort();
         }
 
         const duration = Date.now() - startTime;
@@ -423,12 +480,21 @@ export class BrowserTaskScheduler implements IScheduler {
         // reference would be moot. Guarding here keeps shutdown from logging a
         // spurious "Cannot get service 'scheduler' during container disposal".
         if (!this.container.isDisposing) {
-            const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, this.container);
-            const currentScheduler = schedulerService.getSchedulerInstance();
-            if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
-                schedulerService.setSchedulerInstance(null);
-                schedulerService.setSchedulerVersion(null);
-                schedulerService.setSchedulerInitializationPromise(null);
+            try {
+                const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, this.container);
+                const currentScheduler = schedulerService.getSchedulerInstance();
+                if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
+                    schedulerService.setSchedulerInstance(null);
+                    schedulerService.setSchedulerVersion(null);
+                    schedulerService.setSchedulerInitializationPromise(null);
+                }
+            } catch (err) {
+                // Disposal can begin between the isDisposing check above and the
+                // getService call. isShuttingDown is already latched true, so a
+                // throw here would abort shutdown permanently — drain, state-clear,
+                // server-stop and pool teardown would all be skipped. The reference
+                // being unclearable is the same moot case the guard above covers.
+                logger.debug('[Scheduler] Could not clear scheduler service reference during shutdown:', err);
             }
         }
 

@@ -216,11 +216,21 @@ export function setupOrphanProtection(): void {
 
   /** Tear down the browser and exit. Shared by both orphan signals below. */
   const exitAsOrphan = async () => {
-    // FIX: Await cleanup to prevent browser/context leaks
+    // Await cleanup to prevent browser/context leaks — but bounded. The browser is
+    // the plausible thing to be wedged after the parent died abruptly, and an
+    // unbounded browser.close() hang here would keep the orphan (and its browser)
+    // alive forever: the precise leak this guard exists to stop. The exit deadline
+    // wins over a perfect teardown.
     if (cleanupBrowser) {
-      await cleanupBrowser().catch(err => {
-        logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during orphan exit:`, err);
-      });
+      await Promise.race([
+        cleanupBrowser().catch(err => {
+          logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during orphan exit:`, err);
+        }),
+        new Promise<void>(resolve => {
+          const t = setTimeout(resolve, 10_000);
+          if (t.unref) t.unref();
+        }),
+      ]);
     }
     // Clear the orphan check timer
     cleanupOrphanProtection();

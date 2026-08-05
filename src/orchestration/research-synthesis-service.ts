@@ -92,9 +92,12 @@ export class ResearchSynthesisService implements IService {
       this.sessions.set(sessionId, reports);
       return reports;
     }
-    // Evict the least-recently-used session when at capacity. Because every
-    // store/read touches its session to the end (above), the head is the genuinely
-    // stalest session, not merely the first-created — so an in-flight run is spared.
+    // Evict the least-recently-used session when at capacity. Every STORE touches
+    // its session to the end (above); reads deliberately do not (peekSessionReports
+    // exists so a stray read cannot create-and-evict). A run in its read-only
+    // synthesis phase therefore stops refreshing its recency — tolerable only
+    // because reaching MAX_SESSIONS at all needs ~200 uncleaned sessions in one
+    // process (run cap 3, sessions cleared after each run), i.e. a leaking host.
     if (this.sessions.size >= ResearchSynthesisService.MAX_SESSIONS) {
       const oldestKey = this.sessions.keys().next().value;
       if (oldestKey !== undefined) {

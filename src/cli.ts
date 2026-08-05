@@ -230,20 +230,33 @@ export function bridgeConfigEnv(explicitConfigPath?: string): { path: string; lo
   // iteration and the "don't clobber the real environment" guard would then
   // block the overlay's value — cli.env could never override config.env.
   const merged: Record<string, string> = {};
+  // Keys whose winning value came from an EXPLICIT --config file (not the
+  // default base, not the cli.env overlay). Project-scoped keys are only
+  // bridged for these — see below.
+  const fromExplicitBase = new Set<string>();
   for (const filePath of [basePath, cliOverlayPath]) {
     try {
       if (!fs.existsSync(filePath)) continue;
-      Object.assign(merged, parseDotEnv(fs.readFileSync(filePath, 'utf-8')));
+      const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
+      Object.assign(merged, parsed);
+      for (const k of Object.keys(parsed)) {
+        if (explicitConfigPath !== undefined && filePath === basePath) fromExplicitBase.add(k);
+        else fromExplicitBase.delete(k);
+      }
       loaded = true;
     } catch {
       // ignore unreadable file; fall through to the next
     }
   }
   for (const [k, v] of Object.entries(merged)) {
-    // Skip per-directory (project-scoped) keys: promoting them into process.env would make
-    // config.env out-rank the per-directory registry, defeating a per-cwd override. They are
-    // still applied as a lower-precedence file layer by getConfig()/loadEnvFiles().
-    if (isProjectScopedKey(k)) continue;
+    // Skip per-directory (project-scoped) keys from the AMBIENT files: promoting them into
+    // process.env would make config.env out-rank the per-directory registry, defeating a
+    // per-cwd override. They are still applied as a lower-precedence file layer by
+    // getConfig()/loadEnvFiles(). An EXPLICIT --config file is different: getConfig never
+    // reads that path, so skipping its keys silently dropped them (a depth or
+    // knowledge-mode set in `--config ci.env` simply did not apply) — and a file the user
+    // named on this exact invocation outranking the per-directory registry is the intent.
+    if (isProjectScopedKey(k) && !fromExplicitBase.has(k)) continue;
     if (process.env[k] === undefined && (k.startsWith('PI_RESEARCH_') || k === 'STACKEXCHANGE_API_KEY' || k === 'GITHUB_TOKEN' || k === 'NVD_API_KEY')) {
       process.env[k] = v;
     }
@@ -906,13 +919,18 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // Cancellation. Primary signal is the latch set by the SIGINT/SIGTERM handler —
   // an exact fact, unlike the message, which varies by whichever subsystem noticed
   // the abort first ('Aborted' from the search layer, 'Research aborted' /
-  // 'Research cancelled' from the orchestrator). The message check only covers a
-  // programmatic abort via the caller's own AbortSignal, where no signal arrived.
-  // Checked before everything below: an abort can unwind through a provider call
-  // and surface wording that the config/rate-limit heuristics would otherwise claim.
+  // 'Research cancelled' from the orchestrator). The anchored message signatures
+  // only cover a programmatic abort where no signal arrived. Deliberately NOT
+  // matched: a bare `err.name === 'AbortError'` — internal timeout aborts
+  // (AbortSignal-driven retry/scrape deadlines) throw that name too, and an
+  // escaped one would report "cancelled — do not re-run" for a run nobody
+  // stopped. In the CLI every real cancellation sets the latch or carries these
+  // exact signatures. Checked before everything below: an abort can unwind
+  // through a provider call and surface wording that the config/rate-limit
+  // heuristics would otherwise claim.
   const isCancellation =
     cancellationRequested ||
-    (err instanceof Error && (err.name === 'AbortError' || /^(aborted|research (aborted|cancelled))$/i.test(msg)));
+    (err instanceof Error && /^(aborted|research (aborted|cancelled))$/i.test(msg));
 
   // Auth / model / config-shaped errors → CONFIG exit + config block.
   const isConfigError =
@@ -932,7 +950,7 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // perfectly working key instead of waiting out the limit.
   const isRateLimit = !isCancellation && (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests'));
   const exitCode = isCancellation
-    ? EXIT.CANCELLED
+    ? (cancellationSignal ? exitCodeForSignal(cancellationSignal) : EXIT.CANCELLED)
     : isCapacity
       ? EXIT.TEMPFAIL
       : isConfigError && !isRateLimit
@@ -944,8 +962,11 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   if (json) {
     const payload: Record<string, unknown> = { ok: false, error: msg, exitCode };
     // Machine-readable "this will succeed later" flag, so a consumer can back off
-    // and retry without string-matching the human message.
-    if (isCapacity || isRateLimit) payload['retryable'] = true;
+    // and retry without string-matching the human message. Gated on cancellation:
+    // a Ctrl-C landing in the same window a queue-wait expires must never emit
+    // `cancelled: true` alongside `retryable: true` — a consumer honouring the
+    // latter would re-run the research the user just stopped.
+    if ((isCapacity || isRateLimit) && !isCancellation) payload['retryable'] = true;
     // A cancel is emphatically NOT retryable-by-default: the user asked to stop.
     if (isCancellation) payload['cancelled'] = true;
     if (process.env['PI_RESEARCH_DEBUG'] === 'true' && err instanceof Error && err.stack) {
@@ -1340,12 +1361,23 @@ let activeResearchAbortController: AbortController | null = null;
  */
 let cancellationRequested = false;
 
+/**
+ * WHICH signal fired — so a cancellation that unwinds through reportError
+ * reports the same 128+N the signal path itself would (SIGTERM → 143, not a
+ * flat 130). reportError races onSignal's own flushAndExit; latching the name
+ * makes both racers agree on the number, and keeps the `exitCode` field in
+ * `--json` from contradicting the actual exit status.
+ */
+let cancellationSignal: NodeJS.Signals | null = null;
+
 /** Test seams for the module-level cancellation latch (set only by onSignal). */
 export function _resetCancellationLatchForTests(): void {
   cancellationRequested = false;
+  cancellationSignal = null;
 }
-export function _markCancellationForTests(): void {
+export function _markCancellationForTests(sig?: NodeJS.Signals): void {
   cancellationRequested = true;
+  cancellationSignal = sig ?? null;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -1357,6 +1389,7 @@ async function main(argv: string[]): Promise<number> {
     if (_signalCleanupDone) return;
     _signalCleanupDone = true;
     cancellationRequested = true;
+    cancellationSignal = sig as NodeJS.Signals;
     toStderr(`\n[pi-research] ${sig} — cleaning up…\n`);
     // Abort the in-flight research run FIRST (synchronously ahead of the shutdown
     // teardown below) so the orchestrator's existing signal-aware cancellation path

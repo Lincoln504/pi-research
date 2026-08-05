@@ -106,7 +106,12 @@ export function createSearchTool(options: {
         results.forEach((r, i) => {
           markdown += `## Query ${i + 1}: ${r.query}\n`;
           if (r.results.length === 0) {
-            markdown += `*No results found.*\n\n`;
+            // Render the attributed failure, not a bare "no results": a timeout or
+            // dead worker says nothing about the query, and presenting it as an
+            // empty result sent the model off rewriting perfectly good queries —
+            // the misdirection QueryFailure exists to prevent. This is the only
+            // surface the researcher agent actually reads.
+            markdown += r.error ? `*${r.error.message}*\n\n` : `*No results found.*\n\n`;
           } else {
             r.results.forEach((item, j) => {
               markdown += `[${j + 1}] **${item.title}**\n${item.url}\n${item.content}\n\n`;

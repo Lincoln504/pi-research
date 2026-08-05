@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { spawnSync, execSync } from 'node:child_process';
+import { spawn, spawnSync, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -417,10 +417,42 @@ describe('reportError — exit-code classification', () => {
       expect(EXIT.CANCELLED).not.toBe(EXIT.SOFTWARE);
     });
 
-    it('classifies an AbortError by name regardless of its message', async () => {
+    it('does NOT classify a bare AbortError as cancellation without the latch or the exact signatures', async () => {
+      // Internal timeout aborts (AbortSignal-driven retry/scrape deadlines) throw
+      // name === 'AbortError' too. In the CLI every real cancellation sets the
+      // signal latch or carries the anchored signatures — an escaped internal
+      // abort must NOT report "cancelled — do not re-run" for a run nobody stopped.
       const err = new Error('The operation was aborted because of some provider detail');
       err.name = 'AbortError';
-      expect(await reportError(err, 'research', true)).toBe(EXIT.CANCELLED);
+      expect(await reportError(err, 'research', true)).toBe(EXIT.SOFTWARE);
+    });
+
+    it('reports the SAME 128+N as the signal path when the latch carries the signal', async () => {
+      // reportError races onSignal's own flushAndExit; latching the signal name
+      // makes both racers agree (SIGTERM → 143 from either), and keeps --json's
+      // exitCode field from contradicting the actual exit status.
+      _markCancellationForTests('SIGTERM');
+      expect(await reportError(new Error('Invalid API key provided'), 'research', true)).toBe(143);
+    });
+
+    it('never marks a cancelled capacity error retryable', async () => {
+      // Ctrl-C landing in the same window a queue-wait expires: the payload must
+      // not carry retryable:true alongside cancelled:true, or a consumer re-runs
+      // the research the user just stopped.
+      _markCancellationForTests();
+      const out: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+        out.push(String(chunk));
+        return true;
+      });
+      try {
+        await reportError(new ResearchRunCapacityError(3, 600_000), 'research', true);
+      } finally {
+        spy.mockRestore();
+      }
+      const payload = JSON.parse(out.join(''));
+      expect(payload).toMatchObject({ ok: false, exitCode: EXIT.CANCELLED, cancelled: true });
+      expect(payload.retryable).toBeUndefined();
     });
 
     it('marks the --json payload cancelled rather than retryable', async () => {
@@ -1040,5 +1072,61 @@ describe('skill launcher subprocess', () => {
     const r = runSkill(['research']);
     expect(r.status).toBe(64);
   });
+
+  it('forwards a signal aimed at the launcher to the engine instead of orphaning it', async () => {
+    // POSIX signal delivery — Windows has no kill(2) semantics to test here.
+    if (process.platform === 'win32') return;
+    // A harness enforcing its command timeout SIGTERMs the LAUNCHER pid, not the
+    // process group. Pre-fix, the launcher died with 143 while the engine kept
+    // researching for minutes, holding a machine-wide run slot and the browser
+    // pool. The stub engine records its pid and idles until signalled.
+    const workDir = mkdtempSync(path.join(os.tmpdir(), 'pi-launcher-sig-'));
+    const pidFile = path.join(workDir, 'engine.pid');
+    const stubPath = path.join(workDir, 'stub-engine');
+    writeFileSync(
+      stubPath,
+      [
+        '#!/usr/bin/env node',
+        "require('node:fs').writeFileSync(process.env.PID_FILE, String(process.pid));",
+        "process.on('SIGTERM', () => process.exit(143));",
+        'setInterval(() => {}, 1000);',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    try {
+      const launcher = spawn(process.execPath, [SKILL_LAUNCHER, 'research', 'test query'], {
+        env: { ...process.env, PI_RESEARCH_BIN: stubPath, PID_FILE: pidFile },
+        stdio: 'ignore',
+      });
+      const exited = new Promise<number | null>((resolve) => launcher.on('exit', (code) => resolve(code)));
+
+      // Wait for the stub engine to come up and record its pid.
+      const deadline = Date.now() + 10_000;
+      while (!existsSync(pidFile) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(existsSync(pidFile)).toBe(true);
+      const enginePid = Number(readFileSync(pidFile, 'utf-8'));
+
+      launcher.kill('SIGTERM'); // the launcher ONLY — not the group, not the engine
+      expect(await Promise.race([
+        exited,
+        new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 10_000)),
+      ])).toBe(143);
+
+      // The engine must be gone shortly after — signal 0 probes existence.
+      const engineDeadline = Date.now() + 5_000;
+      let engineAlive = true;
+      while (engineAlive && Date.now() < engineDeadline) {
+        try { process.kill(enginePid, 0); await new Promise((r) => setTimeout(r, 50)); }
+        catch { engineAlive = false; }
+      }
+      expect(engineAlive).toBe(false);
+    } finally {
+      // Belt-and-braces: never leave a stub engine behind, even on assertion failure.
+      try { process.kill(Number(readFileSync(pidFile, 'utf-8')), 'SIGKILL'); } catch { /* already gone */ }
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 

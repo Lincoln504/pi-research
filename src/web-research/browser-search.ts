@@ -87,7 +87,12 @@ export async function performSearch(
     // (post-dequeue) deadline.
     const QUERY_TIMEOUT_MS = (config?.SEARCH_TIMEOUT_MS ?? 45_000) + (config?.BROWSER_TASK_TIMEOUT_MS ?? 10_000);
 
-    const filteredQueries = queries.filter(q => q.trim());
+    // Deduplicated: resultMap and the failures map are both keyed by the query
+    // string, so two tasks for the same string race last-writer-wins — instance A
+    // delivering results, then instance B timing out, discarded A's results and
+    // marked the query failed. One task per distinct string closes that (and stops
+    // paying for the duplicate browser work).
+    const filteredQueries = [...new Set(queries.filter(q => q.trim()))];
     let timeoutCount = 0;
     let errorCount = 0;
     // Keep one representative worker error so total-failure surfaces the real
@@ -167,6 +172,18 @@ export async function performSearch(
                     failures?.set(query, {
                         type: 'service_unavailable',
                         message: `The search backend failed for this query (${msg}). This is an infrastructure failure, not a signal about the query itself — do not rewrite the query in response to it.`,
+                    });
+                } else if (!signal?.aborted) {
+                    // A worker-side 'Aborted' with no caller abort (a pool drain or
+                    // leader handover cancelling the task) is an infrastructure
+                    // interruption. Without an entry here the query fell through to
+                    // the empty_results default — "the query may be too narrow" —
+                    // the exact misattribution this map exists to prevent. The
+                    // caller-abort case stays unrecorded: the post-loop signal
+                    // check reports the cancellation itself.
+                    failures?.set(query, {
+                        type: 'service_unavailable',
+                        message: 'The search task was cancelled on the worker side (pool drain or leader handover) before completing. This says nothing about the query — do not rewrite it; retrying the same query later is reasonable.',
                     });
                 }
             }

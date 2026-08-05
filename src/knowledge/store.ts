@@ -730,7 +730,15 @@ export class KnowledgeStore implements IKnowledgeStore {
    *   JSON-encoded `metadata` blob and cannot be filtered on.
    */
   async deleteByUrlAndType(url: string, ingestionType: string, olderThan?: number): Promise<void> {
-    // Coordinate with close() — see deleteByUrl.
+    // Coordinate with close() — see deleteByUrl. The closing-skip is surfaced
+    // rather than silently resolving: a prune skipped because the store is
+    // closing (a post-run background ingest racing a Ctrl+C close) leaves
+    // duplicates exactly like a failed prune does, but resolved cleanly, so the
+    // writer-queue's failed-prune accounting never saw its most common cause.
+    if (this.isClosing) {
+      logger.warn(`[store] Prune of ${ingestionType} chunks for ${url} skipped — store is closing; superseded duplicates remain until the next refresh.`);
+      metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'skipped_closing' });
+    }
     return this.trackOperation('deleteByUrlAndType', undefined, () => this.deleteByUrlAndTypeInner(url, ingestionType, olderThan));
   }
 
@@ -854,10 +862,14 @@ export class KnowledgeStore implements IKnowledgeStore {
     const startTime = Date.now();
     const escapedUrl = url.replace(/'/g, "''");
 
+    // limit > 1 deliberately: after a failed prune two generations of this URL can
+    // coexist, and LanceDB's fragment-scan order typically returns the OLDEST row
+    // first — limit(1) would serve the superseded content (and feed its older
+    // timestamp to the serve-age gate) until the next successful ingest.
     const results = await table
       .query()
       .where(`url = '${escapedUrl}' AND ingestion_type = 'synthesis-description' AND (${scopeFilter})`)
-      .limit(1)
+      .limit(16)
       .toArray();
 
     const duration = Date.now() - startTime;
@@ -868,6 +880,8 @@ export class KnowledgeStore implements IKnowledgeStore {
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'miss' });
       return null;
     }
+    // Newest generation wins, never row order.
+    results.sort((a: any, b: any) => Number(b.timestamp) - Number(a.timestamp));
 
     const r = results[0];
     // Read-time freshness. The stored timestamp (ms) is otherwise discarded here;

@@ -127,4 +127,57 @@ describe('reconcileSkillInstalls — copy freshness', () => {
     expect(fs.existsSync(path.join(target, 'SKILL.md'))).toBe(true);
     expect(installedSkillMd()).toContain(PACKAGE_NAME);
   });
+
+  it('a refresh whose COPY fails leaves the old install intact and retries next startup', () => {
+    // The rm-then-copy shape destroyed the install permanently here: rmSync ran
+    // first, copyDir threw (unreadable source, ENOSPC), and the retry guard
+    // requires the path to EXIST — so the vanished install was never retried.
+    // Build-then-swap must not touch the live tree until the new one is ready.
+    if (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0)) {
+      return; // chmod-based unreadability is not enforceable here
+    }
+    writeSource(sourceDir, '1.0.0', 'ORIGINAL');
+    installSkill(['claude'], { home, skillSourceDir: sourceDir, copy: true });
+
+    writeSource(sourceDir, '1.1.0', 'NEW');
+    // Version stays readable (staleness is detected) but the tree cannot be
+    // copied: scripts/ is unreadable, so copyDir throws mid-walk.
+    fs.chmodSync(path.join(sourceDir, 'scripts'), 0o000);
+    try {
+      const result = reconcileSkillInstalls({ home, skillSourceDir: sourceDir });
+      expect(result.refreshed).toEqual([]);
+    } finally {
+      fs.chmodSync(path.join(sourceDir, 'scripts'), 0o755);
+    }
+
+    // The install the user had is byte-for-byte still there...
+    expect(installedSkillMd()).toContain('ORIGINAL');
+    // ...no staging debris a skill scanner could mistake for a skill...
+    const skillsDir = path.join(home, '.claude', 'skills');
+    expect(fs.readdirSync(skillsDir)).toEqual(['pi-research']);
+    // ...and the manifest entry survives, so the NEXT startup retries and wins.
+    const retry = reconcileSkillInstalls({ home, skillSourceDir: sourceDir });
+    expect(retry.refreshed).toHaveLength(1);
+    expect(installedSkillMd()).toContain('NEW');
+  });
+
+  it('honours dryRun for the stale-symlink re-point (plan only, touch nothing)', () => {
+    writeSource(sourceDir, '1.0.0');
+    installSkill(['claude'], { home, skillSourceDir: sourceDir }); // symlink mode
+
+    // Relocate the package: the owned link now points at a stale path.
+    const movedSource = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-skill-moved-'));
+    try {
+      writeSource(movedSource, '1.1.0');
+      const linkPath = path.join(home, '.claude', 'skills', 'pi-research');
+      const before = fs.readlinkSync(linkPath);
+
+      const results = installSkill(['claude'], { home, skillSourceDir: movedSource, dryRun: true });
+
+      expect(results[0]!.status).toBe('planned');
+      expect(fs.readlinkSync(linkPath)).toBe(before); // untouched
+    } finally {
+      fs.rmSync(movedSource, { recursive: true, force: true });
+    }
+  });
 });

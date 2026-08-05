@@ -17,7 +17,9 @@ import { getServiceContainer, getService } from '../../core/service-registry.ts'
 import type { ServiceContainer } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerFactory, IScheduler } from '../../core/scheduler-factory.ts';
+import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
+import { BrowserClient } from './browser-client.ts';
 
 // Cooldown to prevent cascading scheduler restarts (thundering herd)
 let lastRestartTime = 0;
@@ -64,12 +66,14 @@ async function recoverFromLeaderHandover(container: ServiceContainer): Promise<v
 }
 
 /**
- * Is the leader currently registered in state still a live process?
+ * Is the leader currently registered in state still a live process — and is it
+ * the one our cached handle actually targets?
  *
  * Used only to decide whether the restart cooldown below may be honoured.
  * Anything that prevents a confident "yes" (no registered leader, an unreadable
- * state file, a service-resolution failure) answers `false`, because the cost of
- * an unnecessary re-resolve is one cheap round-trip while the cost of skipping a
+ * state file, a service-resolution failure, a cached client aimed at a different
+ * port than the registered leader's) answers `false`, because the cost of an
+ * unnecessary re-resolve is one cheap round-trip while the cost of skipping a
  * needed one is a task failure against a dead port.
  */
 async function isRegisteredLeaderAliveUncached(container: ServiceContainer): Promise<boolean> {
@@ -77,6 +81,14 @@ async function isRegisteredLeaderAliveUncached(container: ServiceContainer): Pro
         const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
         const info = await stateManager.getBrowserServer();
         if (!info) return false;
+        // "Leader alive" is not enough: the cooldown protects the CACHED handle, so
+        // that handle must also target the registered leader. If our leader B died
+        // and another process already elected C, C is alive — but our cached client
+        // still aims at B's dead port, and honouring the cooldown would leave every
+        // retry failing against the corpse until the window expired.
+        const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, container);
+        const cached = schedulerService.getSchedulerInstance();
+        if (cached instanceof BrowserClient && cached.targetPort !== info.port) return false;
         return await stateManager.isPidAlive(info.pid, info.schedulerId);
     } catch {
         return false;

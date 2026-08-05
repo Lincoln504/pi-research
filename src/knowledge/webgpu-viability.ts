@@ -150,10 +150,13 @@ function runProbe(model: string, cacheDir: string, timeoutMs: number): Promise<b
     }, timeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
 
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (d) => { stdout += String(d); });
-    child.stderr?.on('data', (d) => { stderr += String(d); });
+    // Buffered and decoded once at 'close': per-chunk String(d) mangles a
+    // multi-byte character straddling a pipe-chunk boundary (the PROBE_OK
+    // sentinel is ASCII, but the logged stderr detail line is not guaranteed to be).
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout?.on('data', (d) => { stdoutChunks.push(Buffer.from(d)); });
+    child.stderr?.on('data', (d) => { stderrChunks.push(Buffer.from(d)); });
 
     child.on('error', (err) => {
       logger.warn('[embedder] WebGPU probe process error — defaulting to CPU:', err);
@@ -161,6 +164,8 @@ function runProbe(model: string, cacheDir: string, timeoutMs: number): Promise<b
     });
 
     child.on('close', (code, signal) => {
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
       // Viability is the sentinel, not the exit code (teardown may abort post-success).
       if (stdout.includes('PROBE_OK')) {
         finish(true);

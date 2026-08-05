@@ -342,6 +342,21 @@ function launch(engine: ResolvedEngine): void {
     },
   );
 
+  // A harness that times out a run typically signals the LAUNCHER pid, not the
+  // process group. Without forwarding, the launcher dies with its 128+N while
+  // the engine keeps researching for minutes — holding one of the machine-wide
+  // run slots plus the browser pool. Forward the cancelling signals and let the
+  // child's exit drive ours (the relay below reports the same 128+N). A
+  // duplicate delivery (a terminal Ctrl-C already signals the whole group) is
+  // harmless: the engine swallows its second signal.
+  for (const sig of CANCELLING_SIGNALS) {
+    try {
+      process.on(sig as NodeJS.Signals, () => {
+        try { child.kill(sig as NodeJS.Signals); } catch { /* child already gone */ }
+      });
+    } catch { /* platform without this signal (e.g. SIGQUIT on Windows) */ }
+  }
+
   child.on('error', (err) => {
     process.stderr.write(`\nError: failed to launch pi-research (${engine.label}): ${err.message}\n`);
     process.exit(EXIT.SOFTWARE);

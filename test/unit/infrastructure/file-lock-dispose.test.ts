@@ -138,4 +138,32 @@ describe('FileLockService — teardown during a held lock', () => {
     await expect(fs.access(lockPath)).rejects.toThrow(); // released and removed
     await lock.dispose();
   });
+
+  it('a caller mid-acquisition-retry fails fast on cleanup() instead of acquiring on the retired instance', async () => {
+    // cleanup()'s drain polls only the HELD handle, and the queued-waiter check
+    // runs before the retry loop is entered — so a caller contending for a
+    // peer's lock (holding nothing, turn already granted) was invisible to
+    // teardown. Pre-fix it survived cleanup(), won the lock when the peer
+    // released, and ran its critical section against torn-down services.
+    const peer = makeLock();
+    await peer.initialize();
+    await peer.acquireLock(); // a live owner: genuine contention, no reclaim
+
+    const svc = makeLock();
+    await svc.initialize();
+    const attempt = svc.acquireLock();
+    // Let the caller reach the retry loop (first EEXIST + at least one sleep).
+    await new Promise((r) => setTimeout(r, 50));
+
+    await svc.cleanup(); // teardown while the caller is mid-retry
+
+    await expect(attempt).rejects.toThrow(/disposed during acquisition|disposed while queued|has been disposed/);
+
+    // The peer releases; the retired instance must NOT create a lock now.
+    await peer.releaseLock();
+    await new Promise((r) => setTimeout(r, 100));
+    await expect(fs.access(lockPath)).rejects.toThrow(); // nothing re-created it
+
+    await peer.dispose();
+  });
 });

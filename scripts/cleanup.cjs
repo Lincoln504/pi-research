@@ -170,9 +170,20 @@ removeOwnedScratchDir('cache dir', path.join(cacheHome, 'pi-research'));
 
 // State tree: transient run state, locks, backups, project-settings. Now lives in
 // pi-research's own namespace (~/.pi/research/state), honoring the same overrides
-// as getGlobalConfigDir()/PI_RESEARCH_STATE_DIR.
-const stateDir = process.env.PI_RESEARCH_STATE_DIR
-  || path.join(os.homedir(), process.env.PI_RESEARCH_CONFIG_DIR_NAME || '.pi', 'research', 'state');
+// as getGlobalConfigDir()/PI_RESEARCH_STATE_DIR — with the same strictness the
+// XDG guard above applies. A RELATIVE state dir would rmSync a tree relative to
+// wherever the user happens to invoke this script (generally NOT where the
+// runtime created state), and a config-dir name carrying a path separator could
+// traverse out of HOME entirely. Deletion must never resolve paths more loosely
+// than the code that created them.
+const stateOverride = process.env.PI_RESEARCH_STATE_DIR;
+const rawDirName = process.env.PI_RESEARCH_CONFIG_DIR_NAME;
+const dirName = rawDirName && !rawDirName.includes('/') && !rawDirName.includes('\\') && rawDirName !== '.' && rawDirName !== '..'
+  ? rawDirName
+  : '.pi';
+const stateDir = stateOverride && path.isAbsolute(stateOverride)
+  ? stateOverride
+  : path.join(os.homedir(), dirName, 'research', 'state');
 removeOwnedScratchDir('state dir', stateDir);
 
 process.exit(0);

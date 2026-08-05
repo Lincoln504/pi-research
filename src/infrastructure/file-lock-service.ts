@@ -32,6 +32,13 @@ const lockContext = new AsyncLocalStorage<Set<string>>();
 const CLEANUP_DRAIN_TIMEOUT_MS = 5_000;
 
 /**
+ * Age past which an orphaned `<lock>.trash.<hex>` copy is swept at startup. An
+ * in-flight trash-and-verify holds its copy for milliseconds; anything this old
+ * was leaked by a crash mid-dance.
+ */
+const TRASH_SWEEP_AGE_MS = 10 * 60_000;
+
+/**
  * Lock configuration options
  */
 export interface FileLockOptions {
@@ -208,9 +215,28 @@ export class FileLockService implements IService {
       await fs.unlink(trashPath).catch(() => { /* best effort */ });
       return;
     }
-    // Nothing there and link failed (EPERM, cross-device, Windows link limits):
-    // move ours back. A restored lock is always better than a destroyed one.
-    await fs.rename(trashPath, this.lockFilePath).catch(() => { /* best effort */ });
+    // Nothing there and link failed (EPERM, filesystems without hardlinks,
+    // Windows link limits): re-create the path EXCLUSIVELY rather than rename it
+    // back — rename silently REPLACES a lock a peer creates between the probe
+    // above and now, clobbering a live owner. 'wx' loses that race loudly, and
+    // then the peer's lock is authoritative.
+    try {
+      const content = await fs.readFile(trashPath, 'utf-8');
+      const handle = await fs.open(this.lockFilePath, 'wx', 0o600);
+      try {
+        await handle.write(content);
+        await handle.sync();
+      } finally {
+        await handle.close().catch(() => { /* content is on disk */ });
+      }
+      await fs.unlink(trashPath).catch(() => { /* restored; copy is redundant */ });
+    } catch {
+      // EEXIST (a peer took the path) — ours is redundant; anything else, leave
+      // the trash copy for the startup sweep. Never delete what we could not
+      // put back.
+      const occupied = await fs.access(this.lockFilePath).then(() => true).catch(() => false);
+      if (occupied) await fs.unlink(trashPath).catch(() => { /* best effort */ });
+    }
   }
 
   /**
@@ -254,6 +280,24 @@ export class FileLockService implements IService {
    * This handles cases where locks weren't released due to crashes.
    */
   private async cleanupStaleLocksOnStartup(): Promise<void> {
+    // Sweep trash copies leaked by an interrupted trash-and-verify (a crash or
+    // I/O failure between the rename and the unlink/restore). Nothing else ever
+    // collects them: the state-dir orphan sweep matches only *.tmp files. The age
+    // gate is generous — an in-flight reclaim's trash copy lives for milliseconds,
+    // and a restore-worthy one is put back on the same code path that made it.
+    try {
+      const dir = pathmod.dirname(this.lockFilePath);
+      const prefix = `${pathmod.basename(this.lockFilePath)}.trash.`;
+      for (const name of await fs.readdir(dir)) {
+        if (!name.startsWith(prefix)) continue;
+        const p = pathmod.join(dir, name);
+        const st = await fs.stat(p).catch(() => null);
+        if (st && Date.now() - st.mtimeMs > TRASH_SWEEP_AGE_MS) {
+          await fs.unlink(p).catch(() => { /* best effort */ });
+        }
+      }
+    } catch { /* best-effort hygiene; never blocks startup */ }
+
     try {
       const rawContent = await fs.readFile(this.lockFilePath, 'utf-8').catch(() => null);
       if (rawContent === null) return; // No lock file — nothing to do
@@ -275,8 +319,10 @@ export class FileLockService implements IService {
         // the UUID matches what we decided on — same guard as the contended path.
         const expectedUuid = parsed?.uuid ?? '';
         const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
+        let renamed = false;
         try {
           await fs.rename(this.lockFilePath, trashPath);
+          renamed = true;
           const trashContent = await fs.readFile(trashPath, 'utf-8');
           const trashParsed = this._parseLockContent(trashContent);
           if ((trashParsed?.uuid ?? '') !== expectedUuid) {
@@ -284,9 +330,14 @@ export class FileLockService implements IService {
             await this._restoreLockFile(trashPath);
             return;
           }
-          await fs.unlink(trashPath);
+          await fs.unlink(trashPath).catch(() => { /* leaked copy; the sweep above collects it */ });
           logger.log('[FileLockService] Stale lock removed');
-        } catch { /* best-effort startup cleanup; acquire() handles contention */ }
+        } catch {
+          // A failure AFTER the rename means the verify never ran — restore
+          // rather than leave the (possibly live) lock destroyed in the trash.
+          if (renamed) await this._restoreLockFile(trashPath);
+          /* otherwise best-effort startup cleanup; acquire() handles contention */
+        }
       }
     } catch (error: unknown) {
       // ENOENT is expected (no lock file exists)
@@ -366,6 +417,15 @@ export class FileLockService implements IService {
 
     try {
       for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
+        // cleanup() can retire the instance while we are contending here — its
+        // drain polls only the HELD handle, so a caller mid-retry (holding
+        // nothing yet) is invisible to it and would otherwise win the lock and
+        // run its critical section against torn-down services after dispose
+        // resolved. The queued-waiter check above cannot catch this: our turn was
+        // granted before retirement. Abort; the catch below hands the turn on.
+        if (this._retired) {
+          throw new Error(`Cannot acquire lock at ${this.lockFilePath}: service was disposed during acquisition`);
+        }
         // Use a LOCAL handle variable so that concurrent acquireLock() calls on
         // the same instance cannot close each other's file handle through the
         // shared this.lockHandle field. We only promote to this.lockHandle after
@@ -376,6 +436,14 @@ export class FileLockService implements IService {
           handle = await fs.open(this.lockFilePath, 'wx', 0o600);
           await handle.write(this._makeLockContent());
           await handle.sync(); // Ensure content is written to disk
+
+          // Retirement may have landed between the open above and this commit.
+          // cleanup()'s drain saw no held handle and already returned, so nothing
+          // would ever tear this acquisition down. Throwing here lets the catch
+          // below close the handle and remove the just-created lock file.
+          if (this._retired) {
+            throw new Error(`Cannot acquire lock at ${this.lockFilePath}: service was disposed during acquisition`);
+          }
 
           // Fully acquired — commit to instance state
           this.lockHandle = handle;
@@ -439,16 +507,26 @@ export class FileLockService implements IService {
                 // surrounding retry loop / timeout, not by stealing.
                 if (await this._shouldReclaim(parsed?.pid ?? null, parsed?.startTime ?? null, lockAge, contendedOwnerAliveMemo)) {
                   const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
+                  let renamed = false;
                   try {
                     await fs.rename(this.lockFilePath, trashPath);
+                    renamed = true;
                     const trashContent = await fs.readFile(trashPath, 'utf-8');
                     const trashParsed = this._parseLockContent(trashContent);
                     if ((trashParsed?.uuid ?? '') !== lockUuid) {
                       await this._restoreLockFile(trashPath);
                       continue;
                     }
-                    await fs.unlink(trashPath);
-                  } catch { /* ignore */ }
+                    await fs.unlink(trashPath).catch(() => { /* leaked copy; startup sweep collects it */ });
+                  } catch {
+                    // Rename failed (nothing moved) — retry handles it. But a read
+                    // failure AFTER the rename means the verify never ran: the lock
+                    // may have changed hands to a live peer mid-check, and leaving
+                    // it in the trash destroys it unverified — the same transient
+                    // classes (EMFILE, EACCES, EBUSY) the inspect branch below
+                    // backs off for. Put it back instead.
+                    if (renamed) await this._restoreLockFile(trashPath);
+                  }
                   continue;
                 }
               } catch (inspectError) {

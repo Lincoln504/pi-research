@@ -81,17 +81,18 @@ export async function search(
     return results;
   } catch (error) {
     const searchDuration = Date.now() - searchStart;
-    metrics.observe('search_latency_ms', searchDuration, { status: 'error' });
-    metrics.increment('search_queries_total', queries.length, { status: 'error' });
-    metrics.increment('search_errors_total', 1, { error_type: 'search_failed' });
-    
     const message = error instanceof Error ? error.message : String(error);
     // A cancelled run must propagate as a cancellation. Swallowing it into
     // per-query `unknown` errors would let the orchestrator carry on and
-    // synthesize from nothing, then report a failure the user never had.
+    // synthesize from nothing, then report a failure the user never had. Checked
+    // BEFORE the error metrics: a user cancelling runs is not a failing search
+    // backend, and counting each Esc as queries.length errors painted one.
     if (signal?.aborted || message === 'Aborted') {
       throw error;
     }
+    metrics.observe('search_latency_ms', searchDuration, { status: 'error' });
+    metrics.increment('search_queries_total', queries.length, { status: 'error' });
+    metrics.increment('search_errors_total', 1, { error_type: 'search_failed' });
     // Re-throw total search failure so the orchestrator can surface a clear error
     // rather than silently producing an empty synthesis with zero links.
     if (message.includes('Search completely failed')) {

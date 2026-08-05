@@ -180,11 +180,28 @@ export class WriterQueue implements IWriterQueue {
     // Dedup: check if we already have this exact URL+type with identical content.
     // findByUrl applies scope filtering, so this only dedupes within the
     // current project's visible scope (local workspace + global entries).
+    // Compared against the NEWEST generation, not row order: after a failed prune
+    // two generations coexist and findByUrl's order is arbitrary — matching the
+    // OLD generation's hash would skip the refresh with the duplicates in place.
     const existing = await this.options.store.findByUrl(normalizedUrl);
     const sameType = existing.filter(c => c.metadata['ingestionType'] === incomingType);
-    if (sameType.length > 0 && sameType[0]!.metadata['contentHash'] === hash) {
-      logger.log(`[writer-queue] Skipping ${normalizedUrl} (${incomingType}) — content unchanged.`);
-      return;
+    if (sameType.length > 0) {
+      const newestTs = Math.max(...sameType.map(d => Number(d.timestamp) || 0));
+      const newest = sameType.find(d => (Number(d.timestamp) || 0) === newestTs)!;
+      if (newest.metadata['contentHash'] === hash) {
+        // Content unchanged vs the current generation — but a prior failed prune
+        // may still have left older generations behind, and with stable content
+        // this skip is the only code that ever looks at this URL again. Collect
+        // them now instead of preserving the duplicates forever.
+        if (sameType.some(d => (Number(d.timestamp) || 0) < newestTs)) {
+          await this.options.store.deleteByUrlAndType(normalizedUrl, incomingType, newestTs).catch((err) => {
+            logger.warn(`[writer-queue] Sweeping superseded duplicates for ${normalizedUrl} (${incomingType}) failed:`, err);
+            metrics.increment('knowledge_ingest_stale_prune_failed_total', 1);
+          });
+        }
+        logger.log(`[writer-queue] Skipping ${normalizedUrl} (${incomingType}) — content unchanged.`);
+        return;
+      }
     }
 
     const rawChunks = this.options.chunker

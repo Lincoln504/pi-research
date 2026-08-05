@@ -112,6 +112,7 @@ export class WorkerPoolManager implements IService {
             try {
                 if (this.pool && this.currentWorkerCount !== maxWorkers) {
                     logger.log(`[WorkerPoolManager] Worker count changed from ${this.currentWorkerCount} to ${maxWorkers}, recreating pool...`);
+                    this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
                     await this.pool.destroy();
                     this.pool = null;
                 }
@@ -211,9 +212,13 @@ export class WorkerPoolManager implements IService {
                         }
                     },
                     exitHandler: (code: number) => {
-                        // null exit code means the worker was killed intentionally (e.g. pool.destroy()).
-                        // Ignore exits from a superseded pool instance (see errorHandler).
-                        if (code !== 0 && code !== null && this.poolEpoch === myEpoch) {
+                        // A worker we destroy on purpose exits with code null — but so does one
+                        // the OOM killer SIGKILLs, and that is exactly the death mode that leaves
+                        // in-flight execute() promises stranded (poolifier never settles them).
+                        // Every intentional destroy bumps poolEpoch first, so a null-code exit
+                        // that still matches the live epoch is an unexpected death and must count
+                        // toward auto-recovery like any other abnormal exit.
+                        if (code !== 0 && this.poolEpoch === myEpoch) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {
@@ -245,6 +250,7 @@ export class WorkerPoolManager implements IService {
                     // Only null the shared field if it still points at the pool we built —
                     // a concurrent path may already have moved on.
                     if (this.pool === built) this.pool = null;
+                    this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
                     await built.destroy().catch((err: any) => logger.debug('Swallowed pool destroy error:', err));
                     throw new Error('Worker pool is shutting down');
                 }
@@ -337,6 +343,7 @@ export class WorkerPoolManager implements IService {
                 // pool (and bumped the generation), so skip — destroying again is spurious
                 // and nulling shared state would clobber a pool rebuilt after the shutdown.
                 if (this.isShuttingDown || this.generation !== myGen) return;
+                this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
                 if (deadPool) await deadPool.destroy();
                 logger.info('[WorkerPoolManager] Auto-recovery: old pool destroyed.');
             } catch (err) {
@@ -399,6 +406,7 @@ export class WorkerPoolManager implements IService {
                 // Use a timeout for pool destruction. Workers run async browser teardown
                 // in their killHandler (context.close / browser.close via Playwright), so
                 // allow enough time for those to complete before the IPC channel closes.
+                this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
                 const destroyPromise = this.pool.destroy();
                 destroyPromise.catch((err: Error) => logger.debug(`[WorkerPoolManager] Background pool destroy rejection: ${err.message}`));
                 await raceWithDeadline(destroyPromise, 5000);

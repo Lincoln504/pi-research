@@ -15,19 +15,24 @@
 
 'use strict';
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 
-try {
-  // process.execPath, not a bare 'node': execSync goes through the shell, which
-  // resolves 'node' from PATH. Under nvm-windows/Volta or a portable Node that can
-  // be a different major than the one running npm (possibly below the engines floor)
-  // or missing entirely, aborting the install. ensure-native-deps.cjs already does
-  // this correctly; the two were inconsistent.
-  execSync(`"${process.execPath}" scripts/build.cjs all`, { stdio: 'inherit', cwd: ROOT });
-} catch (err) {
-  console.error('[prepare] Build failed:', err.message);
+// spawnSync with an argv array, not execSync with a quoted string: execSync goes
+// through /bin/sh -c, where $(…), backticks and quotes stay live INSIDE double
+// quotes — so a Node binary path under a directory named with shell metacharacters
+// would execute them during npm ci / a git install. Same fix setup.cjs and
+// cleanup.cjs already carry. process.execPath (not a bare 'node') for the same
+// reason as ensure-native-deps.cjs: a PATH lookup can resolve a different
+// interpreter (nvm-windows, Volta, a portable Node) than the one running npm.
+const r = spawnSync(process.execPath, ['scripts/build.cjs', 'all'], { stdio: 'inherit', cwd: ROOT });
+if (r.error) {
+  console.error('[prepare] Build failed:', r.error.message);
   process.exit(1);
+}
+if (r.status !== 0) {
+  console.error(`[prepare] Build failed with exit code ${r.status}`);
+  process.exit(r.status ?? 1);
 }

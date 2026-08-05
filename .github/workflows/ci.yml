@@ -533,6 +533,14 @@ jobs:
           # saved node_modules tree. See scripts/ensure-native-deps.cjs.
           key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
+        # Skip the ~100MB camoufox fetch: this job's own tree never launches a
+        # browser, and the unauthenticated GitHub-releases query is rate-limited
+        # on shared macOS/Windows runner IPs — the fetch then fails (harmlessly,
+        # exit 0) after burning up to the full spawn timeout on all three legs.
+        # The token matches the integration job for anything that still asks.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm ci --legacy-peer-deps
       - name: Validate package.json
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('OK',p.name+'@'+p.version)"
