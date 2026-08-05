@@ -5,13 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-08-05
 
 Clears the medium/low findings deferred out of the 1.1.2 audit, then a second
 full-tree audit of everything since. Every item below was confirmed against the
 code — and, where the claim was about the operating system, a package manager, or
 a library's failure behaviour, against a live experiment on this machine rather
 than from memory.
+
+A minor (not patch) version because the range carries deliberate contract
+changes alongside the fixes: cancelled runs now exit `128 + signal` instead of
+`70` (and the agent-skill launcher forwards cancelling signals to the engine),
+and the host-version self-check gained the tested-ceiling warning.
 
 ### Fixed
 - **A worker dying mid-task permanently shrank the browser queue — enough deaths wedged the leader.** Measured on poolifier 5.3.2: when a cluster worker is OOM-killed or SIGKILLed, the in-flight `pool.execute()` promise is *never* settled — not on the death, not when a replacement respawns, not even on `pool.destroy()`. The worker enforces its task timeout on itself, but only while alive — so the dispatched closure pended forever and its PriorityTaskQueue concurrency slot was never released. Each such death shrank the queue by one; the caller's own timeout error is excluded from both retry and the circuit breaker, incoming requests kept resetting the idle timer, and leadership was retained — a machine-wide singleton serving nothing but timeouts. Compounding it, an unexpected `SIGKILL` exits with the same `null` code as an intentional `pool.destroy()`, so these deaths never counted toward auto-recovery either. Every `execute()` now carries its own dead-worker backstop timer created *inside* the dispatched closure (sharing no lifetime with the caller's outer race — the shared-timer variant is exactly how a queued task once lost its guard), intentional destroys bump the pool epoch first so a same-epoch `null` exit now counts as the abnormal death it is, and a task whose caller has already been answered releases its queue claim instead of keeping the slot plus a fresh worker budget. Poolifier's post-destroy wording ("not started pool") is also classified as the transient pool-swap it is, and the orphan-exit path bounds its browser cleanup so a wedged browser cannot keep the orphan alive forever.
