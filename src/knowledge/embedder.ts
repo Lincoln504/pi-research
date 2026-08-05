@@ -69,6 +69,16 @@ export class Embedder {
   private readonly IDLE_TIMEOUT_MS = 60 * 1000;
   private activeEmbeddings = 0;
   /**
+   * Embed calls actively INSIDE the model (a pipeline invocation in flight), as
+   * opposed to activeEmbeddings, which counts whole embed()/embedMany() calls —
+   * including callers parked on recoveryPromise after a device loss. recoverToCpu
+   * drains THIS count before swapping the pipeline: parked callers still hold
+   * their activeEmbeddings slot (decremented downstream in their finally), so a
+   * drain on activeEmbeddings could never succeed with ≥2 concurrent device-loss
+   * failures and always burned the full timeout.
+   */
+  private activeInferences = 0;
+  /**
    * Why the in-flight dispose was started. An IDLE dispose is a memory-reclaim
    * pause that a later embed is expected to undo, so initialize() waits it out and
    * re-initializes. A TERMINAL dispose (shutdown, config change, explicit
@@ -389,13 +399,28 @@ export class Embedder {
     return text;
   }
 
+  /**
+   * Run the pipeline over an input, tracked in activeInferences so recoverToCpu's
+   * drain loop waits only on calls genuinely inside the model.
+   */
+  private async runInference(input: string | string[]): Promise<any> {
+    this.activeInferences++;
+    try {
+      return await logger.runCapturingStderr(async () => {
+        return await this.pipeline!(input, this.pipelineOpts());
+      });
+    } finally {
+      this.activeInferences--;
+    }
+  }
+
   async embed(text: string): Promise<Float32Array> {
     await this.initialize();
     // Compute the input BEFORE the active-count increment: truncateText is a pure
     // string op, and keeping it (and nothing else) ahead of the try/finally means
     // every path that can throw or await is inside the finally that decrements the
     // counter. Otherwise a throw here (or in acquireGpuLock) would leak the count,
-    // permanently wedging recoverToCpu (15s spin) and dispose (5s hang).
+    // permanently wedging dispose (5s hang).
     const input = this.truncateText(this.queryPrefix ? this.queryPrefix + text : text);
     this.stopIdleTimer();
     this.activeEmbeddings++;
@@ -408,9 +433,7 @@ export class Embedder {
           logger.warn('[embedder] GPU per-call lock timeout after 15s — proceeding without lock');
         }
       }
-      const output = await logger.runCapturingStderr(async () => {
-        return await this.pipeline!(input, this.pipelineOpts());
-      });
+      const output = await this.runInference(input);
       return output.data as Float32Array;
     } catch (err) {
       if (isWebGpuDeviceError(err)) {
@@ -425,9 +448,7 @@ export class Embedder {
         // dereferencing a null pipeline would raise a TypeError that MASKS the
         // original device error — rethrow the original instead.
         if (!this.pipeline) throw err;
-        const output = await logger.runCapturingStderr(async () => {
-          return await this.pipeline!(input, this.pipelineOpts());
-        });
+        const output = await this.runInference(input);
         return output.data as Float32Array;
       }
       throw err;
@@ -472,9 +493,7 @@ export class Embedder {
 
           let output: any;
           try {
-            output = await logger.runCapturingStderr(async () => {
-              return await this.pipeline!(batch, this.pipelineOpts());
-            });
+            output = await this.runInference(batch);
           } catch (err) {
             if (isWebGpuDeviceError(err)) {
               if (lockAcquired && this.stateManager) {
@@ -487,9 +506,7 @@ export class Embedder {
               // Same guard as embed(): recoverToCpu may have skipped (disposing/idle),
               // leaving pipeline null — rethrow the original error, not a TypeError.
               if (!this.pipeline) throw err;
-              output = await logger.runCapturingStderr(async () => {
-                return await this.pipeline!(batch, this.pipelineOpts());
-              });
+              output = await this.runInference(batch);
             } else {
               throw err;
             }
@@ -521,22 +538,33 @@ export class Embedder {
       return;
     }
 
-    this.recoveryPromise = (async () => {
+    // Close the initialize() re-entry window SYNCHRONOUSLY, before the first
+    // await: initialize() only checks 'ready'/'disposing' and initializingPromise,
+    // so until the recovery promise below is published, a concurrent
+    // embed()/embedMany() passed every guard and launched a second concurrent
+    // _initializeInternal — racing pipeline/state assignments, leaking the losing
+    // pipeline, and (device was flipped to 'cpu' only after the drain loop)
+    // reloading the exact WebGPU backend that just failed. Flip device first so
+    // no joiner can ever observe 'webgpu' again this session.
+    this.state = 'initializing';
+    this.device = 'cpu';
+
+    const recovery = (async () => {
       logger.warn('[embedder] WebGPU device error detected during operation — falling back to CPU for the remainder of this session');
-      
+
       markWebGpuFallback();
-      
+
       await releaseGpuLock(this.stateManager, this.gpuLockHeld);
       this.gpuLockHeld = false;
-      
-      this.state = 'initializing';
-      
-      // Wait for other concurrent embeddings to finish before disposing the pipeline
+
+      // Drain in-flight pipeline calls before disposing the pipeline. Counts
+      // activeInferences, NOT activeEmbeddings: concurrent callers that hit the
+      // same device error park on recoveryPromise while still holding their
+      // activeEmbeddings slot (see the field comment), so an activeEmbeddings
+      // drain always burned the full timeout under multi-caller device loss.
       const maxWaitMs = 15000;
       const startTime = Date.now();
-      // We expect activeEmbeddings to be at least 1 (the current caller).
-      // If multiple callers are in recoverToCpu, they all wait for recoveryPromise.
-      while (this.activeEmbeddings > 1 && (Date.now() - startTime) < maxWaitMs) {
+      while (this.activeInferences > 0 && (Date.now() - startTime) < maxWaitMs) {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
 
@@ -544,25 +572,40 @@ export class Embedder {
         try { if (typeof (this.pipeline as any).dispose === 'function') await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
         this.pipeline = null;
       }
-      this.device = 'cpu';
-      
-      this.initializingPromise = this._initializeInternal();
+
       try {
-          await this.initializingPromise;
-          this.state = 'ready';
+        await this._initializeInternal();
       } catch (e) {
-          this.state = 'failed';
-          throw e;
-      } finally {
-          this.initializingPromise = null;
+        this.state = 'failed';
+        throw e;
       }
+      // Same guard as initialize(): a terminal dispose may have landed while the
+      // CPU pipeline loaded — never overwrite 'disposing' with 'ready'. (Cast
+      // defeats control-flow narrowing, which cannot see the awaited init racing
+      // dispose() — same idiom as the state re-checks in initialize().)
+      if ((this.state as EmbedderState) === 'disposing') {
+        logger.warn('[embedder] Recovery finished but embedder was disposed in the meantime.');
+        return;
+      }
+      this.state = 'ready';
       logger.warn('[embedder] CPU fallback recovery complete.');
     })();
 
+    this.recoveryPromise = recovery;
+    // Publish for initialize(): a caller arriving mid-recovery must join the
+    // WHOLE recovery (drain + pipeline swap + re-init), not start its own. This
+    // and the assignments above run before recovery's first await, so there is
+    // no window in which a joiner can slip past.
+    this.initializingPromise = recovery;
+
     try {
-      await this.recoveryPromise;
+      await recovery;
     } finally {
-      this.recoveryPromise = null;
+      if (this.recoveryPromise === recovery) this.recoveryPromise = null;
+      // Guarded: by the time this finally runs, a fresh initialize() may already
+      // own initializingPromise (e.g. after a failed recovery) — never null it out
+      // from under that caller.
+      if (this.initializingPromise === recovery) this.initializingPromise = null;
     }
   }
 

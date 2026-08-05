@@ -618,6 +618,12 @@ export class PlanningService implements IPlanningService {
       // "Failed to update plan" line (matching generatePlan's abort hygiene).
       if (signal?.aborted) throw err;
       logger.error('[PlanningService] Failed to update plan:', err);
+      // Degrading below is only sound for a transient failure (timeout, empty response,
+      // transport abort) — the same isDegradableLlmError gate generatePlan applies. A hard
+      // failure (revoked/missing auth, explicit provider rejection) would hit every
+      // remaining round identically, burning each one on doomed search bursts and
+      // researcher launches instead of surfacing the real cause — so it stays fatal.
+      if (!isDegradableLlmError(err, signal)) throw err;
       // Otherwise degrade gracefully: a transient evaluator failure (timeout, empty
       // or provider error) reaches here BEFORE the JSON-parse fallback above and used
       // to throw — aborting the whole run with no decision (looks like "the evaluator

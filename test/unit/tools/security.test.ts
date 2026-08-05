@@ -149,4 +149,62 @@ describe('tools/security', () => {
       );
     });
   });
+
+  describe('execute - database name normalization', () => {
+    it('lowercases database names before dispatch ("NVD" → "nvd")', async () => {
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+      vi.mocked(searchSecurityDatabases).mockResolvedValue({
+        totalVulnerabilities: 0,
+        totalDatabases: 1,
+        results: {},
+        duration: 0,
+      });
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      await tool.execute('test-id', { terms: ['test'], databases: ['NVD', ' Github '] }, undefined, undefined, undefined as any);
+
+      expect(searchSecurityDatabases).toHaveBeenCalledWith(
+        expect.objectContaining({ databases: ['nvd', 'github'] }),
+        undefined,
+      );
+    });
+
+    it('fails loudly (no search, no "0 vulnerabilities") when EVERY requested database is unknown', async () => {
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute('test-id', { terms: ['test'], databases: ['all', 'kev'] }, undefined, undefined, undefined as any);
+
+      expect(searchSecurityDatabases).not.toHaveBeenCalled();
+      const text = (result.content[0] as any).text as string;
+      expect(text).toContain('Security Vulnerability Search Failed');
+      expect(text).toContain('nvd, cisa_kev, github, osv');
+      expect(text).not.toContain('0 vulnerabilities');
+      expect(result.details).toMatchObject({ error: 'unknown_databases' });
+    });
+
+    it('passes unknown names through alongside known ones and renders the searcher-reported errors', async () => {
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+      // The real searcher reports each unknown name in `errors`; the tool's note
+      // section must make the dropped source visible instead of implying "found nothing".
+      vi.mocked(searchSecurityDatabases).mockResolvedValue({
+        totalVulnerabilities: 0,
+        totalDatabases: 1,
+        results: { nvd: { vulnerabilities: [], count: 0 } },
+        duration: 0,
+        errors: ['Unknown database "kev" — valid databases: nvd, cisa_kev, github, osv'],
+      });
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute('test-id', { terms: ['test'], databases: ['nvd', 'kev'] }, undefined, undefined, undefined as any);
+
+      expect(searchSecurityDatabases).toHaveBeenCalledWith(
+        expect.objectContaining({ databases: ['nvd', 'kev'] }),
+        undefined,
+      );
+      const text = (result.content[0] as any).text as string;
+      expect(text).toContain('some databases could not be queried');
+      expect(text).toContain('Unknown database "kev"');
+    });
+  });
 });

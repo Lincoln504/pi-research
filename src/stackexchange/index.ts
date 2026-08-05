@@ -45,6 +45,24 @@ function loadConfig(): StackExchangeConfig {
   };
 }
 
+// The client instance carries the resilience state the SE API requires callers to
+// honor across requests: the `backoff` directive (rest-client lastBackoff), quota
+// tracking, and the 5-failure circuit breaker. A per-call instance resets all of
+// that on every tool call — the exact throttle-violation pattern SE punishes with
+// IP bans — so the client is process-wide, rebuilt only when the API key changes
+// (the sole constructor input that can vary between calls; requestTimeout is a
+// constant in loadConfig).
+let sharedClient: StackExchangeClient | null = null;
+let sharedClientApiKey: string | null = null;
+
+function getClient(config: StackExchangeConfig): StackExchangeClient {
+  if (sharedClient === null || sharedClientApiKey !== config.apiKey) {
+    sharedClient = new StackExchangeClient(config.apiKey, config.requestTimeout);
+    sharedClientApiKey = config.apiKey;
+  }
+  return sharedClient;
+}
+
 /**
  * Main command handler for Stack Exchange operations
  */
@@ -60,11 +78,8 @@ export async function stackexchangeCommand(options: {
   // Load config
   const config = loadConfig();
 
-  // Initialize client
-  const client = new StackExchangeClient(
-    config.apiKey,
-    config.requestTimeout,
-  );
+  // Shared client — resilience state (backoff, quota, breaker) persists across calls
+  const client = getClient(config);
 
   try {
     // Check quota before making requests

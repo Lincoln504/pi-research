@@ -234,14 +234,21 @@ export function bridgeConfigEnv(explicitConfigPath?: string): { path: string; lo
   // default base, not the cli.env overlay). Project-scoped keys are only
   // bridged for these — see below.
   const fromExplicitBase = new Set<string>();
-  for (const filePath of [basePath, cliOverlayPath]) {
+  // Layer order decides the winner (later merge wins). Default: base then cli.env
+  // (overlay wins). With an explicit --config the NAMED file merges last: a file
+  // the user passed on this exact invocation is the most specific intent, and the
+  // ambient cli.env overlay silently overriding it re-created the very failure
+  // this bridge exists to fix (a key set in `--config ci.env` simply not applying).
+  const layers = explicitConfigPath !== undefined
+    ? [cliOverlayPath, basePath]
+    : [basePath, cliOverlayPath];
+  for (const filePath of layers) {
     try {
       if (!fs.existsSync(filePath)) continue;
       const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
       Object.assign(merged, parsed);
-      for (const k of Object.keys(parsed)) {
-        if (explicitConfigPath !== undefined && filePath === basePath) fromExplicitBase.add(k);
-        else fromExplicitBase.delete(k);
+      if (explicitConfigPath !== undefined && filePath === basePath) {
+        for (const k of Object.keys(parsed)) fromExplicitBase.add(k);
       }
       loaded = true;
     } catch {
@@ -1118,6 +1125,20 @@ EXIT CODES
 `;
 }
 
+/**
+ * Read a value-taking option's argument, rejecting the next FLAG as a value.
+ * Truthiness alone let `--model --json` run a full research session against the
+ * literal model "--json" (failing minutes-deep at exit 70 with the --json output
+ * contract silently dropped) instead of failing fast at exit 64.
+ */
+function takeOptionValue(rest: (string | undefined)[], valueIndex: number, flag: string): string {
+  const v = rest[valueIndex];
+  if (v === undefined || v.startsWith('--')) {
+    throw new UsageError(`${flag} requires a value.`);
+  }
+  return v;
+}
+
 export function parseArgs(argv: string[]): ParsedArgs {
   const out: ParsedArgs = {};
   const args = argv.slice(2);
@@ -1143,7 +1164,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const json = rest.includes('--json');
     let configPath: string | undefined;
     const ci = rest.indexOf('--config');
-    if (ci !== -1 && rest[ci + 1]) configPath = rest[ci + 1];
+    if (ci !== -1) configPath = takeOptionValue(rest, ci + 1, '--config');
     out.command = 'status';
     out.status = { json };
     out.configPath = configPath;
@@ -1157,7 +1178,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
       if (a === '--json') json = true;
-      else if (a === '--config' && rest[i + 1]) configPath = rest[++i];
+      else if (a === '--config') configPath = takeOptionValue(rest, ++i, '--config');
       else if (a?.startsWith('--')) {
         throw new UsageError(`unknown option for knowledge: ${a}`);
       } else if (a !== undefined) {
@@ -1179,7 +1200,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
       if (a === '--json') json = true;
-      else if (a === '--config' && rest[i + 1]) configPath = rest[++i];
+      else if (a === '--config') configPath = takeOptionValue(rest, ++i, '--config');
       else if (a?.startsWith('--')) {
         throw new UsageError(`unknown option for knowledge-config: ${a}`);
       } else if (a !== undefined) {
@@ -1263,11 +1284,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         if (isNaN(n) || n < 0 || n > 3) throw new UsageError('--depth must be an integer 0–3.');
         depth = n;
       } else if (a === '--model') {
-        model = rest[++i];
-        if (!model) throw new UsageError('--model requires a value.');
+        model = takeOptionValue(rest, ++i, '--model');
       } else if (a === '--exclude-tools') {
-        const v = rest[++i];
-        excludeTools = v ? v.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+        const v = takeOptionValue(rest, ++i, '--exclude-tools');
+        excludeTools = v.split(',').map((s) => s.trim()).filter(Boolean);
+        if (excludeTools.length === 0) excludeTools = undefined;
       } else if (a === '--initial-links') {
         // Consume until the next flag or end. Validate each entry: these are templated
         // verbatim into the researcher's "investigate these first" evidence block, so
@@ -1289,8 +1310,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         }
         i = j - 1;
       } else if (a === '--config') {
-        configPath = rest[++i];
-        if (!configPath) throw new UsageError('--config requires a path.');
+        configPath = takeOptionValue(rest, ++i, '--config');
       } else if (a === '--json') {
         json = true;
       } else if (a?.startsWith('--')) {

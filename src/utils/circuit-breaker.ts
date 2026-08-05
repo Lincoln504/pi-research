@@ -71,7 +71,7 @@ export class CircuitBreaker {
       const result = await action();
       const duration = Date.now() - startTime;
       metrics.observe('circuit_breaker_call_duration_ms', duration, { breaker: this.options.name, status: 'success' });
-      this.onSuccess();
+      this.onSuccess(admittedAsProbe);
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -105,9 +105,16 @@ export class CircuitBreaker {
     }
   }
 
-  private onSuccess() {
+  private onSuccess(admittedAsProbe: boolean) {
     metrics.increment('circuit_breaker_success_total', 1, { breaker: this.options.name, state: this.state });
     if (this.state === 'HALF_OPEN') {
+      // Only a call admitted through the HALF_OPEN gate is evidence of recovery.
+      // A call admitted while CLOSED that merely settles after the breaker tripped
+      // and re-half-opened carries PRE-outage evidence — counting it would close
+      // the circuit while the real probe is still in flight against a dependency
+      // that may still be down. Its success is simply not counted; the in-flight
+      // probe's own outcome decides the transition.
+      if (!admittedAsProbe) return;
       this.successCount++;
       if (this.successCount >= this.options.halfOpenMaxCalls) {
         this.transitionTo('CLOSED');

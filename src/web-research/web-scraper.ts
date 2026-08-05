@@ -354,8 +354,29 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
     const result = await runBrowserTask<any>({ url: _url, sessionId }, 'scrape', config, signal, 1, container);
     const browserDuration = Date.now() - browserStart;
 
-    if (result.buffer) {
-      const markdown = await extractPdfToMarkdown(new Uint8Array(result.buffer));
+    // PDF bytes travel base64-encoded (bufferB64): the worker result crosses the
+    // cluster-IPC JSON hop (and, for followers, a second JSON hop through the
+    // leader's browser-server), which turns a raw Buffer into
+    // {type:'Buffer',data:[...]} — new Uint8Array(that) is ZERO bytes, so the
+    // extraction ran on nothing and its error string was cached as a "success".
+    // The JSON-roundtripped legacy shape is still decoded so a mixed-version
+    // leader/follower pair keeps working.
+    const legacyBuffer = result.buffer;
+    const pdfBytes: Buffer | null =
+      typeof result.bufferB64 === 'string'
+        ? Buffer.from(result.bufferB64, 'base64')
+        : Array.isArray(legacyBuffer?.data)
+          ? Buffer.from(legacyBuffer.data)
+          : legacyBuffer instanceof Uint8Array
+            ? Buffer.from(legacyBuffer)
+            : null;
+
+    if (pdfBytes !== null) {
+      const markdown = await extractPdfToMarkdown(pdfBytes);
+      // Mirror the fetch layer's PDF branch: an extraction-error string (or an
+      // otherwise empty extraction) must FAIL the scrape via validateContent,
+      // not be recorded — and cached — as successful content.
+      validateContent('', markdown, _url);
       metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'pdf', status: 'success' });
       metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'pdf', status: 'success' });
       return { source: 'playwright', layer: 'playwright+camoufox', markdown };
@@ -386,6 +407,10 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
     metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'html', status: 'success' });
     return { source: 'playwright', layer: 'playwright+camoufox', markdown };
   } catch (error) {
+    // A caller cancellation is not a scrape failure: no layer error metrics and
+    // no tracker entry — the search path applies the same 'Aborted' special case
+    // end-to-end (see browser-search.ts). scrapeSingle classifies it above us.
+    if (signal?.aborted || (error instanceof Error && error.message === 'Aborted')) throw error;
     const browserDuration = Date.now() - browserStart;
     metrics.increment('scrape_operations_total', 1, { layer: 'playwright', status: 'error' });
     metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', status: 'error' });
@@ -401,6 +426,15 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
 }
 
 export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeResult> {
+  // Cancellation short-circuit: after a user abort each remaining URL would
+  // otherwise still pay for SSRF DNS validation, a doomed fetch, and a browser
+  // fallback — all logged/counted as failures the user never had. 'Aborted' is
+  // the codebase's recognized cancellation signature (see browser-search.ts);
+  // deliberately no total_failure tally, no tracker entry, no ERROR log.
+  if (signal?.aborted) {
+    return { url, success: false, error: 'Aborted', markdown: '' };
+  }
+
   // Guard against an array accidentally stringified and passed as a single url (JSON arrays start
   // with '['). Do NOT reject brackets ANYWHERE: valid URLs legitimately contain them in query
   // strings (e.g. ?ids[]=1) and IPv6 literals (http://[::1]/) — the old includes('[') check dropped
@@ -477,6 +511,13 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
 
     return { ...res, url, success: true };
   } catch (e1) {
+    // Cancelled mid-fetch: not a fetch-layer failure, and no reason to pay for
+    // the browser fallback — classify as the recognized cancellation (no ERROR
+    // log, no tracker entry, no total_failure tally).
+    if (signal?.aborted || (e1 instanceof Error && e1.message === 'Aborted')) {
+      logger.debug(`[Scrapers] Scrape cancelled for ${url}`);
+      return { url, success: false, error: 'Aborted', markdown: '' };
+    }
     const fetchDuration = Date.now() - start;
     logger.debug(`[Scrapers] fetch failed for ${url} in ${fetchDuration}ms: ${formatErrorWithCause(e1)}`);
     // Tracked here rather than inside scrapeWithFetch, which is retried above —
@@ -499,6 +540,14 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
 
         return { ...res, url, success: true };
       } catch (e2) {
+        // See the fetch-layer catch above: a cancellation surfacing from the
+        // browser layer (runBrowserTask throws exactly 'Aborted' on a caller
+        // abort) is not a failure — it must not reach the ERROR log, the error
+        // tracker, or the total_failure tally.
+        if (signal?.aborted || (e2 instanceof Error && e2.message === 'Aborted')) {
+          logger.debug(`[Scrapers] Browser scrape cancelled for ${url}`);
+          return { url, success: false, error: 'Aborted', markdown: '' };
+        }
         const totalDuration = Date.now() - start;
         // A blocked/stubbed/HTTP-errored/slow/pool-draining URL is an expected
         // scraping outcome, already surfaced to the user as "not scraped" (the
@@ -530,6 +579,11 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
   
   const results: ScrapeResult[] = [];
   for (let i = 0; i < urls.length; i += maxConcurrency) {
+    // Stop dispatching once the caller has cancelled; URLs already in flight
+    // settle via scrapeSingle's own cancellation classification. Without this,
+    // every remaining batch still ran its full fetch + browser-fallback cycle
+    // after a user cancel.
+    if (signal?.aborted) break;
     const batch = urls.slice(i, i + maxConcurrency);
     const batchRes = await Promise.all(
       batch.map(async url => {

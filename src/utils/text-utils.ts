@@ -76,7 +76,14 @@ export function truncateWithMarker(content: string, maxChars: number): string {
   const makeMarker = (kept: number) => `\n\n[content truncated: showing ${kept} of ${total} chars]`;
   // Reserve marker room using the longest possible marker (kept ≤ total, so the
   // digit count of `kept` never exceeds that of `total`).
-  const keep = Math.max(0, maxChars - makeMarker(total).length);
+  let keep = Math.max(0, maxChars - makeMarker(total).length);
+  // slice() counts UTF-16 code units, so the cut can land between the halves of a
+  // surrogate pair — a lone high surrogate in the body is invalid text that some
+  // providers reject (400) when it reaches a JSON payload. Backing off one unit
+  // restores well-formed text. The whitespace-boundary path below cannot split a
+  // pair: it cuts immediately before a BMP whitespace character.
+  const lastKeptUnit = content.charCodeAt(keep - 1);
+  if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
   let body = content.slice(0, keep);
   // Prefer a clean boundary near the cut point.
   const boundary = Math.max(body.lastIndexOf('\n'), body.lastIndexOf(' '));

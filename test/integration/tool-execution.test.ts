@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { createResearchTool } from '../../src/tools/research-tool-definition.ts';
 import { createHealthTool } from '../../src/tools/health-tool-definition.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../src/core/service-initialization.ts';
@@ -13,7 +16,25 @@ import { registerInfrastructureServices } from '../../src/infrastructure/service
 // resetServiceContainer imported via helpers when needed
 
 describe('Tool Execution After Service Registry Refactor', () => {
+  // Hermetic state: unlike the rest of the serial group this file does not go
+  // through helpers/setup.ts setupLifecycle() (which pins these itself), so the
+  // services registered below would resolve PI_RESEARCH_STATE_DIR/_KNOWLEDGE_DIR
+  // to the REAL ~/.pi/research — run-semaphore slot files and knowledge state
+  // racing any concurrent real run and polluting the developer's machine. Pin
+  // both to per-suite tmpdirs BEFORE any service factory reads them.
+  let tmpStateDir: string;
+  let tmpKnowledgeDir: string;
+  let realStateDir: string | undefined;
+  let realKnowledgeDir: string | undefined;
+
   beforeAll(async () => {
+    realStateDir = process.env['PI_RESEARCH_STATE_DIR'];
+    realKnowledgeDir = process.env['PI_RESEARCH_KNOWLEDGE_DIR'];
+    tmpStateDir = mkdtempSync(path.join(os.tmpdir(), 'pi-tool-exec-state-'));
+    tmpKnowledgeDir = mkdtempSync(path.join(os.tmpdir(), 'pi-tool-exec-knowledge-'));
+    process.env['PI_RESEARCH_STATE_DIR'] = tmpStateDir;
+    process.env['PI_RESEARCH_KNOWLEDGE_DIR'] = tmpKnowledgeDir;
+
     // Register all services
     registerCoreServices();
     registerInfrastructureServices();
@@ -35,6 +56,13 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
   afterAll(async () => {
     await disposeCoreServices();
+    // Restore the ambient env exactly and drop the throwaway dirs.
+    if (realStateDir === undefined) delete process.env['PI_RESEARCH_STATE_DIR'];
+    else process.env['PI_RESEARCH_STATE_DIR'] = realStateDir;
+    if (realKnowledgeDir === undefined) delete process.env['PI_RESEARCH_KNOWLEDGE_DIR'];
+    else process.env['PI_RESEARCH_KNOWLEDGE_DIR'] = realKnowledgeDir;
+    rmSync(tmpStateDir, { recursive: true, force: true });
+    rmSync(tmpKnowledgeDir, { recursive: true, force: true });
   });
 
   beforeEach(async () => {

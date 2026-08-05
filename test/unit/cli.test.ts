@@ -42,11 +42,26 @@ const SKILL_LAUNCHER = path.join(ROOT, 'skills', 'pi-research', 'scripts', 'run.
 // `prepare`), leaving dist/ absent. Build on demand if missing so the suite is
 // self-sufficient regardless of cache state — locally and in CI — instead of
 // failing with an opaque "module not found" from the spawned node process.
+//
+// SUBPROCESS_HOME: throwaway HOME shared by runCli/runSkill below. main() runs
+// reconcileSkillInstalls() for every command except help/version, so a CLI (or
+// launcher-chained CLI) spawned with the real process.env would silently
+// retarget the developer's actual skill symlinks (~/.claude/skills/…) and
+// rewrite the real manifest (~/.pi/research/installed-skills.json) on every
+// `npm test`. Suites that need a POPULATED sandbox HOME (auth.json,
+// config.env, …) build their own tmp home instead.
+let SUBPROCESS_HOME: string;
+
 beforeAll(() => {
+  SUBPROCESS_HOME = mkdtempSync(path.join(os.tmpdir(), 'pir-cli-home-'));
   if (!existsSync(CLI) || !existsSync(SKILL_LAUNCHER)) {
     execSync('npm run build:cli && npm run build:skill', { cwd: ROOT, stdio: 'inherit' });
   }
 }, 120_000);
+
+afterAll(() => {
+  rmSync(SUBPROCESS_HOME, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // parseArgs — no-arg / help variants
@@ -545,10 +560,22 @@ describe('reportError — exit-code classification', () => {
 // Subprocess — CLI binary end-to-end (requires dist/cli.mjs to be built)
 // ---------------------------------------------------------------------------
 
+// Scrubbed env + throwaway HOME — the same hermetic treatment the
+// model-required suite uses: ambient PI_RESEARCH_* must not steer detection,
+// and HOME/USERPROFILE must never be the developer's real ones (see the
+// SUBPROCESS_HOME note above the beforeAll).
+function hermeticEnv(extra?: Record<string, string>): Record<string, string> {
+  const base: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
+  }
+  return { ...base, HOME: SUBPROCESS_HOME, USERPROFILE: SUBPROCESS_HOME, ...extra };
+}
+
 function runCli(args: string[], env?: Record<string, string>) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, ...env },
+    env: hermeticEnv(env),
     timeout: 20_000,
   });
 }
@@ -1036,8 +1063,11 @@ describe('CLI subprocess — knowledge-config (hermetic per-directory scoping)',
 // ---------------------------------------------------------------------------
 
 function runSkill(args: string[]) {
+  // Hermetic like runCli: `status` chains through the launcher into the real
+  // CLI, which reconciles skill installs against $HOME (see SUBPROCESS_HOME).
   return spawnSync(process.execPath, [SKILL_LAUNCHER, ...args], {
     encoding: 'utf-8',
+    env: hermeticEnv(),
     timeout: 20_000,
   });
 }
@@ -1095,7 +1125,9 @@ describe('skill launcher subprocess', () => {
     );
     try {
       const launcher = spawn(process.execPath, [SKILL_LAUNCHER, 'research', 'test query'], {
-        env: { ...process.env, PI_RESEARCH_BIN: stubPath, PID_FILE: pidFile },
+        // hermeticEnv scrubs ambient PI_RESEARCH_*; the stub-engine override is
+        // deliberate and re-added on top.
+        env: hermeticEnv({ PI_RESEARCH_BIN: stubPath, PID_FILE: pidFile }),
         stdio: 'ignore',
       });
       const exited = new Promise<number | null>((resolve) => launcher.on('exit', (code) => resolve(code)));

@@ -26,6 +26,14 @@ import {
   clearCompletedResearchers,
 } from '../tui/research-panel.ts';
 
+/**
+ * Slice id for the run-queued placeholder box. Shown by onRunQueued while the
+ * run waits for a machine-wide run-cap slot (before ANY other lifecycle event)
+ * and removed by onStart once a slot is acquired — both quick and deep fire
+ * onStart before doing real work. Stable-id keyed like 'coord'/'eval'.
+ */
+const RUN_QUEUED_SLICE_ID = 'run-queued';
+
 export interface ObserverContext {
   panelState: ResearchPanelState;
   debouncedRefresh: () => void;
@@ -71,6 +79,9 @@ export function createResearchObserver(
 
   return {
     onStart: (query, complexity) => {
+      // A run-cap slot was acquired and the run is actually starting — drop the
+      // queued-run placeholder (no-op when the run never queued).
+      removeSlice(panelState, RUN_QUEUED_SLICE_ID);
       if (complexity === 0) {
         // Truncate at a CODEPOINT boundary (Array.from iterates codepoints), not a
         // code-unit index: query.slice(0, 20) can split a surrogate pair (emoji,
@@ -88,6 +99,26 @@ export function createResearchObserver(
       }
       // Quick research: researcher is running → steering is acceptable
       panelState.steeringAcceptable = true;
+      debouncedRefresh();
+    },
+
+    onRunQueued: (slots, maxWaitMs) => {
+      // Fired before any other lifecycle event when every machine-wide run slot
+      // is held and this run is about to queue (for up to maxWaitMs). Without a
+      // visible notice the whole wait renders as an empty panel — the exact
+      // "looks like a hang" condition the callback exists to prevent. Surface it
+      // through the same slice/status channel every other phase uses; the
+      // non-numeric label routes updateSliceStatus to a persistent status (no
+      // timed pop), and onStart removes the placeholder once the run begins.
+      const waitMins = Math.max(1, Math.ceil(maxWaitMs / 60_000));
+      addSlice(panelState, RUN_QUEUED_SLICE_ID, 'queued', false);
+      activateSlice(panelState, RUN_QUEUED_SLICE_ID);
+      updateSliceStatus(
+        panelState,
+        RUN_QUEUED_SLICE_ID,
+        `waiting for a free run slot (all ${slots} in use, up to ${waitMins}m)`,
+        debouncedRefresh,
+      );
       debouncedRefresh();
     },
 

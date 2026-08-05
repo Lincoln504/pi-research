@@ -457,8 +457,20 @@ export class StateManager {
     return state.embeddingServer ?? null;
   }
 
-  public async clearEmbeddingServer(): Promise<void> {
+  public async clearEmbeddingServer(expected?: { pid?: number; serverId?: string }): Promise<void> {
     await this.updateState((state) => {
+      // Compare-and-delete: the registration is shared cross-process state, and an
+      // unconditional delete lets a follower's shutdown (or a waiter acting on a
+      // stale snapshot) deregister a DIFFERENT process's live leader — which then
+      // never re-registers (its leadership check treats an absent entry as benign),
+      // so a fresh caller elects a second GPU model instance alongside the invisible
+      // one. Callers pass the identity they believe they are clearing; a mismatch
+      // means someone else already claimed the slot, and the clear must no-op.
+      const entry = state.embeddingServer;
+      if (entry && expected !== undefined) {
+        if (expected.serverId !== undefined && entry.serverId !== expected.serverId) return state;
+        if (expected.pid !== undefined && entry.pid !== expected.pid) return state;
+      }
       delete state.embeddingServer;
       return state;
     });

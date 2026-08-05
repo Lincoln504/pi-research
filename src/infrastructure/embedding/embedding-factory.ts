@@ -76,6 +76,13 @@ export async function isEmbeddingLeaderAlive(
 
 let _embeddingInstance: IEmbedder | null = null;
 let _embeddingInitPromise: Promise<IEmbedder> | null = null;
+// Config the in-flight init was started for. The join below must compare against
+// these — the cached-instance path checks model/device before reuse, and the
+// adoption paths refuse mismatched leaders, but a caller joining a promise built
+// for a different config would silently receive (and stamp the cache with) the
+// wrong-model embedder, defeating both guards.
+let _initModel: string | null = null;
+let _initDevice: string | null = null;
 let _cachedModel: string | null = null;
 let _cachedDevice: string | null = null;
 
@@ -130,8 +137,18 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
 
   // An internal retry (_attempt > 0) is re-entering from INSIDE the promise stored
   // here, so handing that promise back would make it await itself. Only a fresh
-  // external call may join an in-flight init.
-  if (_embeddingInitPromise && _attempt === 0) return _embeddingInitPromise;
+  // external call may join an in-flight init — and only one started for the SAME
+  // config: a mismatched joiner would get the wrong-model embedder (same-dimension
+  // models cross-embed silently). On mismatch, wait the in-flight init out (never
+  // race a second election in this process), then re-resolve for this config — the
+  // cached-instance check above disposes the mismatched instance.
+  if (_embeddingInitPromise && _attempt === 0) {
+    if (_initModel === cfg.EMBEDDING_MODEL && _initDevice === cfg.EMBEDDING_DEVICE) {
+      return _embeddingInitPromise;
+    }
+    await _embeddingInitPromise.catch(() => {});
+    return getEmbedder(cfg, _attempt);
+  }
 
   let p: Promise<IEmbedder>;
 
@@ -222,7 +239,12 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
         if (!(await isEmbeddingLeaderAlive(info, processLifecycle))) {
           // Candidate process died without cleaning up (or its PID was recycled by
           // an unrelated process — the start-time pairing catches that too).
-          await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
+          // serverId-scoped: several waiters typically detect the death in the same
+          // poll tick; the first one's clear+claim can commit before this one's clear
+          // runs, and an unconditional delete here would deregister that NEW claimant
+          // (whose Phase-3 port publish is CAS-guarded and silently no-ops) — leaving
+          // two concurrent model inits and an invisible leader.
+          await stateManager.clearEmbeddingServer({ serverId: info.serverId }).catch((err) => logger.debug('Swallowed clear embedding server error:', err));
           break;
         }
         // Re-check model identity every poll: the leader may have changed while
@@ -246,7 +268,10 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
           const secondCheck = await isPortListening(info.port);
           if (!secondCheck) {
             logger.warn(`[EmbeddingFactory] Registered port ${info.port} is unreachable after two checks — clearing stale state`);
-            await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
+            // serverId-scoped: this snapshot is up to ~2.5s old (two probes + sleep);
+            // the entry may already belong to a new claimant. See the dead-leader
+            // clear above for the failure this prevents.
+            await stateManager.clearEmbeddingServer({ serverId: info.serverId }).catch((err) => logger.debug('Swallowed clear embedding server error:', err));
             break;
           }
         }
@@ -282,8 +307,10 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
     try {
       port = await server.startServer();
     } catch (err) {
-      // Init failed — clear our placeholder so others can try
-      await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
+      // Init failed — clear our placeholder so others can try. serverId-scoped so a
+      // concurrent steal-and-reclaim (a waiter that judged us dead and claimed) is
+      // never deregistered by our own failure path.
+      await stateManager.clearEmbeddingServer({ serverId }).catch((err) => logger.debug('Swallowed clear embedding server error:', err));
       throw err;
     }
 
@@ -307,6 +334,8 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
 
   p = init();
   _embeddingInitPromise = p;
+  _initModel = cfg.EMBEDDING_MODEL;
+  _initDevice = cfg.EMBEDDING_DEVICE;
   // init() already assigns _embeddingInstance before it resolves, so do NOT
   // re-assign it here. If clearEmbeddingInstance() ran (and disposed the server)
   // between init resolving and this microtask, re-assigning would resurrect the

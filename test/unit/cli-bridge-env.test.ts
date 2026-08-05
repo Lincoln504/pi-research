@@ -53,6 +53,42 @@ describe('bridgeConfigEnv precedence', () => {
     }
   });
 
+  it('an explicit --config file outranks the ambient cli.env overlay, for user- and project-scoped keys', () => {
+    const researchDir = path.join(os.homedir(), FIXTURE_DIR_NAME, 'research');
+    const savedModel = process.env['PI_RESEARCH_MODEL'];
+    const savedMode = process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+    try {
+      mkdirSync(researchDir, { recursive: true });
+      // Ambient overlay defines the SAME keys as the explicit file: the file the
+      // user named on this invocation must win, and its project-scoped key must
+      // still be bridged (getConfig never reads the explicit path, so dropping it
+      // means the value applies nowhere).
+      writeFileSync(
+        path.join(researchDir, 'cli.env'),
+        'PI_RESEARCH_MODEL=overlay/model\nPI_RESEARCH_KNOWLEDGE_STORE_MODE=none\n',
+        'utf-8',
+      );
+      const explicitPath = path.join(researchDir, 'ci.env');
+      writeFileSync(
+        explicitPath,
+        'PI_RESEARCH_MODEL=explicit/model\nPI_RESEARCH_KNOWLEDGE_STORE_MODE=global\n',
+        'utf-8',
+      );
+      delete process.env['PI_RESEARCH_MODEL'];
+      delete process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+
+      bridgeConfigEnv(explicitPath);
+      expect(process.env['PI_RESEARCH_MODEL']).toBe('explicit/model');
+      expect(process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE']).toBe('global');
+    } finally {
+      rmSync(path.join(os.homedir(), FIXTURE_DIR_NAME), { recursive: true, force: true });
+      if (savedModel === undefined) delete process.env['PI_RESEARCH_MODEL'];
+      else process.env['PI_RESEARCH_MODEL'] = savedModel;
+      if (savedMode === undefined) delete process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+      else process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = savedMode;
+    }
+  });
+
   it('a real environment value is never clobbered by either file', () => {
     const researchDir = path.join(os.homedir(), FIXTURE_DIR_NAME, 'research');
     const savedModel = process.env['PI_RESEARCH_MODEL'];

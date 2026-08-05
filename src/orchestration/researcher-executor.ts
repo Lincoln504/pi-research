@@ -20,6 +20,7 @@ import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../core/llm/prompts.ts';
 import { injectCurrentDate } from '../core/llm/inject-date.ts';
 import { recordResearcherFailure, getSteeringMessages } from './session-state.ts';
+import { isAbortSentinel, boundSessionAbort } from './abort-utils.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 import { search } from '../web-research/search.ts';
 
@@ -97,6 +98,16 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       } catch (err) {
         logger.debug(`[ResearcherExecutor] Researcher ${id} link-retry search burst failed:`, err);
       }
+    }
+
+    // A cancel/teardown lands here with zero links because the loop above breaks
+    // on abort/disposal — that is a clean stop, not a "search produced nothing"
+    // researcher failure. Return quietly (mirrors the cancellation treatment in
+    // runResearchers) instead of recording a failure, bumping the skip metric,
+    // and painting a red failed slice with a bogus root cause on a plain cancel.
+    if (signal?.aborted || container?.isDisposing) {
+      logger.debug(`[ResearcherExecutor] Researcher ${id} cancelled while acquiring initial links; skipping quietly.`);
+      return;
     }
 
     if (effectiveInitialLinks.length === 0) {
@@ -399,13 +410,19 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         logger.debug(`[ResearcherExecutor] Researcher ${id} salvage attempt failed:`, salvageErr);
       }
       
-      // Skip retries when the run is being torn down: an aborted signal, an explicit
-      // "Aborted" error, or the service container entering disposal (SIGTERM/quit
-      // mid-run, which throws "…during container disposal" from getService). Retrying
-      // during disposal is futile — services are being destroyed — and it relaunches
-      // search bursts into a WorkerPool that dispose() is simultaneously destroying,
-      // producing a storm of "Cannot execute a task on destroying pool" errors.
-      if (signal?.aborted || errMsg === 'Aborted' || errMsg.includes('during container disposal') || container?.isDisposing) {
+      // Skip retries when the run is being torn down: an aborted signal, the abort
+      // sentinel, or the service container entering disposal (SIGTERM/quit mid-run,
+      // which throws "…during container disposal" from getService). The sentinel has
+      // TWO forms — the race's bare 'Aborted' above AND the '<id>: Aborted' that
+      // ensureAssistantResponse throws when a fast-stop abortAllSessions() aborted
+      // this session externally (prompt() then resolves normally) — so match it via
+      // isAbortSentinel, not exact equality: the prefixed form used to slip past
+      // this guard and RETRY a researcher the fast-stop path had just aborted.
+      // Retrying during disposal is futile — services are being destroyed — and it
+      // relaunches search bursts into a WorkerPool that dispose() is simultaneously
+      // destroying, producing a storm of "Cannot execute a task on destroying pool"
+      // errors.
+      if (signal?.aborted || isAbortSentinel(errMsg) || errMsg.includes('during container disposal') || container?.isDisposing) {
         logger.debug(`[ResearcherExecutor] Researcher ${id} aborted or container disposing, skipping retries.`);
         break; // Break out of the attempt loop
       }
@@ -423,18 +440,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       // never settle — never let per-attempt cleanup hang the retry loop on it. The
       // retry builds a fresh session; the abandoned abort keeps draining in the
       // background and its session dies with the run's teardown.
-      await Promise.race([
+      await boundSessionAbort(
         session.abort().catch((err) => {
           logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id}:`, err);
         }),
-        new Promise<void>((resolve) => {
-          const t = setTimeout(() => {
-            logger.warn(`[ResearcherExecutor] Researcher ${id} session abort did not settle within 10s; continuing cleanup`);
-            resolve();
-          }, 10_000);
-          t.unref?.();
-        }),
-      ]);
+        () => logger.warn(`[ResearcherExecutor] Researcher ${id} session abort did not settle within 10s; continuing cleanup`),
+      );
       sessionService?.unregisterSession(researchId, id);
 
       // Restore the default thinking label now that the researcher is done.

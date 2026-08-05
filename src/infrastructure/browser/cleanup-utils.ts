@@ -108,6 +108,44 @@ async function isProfileLive(profileDir: string): Promise<boolean> {
   return false;
 }
 
+/** Canonicalize a path for identity comparison: realpath when resolvable (macOS
+ *  /tmp is a symlink to /private/tmp), else a plain resolve; case-folded on
+ *  Windows, whose filesystem compares case-insensitively. */
+async function canonicalizeForCompare(p: string): Promise<string> {
+  let resolved: string;
+  try {
+    resolved = await fs.realpath(p);
+  } catch {
+    resolved = path.resolve(p);
+  }
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * May the unrecognized-entry deletion branch run against this explicit baseDir?
+ *
+ * That branch recursively rm's ANY stale subdirectory, so it is only safe inside
+ * a directory pi-research owns outright. Two conditions gate it: the dir must not
+ * BE the shared system temp dir (realpath-compared on both sides — a
+ * PI_RESEARCH_TMP_DIR pointed at /tmp once made every same-user /tmp entry — ssh
+ * agents, build caches — a sweep candidate), and the path must carry a
+ * pi-research segment as positive evidence of ownership. When this returns false
+ * the prefix-matched playwright profile cleanup still runs; only unknowns are
+ * spared.
+ */
+async function isPiOwnedSweepDir(dir: string): Promise<boolean> {
+  const [realDir, realTmp] = await Promise.all([
+    canonicalizeForCompare(dir),
+    canonicalizeForCompare(os.tmpdir()),
+  ]);
+  if (realDir === realTmp) return false;
+  const hasPiSegment = (p: string) =>
+    p.split(/[\\/]+/).some((segment) => segment.toLowerCase().startsWith('pi-research'));
+  // Check the canonical path AND the given one: a symlinked profile dir whose
+  // target lacks the marker is still recognizably ours by its configured path.
+  return hasPiSegment(realDir) || hasPiSegment(path.resolve(dir));
+}
+
 /**
  * Reclaim leaked Playwright/Camoufox profile directories.
  *
@@ -133,6 +171,11 @@ export async function cleanupStaleProfiles(
   const prefix = 'playwright_firefoxdev_profile-';
   let removed = 0;
   let errors = 0;
+
+  // Explicit-baseDir mode considers EVERY entry a candidate, including ones it
+  // does not recognize; deleting unknowns is only permitted inside a dir that is
+  // provably pi-owned and not the shared system temp dir (see isPiOwnedSweepDir).
+  const sweepUnrecognized = usePrefix ? false : await isPiOwnedSweepDir(scanDir);
 
   try {
     const entries = await fs.readdir(scanDir);
@@ -171,8 +214,9 @@ export async function cleanupStaleProfiles(
         }
 
         // Unrecognized entry (only reachable with an explicit baseDir): be conservative —
-        // only reclaim if both old AND not live, so we never delete something unknown promptly.
-        if (now - stats.mtimeMs > staleMs && !(await isProfileLive(fullPath))) {
+        // only reclaim inside a pi-owned dir, and only if both old AND not live,
+        // so nothing unknown is ever deleted promptly or outside our ownership.
+        if (sweepUnrecognized && now - stats.mtimeMs > staleMs && !(await isProfileLive(fullPath))) {
           await fs.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
           removed++;
         }

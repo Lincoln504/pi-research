@@ -1113,11 +1113,19 @@ export class KnowledgeStore implements IKnowledgeStore {
       // `_backup_` dirs are intentional, user-recoverable snapshots from the
       // 'backup' migration strategy. RETAIN the most recent one (deleting it
       // would make 'backup' silently equivalent to 'drop'); prune only older,
-      // superseded backups so they don't accumulate. ISO-timestamp names sort
-      // chronologically, so the last entry is newest.
+      // superseded backups so they don't accumulate. Rank by the trailing
+      // `_backup_<timestamp>` suffix, NOT by whole-name sort: the prefix is the
+      // table name AT BACKUP TIME — legitimately `knowledge` OR
+      // `knowledge_migration_<ts>` (persisted re-embed rename failure) — and
+      // `knowledge_b…` < `knowledge_m…` lexicographically, so a whole-name sort
+      // retained an OLD migration-named backup while deleting a NEWER
+      // `knowledge_backup_*`.
       if (backupDirs.length > 1) {
-        backupDirs.sort();
-        for (const name of backupDirs.slice(0, -1)) {
+        const ranked = await Promise.all(
+          backupDirs.map(async name => ({ name, ts: await this.backupDirTimestamp(name) }))
+        );
+        ranked.sort((a, b) => a.ts - b.ts);
+        for (const { name } of ranked.slice(0, -1)) {
           const fullPath = path.join(this.options.dbDir, name);
           logger.info(`[store] Removing superseded backup directory: ${name}`);
           await fsPromises.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -1125,6 +1133,27 @@ export class KnowledgeStore implements IKnowledgeStore {
       }
     } catch (err) {
       logger.warn('[store] Failed to prune orphaned migration directories:', err);
+    }
+  }
+
+  /**
+   * Creation time of a backup dir, for retention ranking in
+   * pruneOrphanedMigrationDirs. Parses the trailing `_backup_<timestamp>` suffix
+   * (an ISO timestamp with `:`/`.` mapped to `-`, exactly as migrationBackup
+   * writes it); falls back to directory mtime for names that don't parse, and to
+   * 0 (ranked oldest, pruned first) if even stat fails.
+   */
+  private async backupDirTimestamp(name: string): Promise<number> {
+    const m = name.match(/_backup_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.lance$/);
+    if (m) {
+      const parsed = Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    try {
+      const stat = await fsPromises.stat(path.join(this.options.dbDir, name));
+      return stat.mtimeMs;
+    } catch {
+      return 0;
     }
   }
 

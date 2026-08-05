@@ -302,6 +302,37 @@ function sleepSync(ms: number): void {
  * could both read the same pre-change snapshot and clobber each other's entry (a lost update).
  * `mutate` receives the latest on-disk registry and edits it in place.
  */
+/**
+ * Reclaim a lock file already judged stale, without the unlink race.
+ *
+ * A direct `unlinkSync(lockPath)` lets two contenders both judge the SAME lock
+ * stale: the slower one then unlinks the winner's freshly created lock, and both
+ * enter the critical section — the exact lost update the lock exists to prevent.
+ * Rename is atomic, so exactly one contender wins the steal; the inode check then
+ * catches the narrower ABA case where the path already holds a NEW lock created
+ * after the caller's stat, and `linkSync` restores it without clobbering (link
+ * fails EEXIST if yet another lock took the path meanwhile).
+ *
+ * Callers always `continue` their O_EXCL acquire loop afterwards — this helper
+ * never grants the lock, it only makes the steal single-winner.
+ */
+function stealStaleLock(lockPath: string, judgedStale: fs.Stats): void {
+  const reclaimPath = `${lockPath}.stale-${process.pid}-${Date.now()}`;
+  try {
+    fs.renameSync(lockPath, reclaimPath);
+  } catch {
+    return; // Another contender already stole it — re-enter the acquire loop.
+  }
+  try {
+    const claimed = fs.statSync(reclaimPath);
+    if (claimed.ino !== judgedStale.ino) {
+      // We grabbed a lock created after our staleness judgment — put it back.
+      try { fs.linkSync(reclaimPath, lockPath); } catch { /* a newer lock holds the path */ }
+    }
+  } catch { /* ignore */ }
+  try { fs.unlinkSync(reclaimPath); } catch { /* ignore */ }
+}
+
 function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<string, string>>) => void): void {
   const registryPath = getProjectSettingsRegistryPath();
   const dir = path.dirname(registryPath);
@@ -327,7 +358,7 @@ function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<
           try {
             const stats = fs.statSync(lockPath);
             if (Date.now() - stats.mtimeMs > 30000) {
-              fs.unlinkSync(lockPath);
+              stealStaleLock(lockPath, stats);
               continue;
             }
           } catch { /* ignore */ }
@@ -841,7 +872,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
         try {
           const stats = fs.statSync(lockPath);
           if (Date.now() - stats.mtimeMs > 30000) {
-            fs.unlinkSync(lockPath);
+            stealStaleLock(lockPath, stats);
             continue;
           }
         } catch { /* ignore */ }

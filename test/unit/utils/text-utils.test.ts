@@ -395,6 +395,23 @@ describe('text-utils', () => {
       expect(once.match(/\[content truncated/g)!.length).toBe(1);
     });
 
+    it('never leaks a lone surrogate when the cut lands inside an astral character', () => {
+      // slice() counts UTF-16 code units, so an odd `keep` lands between the halves
+      // of a surrogate pair. Some providers reject (400) JSON payloads containing an
+      // unpaired surrogate, so the cut must back off to the pair boundary.
+      const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      // No whitespace anywhere, so the clean-boundary path cannot mask the raw cut.
+      const content = '𝕏'.repeat(5000); // 10,000 code units, pairs at every even index
+      // Sweep a window of caps so both parities of `keep` are exercised regardless
+      // of the marker's exact length.
+      for (let cap = 900; cap < 910; cap++) {
+        const out = truncateWithMarker(content, cap);
+        expect(out.length).toBeLessThanOrEqual(cap);
+        expect(loneSurrogate.test(out)).toBe(false);
+        expect(out).toMatch(/\[content truncated: showing \d+ of 10000 chars\]$/);
+      }
+    });
+
     it('reports accurate shown/total counts in the marker', () => {
       const content = 'b'.repeat(10_000);
       const out = truncateWithMarker(content, 1000);

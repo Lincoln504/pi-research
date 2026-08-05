@@ -28,6 +28,9 @@ import type {
   ResearchOptions
 } from './core/interfaces/orchestration-interfaces.ts';
 import type { IPlanningService } from './core/interfaces/planning-interfaces.ts';
+import type { ResearchObserver, HeadlessObserverOptions } from './core/interfaces/observer-interfaces.ts';
+import type { ResearchPlan } from './core/interfaces/research-plan-types.ts';
+import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
@@ -94,6 +97,13 @@ export interface ResearcherOutcome {
   failureReasons: Record<string, string>;
 }
 let _lastResearcherOutcome: ResearcherOutcome | null = null;
+// Monotonic SDK-lifetime counter, bumped by _doShutdown. A run left in flight across
+// shutdownResearchSDK() settles AFTER the shutdown wiped the `_last*` accessors and
+// cleared session metrics; its catch/finally would then repopulate them, so a
+// re-initialized SDK reported a phantom run from the previous lifetime. Each run
+// captures the generation at start and every post-run telemetry write is gated on it
+// still matching.
+let _sdkGeneration = 0;
 
 // Signal handler state — registered once, removed on clean shutdown.
 let _onSignal: ((signal: string) => void) | null = null;
@@ -489,6 +499,18 @@ export async function runDeepResearch(
   // here instead of vanishing into the never-read global tracker.
   const runTracker = new ErrorTracker();
 
+  // Stamp the run with the current shutdown generation: if shutdownResearchSDK()
+  // completes while this run is still in flight, _doShutdown bumps the generation
+  // and every telemetry write below is skipped — the shutdown wipe must win over
+  // an older-generation run settling late (see _sdkGeneration).
+  const runGeneration = _sdkGeneration;
+
+  // Planned-researcher count, captured DURING the run via the observer wrapper —
+  // it is unreadable from the planning service once runResearch() settles (the deep
+  // orchestrator clears that per-run state in its own finally first).
+  let plannedResearchers = 0;
+  const observer = wrapObserverForOutcomeCapture(options.observer, (count) => { plannedResearchers += count; });
+
   try {
     // Resolve the orchestrator INSIDE the try: getService() can throw (container
     // disposal race with shutdown, or an unregistered service), and if that throw
@@ -506,6 +528,9 @@ export async function runDeepResearch(
       depth: depth as ResearchDepth,
       complexity: complexity as 1 | 2 | 3,
       initialLinks: options.initialLinks,
+      // The caller's observer, wrapped so the SDK captures the planned-researcher
+      // events for getLastResearcherOutcome() (must land AFTER the options spread).
+      observer,
       // Forward the SDK's resolved config so initResearchSDK({ config }) overrides
       // actually reach the orchestrator and every downstream service. A per-call
       // options.config (if provided) takes precedence over the SDK-global config.
@@ -522,27 +547,34 @@ export async function runDeepResearch(
     // unbounded across calls (a long-lived SDK/benchmark process). runRegistry.observe() lands
     // it in this run's snapshot, matching the tool path's run-scoped emission.
     runRegistry.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
-    _lastRunSummary = {
-      runId: researchId, startedAt: researchStart, completedAt,
-      durationMs: completedAt - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
-    };
-    metrics.recordRunSummary(_lastRunSummary);
-    _lastErrorReport = runTracker.getReport();
-    logRunErrorSummary(_lastErrorReport, depthLabel, 'success');
-    _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot);
+    // Generation guard: skip every module-level telemetry write if a shutdown
+    // completed mid-run — the wipe must not be resurrected by a stale run.
+    if (runGeneration === _sdkGeneration) {
+      _lastRunSummary = {
+        runId: researchId, startedAt: researchStart, completedAt,
+        durationMs: completedAt - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
+      };
+      metrics.recordRunSummary(_lastRunSummary);
+      _lastErrorReport = runTracker.getReport();
+      logRunErrorSummary(_lastErrorReport, depthLabel, 'success');
+      _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot, plannedResearchers);
+    }
     return result;
   } catch (err) {
     const completedAt = Date.now();
     // Per-run scope (see the success path above) — avoids unbounded session-scope accumulation.
     runRegistry.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
-    _lastRunSummary = {
-      runId: researchId, startedAt: researchStart, completedAt,
-      durationMs: completedAt - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
-    };
-    metrics.recordRunSummary(_lastRunSummary);
-    _lastErrorReport = runTracker.getReport();
-    logRunErrorSummary(_lastErrorReport, depthLabel, 'error');
-    _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot);
+    // Generation guard — see the success path above.
+    if (runGeneration === _sdkGeneration) {
+      _lastRunSummary = {
+        runId: researchId, startedAt: researchStart, completedAt,
+        durationMs: completedAt - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
+      };
+      metrics.recordRunSummary(_lastRunSummary);
+      _lastErrorReport = runTracker.getReport();
+      logRunErrorSummary(_lastErrorReport, depthLabel, 'error');
+      _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot, plannedResearchers);
+    }
     throw err;
   } finally {
     // Free the per-run PiSessionState that shouldStopResearch()/getFailedResearchers()
@@ -604,15 +636,72 @@ function logRunErrorSummary(report: ErrorReport | null, depthLabel: string, stat
 }
 
 /**
+ * Wrap the caller's observer so the SDK sees the planned-researcher events the deep
+ * orchestrator emits DURING the run. The count cannot be read back afterwards: the
+ * orchestrator's own finally runs cleanupResearchServices → clearPlanningState(researchId)
+ * BEFORE runResearch() resolves for the SDK, so a post-run getTotalResearchersPlanned()
+ * always sees 0. onPlanningSuccess (round 1) and onEvaluationDecision('delegate', …)
+ * (later rounds) fire at exactly the points the orchestrator increments that counter —
+ * it suppresses the delegate decision for a round-cap delegation it discards, so the
+ * captured total only counts researchers that were actually going to run.
+ *
+ * An { onProgress } options bag is normalized into a HeadlessObserver HERE rather than
+ * left to the orchestrator (which uses the same shape check): if the orchestrator wrapped
+ * the bag itself, the planning events would dispatch on ITS HeadlessObserver instance and
+ * never reach this capture layer. Mirrors makeSafeObserver's empty-target Proxy so a
+ * frozen caller observer can never trip the Proxy own-property invariant.
+ */
+function wrapObserverForOutcomeCapture(
+  observer: ResearchObserver | HeadlessObserverOptions | undefined,
+  onPlanned: (count: number) => void,
+): ResearchObserver {
+  const base: ResearchObserver | undefined =
+    observer && typeof (observer as HeadlessObserverOptions).onProgress === 'function' && !(observer instanceof HeadlessObserver)
+      ? new HeadlessObserver(observer as HeadlessObserverOptions)
+      : (observer as ResearchObserver | undefined);
+
+  return new Proxy({} as ResearchObserver, {
+    get(_target, prop) {
+      if (prop === 'onPlanningSuccess') {
+        return (plan: ResearchPlan) => {
+          onPlanned(plan?.researchers?.length ?? 0);
+          base?.onPlanningSuccess?.(plan);
+        };
+      }
+      if (prop === 'onEvaluationDecision') {
+        return (action: 'synthesize' | 'delegate', plan?: ResearchPlan, round?: number) => {
+          if (action === 'delegate') onPlanned(plan?.researchers?.length ?? 0);
+          base?.onEvaluationDecision?.(action, plan, round);
+        };
+      }
+      if (!base) return undefined;
+      const value = Reflect.get(base, prop, base);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(base) : value;
+    },
+    has(_target, prop) {
+      if (prop === 'onPlanningSuccess' || prop === 'onEvaluationDecision') return true;
+      return base ? Reflect.has(base, prop) : false;
+    },
+  });
+}
+
+/**
  * Capture how many researchers were planned/launched/failed for this run, BEFORE
  * the caller's `finally` block frees the PiSessionState (endResearchSession) that
  * getFailedResearchers()/getResearcherFailureReasons() read from. Best-effort:
  * this is instrumentation only and must never affect the run's own result.
  */
-async function captureResearcherOutcome(sessionId: string, researchId: string, snapshot: IMetricsSnapshot): Promise<ResearcherOutcome | null> {
+async function captureResearcherOutcome(sessionId: string, researchId: string, snapshot: IMetricsSnapshot, plannedFromObserver: number): Promise<ResearcherOutcome | null> {
   try {
-    const planningService = await getService<IPlanningService>(ServiceNames.PLANNING, undefined, globalContainer!);
-    const planned = planningService.getTotalResearchersPlanned(researchId);
+    // Deep runs: the observer-captured count is authoritative — the orchestrator's
+    // finally already cleared the planning service's per-run entry by the time the SDK
+    // regains control (see wrapObserverForOutcomeCapture). The service read stays as a
+    // fallback for any path that never emits the planning events.
+    let planned = plannedFromObserver;
+    if (planned === 0) {
+      const planningService = await getService<IPlanningService>(ServiceNames.PLANNING, undefined, globalContainer!);
+      planned = planningService.getTotalResearchersPlanned(researchId);
+    }
     const launched = extractRunStats(snapshot)?.researchersLaunched ?? 0;
     const failed = getFailedResearchers(sessionId, researchId);
     return {
@@ -886,6 +975,10 @@ async function _doShutdown(): Promise<void> {
   _lastRunSummary = null;
   _lastErrorReport = null;
   _lastResearcherOutcome = null;
+  // Invalidate the pending telemetry writes of any run still in flight: it settles
+  // after this wipe and its catch/finally would otherwise repopulate the `_last*`
+  // accessors and session metrics with a phantom run from this (now-dead) lifetime.
+  _sdkGeneration++;
   // The module-level config cache survives the globals above. Without this, a
   // shutdown → env/config-file change → re-init cycle in one process silently
   // reuses the first init's config. (The CLI/skill are unaffected — they pass

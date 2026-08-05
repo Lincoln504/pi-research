@@ -19,7 +19,9 @@ export interface TaskResult {
   error?: string;
   success?: boolean;
   navMs?: number;
-  buffer?: Buffer;
+  /** PDF bytes, base64-encoded: a raw Buffer would be mangled to
+   *  {type:'Buffer',data:[...]} by the cluster-IPC JSON serialization. */
+  bufferB64?: string;
   html?: string;
   contentType?: string;
 }

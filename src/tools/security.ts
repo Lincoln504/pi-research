@@ -97,9 +97,26 @@ export function createSecuritySearchTool(options: {
         throw new Error('At least one search term is required');
       }
 
+      // Normalize database names (schema accepts free text): "NVD" must reach the
+      // dispatcher as "nvd". Unknown names are still passed through — the searcher
+      // reports each one in `errors`, which the note below surfaces — but when EVERY
+      // requested name is unknown the call must fail loudly here: running zero
+      // databases and reporting "0 vulnerabilities found" would read as an
+      // authoritative all-clear.
+      const VALID_DATABASES = ['nvd', 'cisa_kev', 'github', 'osv'] as const;
       const databases: readonly ('nvd' | 'cisa_kev' | 'github' | 'osv')[] = p.databases !== undefined && p.databases.length > 0
-        ? p.databases as readonly ('nvd' | 'cisa_kev' | 'github' | 'osv')[]
-        : ['nvd', 'cisa_kev', 'github', 'osv'];
+        ? p.databases.map(db => db.trim().toLowerCase()) as readonly ('nvd' | 'cisa_kev' | 'github' | 'osv')[]
+        : VALID_DATABASES;
+      if (!databases.some(db => (VALID_DATABASES as readonly string[]).includes(db))) {
+        metrics.increment('tool_security_search_calls_total', 1, { status: 'unknown_databases' });
+        return {
+          content: [{
+            type: 'text',
+            text: `# Security Vulnerability Search Failed\n\n**Error:** No recognized databases in request — nothing was searched.\n\n**Requested:** ${p.databases!.join(', ')}\n\n**Valid databases (case-insensitive):** ${VALID_DATABASES.join(', ')}`,
+          }],
+          details: { error: 'unknown_databases', requested: p.databases, validDatabases: VALID_DATABASES },
+        };
+      }
       const maxResults = p.maxResults ?? 20;
 
       metrics.increment('tool_security_search_terms_total', terms.length);

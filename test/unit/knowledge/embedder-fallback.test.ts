@@ -206,6 +206,82 @@ describe('Embedder WebGPU Fallback', () => {
     await expect(embedder.initialize()).rejects.toThrow(/CPU fallback load also failed/);
   });
 
+  it('runtime device loss: concurrent embeds join the published recovery instead of launching a second (webgpu) init', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    const embedder = new Embedder({ model: 'test-model', device: 'webgpu' });
+    await embedder.initialize();
+    expect(embedder.getDevice()).toBe('webgpu');
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(1);
+
+    // embedA parks INSIDE the model (an inference genuinely in flight when the
+    // device dies); embedB's inference then fails with a device error and
+    // starts recoverToCpu, whose drain loop must wait on embedA only.
+    let releaseA!: (v: any) => void;
+    const blockedA = new Promise(resolve => { releaseA = resolve; });
+    vi.mocked(mockPipelineFn)
+      .mockImplementationOnce(async () => blockedA)
+      .mockRejectedValueOnce(new Error('WebGPU device lost'));
+
+    const embedA = embedder.embed('a');
+    await vi.waitFor(() => expect((embedder as any).activeInferences).toBe(1));
+    const embedB = embedder.embed('b');
+    await vi.waitFor(() => expect((embedder as any).recoveryPromise).not.toBeNull());
+
+    // The initialize() re-entry window is closed SYNCHRONOUSLY with recovery
+    // start: device already reads 'cpu' (a joiner can never reload webgpu) and
+    // the recovery is published as the joinable initializingPromise while the
+    // drain loop is still parked on embedA's in-flight inference.
+    expect(embedder.getDevice()).toBe('cpu');
+    expect((embedder as any).initializingPromise).not.toBeNull();
+
+    // A third embed arriving mid-recovery must JOIN it — no second pipeline
+    // construction while the drain loop is still waiting.
+    const embedC = embedder.embed('c');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(1);
+
+    // Release embedA: the drain completes and recovery reloads exactly ONE
+    // pipeline — on CPU.
+    releaseA({ data: new Float32Array(384).fill(1), dims: [1, 384] });
+    await expect(embedA).resolves.toBeInstanceOf(Float32Array);
+    await expect(embedB).resolves.toBeInstanceOf(Float32Array);
+    await expect(embedC).resolves.toBeInstanceOf(Float32Array);
+
+    expect(embedder.getDevice()).toBe('cpu');
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(pipeline).mock.calls[1][2]).toMatchObject({ device: 'cpu' });
+
+    await embedder.dispose();
+  });
+
+  it('runtime device loss with two concurrent failing embeds recovers promptly (parked callers must not stall the drain loop)', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    const embedder = new Embedder({ model: 'test-model', device: 'webgpu' });
+    await embedder.initialize();
+
+    // BOTH in-flight embeds fail with device errors; the second parks on the
+    // first's recoveryPromise while still holding its activeEmbeddings slot.
+    // The drain loop counts activeInferences (0 here — both inferences already
+    // threw), so recovery proceeds immediately rather than burning the full
+    // 15s cap waiting for a count that can never drop.
+    vi.mocked(mockPipelineFn)
+      .mockRejectedValueOnce(new Error('WebGPU device lost'))
+      .mockRejectedValueOnce(new Error('WebGPU device lost'));
+
+    const start = Date.now();
+    const [a, b] = await Promise.all([embedder.embed('a'), embedder.embed('b')]);
+    expect(a).toBeInstanceOf(Float32Array);
+    expect(b).toBeInstanceOf(Float32Array);
+    expect(Date.now() - start).toBeLessThan(10_000);
+    expect(embedder.getDevice()).toBe('cpu');
+    // One initial webgpu load + exactly one CPU reload — the parked caller joined.
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(2);
+
+    await embedder.dispose();
+  }, 20_000);
+
   it('should handle CPU fallback warmup failure', async () => {
     const { pipeline } = await import('@huggingface/transformers');
     

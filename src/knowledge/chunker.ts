@@ -118,6 +118,18 @@ export class Chunker {
 
       if (end <= start) end = Math.min(start + this.targetSize, text.length);
 
+      // Forward-progress invariant: every chunk after the first must end past the
+      // previous chunk's end. When the overlap step plants `start` inside a code
+      // block whose closing fence terminated the PREVIOUS chunk, the in-block
+      // re-extension above clamps `end` back onto that same fence — a chunk that
+      // re-covers only overlap content, and (via the 1-char anti-regression step
+      // below) one such sliver per character until `start` clears the fence.
+      // Covering fresh text is worth splitting the fence: the previous chunk
+      // already carries the block's tail intact.
+      if (chunks.length > 0 && end <= prevEnd) {
+        end = Math.min(start + this.targetSize, text.length);
+      }
+
       const chunkText = text.slice(start, end);
       const actual_overlap = chunks.length === 0 ? 0 : Math.max(0, Math.min(chunkText.length, prevEnd - start));
       

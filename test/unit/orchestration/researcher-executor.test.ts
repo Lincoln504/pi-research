@@ -272,6 +272,41 @@ describe('runResearcher', () => {
       expect(mockSearch).not.toHaveBeenCalled();
       expect(mockPrompt).toHaveBeenCalledOnce();
     });
+
+    it('returns quietly — no failure record — when cancelled before initial links are acquired', async () => {
+      // Regression: the link-retry loop breaks on signal.aborted, then fell into
+      // the unconditional "no initial search results" failure record — painting a
+      // red failed slice with a bogus root cause on a plain user cancel.
+      const controller = new AbortController();
+      controller.abort();
+      const onResearcherFailure = vi.fn();
+
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [],
+        signal: controller.signal,
+        observer: { onResearcherFailure } as any,
+      }));
+
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+      expect(mockSearch).not.toHaveBeenCalled();
+      expect(mockPrompt).not.toHaveBeenCalled();
+    });
+
+    it('returns quietly when the container is disposing before initial links are acquired', async () => {
+      const disposingCtx = { ...BASE_CTX, container: { isReady: true, isDisposing: true } };
+      const onResearcherFailure = vi.fn();
+
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [],
+        ctx: disposingCtx as any,
+        observer: { onResearcherFailure } as any,
+      }));
+
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+      expect(mockPrompt).not.toHaveBeenCalled();
+    });
   });
 
   // ── Observer callbacks ──────────────────────────────────────────────────────
@@ -580,6 +615,30 @@ describe('runResearcher', () => {
       }))).rejects.toThrow('during container disposal');
 
       expect(mockPrompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT retry the id-prefixed Aborted sentinel from an externally-aborted session', async () => {
+      // Regression (fast-stop zombie retry): when the failure threshold trips,
+      // abortAllSessions() aborts the surviving researcher EXTERNALLY — its
+      // prompt() then resolves normally and ensureAssistantResponse throws the
+      // '<id>: Aborted' sentinel (NOT the race's bare 'Aborted', and neither
+      // signal nor container reflects the stop). The exact-equality guard missed
+      // that form and retried: fresh session, fresh search/scrape burst, session
+      // re-registered after cleanup already ran.
+      const { ensureAssistantResponse } = await import('../../../src/utils/text-utils.ts');
+      const mockEnsure = vi.mocked(ensureAssistantResponse);
+      mockEnsure.mockImplementation(() => { throw new Error(`${DEFAULT_RESEARCHER_CONFIG.id}: Aborted`); });
+      try {
+        await expect(runResearcher(makeOptions({
+          researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 2 } as any,
+        }))).rejects.toThrow('1: Aborted');
+
+        // Exactly one attempt — the sentinel guard breaks the loop instead of retrying.
+        expect(mockPrompt).toHaveBeenCalledTimes(1);
+      } finally {
+        // Module-level mock — restore the default so later tests keep their report.
+        mockEnsure.mockImplementation(() => 'mock researcher report content');
+      }
     });
   });
 

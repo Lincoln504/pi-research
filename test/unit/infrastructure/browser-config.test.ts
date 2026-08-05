@@ -116,13 +116,18 @@ describe('browser-config', () => {
             expect(getBrowserProfileDir()).toContain(join('pi-research', 'profiles'));
         });
 
-        it('honours the config.TMP_DIR (PI_RESEARCH_TMP_DIR) override', () => {
+        it('contains config.TMP_DIR (PI_RESEARCH_TMP_DIR) profiles in a pi-research-owned subdirectory, never the dir itself', () => {
+            // Containment invariant: the pool-startup sweep treats every entry of
+            // the profile dir as a reclaim candidate, so TMP_DIR verbatim (e.g.
+            // /tmp per the tmpfs opt-in) would expose unrelated same-user dirs.
             // Under the OS tmpdir, NOT the real ~/.cache/pi-research:
             // getBrowserProfileDir mkdirs its result, and a unit test must not
             // leave artifacts in the user's actual cache tree.
             const custom = join(tmpdir(), 'pi-research-test', 'profiles-test-override');
             try {
-                expect(getBrowserProfileDir({ TMP_DIR: custom } as any)).toBe(custom);
+                expect(getBrowserProfileDir({ TMP_DIR: custom } as any)).toBe(
+                    join(custom, 'pi-research', 'profiles')
+                );
             } finally {
                 rmSync(join(tmpdir(), 'pi-research-test'), { recursive: true, force: true });
             }

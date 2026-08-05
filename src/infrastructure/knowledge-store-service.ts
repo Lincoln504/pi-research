@@ -108,10 +108,40 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
       return this._initializationPromise;
     }
 
+    // A different-cwd (or post-dispose-gate) call while an init is still in flight
+    // must NOT start a second closure: the two would race assignments to
+    // _embedder/_store/_writerQueue (the loser's components leak un-disposed), and
+    // the first to settle would null the second's promise marker — letting a
+    // concurrent dispose() skip its wait-for-init guard and be resurrected when the
+    // straggler flips lifecycle back to INITIALIZED. Settle the in-flight init
+    // first, then fall through to the normal re-init path.
+    while (this._initializationPromise) {
+      await this._initializationPromise.catch(() => { /* its own catch reset state */ });
+      // A newer init may have started while we awaited (or while dispose() below
+      // yielded); if it covers our cwd, join it — the loop re-checks either way.
+      if (this._initializationPromise && this._cwd === newCwd) {
+        return this._initializationPromise;
+      }
+      if (this.lifecycle === ServiceLifecycle.INITIALIZED || this.lifecycle === ServiceLifecycle.DISABLED) {
+        if (this._cwd !== newCwd) {
+          logger.log(`[KnowledgeStoreService] CWD changed from ${this._cwd} to ${newCwd}. Re-initializing store...`);
+          await this.dispose();
+        } else {
+          // The settled init already covers this cwd.
+          return;
+        }
+      }
+    }
+
     this.lifecycle = ServiceLifecycle.INITIALIZING;
     logger.debug('[KnowledgeStoreService] Initializing...');
 
-    this._initializationPromise = (async () => {
+    // `let ... = null` (not const): if the closure throws BEFORE its first await,
+    // the finally runs synchronously during the IIFE call — a const self-reference
+    // would be a TDZ crash. The null guard in the finally covers that window (the
+    // marker was never published, so there is nothing to clear).
+    let initPromise: Promise<void> | null = null;
+    initPromise = (async () => {
       try {
         // Create the knowledge store components.
         // Prefer an explicit ctx.cwd; otherwise keep the cwd already resolved on this
@@ -228,11 +258,18 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         this.lifecycle = ServiceLifecycle.UNINITIALIZED;
         throw err;
       } finally {
-        this._initializationPromise = null;
+        // Identity-guarded (same pattern as embedding-factory's clearIfCurrent): only
+        // the promise that owns the marker may null it, so a settling straggler can
+        // never disarm a newer init's marker — which dispose() relies on to wait out
+        // in-flight work.
+        if (this._initializationPromise === initPromise) {
+          this._initializationPromise = null;
+        }
       }
     })();
+    this._initializationPromise = initPromise;
 
-    return this._initializationPromise;
+    return initPromise;
   }
 
   async dispose(): Promise<void> {

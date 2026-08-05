@@ -139,6 +139,10 @@ export class HeadlessObserver implements ResearchObserver {
     this.emit('researcher_progress', { id, status, tokens, cost });
   }
 
+  onResearcherTokensHint(id: string, inputTokens: number): void {
+    this.emit('researcher_tokens_hint', { id, inputTokens });
+  }
+
   onResearcherComplete(id: string, report: string): void {
     this.emit('researcher_complete', { id, report });
   }
@@ -165,6 +169,10 @@ export class HeadlessObserver implements ResearchObserver {
 
   onEvaluationDecision(action: 'synthesize' | 'delegate', plan?: ResearchPlan, round?: number): void {
     this.emit('evaluation_decision', { action, plan, round });
+  }
+
+  onSynthesisStart(): void {
+    this.emit('synthesis_start');
   }
 
   onComplete(result: string): void {

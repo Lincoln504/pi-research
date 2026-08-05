@@ -202,8 +202,8 @@ export class StateManagerService implements IStateManager {
   /**
    * Clear the embedding server information
    */
-  async clearEmbeddingServer(): Promise<void> {
-    return this.getStateManager().clearEmbeddingServer();
+  async clearEmbeddingServer(expected?: { pid?: number; serverId?: string }): Promise<void> {
+    return this.getStateManager().clearEmbeddingServer(expected);
   }
 
   /**

@@ -62,10 +62,19 @@ describe('scripts/setup.cjs integration tests', () => {
     expect(result.stdout).toContain('pi-research');
     expect(result.stdout).toContain('skipping browser download');
     expect(result.stdout).toContain('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1');
-    expect(result.stderr).not.toContain('Error');
+    // Case-insensitive: setup.cjs emits `ERROR:` (uppercase), which the old
+    // case-sensitive `not.toContain('Error')` could never match.
+    expect(result.stderr).not.toMatch(/error/i);
   });
 
-  it('should handle --system-deps flag without error', async () => {
+  // Honest scope: in setup.cjs the entire --system-deps install block lives
+  // inside the else-branch of the PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD check, so
+  // with the skip env set (mandatory here — the real branch drives the system
+  // package manager via `npx playwright install-deps`, which needs root, and
+  // unsetting the skip would also download the ~100MB browser) the system-deps
+  // branch is intentionally NOT exercised. This is a skip-path smoke test only:
+  // the script must accept the flag and stay clean, nothing more.
+  it('should accept --system-deps on the skip path (install branch not exercised — needs root/package managers)', async () => {
     const result = await runSetup(
       { PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' },
       ['--system-deps']
@@ -73,5 +82,7 @@ describe('scripts/setup.cjs integration tests', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('pi-research');
+    expect(result.stdout).toContain('skipping browser download');
+    expect(result.stderr).not.toMatch(/error/i);
   });
 });

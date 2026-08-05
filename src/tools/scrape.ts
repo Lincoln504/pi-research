@@ -139,11 +139,38 @@ export function createScrapeTool(options: {
       // almost nothing and must not be blocked as if every URL were a full scrape.
       const { kept: dedupedUrls, duplicates } = deduplicateUrls(rawUrls, getGlobalState().researchId);
 
+      // Partition duplicates by whether their content still survives in the session
+      // cache. The content cache is FIFO-capped, so a pool member's content may have
+      // been evicted; those URLs re-enter the fetch list — otherwise they would be
+      // reported as "retrieved from session memory" while appearing nowhere in the
+      // output, and a re-request would just dedup them away again.
+      const duplicateResults: { url: string; markdown: string; success: true }[] = [];
+      const evictedDuplicates: string[] = [];
+      for (const url of duplicates) {
+        const cachedContent = getCachedScrapedContent(getGlobalState().researchId, url);
+        if (cachedContent) {
+          duplicateResults.push({ url, markdown: cachedContent, success: true });
+        } else {
+          evictedDuplicates.push(url);
+        }
+      }
+
+      // Only the first MAX_SCRAPE_URLS candidates are ever fetched. Slice BEFORE the
+      // context gate so the projection bills what will actually be scraped — billing
+      // the full list blocked an 8-URL first batch on a 128k model at zero tokens
+      // used, while the URLs actually fetchable would have passed. Over-cap URLs are
+      // reported explicitly below instead of silently vanishing (they appear neither
+      // in results nor in Failed-to-Scrape, and the session-pool footer excludes the
+      // current batch).
+      const fetchCandidates = [...dedupedUrls, ...evictedDuplicates];
+      const finalUrls = fetchCandidates.slice(0, MAX_SCRAPE_URLS);
+      const skippedUrls = fetchCandidates.slice(MAX_SCRAPE_URLS);
+
       // Context gate: block if projected token usage would exceed threshold
       if (options.getTokensUsed) {
         const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
         const tokensUsed = options.getTokensUsed();
-        const projected = (tokensUsed + dedupedUrls.length * config.AVG_TOKENS_PER_SCRAPE) / ctxWindow;
+        const projected = (tokensUsed + finalUrls.length * config.AVG_TOKENS_PER_SCRAPE) / ctxWindow;
         if (projected >= config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING) {
           const pct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
           metrics.increment('tool_scrape_calls_total', 1, { status: 'context_limit' });
@@ -160,35 +187,21 @@ export function createScrapeTool(options: {
       }
 
       const callCount = options.tracker?.getToolCallCount('scrape') ?? 0;
-      const batchLabel = `Batch ${callCount + 1}`;
       options.tracker?.recordCall('scrape');
       const scrapeStartTime = Date.now();
-      const dedupNote = duplicates.length > 0
-        ? `**Global Cache Hit**: ${duplicates.length} URL(s) retrieved from session memory (already scraped).\n\n`
+      // Count only content actually re-served. Evicted pool members are in the fetch
+      // list instead, so they surface as fresh results (or in the not-fetched note),
+      // never as a "retrieved" claim with no content attached.
+      let dedupNote = duplicateResults.length > 0
+        ? `**Global Cache Hit**: ${duplicateResults.length} URL(s) retrieved from session memory (already scraped).\n\n`
         : '';
+      if (evictedDuplicates.length > 0) {
+        dedupNote += `**Session Cache Evicted**: ${evictedDuplicates.length} previously-scraped URL(s) no longer in session memory — queued for a fresh fetch:\n${evictedDuplicates.map(u => `- ${u}`).join('\n')}\n\n`;
+      }
       metrics.increment('tool_scrape_duplicates_total', duplicates.length);
-
-      // Even for duplicates, we want to return the content if we have it in the session cache
-      const duplicateResults: { url: string; markdown: string; success: true }[] = [];
-      for (const url of duplicates) {
-        const cachedContent = getCachedScrapedContent(getGlobalState().researchId, url);
-        if (cachedContent) {
-          duplicateResults.push({ url, markdown: cachedContent, success: true });
-          options.onUrlScrapeResult?.(url, true);
-        }
+      for (const r of duplicateResults) {
+        options.onUrlScrapeResult?.(r.url, true);
       }
-
-      if (dedupedUrls.length === 0 && duplicateResults.length === 0) {
-        metrics.increment('tool_scrape_calls_total', 1, { status: 'all_duplicates_no_content' });
-        // Add footer with alternative URLs for discovery
-        const earlyFooter = buildSessionPoolFooter(getGlobalState().researchId, rawUrls, options.researcherId);
-        return {
-          content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool, but no cached content was available.${earlyFooter}` }],
-          details: { all_duplicates: true },
-        };
-      }
-
-      const finalUrls = dedupedUrls.slice(0, MAX_SCRAPE_URLS);
 
       // Batch 1 uses the configured scrape concurrency; batch 2+ may go wider
       // once the context budget allows — but never wider than the real browser
@@ -331,6 +344,15 @@ export function createScrapeTool(options: {
         markdown += '\n';
       }
 
+      if (skippedUrls.length > 0) {
+        markdown += `## Not Fetched — Over Batch Cap (${skippedUrls.length})\n\n`;
+        markdown += `Only the first ${MAX_SCRAPE_URLS} URLs of a batch are fetched. The following URLs were NOT fetched — no content for them appears above. Request them in a later scrape batch if still needed:\n`;
+        for (const url of skippedUrls) {
+          markdown += `- ${url}\n`;
+        }
+        markdown += '\n';
+      }
+
       // Append Session URL Pool footer
       markdown += buildSessionPoolFooter(getGlobalState().researchId, rawUrls, options.researcherId);
 
@@ -342,6 +364,7 @@ export function createScrapeTool(options: {
           failed: failedFresh.length,
           cached: cachedResults.length,
           fresh: successfulFresh.length,
+          skipped: skippedUrls.length,
         },
       };
     },

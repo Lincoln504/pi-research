@@ -339,14 +339,14 @@ export class EmbeddingServer implements IEmbedder {
       this.leadershipTimer = null;
     }
 
-    // Clear our registration if we still own it
+    // Clear our registration if we still own it. The serverId CAS runs inside the
+    // state lock, so a successor that claimed the slot between our last check and
+    // this shutdown can never be deregistered by us (the old read-then-clear had
+    // exactly that window).
     try {
-      const serverInfo = await this.stateManager.getEmbeddingServer();
-      if (serverInfo?.serverId === this.serverId) {
-        await this.stateManager.clearEmbeddingServer().catch((err) => {
-          logger.warn('[EmbeddingServer] Failed to clear embedding server state:', err);
-        });
-      }
+      await this.stateManager.clearEmbeddingServer({ serverId: this.serverId }).catch((err) => {
+        logger.warn('[EmbeddingServer] Failed to clear embedding server state:', err);
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // State manager is torn down before the embedding server during process exit —

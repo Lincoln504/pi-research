@@ -64,6 +64,7 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   recordResearcherFailure: vi.fn(),
   shouldStopResearch: vi.fn(() => false),
   getResearchStopMessage: vi.fn(() => 'Research stopped: 0 researcher(s) failed: '),
+  createResearchStopError: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,8 @@ import { healthRegistry } from '../../../src/healthcheck/index.ts';
 import { getService } from '../../../src/core/service-registry.ts';
 import { parseCitations } from '../../../src/utils/text-utils.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+import { runResearcher } from '../../../src/orchestration/researcher-executor.ts';
+import { recordResearcherFailure, shouldStopResearch, createResearchStopError } from '../../../src/orchestration/session-state.ts';
 
 const mockSearch = search as ReturnType<typeof vi.fn>;
 const mockRunAll = healthRegistry.runAll as ReturnType<typeof vi.fn>;
@@ -353,6 +356,88 @@ describe('ResearchOrchestrationService', () => {
       await service.cleanupResearchServices('s1', 'r1', ctx, undefined, { skipStoreMaintenance: false });
       expect(store.rebuildFtsIndex).toHaveBeenCalledTimes(1);
       expect(store.optimize).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // =========================================================================
+  // runResearchers — cancellation classification & bounded fast-stop abort
+  // =========================================================================
+
+  describe('runResearchers', () => {
+    const RESEARCHER = { id: '1', name: 'R1', goal: 'g', queries: [] };
+
+    function makeRunOptions(observer?: any, abortAllSessions: () => Promise<void> = vi.fn(async () => {})) {
+      vi.mocked(getService).mockImplementation(async (name: any) => {
+        if (name === ServiceNames.PLANNING) return { getCurrentPlan: vi.fn(() => null) } as any;
+        if (name === ServiceNames.RESEARCH_SESSION_SERVICE) return { abortAllSessions } as any;
+        return null;
+      });
+      return {
+        plan: { researchers: [RESEARCHER] },
+        options: {
+          sessionId: 's1',
+          researchId: 'r1',
+          query: 'q',
+          complexity: 1,
+          ctx: { cwd: process.cwd(), container: { tryGet: () => undefined } },
+          model: { id: 'm' },
+          config: { MAX_CONCURRENT_RESEARCHERS: 3, MAX_FAILED_RESEARCHERS: 2 },
+          observer,
+        },
+        currentRound: 1,
+        signal: undefined,
+      } as any;
+    }
+
+    it('classifies the id-prefixed Aborted sentinel as a clean cancel — no failure record, no red slice', async () => {
+      // The executor rethrows the '<id>: Aborted' sentinel after a fast-stop
+      // abortAllSessions() aborted the session externally. The exact-equality
+      // check here used to record it as a researcher failure (counting toward
+      // the very threshold that triggered the stop) and paint the slice red.
+      vi.mocked(shouldStopResearch).mockReturnValue(false);
+      vi.mocked(runResearcher).mockRejectedValue(new Error('1: Aborted'));
+      const onResearcherFailure = vi.fn();
+
+      await service.runResearchers(makeRunOptions({ onResearcherFailure }));
+
+      expect(recordResearcherFailure).not.toHaveBeenCalled();
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+    });
+
+    it('still records a genuine researcher failure with its root cause', async () => {
+      vi.mocked(shouldStopResearch).mockReturnValue(false);
+      vi.mocked(runResearcher).mockRejectedValue(new Error('provider exploded'));
+      const onResearcherFailure = vi.fn();
+
+      await service.runResearchers(makeRunOptions({ onResearcherFailure }));
+
+      expect(recordResearcherFailure).toHaveBeenCalledWith('s1', 'r1', '1', 'provider exploded');
+      expect(onResearcherFailure).toHaveBeenCalledWith('1', 'provider exploded');
+    });
+
+    it('fast-stop throws within the bound even when abortAllSessions never settles', async () => {
+      // The fast-stop throw used to gate on an UNBOUNDED await of
+      // abortAllSessions(); one wedged session.abort() hung the run forever
+      // with the stop error already decided.
+      vi.useFakeTimers();
+      try {
+        vi.mocked(shouldStopResearch).mockReturnValue(true);
+        vi.mocked(createResearchStopError).mockImplementation(
+          () => Object.assign(new Error('Research stopped'), { code: 'RESEARCH_STOPPED' }),
+        );
+        const wedgedAbortAll = vi.fn(() => new Promise<void>(() => { /* never settles */ }));
+
+        const run = service.runResearchers(makeRunOptions(undefined, wedgedAbortAll));
+        const expectation = expect(run).rejects.toThrow('Research stopped');
+
+        // Fire the 10s abort-settle bound; the throw must proceed past the wedge.
+        await vi.advanceTimersByTimeAsync(10_001);
+
+        await expectation;
+        expect(wedgedAbortAll).toHaveBeenCalledWith('r1');
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

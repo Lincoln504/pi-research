@@ -186,8 +186,13 @@ export class WorkerPoolManager implements IService {
                 const myEpoch = ++this.poolEpoch;
                 this.pool = new FixedClusterPool(maxWorkers, workerPath, {
                     env: browserEnv,
-                    // Prevent query leakage via process.argv in forked workers
-                    workerOptions: { execArgv: [] },
+                    // Prevent query leakage via process.argv in forked workers: cluster
+                    // pools fork through cluster.setupPrimary(opts.settings), and
+                    // cluster.settings.args defaults to process.argv.slice(2) — without
+                    // this, every worker re-exposes the full CLI (research query
+                    // included) in `ps`. NB `workerOptions` is a worker_threads-only
+                    // poolifier knob; it is ignored by cluster pools.
+                    settings: { args: [] },
                     errorHandler: (e: Error) => {
                         // Ignore events from a pool that has since been replaced/destroyed — a
                         // trailing error from an old pool's dying worker must not affect the live one.

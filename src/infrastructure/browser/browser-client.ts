@@ -7,6 +7,7 @@
 
 import * as http from 'node:http';
 import type { Config } from '../../config.ts';
+import { getConfig } from '../../config.ts';
 import type { SearchResult } from '../../web-research/types.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { logger } from '../../logger.ts';
@@ -14,6 +15,60 @@ import { errorTracker } from '../../utils/error-tracker.ts';
 import { Utf8Body } from '../../utils/http-body.ts';
 import { getClientAgent } from './client-agent.ts';
 import type { NodeError } from '../../types/index.ts';
+
+/**
+ * Client-side patience margin on top of the leader's own task budget. The leader
+ * already bounds each task (nav budget + queue-wait margin) and answers with the
+ * more informative in-band timeout; the follower only needs headroom for the HTTP
+ * hop and leader-side dispatch, so its own timer never answers first.
+ */
+const CLIENT_PATIENCE_MARGIN_MS = 15_000;
+
+/**
+ * Absolute ceiling on any follower request, so a wedged-but-listening leader
+ * still fails in bounded time. Sits above the largest configurable leader budget
+ * (120s nav + 120s task margin) plus the patience margin, so it only binds when
+ * config is out of range. A DEAD leader is not this timer's job — its socket
+ * fails fast with ECONNREFUSED/ECONNRESET.
+ */
+const CLIENT_TIMEOUT_CAP_MS = 300_000;
+
+/**
+ * Mirror of the leader's fixed healthcheck budget in
+ * BrowserTaskScheduler.runHealthCheck (45s probe deadline + 60s queue-wait
+ * margin) — not config-derived there either.
+ */
+const HEALTHCHECK_LEADER_BUDGET_MS = 45_000 + 60_000;
+
+/**
+ * Per-operation follower timeout: the leader's own budget for that task kind
+ * plus a patience margin, bounded by an absolute cap.
+ *
+ * Invariant: the follower is at least as patient as the leader. The old flat 60s
+ * undercut the leader's healthcheck budget (105s) and config-driven search/scrape
+ * budgets (up to 130s+ within schema bounds), and the client-timeout text matches
+ * isTaskTimeoutError, so retry gates skipped it — long tasks failed client-side,
+ * unretried, while the leader was still working on them.
+ */
+export function resolveClientRequestTimeoutMs(operation: string, config?: Config): number {
+    const cfg = config ?? getConfig();
+    let leaderBudgetMs: number;
+    switch (operation) {
+        case 'search':
+            // BrowserTaskScheduler.runSearch: SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS.
+            leaderBudgetMs = cfg.SEARCH_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
+            break;
+        case 'browser-task':
+            // BrowserTaskScheduler.runScrape: SCRAPE_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS.
+            leaderBudgetMs = cfg.SCRAPE_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
+            break;
+        default:
+            // healthcheck, plus any future/unknown path: the largest fixed budget.
+            leaderBudgetMs = HEALTHCHECK_LEADER_BUDGET_MS;
+            break;
+    }
+    return Math.min(CLIENT_TIMEOUT_CAP_MS, leaderBudgetMs + CLIENT_PATIENCE_MARGIN_MS);
+}
 
 /**
  * HTTP client that communicates with a remote scheduler.
@@ -34,7 +89,7 @@ export class BrowserClient implements IScheduler {
         logger.log(`[BrowserClient] Connecting to global scheduler at http://127.0.0.1:${port}`);
     }
 
-    private async request<T>(path: string, data: any, signal?: AbortSignal): Promise<T> {
+    private async request<T>(path: string, data: any, signal?: AbortSignal, config?: Config): Promise<T> {
         const start = Date.now();
         // Extract operation from path for error tracking
         const operation = path.includes('/search') ? 'search' :
@@ -43,8 +98,8 @@ export class BrowserClient implements IScheduler {
 
         return new Promise((resolve, reject) => {
             const agent = getClientAgent();
-            // 60s timeout for client requests (1/3 of original 180s)
-            const timeoutMs = 60000;
+            // Config-derived per task kind: leader budget + margin, capped.
+            const timeoutMs = resolveClientRequestTimeoutMs(operation, config);
             let resolved = false;
             const controller = new AbortController();
             
@@ -211,16 +266,16 @@ export class BrowserClient implements IScheduler {
         });
     }
 
-    async runSearch(query: string, _config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
-        return this.request('/search', { query }, signal);
+    async runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
+        return this.request('/search', { query }, signal, config);
     }
 
-    async runScrape(url: string, _config?: Config, signal?: AbortSignal): Promise<any> {
-        return this.request('/scrape', { url }, signal);
+    async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<any> {
+        return this.request('/scrape', { url }, signal, config);
     }
 
-    async runHealthCheck(_config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
-        return this.request('/healthcheck', {}, signal);
+    async runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
+        return this.request('/healthcheck', {}, signal, config);
     }
 
     async shutdown() {

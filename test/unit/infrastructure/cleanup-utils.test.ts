@@ -24,6 +24,15 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...actual, default: actual, rm: vi.fn(actual.rm) };
 });
 
+// Partial-mock os.tmpdir so the "explicit baseDir IS the system temp dir" guard
+// can be exercised against a sandbox directory instead of the real /tmp.
+const osMockState = vi.hoisted(() => ({ tmpdir: null as string | null }));
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  const tmpdir = () => osMockState.tmpdir ?? actual.tmpdir();
+  return { ...actual, default: { ...actual, tmpdir }, tmpdir };
+});
+
 describe('cleanup-utils', () => {
   let testBaseDir: string;
   let testCacheDir: string;
@@ -33,13 +42,17 @@ describe('cleanup-utils', () => {
   const ACTIVE_AGE_MS = (STALE_THRESHOLD_DAYS - 1) * MS_PER_DAY;
 
   beforeEach(() => {
-    // Create a temporary directory for test profiles
-    testBaseDir = path.join(os.tmpdir(), `pi-cleanup-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    // Create a temporary directory for test profiles. The path carries a
+    // `pi-research` segment because the unrecognized-entry sweep now only runs
+    // inside a dir that is provably pi-owned (mirrors the real profile dir,
+    // which always ends in .../pi-research/profiles).
+    testBaseDir = path.join(os.tmpdir(), `pi-research-cleanup-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     testCacheDir = path.join(testBaseDir, 'ms-playwright');
     mkdirSync(testCacheDir, { recursive: true });
   });
 
   afterEach(() => {
+    osMockState.tmpdir = null;
     // Clean up test directory
     if (fs.existsSync(testBaseDir)) {
       rmSync(testBaseDir, { recursive: true, force: true });
@@ -278,6 +291,58 @@ describe('cleanup-utils', () => {
       // Incomplete stale profiles should still be cleaned up
       expect(directoryFullyRemoved(incompleteProfile)).toBe(true);
       expect(result.removed).toBe(1);
+    });
+
+    it('never deletes unrecognized entries when the explicit baseDir IS the system temp dir', async () => {
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
+
+      // Simulate PI_RESEARCH_TMP_DIR pointed at the system temp dir (the browser
+      // config's own tmpfs opt-in suggestion): baseDir === os.tmpdir(). The
+      // sandbox path even contains a pi-research segment — the tmpdir identity
+      // check must win regardless.
+      osMockState.tmpdir = testCacheDir;
+
+      // An unrelated same-user directory (ssh agent socket dir, build cache, …),
+      // stale by every measure — previously recursively rm'd.
+      const unrelated = createProfile('ssh-XXXXXXtest', STALE_AGE_MS);
+      // A genuine leaked playwright profile in the same dir: still reclaimed.
+      const leakedProfile = createProfile('playwright_firefoxdev_profile-leak', STALE_AGE_MS);
+
+      const result = await cleanupStaleProfiles(testCacheDir);
+
+      expect(directoryExists(unrelated)).toBe(true);
+      expect(directoryFullyRemoved(leakedProfile)).toBe(true);
+      expect(result.removed).toBe(1);
+    });
+
+    it('spares unrecognized entries in a non-pi-owned explicit baseDir (prefix-matched profiles still reclaimed)', async () => {
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
+
+      // A directory with no pi-research segment anywhere in its path: no positive
+      // evidence of ownership, so unknown entries must be spared. (testBaseDir
+      // itself carries a pi-research segment, so use a plain sandbox instead.)
+      const plainBase = path.join(os.tmpdir(), `cleanup-foreign-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+      mkdirSync(plainBase, { recursive: true });
+      try {
+        const unknown = path.join(plainBase, 'user-build-cache');
+        mkdirSync(unknown, { recursive: true });
+        writeFileSync(path.join(unknown, 'data.bin'), 'x');
+        const old = new Date(Date.now() - STALE_AGE_MS);
+        utimesSync(unknown, old, old);
+
+        const leaked = path.join(plainBase, 'playwright_firefoxdev_profile-foreign');
+        mkdirSync(leaked, { recursive: true });
+        writeFileSync(path.join(leaked, 'prefs.js'), '{}');
+        utimesSync(leaked, old, old);
+
+        const result = await cleanupStaleProfiles(plainBase);
+
+        expect(fs.existsSync(unknown)).toBe(true);
+        expect(fs.existsSync(leaked)).toBe(false);
+        expect(result.removed).toBe(1);
+      } finally {
+        rmSync(plainBase, { recursive: true, force: true });
+      }
     });
 
     it('handles very old profiles (months old)', async () => {

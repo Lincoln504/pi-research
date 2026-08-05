@@ -101,4 +101,36 @@ describe('CircuitBreaker', () => {
     await expect(first).resolves.toBe('ok');
     expect(cb.getState()).toBe('CLOSED'); // the single probe succeeded → circuit closes
   });
+
+  it('ignores a pre-outage success settling during HALF_OPEN — only the admitted probe closes the circuit', async () => {
+    // Regression: a call admitted while CLOSED that settled after the breaker tripped and
+    // re-half-opened counted toward the HALF_OPEN close — closing on PRE-outage evidence
+    // while the real probe was still in flight against a possibly-down dependency.
+    const cb = new CircuitBreaker({ failureThreshold: 2, resetTimeoutMs: 1000, halfOpenMaxCalls: 1 });
+
+    // Call A: admitted while CLOSED, stays in flight across the trip + half-open.
+    let resolveA!: (v: string) => void;
+    const a = cb.execute(() => new Promise<string>((res) => { resolveA = res; }));
+
+    // Trip the breaker while A is pending.
+    await expect(cb.execute(vi.fn().mockRejectedValue(new Error('fail')))).rejects.toThrow('fail');
+    await expect(cb.execute(vi.fn().mockRejectedValue(new Error('fail')))).rejects.toThrow('fail');
+    expect(cb.getState()).toBe('OPEN');
+
+    // Past the reset window, call B flips to HALF_OPEN and is admitted as THE probe.
+    vi.advanceTimersByTime(1500);
+    let resolveB!: (v: string) => void;
+    const b = cb.execute(() => new Promise<string>((res) => { resolveB = res; }));
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    // A's success predates the outage — it must not close the circuit.
+    resolveA('a');
+    await expect(a).resolves.toBe('a');
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    // The probe's own success is the only evidence that closes it.
+    resolveB('b');
+    await expect(b).resolves.toBe('b');
+    expect(cb.getState()).toBe('CLOSED');
+  });
 });

@@ -37,10 +37,17 @@ vi.mock('../../../src/logger.ts', () => ({
   logger: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// Mock PDF extraction
+// Mock PDF extraction. Records the exact bytes handed to the parser (so tests can
+// assert the IPC-safe base64 round-trip delivered real bytes) and throws on an
+// empty input, mirroring the real WASM parser — zero bytes cannot be a PDF.
+const pdfMockState = vi.hoisted(() => ({ lastBytes: null as Uint8Array | null }));
 vi.mock('pdf-oxide-wasm', () => {
   return {
     WasmPdfDocument: class {
+      constructor(bytes: Uint8Array) {
+        pdfMockState.lastBytes = bytes;
+        if (bytes.length === 0) throw new Error('empty or corrupt PDF buffer');
+      }
       pageCount = () => 1;
       toMarkdown = () => 'PDF content';
       toMarkdownAll = () => 'Full PDF content ' + 'word '.repeat(100);
@@ -307,6 +314,138 @@ describe('scrapers', () => {
       );
       expect(fetchLayerErrors).toHaveLength(1);
       trackSpy.mockRestore();
+    });
+  });
+
+  describe('scrapeSingle — browser PDF path (IPC-safe bytes)', () => {
+    // Worker PDF bytes cross the poolifier cluster-IPC channel (JSON
+    // serialization), where a raw Buffer arrives as {type:'Buffer',data:[...]}
+    // and new Uint8Array(that) is ZERO bytes — the extraction then ran on
+    // nothing and its "*Error: ...*" string was cached as a success. The worker
+    // now ships base64; these tests pin the decode and the failure semantics.
+    const PDF_BYTES = Buffer.from('%PDF-1.7 test-bytes éÿ payload');
+
+    beforeEach(() => {
+      pdfMockState.lastBytes = null;
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch layer down')));
+    });
+
+    it('decodes bufferB64 back to the exact original bytes and succeeds', async () => {
+      mockRunBrowserTask.mockResolvedValue({
+        contentType: 'application/pdf',
+        bufferB64: PDF_BYTES.toString('base64'),
+      });
+
+      const result = await scrapeSingle('https://some-site.org/paper.pdf');
+
+      expect(result.success).toBe(true);
+      expect(result.markdown).toContain('Full PDF content');
+      // The whole point: the parser received the worker's REAL bytes, not zero.
+      expect(pdfMockState.lastBytes).not.toBeNull();
+      expect(Buffer.from(pdfMockState.lastBytes!).equals(PDF_BYTES)).toBe(true);
+    });
+
+    it('still decodes the legacy JSON-roundtripped Buffer shape (mixed-version leader/follower)', async () => {
+      // What an old leader hands a new follower: the Buffer after one (or two)
+      // JSON hops — {type:'Buffer',data:[...]}.
+      mockRunBrowserTask.mockResolvedValue({
+        contentType: 'application/pdf',
+        buffer: JSON.parse(JSON.stringify(PDF_BYTES)),
+      });
+
+      const result = await scrapeSingle('https://some-site.org/legacy.pdf');
+
+      expect(result.success).toBe(true);
+      expect(pdfMockState.lastBytes).not.toBeNull();
+      expect(Buffer.from(pdfMockState.lastBytes!).equals(PDF_BYTES)).toBe(true);
+    });
+
+    it('reports FAILURE when PDF extraction yields an error string (never a cached success)', async () => {
+      // Zero decoded bytes is exactly the old bug's symptom: extraction fails,
+      // extractPdfToMarkdown returns "*Error: ...*", and the PDF branch used to
+      // skip validateContent — reporting success and caching the error string.
+      mockRunBrowserTask.mockResolvedValue({
+        contentType: 'application/pdf',
+        bufferB64: '',
+      });
+
+      const result = await scrapeSingle('https://some-site.org/broken.pdf');
+
+      expect(result.success).toBe(false);
+      expect(result.markdown).toBe('');
+    });
+  });
+
+  describe('scrapeSingle / scrape — cancellation', () => {
+    it('short-circuits on an already-aborted signal without fetch, browser, or failure metrics', async () => {
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+      const controller = new AbortController();
+      controller.abort();
+
+      let result: Awaited<ReturnType<typeof scrapeSingle>>;
+      await runWithRunRegistry(runRegistry, async () => {
+        result = await scrapeSingle('https://example.com/cancelled', controller.signal);
+      });
+
+      expect(result!.success).toBe(false);
+      expect(result!.error).toBe('Aborted');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mockRunBrowserTask).not.toHaveBeenCalled();
+      // A cancellation is not a scrape failure — it must not appear in the
+      // run summary's failed-URL tally.
+      const snapshot = runRegistry.getSnapshot();
+      expect(snapshot.counters['scrape_results_total{outcome="total_failure"}']).toBeUndefined();
+    });
+
+    it("classifies a browser-layer 'Aborted' as cancellation: no ERROR log, no total_failure, no tracker entry", async () => {
+      const { logger } = await import('../../../src/logger.ts');
+      const { errorTracker } = await import('../../../src/utils/error-tracker.ts');
+      const trackSpy = vi.spyOn(errorTracker, 'trackError');
+      const controller = new AbortController();
+      // Fetch fails once the caller aborts; the browser layer then surfaces the
+      // codebase's recognized cancellation signature.
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+        controller.abort();
+        throw new Error('socket closed');
+      }));
+      mockRunBrowserTask.mockRejectedValue(new Error('Aborted'));
+
+      let result: Awaited<ReturnType<typeof scrapeSingle>>;
+      await runWithRunRegistry(runRegistry, async () => {
+        result = await scrapeSingle('https://example.com/mid-cancel', controller.signal);
+      });
+
+      expect(result!.success).toBe(false);
+      expect(result!.error).toBe('Aborted');
+      expect(vi.mocked(logger.error)).not.toHaveBeenCalled();
+      expect(trackSpy).not.toHaveBeenCalled();
+      const snapshot = runRegistry.getSnapshot();
+      expect(snapshot.counters['scrape_results_total{outcome="total_failure"}']).toBeUndefined();
+      trackSpy.mockRestore();
+    });
+
+    it('stops dispatching batches once the signal aborts mid-run', async () => {
+      const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+      const okHtml = '<p>' + 'Word word word word word word word word word word '.repeat(6) + '</p>';
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'text/html; charset=utf-8' },
+        text: async () => okHtml,
+        arrayBuffer: async () => new TextEncoder().encode(okHtml).buffer,
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const controller = new AbortController();
+
+      const urls = ['https://a.example/1', 'https://a.example/2', 'https://a.example/3', 'https://a.example/4'];
+      // maxConcurrency 1 → four sequential batches; cancel after the first result.
+      const results = await scrape(urls, 1, controller.signal, undefined, undefined, () => controller.abort());
+
+      // Only the first batch ran; the doomed fetch/browser cycle for the
+      // remaining URLs was skipped entirely.
+      expect(results).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mockRunBrowserTask).not.toHaveBeenCalled();
     });
   });
 

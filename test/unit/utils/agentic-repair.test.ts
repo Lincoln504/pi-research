@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../../src/logger.ts', () => ({
+  logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), info: vi.fn() },
+}));
+
 import { repairJsonWithLlm } from '../../../src/core/llm/agentic-repair.ts';
+import { logger } from '../../../src/logger.ts';
 import { Type } from 'typebox';
 import type { Model } from '@earendil-works/pi-ai';
 
@@ -109,5 +115,49 @@ describe('repairJsonWithLlm', () => {
     const res = await repairJsonWithLlm('bad', mockCompleter, auth, { model: stubModel, schema, onUsage });
     expect(res).toEqual({ foo: 'x', bar: 2 });
     expect(onUsage).toHaveBeenCalledTimes(2);
+  });
+
+  describe('abort handling', () => {
+    it('stops retrying and returns null quietly when the signal aborts during attempt 1', async () => {
+      // Regression: a user cancel mid-salvage was logged at ERROR as "unexpected error"
+      // and attempt 2 launched with an already-aborted signal.
+      const ac = new AbortController();
+      mockCompleter.mockImplementation(() => {
+        ac.abort();
+        return Promise.reject(new Error('stream torn down'));
+      });
+      const result = await repairJsonWithLlm('{', mockCompleter, auth, { model: stubModel, signal: ac.signal });
+      expect(result).toBeNull();
+      expect(mockCompleter).toHaveBeenCalledTimes(1); // attempt 2 never launches
+      expect(vi.mocked(logger.error)).not.toHaveBeenCalled(); // clean stop, not an "unexpected error"
+      expect(vi.mocked(logger.debug)).toHaveBeenCalled();
+    });
+
+    it('never issues an attempt when the signal is already aborted at entry', async () => {
+      const ac = new AbortController();
+      ac.abort();
+      const result = await repairJsonWithLlm('{', mockCompleter, auth, { model: stubModel, signal: ac.signal });
+      expect(result).toBeNull();
+      expect(mockCompleter).not.toHaveBeenCalled();
+      expect(vi.mocked(logger.error)).not.toHaveBeenCalled();
+    });
+
+    it('treats an AbortError by name as a cancellation even when no signal was passed', async () => {
+      // Mirrors isRetriableLlmError: an abort can surface as an AbortError before the
+      // caller's signal state is observable here.
+      mockCompleter.mockRejectedValue(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }));
+      const result = await repairJsonWithLlm('{', mockCompleter, auth, { model: stubModel });
+      expect(result).toBeNull();
+      expect(mockCompleter).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(logger.error)).not.toHaveBeenCalled();
+    });
+
+    it('still retries (and logs at ERROR) on a non-abort unexpected error', async () => {
+      mockCompleter.mockRejectedValue(new Error('boom'));
+      const result = await repairJsonWithLlm('{', mockCompleter, auth, { model: stubModel });
+      expect(result).toBeNull();
+      expect(mockCompleter).toHaveBeenCalledTimes(2); // both attempts run
+      expect(vi.mocked(logger.error)).toHaveBeenCalled();
+    });
   });
 });

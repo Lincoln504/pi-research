@@ -176,7 +176,12 @@ export async function disposeCoreServices(container: ServiceContainer = getServi
     try {
       const stateManager = container.tryGet<IStateManager>(ServiceNames.STATE_MANAGER);
       if (stateManager) {
-        await stateManager.clearEmbeddingServer();
+        // pid-scoped: this shutdown may be a mere follower (EmbeddingClient) or a
+        // process that never touched embeddings; an unconditional clear here would
+        // deregister ANOTHER process's live leader, leaving it an invisible leader
+        // (its check treats a missing entry as benign) and forcing a duplicate GPU
+        // model election on the next caller.
+        await stateManager.clearEmbeddingServer({ pid: process.pid });
         logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
       }
     } catch {

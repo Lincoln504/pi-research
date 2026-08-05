@@ -1,0 +1,133 @@
+/**
+ * LogRotation unit tests.
+ *
+ * Two invariants matter here beyond basic rotation mechanics:
+ *  - Rename failure must SKIP the rotation, never fall back to copy+delete: the
+ *    consolidated log is appended to by several processes at once (main,
+ *    embedding server, browser workers), and a copy+unlink destroys whatever
+ *    they append between the copy and the unlink.
+ *  - Rotation and clearLogs must recreate the live log at 0o600: Logger
+ *    pre-creates it owner-only because the default path sits in a
+ *    world-traversable tmpdir, and a umask-default recreate by the next append
+ *    would silently drop that posture.
+ */
+
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+
+const mockState = vi.hoisted(() => ({ failRename: false }));
+
+// Pass-through fs mock: only renameSync is interceptable, so every other call in
+// both the module under test and this file hits the real filesystem.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    renameSync: ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      if (mockState.failRename) {
+        const err = new Error('EBUSY: resource busy or locked') as NodeJS.ErrnoException;
+        err.code = 'EBUSY';
+        throw err;
+      }
+      return actual.renameSync(oldPath, newPath);
+    }) as typeof actual.renameSync,
+  };
+});
+
+let LogRotation: (typeof import('../../../src/utils/log-rotation.ts'))['LogRotation'];
+
+beforeAll(async () => {
+  // The unit-test setup file loads src/utils/metrics.ts → logger.ts →
+  // log-rotation.ts BEFORE this file's vi.mock('node:fs') registration, so a
+  // static import would hand back the cached instance bound to the REAL fs and
+  // the rename interception above would never fire. Re-evaluating the module
+  // after resetModules resolves its node:fs import through the mock registry.
+  vi.resetModules();
+  ({ LogRotation } = await import('../../../src/utils/log-rotation.ts'));
+});
+
+// One byte over the class's 10MB cap so a rotation check fires.
+const OVERSIZE = 10 * 1024 * 1024 + 1;
+
+function recordingLogger() {
+  const lines: string[] = [];
+  return {
+    lines,
+    log: (...args: unknown[]) => { lines.push(args.map(String).join(' ')); },
+  };
+}
+
+describe('LogRotation', () => {
+  let dir: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    mockState.failRename = false;
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-log-rotation-test-'));
+    logFile = path.join(dir, 'research-debug.log');
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rotates an oversized file and recreates the live log empty and owner-only (0600)', () => {
+    fs.writeFileSync(logFile, Buffer.alloc(OVERSIZE, 0x61));
+    const logger = recordingLogger();
+
+    new LogRotation(logger).rotateLogFile(logFile, dir);
+
+    const archives = fs.readdirSync(dir).filter((f) => f.startsWith('research-debug.log.'));
+    expect(archives).toHaveLength(1);
+    // The archive carries the full pre-rotation content.
+    expect(fs.statSync(path.join(dir, archives[0]!)).size).toBe(OVERSIZE);
+    // The live log is recreated empty so concurrent appenders inherit the
+    // owner-only file instead of materializing a umask-default one.
+    expect(fs.existsSync(logFile)).toBe(true);
+    expect(fs.statSync(logFile).size).toBe(0);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(logFile).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it('skips rotation when rename fails, preserving the source file intact', () => {
+    fs.writeFileSync(logFile, Buffer.alloc(OVERSIZE, 0x61));
+    mockState.failRename = true;
+    const logger = recordingLogger();
+
+    new LogRotation(logger).rotateLogFile(logFile, dir);
+
+    // The source must be untouched — a copy+delete fallback would drop appends
+    // other processes land between the copy and the unlink.
+    expect(fs.existsSync(logFile)).toBe(true);
+    expect(fs.statSync(logFile).size).toBe(OVERSIZE);
+    const archives = fs.readdirSync(dir).filter((f) => f.startsWith('research-debug.log.'));
+    expect(archives).toHaveLength(0);
+    expect(logger.lines.join('\n')).toContain('Log rotation skipped');
+  });
+
+  it('leaves a file under the size cap alone', () => {
+    fs.writeFileSync(logFile, 'small');
+
+    new LogRotation(recordingLogger()).rotateLogFile(logFile, dir);
+
+    expect(fs.readFileSync(logFile, 'utf8')).toBe('small');
+    expect(fs.readdirSync(dir)).toEqual(['research-debug.log']);
+  });
+
+  it('clearLogs removes archives and recreates the live log empty and owner-only (0600)', () => {
+    fs.writeFileSync(logFile, 'live content');
+    fs.writeFileSync(`${logFile}.2026-01-01T00-00-00-000Z`, 'old archive');
+    const logger = recordingLogger();
+
+    new LogRotation(logger).clearLogs(logFile, dir);
+
+    expect(fs.readdirSync(dir)).toEqual(['research-debug.log']);
+    expect(fs.statSync(logFile).size).toBe(0);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(logFile).mode & 0o777).toBe(0o600);
+    }
+  });
+});

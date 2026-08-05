@@ -19,7 +19,11 @@ export interface IStateManager extends IService {
   setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void>;
   clearBrowserServer(): Promise<void>;
   getEmbeddingServer(): Promise<{ port: number; pid: number; startTime?: number; serverId: string; model?: string; authSecret?: string } | null>;
-  clearEmbeddingServer(): Promise<void>;
+  // `expected` makes the clear a compare-and-delete: the entry is only removed when
+  // the provided identity fields match, so a stale caller cannot deregister a leader
+  // it does not own. Omit only when the caller has just verified ownership under the
+  // same state lock.
+  clearEmbeddingServer(expected?: { pid?: number; serverId?: string }): Promise<void>;
   isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean>;
   acquireGpuLock(sessionId?: string, timeoutMs?: number): Promise<boolean>;
   releaseGpuLock(pid?: number): Promise<void>;

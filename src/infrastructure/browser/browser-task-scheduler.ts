@@ -288,8 +288,10 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         const duration = Date.now() - startTime;
-        metrics.observe('browser_search_duration_ms', duration, { status: 'success' });
-        metrics.increment('browser_search_requests_total', 1, { status: 'success' });
+        // In-band worker error checked FIRST: a task the worker reports as failed
+        // must count only as an error. Recording success unconditionally before
+        // this check double-counted every worker-reported failure as
+        // success+error, so dashboards read healthy through a full outage.
         if (result.error) {
             metrics.increment('browser_search_requests_total', 1, { status: 'error' });
             errorTracker.trackError(new Error(result.error), {
@@ -301,6 +303,8 @@ export class BrowserTaskScheduler implements IScheduler {
             });
             throw new Error(result.error);
         }
+        metrics.observe('browser_search_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_search_requests_total', 1, { status: 'success' });
         return result.results;
     }
 
@@ -360,8 +364,7 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         const duration = Date.now() - startTime;
-        metrics.observe('browser_scrape_duration_ms', duration, { status: 'success' });
-        metrics.increment('browser_scrape_requests_total', 1, { status: 'success' });
+        // In-band error first — success-side recording must not precede it (see runSearch).
         if (result.error) {
             metrics.increment('browser_scrape_requests_total', 1, { status: 'error' });
             errorTracker.trackError(new Error(result.error), {
@@ -372,6 +375,8 @@ export class BrowserTaskScheduler implements IScheduler {
             });
             throw new Error(result.error);
         }
+        metrics.observe('browser_scrape_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_scrape_requests_total', 1, { status: 'success' });
         return result;
     }
 
@@ -425,10 +430,10 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         const duration = Date.now() - startTime;
-        metrics.observe('browser_healthcheck_duration_ms', duration, { status: 'success' });
-        metrics.increment('browser_healthcheck_requests_total', 1, { status: 'success' });
-        metrics.setGauge('browser_pool_health', 1);
-        logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
+        // In-band error first — success-side recording must not precede it (see
+        // runSearch). This path additionally owns the browser_pool_health gauge:
+        // setting it to 1 before the check flickered the pool healthy on every
+        // failed probe during an outage.
         if (result.error) {
             metrics.increment('browser_healthcheck_requests_total', 1, { status: 'error' });
             metrics.setGauge('browser_pool_health', 0);
@@ -440,6 +445,10 @@ export class BrowserTaskScheduler implements IScheduler {
             });
             throw new Error(result.error);
         }
+        metrics.observe('browser_healthcheck_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_healthcheck_requests_total', 1, { status: 'success' });
+        metrics.setGauge('browser_pool_health', 1);
+        logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
         return result;
     }
 

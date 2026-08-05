@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractRunStats, buildResearchSummary } from '../../../src/utils/metrics-summary.ts';
+import { MetricsRegistry } from '../../../src/utils/metrics.ts';
 import type { IMetricsSnapshot } from '../../../src/utils/metrics.ts';
 
 function snapshot(counters: Record<string, number>): IMetricsSnapshot {
@@ -39,6 +40,48 @@ describe('extractRunStats — error accounting', () => {
     }))!;
 
     expect(stats.errors).toBe(2); // researcher errors only, scrape blocks excluded
+  });
+});
+
+describe('extractRunStats — real registry key shapes', () => {
+  it('finds the duration histogram under the registry-sorted label order and any complexity value', () => {
+    const reg = new MetricsRegistry();
+    // Label insertion order here is deliberately NON-alphabetical: the registry
+    // sorts keys, so the emitted histogram key is
+    // research_session_duration_ms{complexity="4",mode="deep",status="success"} —
+    // a hardcoded {mode,complexity,status} lookup can never match it, and
+    // complexity="4" is outside any fixed 0-3 enumeration.
+    reg.observe('research_session_duration_ms', 42_000, { mode: 'deep', complexity: '4', status: 'success' });
+    reg.increment('researchers_launched_total', 1, { mode: 'deep', complexity: '4', round: '1' });
+    reg.increment('llm_tokens_total', 100, { component: 'researcher' });
+
+    const stats = extractRunStats(reg.getSnapshot())!;
+    expect(stats).not.toBeNull();
+    expect(stats.durationMs).toBe(42_000);
+  });
+
+  it('reports the deduped unique-URL count, not raw + unique summed', () => {
+    const reg = new MetricsRegistry();
+    // browser_search_unique_urls_total is the cross-query deduped subset of the
+    // same batch counted by browser_search_results_total — summing both would
+    // report 32 discovered URLs for 12 real ones.
+    reg.increment('browser_search_results_total', 20, { engine: 'ddg' });
+    reg.increment('browser_search_unique_urls_total', 12);
+    reg.increment('researchers_launched_total', 1, { mode: 'deep', complexity: '1', round: '1' });
+
+    const stats = extractRunStats(reg.getSnapshot())!;
+    expect(stats).not.toBeNull();
+    expect(stats.urlsDiscovered).toBe(12);
+  });
+
+  it('falls back to the raw results counter when a search died before emitting the unique count', () => {
+    const reg = new MetricsRegistry();
+    reg.increment('browser_search_results_total', 7, { engine: 'ddg' });
+    reg.increment('researchers_launched_total', 1, { mode: 'deep', complexity: '1', round: '1' });
+
+    const stats = extractRunStats(reg.getSnapshot())!;
+    expect(stats).not.toBeNull();
+    expect(stats.urlsDiscovered).toBe(7);
   });
 });
 

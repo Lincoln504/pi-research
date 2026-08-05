@@ -119,6 +119,35 @@ describe('Chunker', () => {
     expect(reconstructed).toBe(text);
   });
 
+  it('keeps forward progress when the overlap step re-enters a code block (no per-character slivers)', () => {
+    // A fenced block that straddles a chunk boundary: the first chunk extends to
+    // the closing fence, then the overlap plants the next start INSIDE the block.
+    // Without the forward-progress guard this degenerates into one chunk per
+    // character (observed: 228 chunks for ~7k chars with the shipped e5 config).
+    const c = new Chunker({ targetSize: 1500, overlap: 225 });
+    const fenced = '```\n' + 'x'.repeat(1571) + '\n```';
+    const text = 'a'.repeat(1000) + '\n' + fenced + '\n' + 'b'.repeat(4400);
+    const chunks = c.chunk(text);
+
+    // Upper bound: ceil(len / (targetSize - overlap)) plus slack for extensions.
+    expect(chunks.length).toBeLessThan(12);
+
+    // Every chunk after the first must cover text beyond the previous coverage.
+    let covered = chunks[0]!.text.length;
+    for (let i = 1; i < chunks.length; i++) {
+      const advance = chunks[i]!.text.length - chunks[i]!.actual_overlap;
+      expect(advance).toBeGreaterThan(0);
+      covered += advance;
+    }
+    expect(covered).toBe(text.length);
+
+    let reconstructed = chunks[0]!.text;
+    for (let i = 1; i < chunks.length; i++) {
+      reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
+    }
+    expect(reconstructed).toBe(text);
+  });
+
   it('should throw error when overlap >= targetSize', () => {
     expect(() => {
       new Chunker({ targetSize: 100, overlap: 100 });

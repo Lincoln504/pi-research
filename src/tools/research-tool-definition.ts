@@ -466,8 +466,14 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
 
         const errMsg = String(error).toLowerCase();
 
-        // Handle rate limits gracefully
-        if (errMsg.includes('429') || errMsg.includes('rate limit') || errMsg.includes('too many requests') || errMsg.includes('quota')) {
+        // Handle rate limits gracefully. "429" is matched on a word boundary
+        // (mirroring messageIsTransient in web-research/retry-utils.ts): a substring
+        // test also matched digits embedded in a larger number — e.g. a context-
+        // overflow error quoting "you requested 142935 tokens" — misreporting the
+        // run as rate-limited. 'quota' stays unanchored, same trade-off as
+        // retry-utils: provider quota errors ("insufficient_quota") carry no
+        // rate/limit wording to anchor on.
+        if (/\b429\b/.test(errMsg) || errMsg.includes('rate limit') || errMsg.includes('too many requests') || errMsg.includes('quota')) {
             logger.warn('[research] Run halted gracefully due to rate limit:', error);
             if (ctx.hasUI) {
                 ctx.ui.notify('Research halted: API rate limit reached', 'warning');

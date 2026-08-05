@@ -97,6 +97,15 @@ function preRepairJson(jsonStr: string): string {
 }
 
 /**
+ * Upper bound on the forward candidate scan in extractJsonObject/extractJsonArray.
+ * Prose braces ("Fill {placeholder} …") or citation brackets ("[see note] …") can
+ * precede the real payload, so a closed-but-unparseable candidate must not end the
+ * search — but brace-dense non-JSON text must not turn extraction into a quadratic
+ * walk either, hence the cap.
+ */
+const MAX_JSON_CANDIDATES = 8;
+
+/**
  * Parse a JSON slice, trying it verbatim first and only running preRepairJson on
  * failure. preRepairJson rewrites smart quotes and trailing commas even inside
  * string values, so applying it unconditionally would corrupt otherwise-valid JSON
@@ -114,9 +123,12 @@ function parseRawThenRepair(jsonStr: string): unknown {
 /**
  * Extract JSON object from raw text
  *
- * Finds the first `{` then walks forward with depth-tracking (respecting string
- * literals) to locate its matching `}`. This correctly handles text that contains
- * multiple JSON objects or has trailing content after the object.
+ * Walks forward with depth-tracking (respecting string literals) from each `{`
+ * candidate to its matching `}`. A candidate that closes but fails to parse is a
+ * prose brace (e.g. "Fill {placeholder} like this: {…}"), so the scan advances to
+ * the next `{` — bounded by MAX_JSON_CANDIDATES. Truncated-repair applies at the
+ * first UNCLOSED candidate: past that point there is no further text to scan, and
+ * an unclosed opener is what genuinely cut-off LLM output looks like.
  *
  * @param text - Text to search for JSON object
  * @returns Extraction result with parsed value or error
@@ -124,7 +136,7 @@ function parseRawThenRepair(jsonStr: string): unknown {
 export function extractJsonObject<T = unknown>(
   text: string
 ): JsonExtractionResult<T> {
-  const objStart = text.indexOf('{');
+  let objStart = text.indexOf('{');
 
   if (objStart === -1) {
     return {
@@ -134,54 +146,67 @@ export function extractJsonObject<T = unknown>(
     };
   }
 
-  const { index: objEnd, inString } = findMatchingBracket(text, objStart);
+  let lastParseError = 'unknown parse error';
+  for (
+    let attempt = 0;
+    attempt < MAX_JSON_CANDIDATES && objStart !== -1;
+    attempt++, objStart = text.indexOf('{', objStart + 1)
+  ) {
+    const { index: objEnd, inString } = findMatchingBracket(text, objStart);
 
-  if (objEnd === -1) {
-    // Attempt local repair for truncated JSON
-    logger.debug('[json-utils] JSON object truncated; attempting local repair');
-    let partialText = text.slice(objStart);
-    
-    // If we were inside a string, we MUST close it first
-    if (inString) {
-        partialText += '"';
-    }
+    if (objEnd === -1) {
+      // Attempt local repair for truncated JSON
+      logger.debug('[json-utils] JSON object truncated; attempting local repair');
+      let partialText = text.slice(objStart);
 
-    for (let i = 1; i <= 15; i++) {
-      try {
-        const candidate = preRepairJson(partialText + '}'.repeat(i));
-        const parsed = JSON.parse(candidate);
-        logger.debug(`[json-utils] JSON object truncated; salvaged by appending ${inString ? 'quote and ' : ''}${i} closing braces`);
-        return { success: true, value: parsed as T, method: 'raw-object' };
-      } catch {
-        continue;
+      // If we were inside a string, we MUST close it first
+      if (inString) {
+          partialText += '"';
       }
+
+      for (let i = 1; i <= 15; i++) {
+        try {
+          const candidate = preRepairJson(partialText + '}'.repeat(i));
+          const parsed = JSON.parse(candidate);
+          logger.debug(`[json-utils] JSON object truncated; salvaged by appending ${inString ? 'quote and ' : ''}${i} closing braces`);
+          return { success: true, value: parsed as T, method: 'raw-object' };
+        } catch {
+          continue;
+        }
+      }
+
+      return {
+        success: false,
+        value: undefined,
+        error: 'No matching closing brace found and local repair failed',
+      };
     }
-    
-    return {
-      success: false,
-      value: undefined,
-      error: 'No matching closing brace found and local repair failed',
-    };
+
+    try {
+      const parsed = parseRawThenRepair(text.slice(objStart, objEnd + 1));
+      return { success: true, value: parsed as T, method: 'raw-object' };
+    } catch (err) {
+      // Closed but unparseable — a prose brace, not the payload. Try the next `{`.
+      lastParseError = err instanceof Error ? err.message : String(err);
+    }
   }
 
-  try {
-    const parsed = parseRawThenRepair(text.slice(objStart, objEnd + 1));
-    return { success: true, value: parsed as T, method: 'raw-object' };
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return {
-      success: false,
-      value: undefined,
-      error: `Failed to parse JSON object: ${errorMsg}`,
-    };
-  }
+  return {
+    success: false,
+    value: undefined,
+    error: `Failed to parse JSON object: ${lastParseError}`,
+  };
 }
 
 /**
  * Extract JSON array from raw text
  *
- * Looks for a JSON array spanning from the first `[` to the last `]`.
- * Useful for extracting arrays of strings or objects.
+ * Walks forward with depth-tracking (respecting string literals) from each `[`
+ * candidate to its matching `]`. A candidate that closes but fails to parse is a
+ * citation-style bracket (e.g. "[see note] … [\"a\",\"b\"]"), so the scan advances
+ * to the next `[` — bounded by MAX_JSON_CANDIDATES. Truncated-repair applies at
+ * the first UNCLOSED candidate: past that point there is no further text to scan,
+ * and an unclosed opener is what genuinely cut-off LLM output looks like.
  *
  * @param text - Text to search for JSON array
  * @returns Extraction result with parsed value or error
@@ -189,7 +214,7 @@ export function extractJsonObject<T = unknown>(
 export function extractJsonArray<T = unknown>(
   text: string
 ): JsonExtractionResult<T[]> {
-  const arrStart = text.indexOf('[');
+  let arrStart = text.indexOf('[');
 
   if (arrStart === -1) {
     return {
@@ -199,54 +224,69 @@ export function extractJsonArray<T = unknown>(
     };
   }
 
-  const { index: arrEnd, inString } = findMatchingBracket(text, arrStart);
-  if (arrEnd === -1) {
-    // Attempt local repair for truncated JSON
-    logger.debug('[json-utils] JSON array truncated; attempting local repair');
-    let partialText = text.slice(arrStart);
-    
-    if (inString) {
-        partialText += '"';
-    }
+  let lastError = 'unknown parse error';
+  let lastErrorShape: 'not-array' | 'parse' = 'parse';
+  for (
+    let attempt = 0;
+    attempt < MAX_JSON_CANDIDATES && arrStart !== -1;
+    attempt++, arrStart = text.indexOf('[', arrStart + 1)
+  ) {
+    const { index: arrEnd, inString } = findMatchingBracket(text, arrStart);
+    if (arrEnd === -1) {
+      // Attempt local repair for truncated JSON
+      logger.debug('[json-utils] JSON array truncated; attempting local repair');
+      let partialText = text.slice(arrStart);
 
-    for (let i = 1; i <= 15; i++) {
-      try {
-        const candidate = preRepairJson(partialText + ']'.repeat(i));
-        const parsed = JSON.parse(candidate);
-        if (Array.isArray(parsed)) {
-          logger.debug(`[json-utils] JSON array truncated; salvaged by appending ${inString ? 'quote and ' : ''}${i} closing brackets`);
-          return { success: true, value: parsed as T[], method: 'raw-array' };
-        }
-      } catch {
-        continue;
+      if (inString) {
+          partialText += '"';
       }
-    }
 
-    return {
-      success: false,
-      value: undefined,
-      error: 'No matching closing bracket found and local repair failed',
-    };
-  }
+      for (let i = 1; i <= 15; i++) {
+        try {
+          const candidate = preRepairJson(partialText + ']'.repeat(i));
+          const parsed = JSON.parse(candidate);
+          if (Array.isArray(parsed)) {
+            logger.debug(`[json-utils] JSON array truncated; salvaged by appending ${inString ? 'quote and ' : ''}${i} closing brackets`);
+            return { success: true, value: parsed as T[], method: 'raw-array' };
+          }
+        } catch {
+          continue;
+        }
+      }
 
-  try {
-    const parsed = parseRawThenRepair(text.slice(arrStart, arrEnd + 1));
-    if (!Array.isArray(parsed)) {
       return {
         success: false,
         value: undefined,
-        error: 'Parsed value is not an array',
+        error: 'No matching closing bracket found and local repair failed',
       };
     }
-    return { success: true, value: parsed as T[], method: 'raw-array' };
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+
+    try {
+      const parsed = parseRawThenRepair(text.slice(arrStart, arrEnd + 1));
+      if (!Array.isArray(parsed)) {
+        lastErrorShape = 'not-array';
+        continue;
+      }
+      return { success: true, value: parsed as T[], method: 'raw-array' };
+    } catch (err) {
+      // Closed but unparseable — a citation bracket, not the payload. Try the next `[`.
+      lastErrorShape = 'parse';
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  if (lastErrorShape === 'not-array') {
     return {
       success: false,
       value: undefined,
-      error: `Failed to parse JSON array: ${errorMsg}`,
+      error: 'Parsed value is not an array',
     };
   }
+  return {
+    success: false,
+    value: undefined,
+    error: `Failed to parse JSON array: ${lastError}`,
+  };
 }
 
 /**

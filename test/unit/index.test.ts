@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+// Real fs (the vi.mock below only replaces readFileSync; the spread keeps the rest).
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 const mockExecute = vi.fn<() => Promise<{ content: Array<{ type: 'text'; text: string }>; details: Record<string, unknown> }>>();
 
@@ -90,6 +94,33 @@ function makeCtx(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 describe('extension entrypoint', () => {
+  // Insurance against real-HOME mutation: activate() runs reconcileSkillInstalls(),
+  // and today only the file-wide node:fs mock (readFileSync → 'MOCK_USAGE_PROMPT'
+  // breaks readManifest's JSON.parse) keeps it away from the developer's real
+  // skill links — existsSync/unlinkSync/symlinkSync/rmSync stay REAL. Pin HOME
+  // (and USERPROFILE for Windows) to a throwaway dir so a future narrowing of
+  // that mock can never reach ~/.pi/research/installed-skills.json or
+  // ~/.claude/skills/….
+  let tmpHome: string;
+  let realHome: string | undefined;
+  let realUserProfile: string | undefined;
+
+  beforeAll(() => {
+    tmpHome = mkdtempSync(path.join(os.tmpdir(), 'pi-index-home-'));
+    realHome = process.env['HOME'];
+    realUserProfile = process.env['USERPROFILE'];
+    process.env['HOME'] = tmpHome;
+    process.env['USERPROFILE'] = tmpHome;
+  });
+
+  afterAll(() => {
+    if (realHome === undefined) delete process.env['HOME'];
+    else process.env['HOME'] = realHome;
+    if (realUserProfile === undefined) delete process.env['USERPROFILE'];
+    else process.env['USERPROFILE'] = realUserProfile;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

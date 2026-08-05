@@ -156,6 +156,39 @@ describe('extractJsonObject', () => {
     expect(result.value).toEqual({ a: 1, b: { c: 2 } });
     expect(result.method).toBe('raw-object');
   });
+
+  it('scans past a prose brace to the real payload', () => {
+    // The first `{` candidate ({placeholder}) closes but is not JSON — extraction
+    // must advance to the next candidate instead of reporting "no valid JSON".
+    const result = extractJsonObject('Fill {placeholder} like this: {"score": 5}');
+    expect(result.success).toBe(true);
+    expect((result.value as any).score).toBe(5);
+  });
+
+  it('scans past multiple prose braces', () => {
+    const result = extractJsonObject('Use {a} or {b} then output {"ok": true}');
+    expect(result.success).toBe(true);
+    expect((result.value as any).ok).toBe(true);
+  });
+
+  it('still applies truncated repair at the first unclosed candidate after skipping prose braces', () => {
+    const result = extractJsonObject('Fill {placeholder} then: {"a": 1, "b": {"c": 2}');
+    expect(result.success).toBe(true);
+    expect(result.value).toEqual({ a: 1, b: { c: 2 } });
+  });
+
+  it('keeps the existing error shape when every candidate fails to parse', () => {
+    const result = extractJsonObject('choose {x} or {y} or {z}');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to parse JSON object');
+  });
+
+  it('bounds the forward scan on brace-dense non-JSON text', () => {
+    // A payload buried past the candidate cap is not found — the scan must stay
+    // bounded rather than walking arbitrarily many prose braces.
+    const result = extractJsonObject('{x} '.repeat(20) + '{"ok": true}');
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -185,6 +218,27 @@ describe('extractJsonArray', () => {
   it('fails on plain text', () => {
     const result = extractJsonArray('just text');
     expect(result.success).toBe(false);
+  });
+
+  it('scans past a citation-style bracket to the real array', () => {
+    // The first `[` candidate ([citation needed]) closes but is not JSON —
+    // extraction must advance to the next candidate.
+    const result = extractJsonArray('[citation needed] the queries are: ["a", "b"]');
+    expect(result.success).toBe(true);
+    expect(result.value).toEqual(['a', 'b']);
+  });
+
+  it('still applies truncated repair at the first unclosed candidate after skipping a citation bracket', () => {
+    const result = extractJsonArray('[see note] then: ["a", "b"');
+    expect(result.success).toBe(true);
+    expect(result.value).toEqual(['a', 'b']);
+    expect(result.method).toBe('raw-array');
+  });
+
+  it('keeps the existing error shape when every candidate fails to parse', () => {
+    const result = extractJsonArray('[citation needed] and [another note]');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to parse JSON array');
   });
 });
 

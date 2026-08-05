@@ -55,6 +55,17 @@ export class ProcessLifecycleService implements IProcessLifecycle {
 
   private cachedStartTime: number | null = null;
 
+  // Short-TTL memo for SUBPROCESS-backed start-time lookups (macOS `ps`, Windows
+  // powershell — Linux reads /proc and stays uncached). A queued run-slot waiter
+  // sweeps every 250ms and builds a fresh FileLockService per attempt, so without
+  // a cross-attempt memo each live owner costs up to two `ps` spawns per sweep —
+  // ~48 subprocess spawns/second sustained on macOS while queued. A live PID's
+  // start time never changes; the only staleness is a PID recycled within the
+  // TTL reading as its dead predecessor, which merely delays a stale-owner steal
+  // by up to the TTL (well under every staleness threshold in use).
+  private static readonly START_TIME_TTL_MS = 5000;
+  private startTimeMemo = new Map<number, { value: number | null; at: number }>();
+
   async initialize(): Promise<void> {
     this.lifecycle = ServiceLifecycle.INITIALIZED;
   }
@@ -87,6 +98,18 @@ export class ProcessLifecycleService implements IProcessLifecycle {
       }
     }
 
+    const memoized = this.startTimeMemo.get(pid);
+    if (memoized && Date.now() - memoized.at < ProcessLifecycleService.START_TIME_TTL_MS) {
+      return memoized.value;
+    }
+    const memoize = (value: number | null): number | null => {
+      // Bound the map: sweeps interrogate a handful of owners; anything beyond a
+      // few hundred distinct PIDs inside one TTL window means leaked entries.
+      if (this.startTimeMemo.size > 256) this.startTimeMemo.clear();
+      this.startTimeMemo.set(pid, { value, at: Date.now() });
+      return value;
+    };
+
     // Windows: use powershell to get process creation time
     if (process.platform === 'win32') {
       try {
@@ -99,11 +122,11 @@ export class ProcessLifecycleService implements IProcessLifecycle {
           );
           child.unref?.();
         });
-        if (!output || !output.trim()) return null;
+        if (!output || !output.trim()) return memoize(null);
         const startTime = parseInt(output.trim(), 10);
-        return isNaN(startTime) ? null : startTime;
+        return memoize(isNaN(startTime) ? null : startTime);
       } catch {
-        return null;
+        return memoize(null);
       }
     }
 
@@ -121,8 +144,8 @@ export class ProcessLifecycleService implements IProcessLifecycle {
     // So: try `etimes`, and fall back to parsing POSIX `etime` when it yields
     // nothing. `etime` is mandated by POSIX, so the fallback works everywhere.
     const elapsedSec = await this.readElapsedSeconds(pid);
-    if (elapsedSec === null) return null;
-    return Math.floor(Date.now() / 1000) - elapsedSec;
+    if (elapsedSec === null) return memoize(null);
+    return memoize(Math.floor(Date.now() / 1000) - elapsedSec);
   }
 
   /** Elapsed seconds for `pid` via ps, or null. Tries `etimes`, then POSIX `etime`. */

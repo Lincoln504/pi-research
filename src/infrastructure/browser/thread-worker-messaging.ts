@@ -311,7 +311,7 @@ export async function executeScrapeTask(
   _context: any,
   url: string,
   signal?: AbortSignal
-): Promise<{ contentType: string; html?: string; buffer?: Buffer; jitter: number }> {
+): Promise<{ contentType: string; html?: string; bufferB64?: string; jitter: number }> {
   const page = await createPageSafe(_context);
   const SCRAPE_TIMEOUT = parseInt(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] || '15000', 10);
   page.setDefaultTimeout(SCRAPE_TIMEOUT);
@@ -466,7 +466,12 @@ export async function executeScrapeTask(
       await Promise.allSettled(pendingAddrChecks);
       if (poisonedError) throw poisonedError;
       await page.close();
-      return { contentType, buffer, jitter: 0 };
+      // Base64, never a raw Buffer: this result crosses the poolifier cluster IPC
+      // channel (default JSON serialization), where a Buffer arrives as
+      // {type:'Buffer',data:[...]} — and the follower path adds a second JSON hop
+      // through the leader's browser-server. A base64 string survives both hops
+      // verbatim (and is ~3x smaller on the wire than the data-array form).
+      return { contentType, bufferB64: buffer.toString('base64'), jitter: 0 };
     }
 
     // If it's HTML, check if we need to wait longer (JS-heavy sites)

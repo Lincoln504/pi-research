@@ -141,6 +141,20 @@ describe('HeadlessObserver', () => {
       expect(events[0]!.data.cost).toBeUndefined();
     });
 
+    it('onResearcherTokensHint emits "researcher_tokens_hint" with id and inputTokens', () => {
+      observer.onResearcherTokensHint('r1', 12345);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe('researcher_tokens_hint');
+      expect(events[0]!.data).toEqual({ id: 'r1', inputTokens: 12345 });
+    });
+
+    it('onSynthesisStart emits "synthesis_start"', () => {
+      observer.onSynthesisStart();
+      expect(events).toHaveLength(1);
+      expect(events[0]!.event).toBe('synthesis_start');
+      expect(events[0]!.data).toBeUndefined();
+    });
+
     it('onResearcherComplete emits "researcher_complete" with id and report', () => {
       observer.onResearcherComplete('r1', '## Report\nFindings...');
       expect(events[0]!.event).toBe('researcher_complete');
@@ -304,12 +318,14 @@ describe('HeadlessObserver', () => {
         observer.onSearchComplete(3);
         observer.onResearcherStart('r1', 'R', 'G');
         observer.onResearcherProgress('r1');
+        observer.onResearcherTokensHint('r1', 100);
         observer.onResearcherComplete('r1', 'report');
         observer.onResearcherFailure('r1', 'err');
         observer.onEvaluationStart(1);
         observer.onEvaluationProgress('eval');
         observer.onEvaluationTokens(500, 0.02);
         observer.onEvaluationDecision('synthesize');
+        observer.onSynthesisStart();
         observer.onComplete('done');
         observer.onError(new Error('boom'));
         observer.onTokensConsumed(1000, 0.05);

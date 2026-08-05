@@ -137,9 +137,17 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   const browserSearchQueries = sumCounter(counters, 'browser_search_queries_total');
   const searchQueries = sumCounter(counters, 'search_queries_total') + browserSearchQueries;
 
-  // URLs discovered via search
-  const urlsDiscovered = sumCounter(counters, 'browser_search_results_total') +
-    sumCounter(counters, 'browser_search_unique_urls_total');
+  // URLs discovered via search. browser_search_unique_urls_total is the
+  // cross-query deduped subset of the SAME batch counted by
+  // browser_search_results_total (raw per-query results), so summing both
+  // near-doubles the figure. The unique counter IS the discovered count; the
+  // raw counter is only a fallback for a search that threw before completing
+  // the batch (the unique count is emitted after cross-query dedup, so such a
+  // run never emits it).
+  const uniqueUrlsDiscovered = sumCounter(counters, 'browser_search_unique_urls_total');
+  const urlsDiscovered = uniqueUrlsDiscovered > 0
+    ? uniqueUrlsDiscovered
+    : sumCounter(counters, 'browser_search_results_total');
 
   // URLs scraped — outcomes from scrape_results_total
   const fetchSuccess = getLabeledCounter(counters, 'scrape_results_total', { outcome: 'fetch_success' });
@@ -178,12 +186,22 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   // Cost — sum all label variants
   const cost = sumCounter(counters, 'llm_cost_total');
 
-  // Duration from histogram
-  const durationMs = histograms['research_session_duration_ms{mode="deep",complexity="1",status="success"}']?.max ||
-    histograms['research_session_duration_ms{mode="deep",complexity="2",status="success"}']?.max ||
-    histograms['research_session_duration_ms{mode="deep",complexity="3",status="success"}']?.max ||
-    histograms['research_session_duration_ms{mode="quick",complexity="0",status="success"}']?.max ||
-    0;
+  // Duration from histogram. The registry serializes label keys in ALPHABETICAL
+  // order (MetricsRegistry.serializeLabels), so the real key is
+  // `{complexity="…",mode="…",status="…"}` — a lookup that hardcodes any other
+  // label order can never match. Complexity is also emitted as String(complexity)
+  // with no fixed value set. Scan by metric-name prefix + success status instead,
+  // taking the largest observed max across matching label variants.
+  let durationMs = 0;
+  for (const key of Object.keys(histograms)) {
+    if (
+      key.startsWith('research_session_duration_ms{') &&
+      key.includes('status="success"')
+    ) {
+      const max = histograms[key]?.max ?? 0;
+      if (max > durationMs) durationMs = max;
+    }
+  }
 
   // Rounds completed — evaluator runs give us the round count
   const roundsCompleted = sumCounter(counters, 'evaluator_runs_total');

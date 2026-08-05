@@ -92,39 +92,48 @@ describe('Error Recovery and Resilience', () => {
 
       await knowledgeStore.close();
 
-      // Corrupt the database (simulate corruption)
+      // Corrupt the store. This is LanceDB, not SQLite: the on-disk layout is
+      // <dbDir>/<table>.lance/{data/*.lance, _versions/*.manifest} — a previous
+      // revision of this test filtered for `.db`/`.sqlite` files, matched
+      // NOTHING, and asserted `countAfter >= 0` against a pristine store.
+      // Garbage every version manifest — the files LanceDB must parse to open
+      // the table at all — and guard that we actually found some, so a future
+      // layout drift fails loudly instead of re-vacuating the test.
       const fs = await import('node:fs');
-      const dbFiles = fs.readdirSync(dbPath).filter(f => f.endsWith('.db') || f.endsWith('.sqlite'));
-
-      for (const file of dbFiles) {
-        const filePath = path.join(dbPath, file);
-        const content = fs.readFileSync(filePath);
-        // Corrupt first few bytes
-        const corrupted = Buffer.from(content);
-        corrupted[0] = 0xFF;
-        corrupted[1] = 0xFF;
-        fs.writeFileSync(filePath, corrupted);
+      const versionsDir = path.join(dbPath, 'knowledge.lance', '_versions');
+      const manifests = fs.readdirSync(versionsDir).filter(f => f.endsWith('.manifest'));
+      expect(manifests.length).toBeGreaterThan(0);
+      for (const file of manifests) {
+        fs.writeFileSync(path.join(versionsDir, file), Buffer.from('CORRUPT: not a lance manifest'));
       }
 
-      // Should recover or create new store
+      // Contract on reopening the corrupted store (deterministic on the pinned
+      // lancedb version — "LanceError(IO): file size is too small"): open()
+      // surfaces a CATCHABLE error. openInternal logs, rolls back the half-open
+      // handle and re-throws; the process must survive.
       const recoveredStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
+      await expect(recoveredStore.open()).rejects.toThrow();
+
+      // The failed open must have rolled back db/table (openInternal's catch),
+      // so a retry hits the same corruption again rather than short-circuiting
+      // on `if (this.db) return` into a half-open store…
+      await expect(recoveredStore.open()).rejects.toThrow();
+      // …and reads on the never-opened store follow the documented
+      // no-connection contract (0), not a crash into the corrupt table.
+      expect(await recoveredStore.count()).toBe(0);
+
+      // Process-level recovery after the corruption: a FRESH store in a new
+      // directory must still open and work (real work, not a tautology — it
+      // exercises open/add/count end to end after the failure above).
+      const newStorePath = path.join(testDbDir, `recovered-${randomUUID()}`);
+      const newStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: newStorePath, embedder, modelName });
+      await newStore.open();
       try {
-        await recoveredStore.open();
-
-        // Either we recovered data or we have a fresh store
-        const countAfter = await recoveredStore.count();
-        expect(countAfter).toBeGreaterThanOrEqual(0);
-
-        await recoveredStore.close();
-      } catch (error) {
-        // If recovery fails, we should be able to create a new store
-        const newStorePath = path.join(testDbDir, `recovered-${randomUUID()}`);
-        const newStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: newStorePath, embedder, modelName });
-        await newStore.open();
-
-        const countInNew = await newStore.count();
-        expect(countInNew).toBe(0);
-
+        await newStore.addDocuments([
+          { text: 'Post-corruption document', url: 'https://test.com/post', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        ]);
+        expect(await newStore.count()).toBe(1);
+      } finally {
         await newStore.close();
       }
     }, 60000);

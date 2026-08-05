@@ -22,18 +22,20 @@ import type {
   GitHubResult,
   OSVResult,
 } from './types.ts';
-import { REQUEST_DELAY_MS_NVD, REQUEST_DELAY_MS_OTHER } from '../constants.ts';
 import { searchNVD } from './nvd-client.ts';
 import { searchCisaKev } from './cisa-kev.ts';
 import { searchGitHubAdvisories } from './github-advisories.ts';
 import { searchOSV } from './osv-client.ts';
-import { safeUnref } from '../utils/safe-unref.ts';
+import { logger } from '../logger.ts';
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
 type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+type KnownDatabase = 'nvd' | 'cisa_kev' | 'github' | 'osv';
+const KNOWN_DATABASES: readonly KnownDatabase[] = ['nvd', 'cisa_kev', 'github', 'osv'];
 
 interface DatabaseInfo {
   readonly databases: readonly DatabaseInfoEntry[];
@@ -60,7 +62,15 @@ function isValidSeverity(value: unknown): value is Severity {
 
 function getSeverityParam(params: SecuritySearchParams): Severity | undefined {
   if (params.severity === undefined) return undefined;
-  return isValidSeverity(params.severity) ? params.severity : undefined;
+  // NVD requires the exact uppercase enum. GitHub/OSV normalize case and the
+  // MODERATE↔MEDIUM synonym in their clients (github-advisories.ts, osv-client.ts);
+  // without the same treatment here, severity:"high" or "Moderate" silently ran
+  // NVD unfiltered while the other databases filtered.
+  const upper = params.severity.trim().toUpperCase();
+  const normalized = upper === 'MODERATE' ? 'MEDIUM' : upper;
+  if (isValidSeverity(normalized)) return normalized;
+  logger.warn(`[security] Unknown severity filter "${params.severity}" (valid: LOW, MEDIUM, HIGH, CRITICAL) — NVD results are unfiltered`);
+  return undefined;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -77,7 +87,6 @@ export interface SecuritySearcherConfig {
   readonly cisaKevClient?: ICisaKevClient;
   readonly githubAdvisoriesClient?: IGitHubAdvisoriesClient;
   readonly osvClient?: IOSVClient;
-  readonly requestDelay?: number; // Override for testing
 }
 
 const DEFAULT_CONFIG: SecuritySearcherConfig = {
@@ -85,7 +94,6 @@ const DEFAULT_CONFIG: SecuritySearcherConfig = {
   cisaKevClient: undefined,
   githubAdvisoriesClient: undefined,
   osvClient: undefined,
-  requestDelay: -1, // Use database-specific logic by default
 };
 
 export class SecuritySearcher {
@@ -101,9 +109,22 @@ export class SecuritySearcher {
     const errors: string[] = [];
     let totalVulnerabilities = 0;
 
+    // Normalize database names before dispatch: callers (agents, SDK users) write
+    // "NVD" / " osv " etc. An unrecognized name must surface in `errors` rather than
+    // silently contributing an authoritative-looking "0 vulnerabilities" for a
+    // database that was never queried.
+    const databases: string[] = [];
+    for (const raw of params.databases) {
+      const db = String(raw).trim().toLowerCase();
+      databases.push(db);
+      if (!(KNOWN_DATABASES as readonly string[]).includes(db)) {
+        errors.push(`Unknown database "${raw}" — valid databases: ${KNOWN_DATABASES.join(', ')}`);
+      }
+    }
+
     const searchPromises: Promise<void>[] = [];
 
-    if (params.databases.includes('nvd')) {
+    if (databases.includes('nvd')) {
       searchPromises.push((async () => {
         try {
           const nvdResult = await this.searchNVD(params.terms, {
@@ -120,7 +141,7 @@ export class SecuritySearcher {
       })());
     }
 
-    if (params.databases.includes('cisa_kev')) {
+    if (databases.includes('cisa_kev')) {
       searchPromises.push((async () => {
         try {
           const cisaResult = await this.searchCisaKev(params.terms, { maxResults: params.maxResults, signal });
@@ -132,7 +153,7 @@ export class SecuritySearcher {
       })());
     }
 
-    if (params.databases.includes('github')) {
+    if (databases.includes('github')) {
       searchPromises.push((async () => {
         try {
           const githubResult = await this.searchGitHub(params.terms, {
@@ -150,7 +171,7 @@ export class SecuritySearcher {
       })());
     }
 
-    if (params.databases.includes('osv')) {
+    if (databases.includes('osv')) {
       searchPromises.push((async () => {
         try {
           const osvResult = await this.searchOSV(params.terms, {
@@ -169,24 +190,10 @@ export class SecuritySearcher {
 
     await Promise.all(searchPromises);
 
-    // Apply delay
-    let delay = this.config.requestDelay ?? -1;
-    if (delay === -1) {
-        delay = params.databases.includes('nvd') ? REQUEST_DELAY_MS_NVD : REQUEST_DELAY_MS_OTHER;
-    }
-
-    if (delay > 0) {
-      // Abortable: a caller cancel must not sit through the post-sweep delay.
-      await new Promise<void>((resolve) => {
-        const timeoutId = setTimeout(() => {
-          signal?.removeEventListener('abort', onAbort);
-          resolve();
-        }, delay);
-        safeUnref(timeoutId);
-        const onAbort = () => { clearTimeout(timeoutId); resolve(); };
-        if (signal) signal.addEventListener('abort', onAbort, { once: true });
-      });
-    }
+    // No post-sweep delay: NVD inter-request spacing is enforced by the module-level
+    // NVDRateLimiter in nvd-client.ts, whose state persists across searches and tool
+    // calls, so sleeping here after results were already in hand only added dead
+    // researcher time.
 
     return {
       results,

@@ -181,6 +181,44 @@ describe('KnowledgeStore Migration Error Paths', () => {
     mockEmbedder.embedMany = originalEmbedMany;
   });
 
+  it('prune retains the NEWEST backup by its _backup_ timestamp across mixed basenames', async () => {
+    // Both spellings are legitimate — the prefix is the table name AT BACKUP
+    // TIME: a plain `knowledge_backup_*`, or a backup of a persisted re-embed
+    // temp table, `knowledge_migration_*_backup_*`. A whole-name lexicographic
+    // sort ranks `knowledge_m…` above `knowledge_b…` regardless of timestamps,
+    // deleting the newest snapshot while retaining an older one.
+    const older = 'knowledge_migration_2026-01-01T00-00-00-000Z_backup_2026-01-02T00-00-00-000Z.lance';
+    const newer = 'knowledge_backup_2026-03-04T05-06-07-890Z.lance';
+    fs.mkdirSync(path.join(testDbDir, older));
+    fs.mkdirSync(path.join(testDbDir, newer));
+
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store.initialize();
+
+    expect(fs.existsSync(path.join(testDbDir, newer))).toBe(true);
+    expect(fs.existsSync(path.join(testDbDir, older))).toBe(false);
+  });
+
+  it('prune falls back to directory mtime for backup names without a parseable timestamp', async () => {
+    // mkdir sets mtime to "now" — newer than the 2020 timestamp embedded in the
+    // parseable name — so the unparseable dir is the newest snapshot and must be
+    // the one retained.
+    const unparseable = 'knowledge_backup_manual.lance';
+    const parseableOld = 'knowledge_backup_2020-01-01T00-00-00-000Z.lance';
+    fs.mkdirSync(path.join(testDbDir, unparseable));
+    fs.mkdirSync(path.join(testDbDir, parseableOld));
+
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store.initialize();
+
+    expect(fs.existsSync(path.join(testDbDir, unparseable))).toBe(true);
+    expect(fs.existsSync(path.join(testDbDir, parseableOld))).toBe(false);
+  });
+
   it('backup migration failure ABORTS the open — never escalates to a data-destroying drop', async () => {
     // Regression: the fallback ladder used to escalate backup→drop, so a
     // (possibly transient) backup failure under the DEFAULT strategy silently

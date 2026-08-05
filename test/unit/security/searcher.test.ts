@@ -168,14 +168,8 @@ function createMockAdvisory(overrides: Partial<Advisory> = {}): Advisory {
   };
 }
 
-/**
- * Helper to create a SecuritySearcher with no request delay for fast tests
- */
 function createFastSearcher(config?: Partial<SecuritySearcherConfig>): SecuritySearcher {
-  return new SecuritySearcher({
-    requestDelay: 0,
-    ...config,
-  });
+  return new SecuritySearcher({ ...config });
 }
 
 describe('SecuritySearcher', () => {
@@ -543,7 +537,6 @@ describe('SecuritySearcher', () => {
       const searcher = new SecuritySearcher({
         nvdClient: mockNVD,
         cisaKevClient: mockCisa,
-        requestDelay: 0,
       });
 
       const params: SecuritySearchParams = {
@@ -621,15 +614,12 @@ describe('SecuritySearcher', () => {
     });
   });
 
-  describe('request delay', () => {
-    it('should apply request delay when configured', async () => {
+  describe('post-sweep delay removal', () => {
+    it('returns promptly after all databases respond (NVD spacing lives in the nvd-client rate limiter, not here)', async () => {
       const mockNVD = new MockNVDClient();
       mockNVD.setMockResult('test', { count: 1, vulnerabilities: [] });
 
-      const searcher = new SecuritySearcher({
-        nvdClient: mockNVD,
-        requestDelay: 100,
-      });
+      const searcher = new SecuritySearcher({ nvdClient: mockNVD });
 
       const params: SecuritySearchParams = {
         terms: ['test'],
@@ -640,29 +630,86 @@ describe('SecuritySearcher', () => {
       await searcher.search(params);
       const duration = Date.now() - startTime;
 
-      expect(duration).toBeGreaterThanOrEqual(90);
+      // The removed post-sweep sleep was 6s for NVD-inclusive calls; anything in
+      // this ballpark means it came back.
+      expect(duration).toBeLessThan(1000);
+    });
+  });
+
+  describe('database name normalization', () => {
+    it('dispatches case-insensitively ("NVD" reaches the nvd client)', async () => {
+      const mockNVD = new MockNVDClient();
+      mockNVD.setMockResult('test', { count: 1, vulnerabilities: [createMockVulnerability()] });
+
+      const searcher = createFastSearcher({ nvdClient: mockNVD });
+
+      const result = await searcher.search({
+        terms: ['test'],
+        databases: ['NVD' as 'nvd'],
+      });
+
+      expect(mockNVD.getSearchCalls()).toHaveLength(1);
+      expect(result.results.nvd?.count).toBe(1);
+      expect(result.errors).toBeUndefined();
     });
 
-    it('should not apply delay when set to 0', async () => {
+    it('surfaces an unknown database name in errors instead of silently skipping it', async () => {
       const mockNVD = new MockNVDClient();
-      mockNVD.setMockResult('test', { count: 1, vulnerabilities: [] });
+      mockNVD.setMockResult('test', { count: 1, vulnerabilities: [createMockVulnerability()] });
 
-      const searcher = new SecuritySearcher({
-        nvdClient: mockNVD,
-        requestDelay: 0,
+      const searcher = createFastSearcher({ nvdClient: mockNVD });
+
+      const result = await searcher.search({
+        terms: ['test'],
+        databases: ['nvd', 'kev' as 'cisa_kev'],
       });
 
-      const params: SecuritySearchParams = {
+      // The known database still ran; the unknown one is named with the valid set.
+      expect(result.results.nvd?.count).toBe(1);
+      expect(result.errors).toBeDefined();
+      expect(result.errors!.some(e => e.includes('"kev"') && e.includes('nvd, cisa_kev, github, osv'))).toBe(true);
+    });
+
+    it('reports every requested name when ALL are unknown (no silent "0 vulnerabilities")', async () => {
+      const searcher = createFastSearcher();
+
+      const result = await searcher.search({
+        terms: ['test'],
+        databases: ['all', 'NIST'] as unknown as ('nvd')[],
+      });
+
+      expect(result.totalDatabases).toBe(0);
+      expect(result.errors).toHaveLength(2);
+      expect(result.errors!.some(e => e.includes('"all"'))).toBe(true);
+      expect(result.errors!.some(e => e.includes('"NIST"'))).toBe(true);
+    });
+  });
+
+  describe('severity normalization (NVD param)', () => {
+    it('uppercases a lowercase severity so NVD is actually filtered', async () => {
+      const mockNVD = new MockNVDClient();
+      const searcher = createFastSearcher({ nvdClient: mockNVD });
+
+      await searcher.search({
         terms: ['test'],
         databases: ['nvd'],
-      };
+        severity: 'high',
+      });
 
-      const startTime = Date.now();
-      await searcher.search(params);
-      const duration = Date.now() - startTime;
+      expect(mockNVD.getSearchCalls()[0]!.options?.severity).toBe('HIGH');
+    });
 
-      // Should be very fast
-      expect(duration).toBeLessThan(50);
+    it('maps MODERATE (any case) to MEDIUM, matching the GitHub/OSV clients', async () => {
+      const mockNVD = new MockNVDClient();
+      const searcher = createFastSearcher({ nvdClient: mockNVD });
+
+      await searcher.search({
+        terms: ['test'],
+        databases: ['nvd'],
+        severity: 'Moderate',
+      });
+
+      expect(mockNVD.getSearchCalls()[0]!.options?.severity).toBe('MEDIUM');
     });
   });
 });

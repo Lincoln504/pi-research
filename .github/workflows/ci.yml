@@ -488,10 +488,12 @@ jobs:
       - run: sudo apt-get install -y graphviz
       - run: npm run deps:generate
       - name: Commit and push docs/deps.svg
-        # Skip push on fork PRs: GitHub does not grant contents:write to fork
-        # workflows, so git push would fail. The dep-graph still runs and the
-        # SVG is regenerated locally — we just don't commit it back.
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        # Push events only. PR runs — same-repo included — check out a detached
+        # merge ref, so `git push` fails with "not currently on a branch" the
+        # first time a PR changes module structure; fork PRs additionally lack
+        # contents:write. The dep-graph rules check and SVG regeneration above
+        # still run on PRs — we just don't commit the result back.
+        if: github.event_name == 'push'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

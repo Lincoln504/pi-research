@@ -61,8 +61,9 @@ export function getBrowserCacheDir(): string {
  * os.tmpdir(): on systems where /tmp is tmpfs (RAM-backed), placing several
  * browser profiles there consumes RAM and, with an OOM killer like earlyoom
  * active, can contribute to the whole session being killed. Override with
- * PI_RESEARCH_TMP_DIR (config.TMP_DIR) — e.g. point it back at the system temp
- * dir to deliberately use tmpfs/RAM when there is memory headroom.
+ * PI_RESEARCH_TMP_DIR (config.TMP_DIR) — e.g. point it at the system temp dir
+ * to deliberately use tmpfs/RAM when there is memory headroom; profiles then
+ * land in <TMP_DIR>/pi-research/profiles, never in TMP_DIR itself.
  *
  * The directory is created if missing, because Playwright requires the parent
  * of its mkdtemp profile dir to already exist.
@@ -71,7 +72,17 @@ export function getBrowserProfileDir(config?: Config): string {
     const configured = (config || getConfig()).TMP_DIR;
     let dir: string;
     if (configured && configured.trim().length > 0) {
-        dir = configured;
+        // Containment invariant: profiles live in a pi-research-owned
+        // SUBDIRECTORY of the configured dir, never the configured dir itself.
+        // The pool-startup sweep (cleanupStaleProfiles with an explicit baseDir)
+        // treats every entry of this directory as a reclaim candidate, so using
+        // PI_RESEARCH_TMP_DIR verbatim — e.g. pointed at /tmp per the tmpfs
+        // opt-in above — put unrelated same-user directories (ssh agents, build
+        // caches) on the sweep's candidate list. The pi-research/profiles shape
+        // also matches PI_BROWSER_MARKER's profile-path fallback in
+        // browser-cleanup.ts, so orphan detection keeps working for relocated
+        // profiles.
+        dir = join(configured, 'pi-research', 'profiles');
     } else {
         const cacheHome = process.env['XDG_CACHE_HOME'] || join(homedir(), '.cache');
         dir = join(cacheHome, 'pi-research', 'profiles');

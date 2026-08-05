@@ -468,13 +468,43 @@ describe('PlanningService', () => {
       }
     });
 
-    it('synthesizes (does not throw) when the evaluator LLM call fails and there is no prior agenda', async () => {
-      vi.mocked(completeSimple).mockRejectedValue(new Error('empty response'));
+    it('synthesizes (does not throw) when the evaluator fails transiently and there is no prior agenda', async () => {
+      // An app-level timeout is degradable (and deliberately not retried, so this stays
+      // a single attempt). A non-degradable failure now rethrows instead — see below.
+      vi.mocked(completeSimple).mockRejectedValue(new Error('LLM call timed out after 300000ms (evaluator-updatePlanForRound)'));
       const plan = await service.updatePlanForRound({
         ...BASE_OPTIONS,
         previousPlan: { action: 'delegate', researchers: [], allQueries: [] },
       });
       expect(plan.action).toBe('synthesize');
+    });
+
+    it('rethrows a NON-degradable evaluator failure mid-run instead of continuing the prior agenda', async () => {
+      // A mid-run credential revocation / provider rejection hits every remaining round
+      // identically — degrading would burn each one on doomed search bursts and researcher
+      // launches. It must surface the real cause (same isDegradableLlmError gate as
+      // generatePlan), even with a runnable prior agenda available.
+      vi.mocked(completeSimple).mockRejectedValue(new Error('401 unauthorized'));
+      await expect(service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        previousPlan: { action: 'delegate', researchers: [{ id: '1', name: 'R', goal: 'g', queries: ['q'] }], allQueries: ['q'] },
+      })).rejects.toThrow('401 unauthorized');
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // non-transient → no retry either
+    });
+
+    it('rethrows when evaluation auth lookup fails (no doomed fallback rounds without a working model)', async () => {
+      // The auth throw inside the try used to be swallowed by the degrade-on-any-error
+      // catch, turning "credentials revoked" into a silent continue-prior-agenda loop.
+      vi.mocked(MOCK_MODEL_REGISTRY.getApiKeyAndHeaders).mockResolvedValueOnce({ ok: false, error: 'unauthorized' });
+      await expect(service.updatePlanForRound(BASE_OPTIONS)).rejects.toThrow('Failed to get API key for evaluation');
+    });
+
+    it('still propagates a cancellation ahead of the degradable/fatal gate', async () => {
+      const ac = new AbortController();
+      ac.abort();
+      vi.mocked(completeSimple).mockRejectedValue(new Error('evaluator-updatePlanForRound cancelled or timed out'));
+      await expect(service.updatePlanForRound({ ...BASE_OPTIONS, signal: ac.signal })).rejects.toThrow();
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // a deliberate cancel is never retried
     });
 
     it('normalizes citations across reports and injects a GLOBAL SOURCE LIST into the synthesis input', async () => {

@@ -146,7 +146,9 @@ import {
   getLastRunStats,
   getSessionMetrics,
   getLastResearcherOutcome,
+  getLastErrorReport,
 } from '../../src/sdk.ts';
+import { metrics } from '../../src/utils/metrics.ts';
 import { 
   registerCoreServices, 
   initializeCoreServices, 
@@ -353,6 +355,90 @@ describe('SDK Lifecycle', () => {
       expect(outcome!.planned).toBe(3);
       expect(outcome!.succeeded).toBe(outcome!.launched - outcome!.failed);
       expect(outcome!.failureReasons).toEqual({});
+    });
+
+    it('captures the planned count from observer events DURING the run (deep runs: planning state is cleared before the SDK regains control)', async () => {
+      // Regression: captureResearcherOutcome read getTotalResearchersPlanned(researchId)
+      // AFTER runResearch() resolved, but the deep orchestrator's own finally clears that
+      // per-run entry first — planned was ALWAYS 0 for deep runs. The SDK now sums the
+      // orchestrator's planning events; the mocked service read (3) must NOT be consulted
+      // when the observer captured a count, so 5 here discriminates the two sources.
+      await initSDK();
+      mockDeepRun.mockImplementation(async (opts: any) => {
+        // Round 1 plan + a round-2 delegation, mirroring the deep orchestrator's emissions.
+        opts.observer.onPlanningSuccess({ action: 'delegate', researchers: [{}, {}] });
+        opts.observer.onEvaluationDecision('delegate', { action: 'delegate', researchers: [{}, {}, {}] }, 2);
+        // A synthesize decision carries no planned researchers and must not count.
+        opts.observer.onEvaluationDecision('synthesize', { researchers: [{}] }, 3);
+        return 'deep result';
+      });
+      await runDeepResearch('q');
+      expect(getLastResearcherOutcome()!.planned).toBe(5);
+    });
+
+    it('still forwards observer events to the caller\'s ResearchObserver through the capture wrapper', async () => {
+      await initSDK();
+      const onPlanningSuccess = vi.fn();
+      const onResearcherStart = vi.fn();
+      mockDeepRun.mockImplementation(async (opts: any) => {
+        opts.observer.onPlanningSuccess({ action: 'delegate', researchers: [{}] });
+        opts.observer.onResearcherStart('1.researcher-0', 'R', 'goal', 1);
+        return 'deep result';
+      });
+      await runDeepResearch('q', { observer: { onPlanningSuccess, onResearcherStart } } as any);
+      expect(onPlanningSuccess).toHaveBeenCalledWith({ action: 'delegate', researchers: [{}] });
+      expect(onResearcherStart).toHaveBeenCalledWith('1.researcher-0', 'R', 'goal', 1);
+    });
+
+    it('normalizes an { onProgress } options bag itself so planning events still reach both the bag and the capture', async () => {
+      // If the ORCHESTRATOR wrapped the bag, its HeadlessObserver instance would receive
+      // the planning events and the SDK capture layer would never see them.
+      await initSDK();
+      const onProgress = vi.fn();
+      mockDeepRun.mockImplementation(async (opts: any) => {
+        opts.observer.onPlanningSuccess({ action: 'delegate', researchers: [{}, {}] });
+        return 'deep result';
+      });
+      await runDeepResearch('q', { observer: { onProgress } } as any);
+      expect(onProgress).toHaveBeenCalledWith('planning_success', { plan: { action: 'delegate', researchers: [{}, {}] } });
+      expect(getLastResearcherOutcome()!.planned).toBe(2);
+    });
+  });
+
+  describe('shutdown mid-run (telemetry generation guard)', () => {
+    it('a run settling after shutdownResearchSDK() cannot resurrect telemetry into the next lifetime', async () => {
+      // Regression: a run in flight during shutdown settled AFTER _doShutdown wiped the
+      // _last* accessors and cleared session metrics; its catch/finally repopulated them,
+      // so after a re-init the SDK reported a phantom run from the previous lifetime.
+      await initSDK();
+      let rejectRun!: (e: Error) => void;
+      mockDeepRun.mockImplementation(() => new Promise<string>((_res, rej) => { rejectRun = rej; }));
+      const recordSpy = vi.spyOn(metrics, 'recordRunSummary');
+      const runPromise = runDeepResearch('q');
+      await new Promise((r) => setImmediate(r)); // let the run reach the orchestrator await
+      await shutdownResearchSDK();               // wipes telemetry while the run is in flight
+      recordSpy.mockClear();
+      rejectRun(new Error('late failure'));
+      await expect(runPromise).rejects.toThrow('late failure');
+      // The stale run's catch path must not have repopulated any telemetry...
+      expect(getLastRunSummary()).toBeNull();
+      expect(getLastRunMetrics()).toBeNull();
+      expect(getLastErrorReport()).toBeNull();
+      expect(getLastResearcherOutcome()).toBeNull();
+      // ...nor recorded a session run summary into the fresh lifetime.
+      expect(recordSpy).not.toHaveBeenCalled();
+      recordSpy.mockRestore();
+    });
+
+    it('a run in the SAME lifetime still records telemetry after an unrelated earlier shutdown', async () => {
+      // The guard keys on the generation captured at run START — a shutdown BEFORE the
+      // run began (previous lifetime) must not suppress the new lifetime's telemetry.
+      await initSDK();
+      await shutdownResearchSDK();
+      await initSDK();
+      await runDeepResearch('q');
+      expect(getLastRunSummary()).not.toBeNull();
+      expect(getLastRunSummary()!.status).toBe('success');
     });
   });
 

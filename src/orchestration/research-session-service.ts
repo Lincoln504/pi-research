@@ -12,6 +12,7 @@ import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
+import { boundSessionAbort } from './abort-utils.ts';
 
 /**
  * Session entry with abort capability
@@ -99,15 +100,25 @@ export class ResearchSessionService implements IService {
   }
 
   /**
-   * Abort all active sessions for a specific sessionId, or all sessions if sessionId is omitted
+   * Abort all active sessions for a specific sessionId, or all sessions if sessionId is omitted.
+   *
+   * Each abort is bounded (boundSessionAbort): entry.abort() awaits the very
+   * in-flight call it is cancelling, which may never settle — and this method
+   * gates both the fast-stop throw (runResearchers) and run()'s finally via
+   * cleanup(), so one wedged session would otherwise hang the whole run's
+   * return. When the bound fires, teardown proceeds and the abandoned abort
+   * keeps draining in the background.
    */
   async abortAllSessions(sessionId?: string): Promise<void> {
     if (sessionId) {
       const sessionMap = this.getSessionMap(sessionId);
       const aborts = Array.from(sessionMap.values()).map((entry, index) =>
-        entry.abort().catch((err) => {
-          logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
-        })
+        boundSessionAbort(
+          entry.abort().catch((err) => {
+            logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
+          }),
+          () => logger.debug(`[ResearchSessionService] Session ${index} abort did not settle within bound; continuing teardown`),
+        )
       );
       await Promise.all(aborts);
       sessionMap.clear();
@@ -116,9 +127,12 @@ export class ResearchSessionService implements IService {
       const aborts: Promise<void>[] = [];
       for (const sessionMap of this.sessions.values()) {
         aborts.push(...Array.from(sessionMap.values()).map((entry, index) =>
-          entry.abort().catch((err) => {
-            logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
-          })
+          boundSessionAbort(
+            entry.abort().catch((err) => {
+              logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
+            }),
+            () => logger.debug(`[ResearchSessionService] Session ${index} abort did not settle within bound; continuing teardown`),
+          )
         ));
       }
       await Promise.all(aborts);

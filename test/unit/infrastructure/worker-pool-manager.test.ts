@@ -73,9 +73,10 @@ const poolRegistry = vi.hoisted(() => ({ instances: [] as any[] }));
 
 vi.mock('poolifier', () => {
 
-  function FixedClusterPool(this: any, _size: number, _path: string, _opts?: unknown) {
+  function FixedClusterPool(this: any, _size: number, _path: string, opts?: unknown) {
     this.execute = vi.fn().mockResolvedValue({});
     this.destroy = vi.fn().mockResolvedValue(undefined);
+    this.opts = opts; // recorded so tests can assert what the pool was built with
     poolRegistry.instances.push(this);
     return this;
   }
@@ -243,6 +244,22 @@ describe('WorkerPoolManager', () => {
 
       // The instance is still reusable afterwards.
       await expect(manager.ensurePool()).resolves.not.toBeNull();
+    });
+  });
+
+  describe('worker argv hygiene (research-query leakage)', () => {
+    it('passes cluster settings.args=[] — the knob cluster pools actually honour', async () => {
+      // Cluster pools fork via cluster.setupPrimary(opts.settings), where
+      // settings.args defaults to process.argv.slice(2): without the override,
+      // every forked worker exposes the full CLI (research query included) in
+      // `ps`. The previously-passed workerOptions is a worker_threads-only knob
+      // poolifier ignores for cluster pools — it must not linger and imply
+      // coverage it never provided.
+      await manager.ensurePool();
+
+      const opts = poolRegistry.instances[0].opts as any;
+      expect(opts.settings).toEqual({ args: [] });
+      expect(opts.workerOptions).toBeUndefined();
     });
   });
 

@@ -27,8 +27,14 @@ export class LogRotation {
     try {
       if (fs.existsSync(logFile)) {
         fs.unlinkSync(logFile);
+        // Same rationale as the post-rotation recreate in rotateLogFile: the
+        // unlink discarded the 0o600 file, and a umask-default recreate by the
+        // next append would drop the owner-only posture.
+        try {
+          fs.closeSync(fs.openSync(logFile, 'a', 0o600));
+        } catch { /* best-effort — the next append recreates the file */ }
       }
-      
+
       const files = fs.readdirSync(logDir);
       const baseName = path.basename(logFile);
       const archives = files.filter(f => f.startsWith(baseName) && f !== baseName);
@@ -63,19 +69,31 @@ export class LogRotation {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const archivePath = `${logFile}.${timestamp}`;
       
-      // Rename current log file to archive
+      // Rename current log file to archive. The archive name is timestamped, so
+      // the target never pre-exists — a rename failure means the SOURCE is held
+      // open (Windows sharing semantics). A copy+unlink fallback here would
+      // destroy appends the OTHER processes writing this consolidated log (main,
+      // embedding server, browser workers) land between the copy and the unlink.
+      // Skipping the rotation is the data-preserving choice: the file transiently
+      // exceeds the cap until a later check succeeds (accepted by the throttling
+      // contract in checkAndRotate).
       try {
         fs.renameSync(logFile, archivePath);
       } catch (renameErr) {
-        // fs.renameSync fails on Windows if target exists (NTFS). Fall back to copy+delete.
-        if (process.platform === 'win32') {
-          fs.copyFileSync(logFile, archivePath);
-          fs.unlinkSync(logFile);
-        } else {
-          throw renameErr;
-        }
+        this.logger.log('[Logger] Log rotation skipped (rename failed; file likely in use):', renameErr);
+        return;
       }
-      
+
+      // Rotation moved the 0o600 file aside; without an explicit recreate the next
+      // append materializes it at the umask default (typically 0644) in a
+      // world-traversable tmpdir, silently dropping the owner-only posture Logger
+      // establishes at construction. Mode applies only at creation, so this is
+      // harmless where a file already exists or mode semantics differ (win32).
+      try {
+        fs.closeSync(fs.openSync(logFile, 'a', 0o600));
+      } catch { /* best-effort — the next append recreates the file */ }
+
+
       // Clean up old archives
       try {
         const files = fs.readdirSync(logDir);

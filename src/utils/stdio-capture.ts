@@ -34,6 +34,26 @@ let unkeyedCaptureDepth = 0;
 let isAnyLoggerCapturingOutput = false;
 
 /**
+ * Active captures in creation order. Restoration MUST be LIFO: each capture saves
+ * the currently-installed writers/console/fs.writeSync (and the current FD-2
+ * target) as its "originals", so a frame that finishes while a later frame is
+ * still active must NOT restore — it would re-install the still-active frame's
+ * view of the world later, when that frame finally exits, re-pointing stderr,
+ * stdout, console.* and OS-level FD 2 at a dead capture's log-file plumbing for
+ * the remainder of the process. Keyed captures nest by design (a run's capture
+ * around the embedding server's), and nothing orders their exits — a cancelled
+ * run's outer capture routinely ends while the embedder-init capture is mid
+ * flight. So: an out-of-order finisher only marks its frame retired; the frame
+ * on top of the stack performs the actual restores, unwinding every already-
+ * retired frame beneath it in strict reverse order.
+ */
+interface CaptureFrame {
+  retired: boolean;
+  restore: () => void;
+}
+const captureStack: CaptureFrame[] = [];
+
+/**
  * Recompute the global "is anything capturing" flag from BOTH the keyed sessions and
  * the unkeyed-capture depth, so neither scheme can clobber the other's state.
  */
@@ -220,7 +240,9 @@ export async function captureStdio<T>(
       if (shouldRedirectStderr(stat)) {
         savedFd2 = fs.openSync('/dev/fd/2', 'a');
         fs.closeSync(2);
-        const newFd = fs.openSync(logFile, 'a');
+        // 0o600 applies only when this open CREATES the file — keeps the log
+        // owner-only in a world-traversable tmpdir if rotation removed it.
+        const newFd = fs.openSync(logFile, 'a', 0o600);
         if (newFd === 2) {
           fd2Redirected = true;
         } else {
@@ -371,20 +393,41 @@ export async function captureStdio<T>(
     }
   } catch (_e) { /* ignore */ }
 
+  const frame: CaptureFrame = {
+    retired: false,
+    restore: () => {
+      process.stderr.write = originalStderrWrite;
+      process.stdout.write = originalStdoutWrite;
+      try {
+        fs.writeSync = originalFsWriteSync;
+      } catch { /* ignore */ }
+      console.log = originalConsole.log;
+      console.info = originalConsole.info;
+      console.warn = originalConsole.warn;
+      console.error = originalConsole.error;
+      console.debug = originalConsole.debug;
+
+      // Restore FD 2 to what it was when THIS frame started (for a nested frame
+      // that is the enclosing frame's log-file redirect; the enclosing frame's
+      // own restore, which always runs after this one in the unwind, then puts
+      // the true terminal FD back).
+      if (fd2Redirected && savedFd2 >= 0) {
+        try {
+          fs.closeSync(2);
+          const r = fs.openSync(`/dev/fd/${savedFd2}`, 'a');
+          if (r !== 2 && r >= 0) {
+            // Didn't recover FD 2 — leave restored FD open
+          }
+          try { fs.closeSync(savedFd2); } catch { /* ignore */ }
+        } catch { /* ignore restore errors */ }
+      }
+    },
+  };
+  captureStack.push(frame);
+
   try {
     return await task();
   } finally {
-    // Restore everything
-    process.stderr.write = originalStderrWrite;
-    process.stdout.write = originalStdoutWrite;
-    try {
-      fs.writeSync = originalFsWriteSync;
-    } catch { /* ignore */ }
-    console.log = originalConsole.log;
-    console.info = originalConsole.info;
-    console.warn = originalConsole.warn;
-    console.error = originalConsole.error;
-    console.debug = originalConsole.debug;
     if (sessionId) {
       setSessionCapturing(sessionId, false);
     } else {
@@ -392,16 +435,14 @@ export async function captureStdio<T>(
       recomputeGlobalCapturing();
     }
 
-    // Restore FD 2
-    if (fd2Redirected && savedFd2 >= 0) {
-      try {
-        fs.closeSync(2);
-        const r = fs.openSync(`/dev/fd/${savedFd2}`, 'a');
-        if (r !== 2 && r >= 0) {
-          // Didn't recover FD 2 — leave restored FD open
-        }
-        try { fs.closeSync(savedFd2); } catch { /* ignore */ }
-      } catch { /* ignore restore errors */ }
+    // LIFO unwind (see captureStack): only the top frame restores; an
+    // out-of-order finisher parks as retired and is unwound — in reverse
+    // order — when everything above it has finished. Until then its patches
+    // stay installed, which merely extends capture a little; restoring early
+    // would divert stdio permanently.
+    frame.retired = true;
+    while (captureStack.length > 0 && captureStack[captureStack.length - 1]!.retired) {
+      captureStack.pop()!.restore();
     }
   }
 }
