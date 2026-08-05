@@ -15,7 +15,7 @@
  * directly:  node <package-root>/scripts/cleanup.cjs
  */
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { rmSync, existsSync, lstatSync, readlinkSync, readFileSync, writeFileSync, unlinkSync } = require('fs');
 const os = require('os');
 const path = require('path');
@@ -108,8 +108,17 @@ if (process.env.PI_RESEARCH_PURGE_BROWSERS === '1') {
   if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD !== '1') {
     try {
       const bin = resolveCamoufoxBin();
-      const cmd = bin ? `"${bin}" remove` : 'npx camoufox-js remove';
-      execSync(cmd, { stdio: 'inherit' });
+      // Argv array, not a shell string — see the matching note in setup.cjs: `bin`
+      // is derived from the install directory, and a shell string would let a
+      // directory name containing `$(…)` execute at uninstall time.
+      const isWin = process.platform === 'win32';
+      const res = bin
+        ? (isWin
+            ? spawnSync(`"${bin}"`, ['remove'], { stdio: 'inherit', shell: true })
+            : spawnSync(bin, ['remove'], { stdio: 'inherit' }))
+        : spawnSync('npx', ['camoufox-js', 'remove'], { stdio: 'inherit', shell: isWin });
+      if (res.error) throw res.error;
+      if (res.status !== 0) throw new Error(`camoufox remove exited with code ${res.status}`);
       console.log('pi-research: camoufox browser binaries removed.');
     } catch (error) {
       console.warn(`pi-research: could not remove camoufox binaries: ${error instanceof Error ? error.message : String(error)}`);

@@ -344,6 +344,14 @@ describe('ResearchRunSemaphore — real multi-process behaviour', () => {
     // cannot match it. A bare `kill(pid, 0)` check would read this as a live
     // holder and deadlock the cap forever; the PID+startTime check must see
     // through it and reclaim.
+    //
+    // This assertion is load-bearing only because permission errors no longer
+    // short-circuit liveness. Previously `kill(1, 0)` raised EPERM for an
+    // unprivileged user and EPERM was misread as "dead", so the slot was reclaimed
+    // WITHOUT the start-time comparison ever running — the test passed even when
+    // start-time lookup was completely broken (as it silently was on macOS, where
+    // `ps -o etimes=` does not exist). Now EPERM means "exists, not ours to
+    // signal" and reclamation depends on the identity check actually working.
     await writeFile(
       path.join(slotDir, 'research-run-slot-0.lock'),
       JSON.stringify({ uuid: 'forged-impostor', pid: 1, startTime: 1 }),

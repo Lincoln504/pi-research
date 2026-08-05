@@ -18,6 +18,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 
 /**
+ * How long teardown waits for an initialization that is still in flight. Long
+ * enough to cover a normal service coming up, short enough that a service blocked
+ * on something slow (a model download) cannot hold shutdown open indefinitely.
+ */
+const DISPOSE_INFLIGHT_INIT_TIMEOUT_MS = 5_000;
+
+/**
  * Service lifecycle stages
  */
 export enum ServiceLifecycle {
@@ -209,8 +216,33 @@ export class ServiceContainer {
       throw new Error(`Service '${name}' is not registered`);
     }
 
-    // Return existing instance if already initialized
+    // Return existing instance if already initialized.
     if (registration.instance) {
+      // `_initializeService` publishes `registration.instance` BEFORE awaiting the
+      // service's own initialize(), deliberately: a service whose initialize()
+      // resolves a peer that resolves it back would otherwise deadlock, and the
+      // partial instance is what breaks that cycle. But the same early publish
+      // hands a HALF-BUILT service to unrelated concurrent callers — e.g.
+      // StateManagerService only assigns its inner manager after nine awaited
+      // getService() calls, so every method on it throws "not initialized" until
+      // then, and the embedding factory resolves it and immediately calls
+      // updateState(). Worse, the ctx branch below would re-run initialize() on an
+      // instance that is still running it, constructing a second StateManager and
+      // discarding the first.
+      //
+      // So: if it is still initializing, wait for that to finish. The cycle case is
+      // exactly the case where `caller` is set (we are inside some service's
+      // initialize()), and there we must NOT wait — that is the deadlock the early
+      // publish exists to avoid. Outside an initialization there is no cycle to
+      // break and waiting is always correct.
+      if (registration.initializationPromise && caller === undefined) {
+        await registration.initializationPromise.catch(() => { /* surfaced below */ });
+        if (!registration.instance) {
+          // Initialization failed and cleaned up after itself — fall through and
+          // retry from scratch rather than returning a torn-down instance.
+          return this.get<T>(name, ctx);
+        }
+      }
       // Re-initialize if ctx is provided and service supports it
       if (ctx && registration.instance.initialize) {
         // Wrap in initializationContext so nested get() calls are tracked
@@ -243,7 +275,21 @@ export class ServiceContainer {
   }
 
   /**
-   * Get a service instance synchronously (returns null if not initialized)
+   * Get a service instance synchronously (returns null if not registered or not
+   * yet constructed).
+   *
+   * Deliberately returns instances in NON-settled lifecycles too. This is a
+   * lifecycle *inspector* as much as an accessor: the health check resolves the
+   * knowledge store through it precisely so it can report `initializing` /
+   * `disabled` / `disposed (not running)` WITHOUT forcing initialization (forcing
+   * it was a past cause of 45 s CI stalls). Filtering those states out here would
+   * make every one of them indistinguishable from "absent".
+   *
+   * The trade-off: because `_initializeService` publishes the instance before
+   * awaiting its `initialize()` (to break dependency cycles), a caller that
+   * immediately *uses* the result can catch a half-built service. Callers that
+   * need a ready service must use the async `get()`, which waits — see the note
+   * there. Callers that only inspect `lifecycle` are safe by construction.
    */
   tryGet<T extends IService>(name: string): T | null {
     if (this.isDisposing) {
@@ -347,7 +393,41 @@ export class ServiceContainer {
     }
 
     try {
-      const activeServices = Array.from(this.services.keys()).filter(name => 
+      // Settle any initialization still in flight BEFORE snapshotting what to tear
+      // down. `activeServices` is "instances that are non-null right now", so a
+      // get() whose factory has not resolved yet is invisible to it — and nothing
+      // else awaits it. Such a service installs itself into the registry AFTER
+      // teardown reports completion and is never disposed: for BrowserTaskScheduler
+      // that is a listening HTTP server plus a cluster pool and Camoufox children
+      // outliving shutdown; for KnowledgeStoreService an ONNX session and LanceDB
+      // handles. (SchedulerService.dispose hand-rolls this same guard for itself,
+      // which does not help when the leaked service IS SchedulerService.)
+      //
+      // Bounded: a service blocked on something slow (a model download) must not
+      // hold teardown open indefinitely. On timeout we proceed — the snapshot below
+      // still catches anything that landed in the meantime.
+      const inFlight = Array.from(this.services.values())
+        .map((r) => r.initializationPromise)
+        .filter((p): p is Promise<IService> => p != null);
+      if (inFlight.length > 0) {
+        if (this.defaultOptions.enableLogging) {
+          logger.debug(`[ServiceContainer] Waiting for ${inFlight.length} in-flight initialization(s) before teardown`);
+        }
+        let settleTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(inFlight),
+          new Promise<void>((resolve) => {
+            settleTimer = setTimeout(() => {
+              logger.warn('[ServiceContainer] Timed out waiting for in-flight service initialization; proceeding with teardown');
+              resolve();
+            }, DISPOSE_INFLIGHT_INIT_TIMEOUT_MS);
+            settleTimer.unref?.();
+          }),
+        ]);
+        if (settleTimer) clearTimeout(settleTimer);
+      }
+
+      const activeServices = Array.from(this.services.keys()).filter(name =>
         this.services.get(name)?.instance !== null
       );
       

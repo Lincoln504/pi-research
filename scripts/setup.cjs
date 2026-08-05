@@ -11,7 +11,7 @@
  *   PLAYWRIGHT_INSTALL_DEPS=true        - also install Linux system deps (or pass --system-deps)
  */
 
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { existsSync, readdirSync, statSync } = require('fs');
 const { homedir } = require('os');
 const path = require('path');
@@ -95,11 +95,24 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
   if (!alreadyInstalled) {
     try {
       const bin = resolveCamoufoxBin();
-      const cmd = bin ? `"${bin}" fetch` : 'npx camoufox-js fetch';
+      // spawnSync with an ARGV ARRAY, never a shell string. `bin` is a filesystem
+      // path derived from the install directory, and execSync runs through
+      // `/bin/sh -c` where `$(…)`, backticks and quotes stay live INSIDE double
+      // quotes — so a package installed under a directory whose name contains
+      // shell metacharacters would execute them at install time. Windows still
+      // needs a shell to run the `.cmd` shim, and there the path is quoted; the
+      // runtime twin in ensure-browser.ts uses the same shape.
       // Bound the ~100MB download so a stalled/interrupted network fails fast
       // instead of hanging `npm install` forever (the catch below exits 0, and the
       // browser is re-fetchable manually). 15 min is ample even on slow links.
-      execSync(cmd, { stdio: 'inherit', env, timeout: 15 * 60 * 1000 });
+      const spawnOpts = { stdio: 'inherit', env, timeout: 15 * 60 * 1000 };
+      const res = bin
+        ? (isWindows
+            ? spawnSync(`"${bin}"`, ['fetch'], { ...spawnOpts, shell: true })
+            : spawnSync(bin, ['fetch'], spawnOpts))
+        : spawnSync('npx', ['camoufox-js', 'fetch'], { ...spawnOpts, shell: isWindows });
+      if (res.error) throw res.error;
+      if (res.status !== 0) throw new Error(`camoufox fetch exited with code ${res.status}`);
       browsersInstalled = true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

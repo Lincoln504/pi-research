@@ -129,7 +129,21 @@ jobs:
           npm install "${{ github.workspace }}/${TAR_FILE}"
           node "${{ github.workspace }}/scripts/verify-package.cjs" installed \
             "$(pwd)/node_modules/@lincoln504/pi-research"
-          echo "OK: Install smoke-test passed"
+
+          # EXECUTE the installed CLI, don't just check that files exist. The
+          # bundle is built with esbuild `packages: 'external'`, so every bare
+          # import is resolved at runtime from the CONSUMER's tree — a dependency
+          # moved to devDependencies, a dropped `files` entry, or an exports
+          # subpath that only exists in the dev tree all resolve fine in this repo
+          # (where the full dev tree is present) and fail only here. Without this,
+          # lint, type-check, unit tests and the manifest check all pass and the
+          # broken artifact ships.
+          node node_modules/@lincoln504/pi-research/dist/cli.mjs --version
+          node node_modules/@lincoln504/pi-research/dist/cli.mjs --help > /dev/null
+          # The agent-skill launcher is the entry point coding agents actually
+          # invoke, and it is a separate bundle with its own resolution logic.
+          node node_modules/@lincoln504/pi-research/skills/pi-research/scripts/run.mjs --help > /dev/null
+          echo "OK: Install smoke-test passed (files present AND the installed CLI runs)"
 
   publish:
     name: Publish to npm

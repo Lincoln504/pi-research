@@ -519,3 +519,15 @@ jobs:
           echo "INSTALLED_DIR=$WORK/node_modules/@lincoln504/pi-research" >> "$GITHUB_ENV"
       - name: Verify installed package layout (entry points, bundles, worker, prompts)
         run: node scripts/verify-package.cjs installed "$INSTALLED_DIR"
+      - name: Run the installed CLI (resolution smoke-test)
+        # Existence checks cannot catch a resolution failure. dist/cli.mjs is built
+        # with esbuild `packages: 'external'`, so every bare import resolves at
+        # runtime from the CONSUMER's tree — a dependency moved to devDependencies,
+        # a dropped `files` entry, or an exports subpath present only in the dev
+        # tree all work in this repo and fail exactly here. Executing it is the only
+        # check that exercises that boundary.
+        run: |
+          node "$INSTALLED_DIR/dist/cli.mjs" --version
+          node "$INSTALLED_DIR/dist/cli.mjs" --help > /dev/null
+          node "$INSTALLED_DIR/skills/pi-research/scripts/run.mjs" --help > /dev/null
+          echo "OK: installed CLI and skill launcher both execute"

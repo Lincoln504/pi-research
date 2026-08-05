@@ -12,6 +12,39 @@ import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 /**
+ * Parse the POSIX `ps -o etime=` elapsed-time format into whole seconds.
+ * Accepted shapes: `MM:SS`, `HH:MM:SS`, `DD-HH:MM:SS`. Returns null if it does
+ * not parse, so a caller degrades to "unknown" rather than to a bogus number.
+ */
+export function parseEtime(value: string): number | null {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(value.trim());
+  if (!m) return null;
+  const days = m[1] ? parseInt(m[1], 10) : 0;
+  const hours = m[2] ? parseInt(m[2], 10) : 0;
+  const minutes = parseInt(m[3]!, 10);
+  const seconds = parseInt(m[4]!, 10);
+  if ([days, hours, minutes, seconds].some((n) => isNaN(n))) return null;
+  return days * 86400 + hours * 3600 + minutes * 60 + seconds;
+}
+
+/**
+ * Does this `process.kill(pid, 0)` failure mean the process is GONE?
+ *
+ * Only `ESRCH` does. `EPERM` (POSIX) and `EACCES` — which is what libuv surfaces
+ * on Windows when `OpenProcess` returns ERROR_ACCESS_DENIED — both mean the
+ * process EXISTS but is not ours to signal: another user on a shared host, a CI
+ * side-car, a different Windows session. Reporting those as dead lets a caller
+ * reclaim a live lock, run slot or leader out from under its owner, which is how
+ * two writers end up racing the state file. The orphan guard and the browser
+ * sweep already get this right; this is the same rule.
+ */
+function isDefinitelyGone(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (code === 'EPERM' || code === 'EACCES') return false;
+  return true;
+}
+
+/**
  * Process Lifecycle Service
  *
  * Provides utilities for checking process liveness and monitoring.
@@ -74,23 +107,51 @@ export class ProcessLifecycleService implements IProcessLifecycle {
       }
     }
 
-    // Cross-platform fallback (macOS/Unix): `ps -o etimes=` returns elapsed seconds.
-    try {
-      const output = await new Promise<string>((resolve, reject) => {
-        const child = execFile(
-          'ps', ['-o', 'etimes=', '-p', String(pid)],
-          { encoding: 'utf8', timeout: 3000 },
-          (err, stdout) => err ? reject(err) : resolve(stdout),
-        );
-        child.unref?.();
-      });
-      if (!output || !output.trim()) return null;
-      const elapsedSec = parseInt(output.trim(), 10);
-      if (isNaN(elapsedSec)) return null;
-      return Math.floor(Date.now() / 1000) - elapsedSec;
-    } catch {
-      return null;
+    // Cross-platform fallback (macOS/BSD): derive start time from elapsed time.
+    //
+    // `etimes` (elapsed WHOLE SECONDS) is a procps-ng/FreeBSD extension. Apple's
+    // ps (adv_cmds) does not implement it — it has only the POSIX `etime`
+    // ([[dd-]hh:]mm:ss). Asking for an unsupported keyword does not fail loudly:
+    // procps-ng writes an error to stderr and still exits 0 with EMPTY stdout,
+    // BSD ps exits non-zero. Both collapse to `null` here, which meant every
+    // PID+start-time guard on macOS silently degraded to a bare signal-0 check —
+    // the file lock, the run-slot semaphore, the GPU lock and both leader
+    // elections all advertise PID-reuse safety they were not actually getting.
+    //
+    // So: try `etimes`, and fall back to parsing POSIX `etime` when it yields
+    // nothing. `etime` is mandated by POSIX, so the fallback works everywhere.
+    const elapsedSec = await this.readElapsedSeconds(pid);
+    if (elapsedSec === null) return null;
+    return Math.floor(Date.now() / 1000) - elapsedSec;
+  }
+
+  /** Elapsed seconds for `pid` via ps, or null. Tries `etimes`, then POSIX `etime`. */
+  private async readElapsedSeconds(pid: number): Promise<number | null> {
+    const run = async (fmt: string): Promise<string | null> => {
+      try {
+        return await new Promise<string>((resolve, reject) => {
+          const child = execFile(
+            'ps', ['-o', fmt, '-p', String(pid)],
+            { encoding: 'utf8', timeout: 3000 },
+            (err, stdout) => err ? reject(err) : resolve(stdout),
+          );
+          child.unref?.();
+        });
+      } catch {
+        return null;
+      }
+    };
+
+    const etimes = await run('etimes=');
+    if (etimes && etimes.trim()) {
+      const n = parseInt(etimes.trim(), 10);
+      if (!isNaN(n)) return n;
     }
+
+    const etime = await run('etime=');
+    if (etime && etime.trim()) return parseEtime(etime.trim());
+
+    return null;
   }
 
   /**
@@ -111,11 +172,20 @@ export class ProcessLifecycleService implements IProcessLifecycle {
    * @returns true if process is alive (and matches start time if provided)
    */
   async isProcessAlive(pid: number, expectedStartTime?: number | null): Promise<boolean> {
+    // 1. EXISTENCE. Separate from identity (step 2) on purpose: a permission error
+    //    means the process exists but is not ours to signal, which must NOT
+    //    short-circuit the start-time comparison — a PID-reuse impostor owned by
+    //    another user would otherwise read as a live owner and deadlock the lock,
+    //    run slot or leadership it forged.
     try {
-      // 1. Basic liveness check via signal 0
       process.kill(pid, 0);
-      
-      // 2. If start time verification requested, check it
+    } catch (err) {
+      if (isDefinitelyGone(err)) return false;
+      // EPERM/EACCES: exists, not signalable by us — continue to the identity check.
+    }
+
+    try {
+      // 2. IDENTITY. If start time verification requested, check it.
       if (expectedStartTime !== undefined && expectedStartTime !== null) {
         const actualStartTime = await this.getProcessStartTime(pid);
         if (actualStartTime === null) {
@@ -132,14 +202,18 @@ export class ProcessLifecycleService implements IProcessLifecycle {
           // caller — a live lock/leader/run-cap owner is reclaimed from under it
           // → two writers collide (lost update) or the run-cap admits extra
           // concurrent runs (the flaky duplicate-slot/cap-breach we saw on Windows
-          // CI). So re-confirm liveness instead of guessing: if signal(0) STILL
-          // succeeds the process is alive → return true; if it now throws it died
-          // between the two probes and the outer catch returns false. A genuine
-          // death is therefore still detected within one poll tick (~100ms); the
-          // only behavioural change is that a confirmed-alive PID is never again
-          // misreported as dead on a transient start-time lookup failure.
-          process.kill(pid, 0); // re-confirm; a throw (process died) → outer catch → false
-          return true;
+          // CI). So re-confirm existence instead of guessing: if the PID is STILL
+          // there the process is alive → true; if it has gone it died between the
+          // two probes → false. A genuine death is therefore still detected within
+          // one poll tick (~100ms); the only behavioural change is that a
+          // confirmed-alive PID is never again misreported as dead on a transient
+          // start-time lookup failure.
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch (reconfirmErr) {
+            return !isDefinitelyGone(reconfirmErr);
+          }
         }
         // Allow ±1s slack. The macOS/BSD fallback derives start time as
         // floor(Date.now()/1000) - `ps etimes` (elapsed whole seconds); both terms are
@@ -149,10 +223,13 @@ export class ProcessLifecycleService implements IProcessLifecycle {
         // within a 1s window at the identical PID is not a realistic false-match.
         return Math.abs(actualStartTime - expectedStartTime) <= 1;
       }
-      
+
       return true;
     } catch {
-      return false;
+      // The start-time lookup itself blew up (not a signal error — those are
+      // handled above). Existence was already established, so treat it as alive:
+      // reclaiming a confirmed-present owner is the worse failure.
+      return true;
     }
   }
 
@@ -163,8 +240,8 @@ export class ProcessLifecycleService implements IProcessLifecycle {
     try {
       process.kill(pid, 0);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      return !isDefinitelyGone(err);
     }
   }
 

@@ -100,7 +100,7 @@
     "setup": "node scripts/setup.cjs",
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "deps:check": "depcruise --config config/tooling/dependency-cruiser.cjs --output-type err-long src",
-    "deps:generate": "npx --yes madge --image docs/deps.svg src/index.ts",
+    "deps:generate": "npx --yes madge@8.0.0 --image docs/deps.svg src/index.ts",
     "analyze:dependencies": "ncu",
     "analyze:compatibility": "depngn"
   },
