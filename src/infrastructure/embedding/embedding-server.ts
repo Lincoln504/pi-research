@@ -6,6 +6,7 @@
  */
 
 import * as http from 'node:http';
+import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import { logger } from '../../logger.ts';
 import { captureStdio } from '../../utils/stdio-capture.ts';
@@ -14,6 +15,38 @@ import { DiskSpaceChecker } from '../../utils/disk-space-checker.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import type { Embedder } from '../../knowledge/embedder.ts';
+
+/**
+ * Per-process shared secret every embed request must present.
+ *
+ * The server binds 127.0.0.1, but loopback is not an authorization boundary —
+ * any local process could otherwise enqueue embedding work. That matters more
+ * than raw GPU cost: the serial queue steps the leader down when it poisons, so
+ * sustained abuse denies the knowledge store cluster-wide. The browser server has
+ * had this since #21; the embedding server was the asymmetric gap.
+ *
+ * Generated lazily and held in memory only — it is published to followers through
+ * the state file, which is already 0o600 and already carries the browser secret.
+ */
+let _embeddingAuthSecret: string | null = null;
+
+export function getEmbeddingServerAuthSecret(): string {
+  if (!_embeddingAuthSecret) {
+    _embeddingAuthSecret = crypto.randomBytes(32).toString('hex');
+  }
+  return _embeddingAuthSecret;
+}
+
+/**
+ * Constant-time comparison of a presented header against the expected secret.
+ * Length is compared first because timingSafeEqual throws on a length mismatch.
+ */
+function isAuthorized(presented: string | string[] | undefined): boolean {
+  const header = Array.isArray(presented) ? presented[0] : presented;
+  const expected = Buffer.from(getEmbeddingServerAuthSecret(), 'utf8');
+  const actual = Buffer.from(header ?? '', 'utf8');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
 
 // ---------------------------------------------------------------------------
 // SerialQueue — ensures embed/embedMany never run concurrently on the GPU
@@ -428,6 +461,16 @@ export class EmbeddingServer implements IEmbedder {
   // ---- HTTP request handler ----
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // Authorize BEFORE reading the body, so an unauthenticated caller cannot make
+    // us buffer up to MAX_BODY_SIZE, and before routing, so it cannot probe
+    // leadership/health state either. Mirrors the browser server.
+    if (!isAuthorized(req.headers['x-embedding-auth'])) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      req.resume(); // drain so the socket is released rather than left half-read
+      return;
+    }
+
     const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
 
     let body = '';

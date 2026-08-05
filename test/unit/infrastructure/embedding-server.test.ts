@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { EmbeddingServer, _SerialQueue } from '../../../src/infrastructure/embedding/embedding-server';
+import { EmbeddingServer, _SerialQueue, getEmbeddingServerAuthSecret } from '../../../src/infrastructure/embedding/embedding-server';
 import type { IStateManager } from '../../../src/core/interfaces/state-manager-interfaces';
 import type { Embedder } from '../../../src/knowledge/embedder';
 
@@ -157,6 +157,10 @@ describe('EmbeddingServer', () => {
       const req = new EventEmitter() as any;
       req.method = 'POST';
       req.url = '/embed';
+      // Requests are authorized before the body is read, so these post-auth
+      // paths must present the secret to reach the logic under test.
+      req.headers = { 'x-embedding-auth': getEmbeddingServerAuthSecret() };
+      req.resume = () => {};
 
       const res: any = {
         headersSent: false,
@@ -183,6 +187,10 @@ describe('EmbeddingServer', () => {
       const req = new EventEmitter() as any;
       req.method = 'POST';
       req.url = '/embed';
+      // Requests are authorized before the body is read, so these post-auth
+      // paths must present the secret to reach the logic under test.
+      req.headers = { 'x-embedding-auth': getEmbeddingServerAuthSecret() };
+      req.resume = () => {};
 
       const res: any = {
         headersSent: false,

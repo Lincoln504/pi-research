@@ -19,7 +19,7 @@ import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import { Embedder } from '../../knowledge/embedder.ts';
 import { getModelEmbedderConfig } from '../../knowledge/model-config.ts';
 
-import { EmbeddingServer } from './embedding-server.ts';
+import { EmbeddingServer, getEmbeddingServerAuthSecret } from './embedding-server.ts';
 import { EmbeddingClient } from './embedding-client.ts';
 
 // ---------------------------------------------------------------------------
@@ -166,6 +166,9 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
         pid: process.pid,
         serverId,
         model: cfg.EMBEDDING_MODEL,
+        // Published with the claim, not with the port, so a follower that adopts
+        // this leader always has the secret available whenever the port is.
+        authSecret: getEmbeddingServerAuthSecret(),
         ...(myStartTime !== null ? { startTime: myStartTime } : {}),
       };
       iAmCandidate = true;
@@ -223,7 +226,7 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
           const portOk = await isPortListening(info.port);
           if (portOk) {
             logger.info(`[EmbeddingFactory] Connecting to embedding server on port ${info.port}`);
-            const client = new EmbeddingClient(info.port);
+            const client = new EmbeddingClient(info.port, cfg.EMBEDDING_DEVICE, info.authSecret);
             await client.fetchHealth();
             _embeddingInstance = client;
             _cachedModel = cfg.EMBEDDING_MODEL;

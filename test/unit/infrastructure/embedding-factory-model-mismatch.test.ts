@@ -42,6 +42,9 @@ vi.mock('../../../src/infrastructure/embedding/embedding-server.ts', () => ({
     startLeadershipCheck() {}
     async dispose() {}
   },
+  // The factory publishes the leader's auth secret into the state entry, so this
+  // export must exist on the mock too.
+  getEmbeddingServerAuthSecret: () => 'mock-embedding-secret',
 }));
 
 // The factory port-probes an adopted leader with a real TCP connect; stub the

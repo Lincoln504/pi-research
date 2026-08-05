@@ -79,6 +79,15 @@ export const SingletonStateSchema = Type.Object({
     // in-process embedder instead. Optional for entries written by older
     // processes, which are tolerated as matching.
     model: Type.Optional(Type.String()),
+    // Shared secret a follower must present on every embed request. Mirrors
+    // browserServer.authSecret: the server listens on loopback, but loopback is
+    // not an authorization boundary — any local process could otherwise enqueue
+    // embedding work, and because the serial queue steps the leader down when
+    // poisoned, sustained abuse denies the knowledge store rather than merely
+    // burning GPU. Optional so an entry written by an older leader still parses;
+    // a client that finds none simply sends no header, and such a leader does not
+    // check one either.
+    authSecret: Type.Optional(Type.String()),
   })),
 });
 

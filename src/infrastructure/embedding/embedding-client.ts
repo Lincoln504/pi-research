@@ -17,8 +17,19 @@ export class EmbeddingClient implements IEmbedder {
   constructor(
     private readonly port: number,
     private _device: string = 'unknown',
+    /**
+     * Shared secret published by the leader in state. Undefined when the leader
+     * predates auth (it does not check a header either), so the request simply
+     * carries none — an older leader keeps working rather than 403-ing.
+     */
+    private readonly authSecret?: string,
   ) {
     logger.log(`[EmbeddingClient] Connecting to embedding server at http://127.0.0.1:${port}`);
+  }
+
+  /** Auth header for the leader, or nothing when connecting to a pre-auth leader. */
+  private authHeaders(): Record<string, string> {
+    return this.authSecret ? { 'x-embedding-auth': this.authSecret } : {};
   }
 
   // ---- IEmbedder ----
@@ -93,6 +104,7 @@ export class EmbeddingClient implements IEmbedder {
           port: this.port,
           path,
           method: 'GET',
+          headers: this.authHeaders(),
         },
         (res) => {
           // Keep the timeout armed through the body read — clearing it on headers
@@ -160,6 +172,7 @@ export class EmbeddingClient implements IEmbedder {
           headers: {
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(body),
+            ...this.authHeaders(),
           },
         },
         (res) => {
