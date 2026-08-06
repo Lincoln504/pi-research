@@ -41,6 +41,7 @@ import { completeSimple } from '@earendil-works/pi-ai/compat';
 import { loadPrompt } from '../../../src/core/llm/prompts.ts';
 import { metrics } from '../../../src/utils/metrics.ts';
 import { getConfig } from '../../../src/config.ts';
+import { MAX_ROUNDS_LEVEL_3, MAX_EXTRA_ROUNDS_WITH_STEERING } from '../../../src/constants.ts';
 import type { StopReason } from '@earendil-works/pi-ai';
 
 const STUB_MODEL = { id: 'test-model' } as any;
@@ -562,6 +563,52 @@ describe('PlanningService', () => {
       const ctx = call[1] as { systemPrompt: string };
       expect(ctx.systemPrompt).toContain('youtube every 9');
       expect(ctx.systemPrompt).not.toContain('{{youtube_query_every_n}}');
+    });
+
+    // Regression: updatePlanForRound used to always recompute maxRounds internally
+    // from the BASE complexity table, blind to any steering-driven extension the
+    // orchestrator granted. Once steering pushed currentRound past that base value,
+    // the understated denominator both produced an impossible "Round N of base"
+    // display AND skewed getRoundPhaseGuidance's roundRatio toward LATE too early —
+    // working against what the user spent steering budget to unlock.
+    describe('maxRounds option — steering-extended round budget', () => {
+      const baseMaxRounds = MAX_ROUNDS_LEVEL_3; // 3
+      const steeringExtendedMaxRounds = baseMaxRounds + MAX_EXTRA_ROUNDS_WITH_STEERING; // 3 + 2 = 5
+      const currentRound = 4; // only reachable because steering extended the budget past 3
+
+      it('falls back to the base complexity-table maxRounds when no option is supplied (backward compat)', async () => {
+        vi.mocked(loadPrompt).mockReturnValueOnce('eval {{root_query}}\n{{round_phase_guidance}}');
+        vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('ok')));
+
+        await service.updatePlanForRound({ ...BASE_OPTIONS, complexity: 3, round: currentRound });
+
+        const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
+        const ctx = call[1] as { systemPrompt: string };
+        // No maxRounds passed → old behavior: base value (3), impossible "Round 4 of 3"
+        // text, and a ratio (4/3 > 0.8) that selects the LATE phase branch.
+        expect(ctx.systemPrompt).toContain(`Round ${currentRound} of ${baseMaxRounds}`);
+        expect(ctx.systemPrompt).toContain('Round Phase: LATE');
+      });
+
+      it('uses the caller-supplied maxRounds for round-phase guidance when provided', async () => {
+        vi.mocked(loadPrompt).mockReturnValueOnce('eval {{root_query}}\n{{round_phase_guidance}}');
+        vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('ok')));
+
+        await service.updatePlanForRound({
+          ...BASE_OPTIONS,
+          complexity: 3,
+          round: currentRound,
+          maxRounds: steeringExtendedMaxRounds,
+        });
+
+        const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
+        const ctx = call[1] as { systemPrompt: string };
+        // With the real, steering-extended budget (5) supplied, the ratio (4/5 = 0.8)
+        // lands in MIDDLE instead of LATE, and the display shows the true "of 5".
+        expect(ctx.systemPrompt).toContain(`Round ${currentRound} of ${steeringExtendedMaxRounds}`);
+        expect(ctx.systemPrompt).toContain('Round Phase: MIDDLE');
+        expect(ctx.systemPrompt).not.toContain('Round Phase: LATE');
+      });
     });
 
     it('forces synthesize when mustSynthesize is true, regardless of LLM response', async () => {

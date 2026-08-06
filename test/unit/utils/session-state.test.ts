@@ -19,6 +19,9 @@ import {
   registerMasterUpdate,
   registerSessionAbort,
   abortAllSessions,
+  addSteeringMessage,
+  consumeQueuedMessages,
+  getSteeringMessages,
 } from '../../../src/orchestration/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
@@ -242,6 +245,54 @@ describe('utils/session-state', () => {
 
     it('abortAllSessions is a no-op for unknown Pi session', () => {
       expect(() => abortAllSessions('nonexistent-pi-session')).not.toThrow();
+    });
+  });
+
+  describe('Steering message run-scoping (endResearchSession)', () => {
+    it('drops an already-consumed (active) steering message when the run that consumed it ends, so a later unrelated run in the same Pi session does not inherit it', () => {
+      const psid = 'steering-leak-test';
+      const runA = startResearchSession(psid);
+      const panelA = createInitialPanelState(runA, 'rA', 'topic A', 'model');
+      registerSessionPanel(psid, runA, panelA);
+
+      // Steer run A mid-flight; the orchestrator consumes it (queued -> active)
+      // before run A finishes.
+      addSteeringMessage(psid, 'focus on topic A specifics');
+      const consumed = consumeQueuedMessages(psid);
+      expect(consumed).toHaveLength(1);
+      expect(consumed[0]!.status).toBe('active');
+
+      // Run A finishes. The consumed message must not survive past it.
+      endResearchSession(psid, runA);
+
+      // A later, unrelated run starts in the SAME Pi session.
+      const runB = startResearchSession(psid);
+      const panelB = createInitialPanelState(runB, 'rB', 'topic B', 'model');
+      registerSessionPanel(psid, runB, panelB);
+
+      const steeringForB = getSteeringMessages(psid);
+      expect(steeringForB.map(m => m.text)).not.toContain('focus on topic A specifics');
+      expect(steeringForB).toHaveLength(0);
+    });
+
+    it('preserves a genuinely still-queued (never-consumed) steering message across endResearchSession so the next run in the same Pi session can see it', () => {
+      const psid = 'steering-gap-preserve-test';
+      const runA = startResearchSession(psid);
+      const panelA = createInitialPanelState(runA, 'rA', 'topic A', 'model');
+      registerSessionPanel(psid, runA, panelA);
+
+      // Message arrives but is never consumed before run A ends (e.g. it arrived
+      // in the gap right at/after run completion).
+      addSteeringMessage(psid, 'arrived in the gap, unconsumed');
+
+      endResearchSession(psid, runA);
+
+      const runB = startResearchSession(psid);
+      const panelB = createInitialPanelState(runB, 'rB', 'topic B', 'model');
+      registerSessionPanel(psid, runB, panelB);
+
+      const steeringForB = getSteeringMessages(psid);
+      expect(steeringForB.map(m => m.text)).toContain('arrived in the gap, unconsumed');
     });
   });
 });

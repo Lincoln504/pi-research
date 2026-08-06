@@ -446,8 +446,8 @@ export class StateManager {
     );
   }
 
-  public async clearBrowserServer(): Promise<void> {
-    await this.browserApi.clearBrowserServer(this.updateState.bind(this));
+  public async clearBrowserServer(expected?: { pid?: number; schedulerId?: string }): Promise<void> {
+    await this.browserApi.clearBrowserServer(this.updateState.bind(this), expected);
   }
 
   // ==================== Embedding Server API ====================

@@ -188,8 +188,8 @@ export class StateManagerService implements IStateManager {
   /**
    * Clear the browser server information
    */
-  async clearBrowserServer(): Promise<void> {
-    return this.getStateManager().clearBrowserServer();
+  async clearBrowserServer(expected?: { pid?: number; schedulerId?: string }): Promise<void> {
+    return this.getStateManager().clearBrowserServer(expected);
   }
 
   /**

@@ -201,7 +201,7 @@ Services that hold resources implement `dispose()`; the registry disposes them i
 reverse dependency order. Resolving through the registry (rather than direct imports)
 enforces lifecycle discipline (init → use → dispose) and lets tests swap in mocks.
 
-- Core (`src/core/`): `PlanningService`, `SchedulerService`, `HealthCheckService`
+- Core (`src/core/`): `PlanningService`, `SchedulerService`
 - Infrastructure (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `MetricsService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService` (plus `WriterQueue`, defined in `src/knowledge/` and registered here)
 - Orchestration (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`
 

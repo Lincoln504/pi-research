@@ -9,7 +9,7 @@ export type { SearchResult, ScrapeResult, IScheduler, SchedulerMetadata, ISchedu
 export type { ISchedulerFactory } from './scheduler-factory.ts';
 
 // Health check interfaces
-export type { HealthCheckResult, HealthCheckCache, IHealthCheckService, IHealthRegistryService } from './interfaces/health-check-interfaces.ts';
+export type { IHealthRegistryService } from './interfaces/health-check-interfaces.ts';
 
 // Knowledge store interfaces
 export type { 

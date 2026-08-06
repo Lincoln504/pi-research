@@ -132,7 +132,16 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
         }
 
         if (shouldClearState) {
-            await stateManager.clearBrowserServer().catch((error) => {
+            // Compare-and-delete against the registration we just read: without a
+            // lock spanning the read-decide-clear sequence above, a concurrent
+            // process can independently detect the same dead leader, complete its
+            // own (properly locked) election in getScheduler(), and publish a
+            // fresh registration in this exact window. An unconditional clear here
+            // would wipe that brand-new, legitimate leader — it keeps running but
+            // becomes undiscoverable via state, so the next caller elects a
+            // second, redundant leader. See StateBrowserManager.clearBrowserServer.
+            const expected = serverInfo ? { pid: serverInfo.pid, schedulerId: serverInfo.schedulerId } : undefined;
+            await stateManager.clearBrowserServer(expected).catch((error) => {
                 logger.warn('[Scheduler] Failed to clear browser server from state:', error);
             });
         }
@@ -222,12 +231,18 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
                         if (serverInfo.pid !== process.pid) {
                             logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
                         }
-                        await stateManager.clearBrowserServer();
+                        // Defense-in-depth CAS: this read-then-clear is entirely inside
+                        // the browser-init lock, which serializes other getScheduler()
+                        // callers, but callers that clear without taking this lock
+                        // (forceSchedulerRestart, scheduler shutdown) are not excluded —
+                        // pass what was just read so a mismatch no-ops instead of
+                        // deleting a registration this code didn't observe.
+                        await stateManager.clearBrowserServer({ pid: serverInfo.pid, schedulerId: serverInfo.schedulerId });
                     } else {
                         const portOk = await isPortListening(serverInfo.port);
                         if (!portOk) {
                             logger.warn(`[Scheduler] PID ${serverInfo.pid} is alive but port ${serverInfo.port} is not listening — clearing stale state and starting fresh.`);
-                            await stateManager.clearBrowserServer().catch((e) => {
+                            await stateManager.clearBrowserServer({ pid: serverInfo.pid, schedulerId: serverInfo.schedulerId }).catch((e) => {
                                 logger.warn('[Scheduler] Failed to clear stale browser server state:', e);
                             });
                         } else {

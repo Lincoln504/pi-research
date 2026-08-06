@@ -130,6 +130,30 @@ export class Chunker {
         end = Math.min(start + this.targetSize, text.length);
       }
 
+      // UTF-16 surrogate-pair safety: `end` is a raw code-unit index, and every
+      // adjustment above (code-block/heading/sentence/newline/space, plus the
+      // forward-progress guard) operates purely in code-unit space — none of
+      // them are aware of astral characters (emoji, rare CJK Extension B+),
+      // which are a HIGH surrogate (0xD800-0xDBFF) followed by a LOW surrogate
+      // (0xDC00-0xDFFF). If `end` lands between the two halves, slicing here
+      // emits a lone high surrogate. Node's UTF-16->UTF-8 conversion (JSON
+      // serialization, HTTP bodies, N-API marshalling into the LanceDB/Arrow
+      // layer) silently substitutes U+FFFD for that rather than throwing —
+      // silent corruption of text that gets embedded and stored. Mirrors the
+      // backoff in truncateWithMarker (src/utils/text-utils.ts). Applied last,
+      // right before the slice, and only shrinks `end` when doing so can't
+      // undo the forward-progress guard just above or produce an empty chunk.
+      if (end < text.length) {
+        const code = text.charCodeAt(end - 1);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const candidate = end - 1;
+          const staysPastPrev = chunks.length === 0 || candidate > prevEnd;
+          if (candidate > start && staysPastPrev) {
+            end = candidate;
+          }
+        }
+      }
+
       const chunkText = text.slice(start, end);
       const actual_overlap = chunks.length === 0 ? 0 : Math.max(0, Math.min(chunkText.length, prevEnd - start));
       
@@ -143,7 +167,22 @@ export class Chunker {
         start = end - Math.min(this.overlap, chunkText.length - 1);
       }
       if (start < 0) start = 0;
-      if (start >= end) start = end - 1; 
+      if (start >= end) start = end - 1;
+
+      // Surrogate-pair safety, read side: `start` (end - overlap, further
+      // clamped above) is an independent raw code-unit index — it is not
+      // derived from any of the textual heuristics that picked `end` above,
+      // so the fix to `end` does not cover it. It can separately bisect an
+      // unrelated pair and produce a next chunk that OPENS with a lone low
+      // surrogate. The pair's high half is already inside the chunk just
+      // pushed (it sits before `end`), so pulling `start` back one unit only
+      // widens that chunk's overlap by one code unit — it never drops text.
+      if (start > 0) {
+        const code = text.charCodeAt(start);
+        if (code >= 0xdc00 && code <= 0xdfff) {
+          start -= 1;
+        }
+      }
     }
 
     const duration = Date.now() - startTime;

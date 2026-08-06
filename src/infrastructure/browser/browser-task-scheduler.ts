@@ -518,7 +518,12 @@ export class BrowserTaskScheduler implements IScheduler {
             logger.warn('[Scheduler] Could not read browser server state during shutdown:', err);
         }
         if (serverInfo?.pid === process.pid && serverInfo?.schedulerId === this.schedulerId) {
-            await this.stateManager.clearBrowserServer().catch((err) => {
+            // CAS: this belief-check (pid + schedulerId match) happens outside any
+            // lock, so pass it as `expected` rather than relying on it as an
+            // assumption — if a successor claimed the slot between the read above
+            // and this clear, the mismatch makes the clear a no-op instead of
+            // deregistering the new owner.
+            await this.stateManager.clearBrowserServer({ pid: process.pid, schedulerId: this.schedulerId }).catch((err) => {
                 logger.warn('[Scheduler] Failed to clear browser server state during shutdown:', err);
             });
         }

@@ -66,6 +66,14 @@ export interface UpdatePlanOptions {
   previousPlan: ResearchPlan | null;
   totalResearchersPlanned: number;
   mustSynthesize?: boolean;
+  /** The caller's live round budget (base complexity max plus any steering-driven
+   *  extension), e.g. from DeepResearchOrchestrator's extended `maxRounds`. When
+   *  omitted, updatePlanForRound falls back to the base complexity-table value —
+   *  which understates the budget once steering has extended it, skewing the
+   *  round-phase-guidance ratio (and its EARLY/MIDDLE/LATE branch selection)
+   *  toward LATE too early. Optional and additive: existing callers that don't
+   *  pass it keep the prior behavior unchanged. */
+  maxRounds?: number;
   observer?: ResearchObserver;
   excludeTools?: string[];
   steeringMessages?: string[];

@@ -256,20 +256,73 @@ and the host-version self-check gained the tested-ceiling warning.
 
 ---
 
-## Deferred Findings (from v1.0.7 audit)
+## Deferred Findings — cleared 2026-08-06
 
-The following issues were identified during the v1.0.7 audit but intentionally deferred to future releases:
+The v1.0.7-era list below was re-audited against the current tree, three weeks
+and many fix rounds after it was written. Every item resolved one of two ways:
+already fixed as a side effect of unrelated work since, or fixed directly in
+this pass with a regression test. None remain open.
 
-1. **KnowledgeStore.close() timeout behavior** - The close() method proceeds even when the pending-write wait times out. A correct fix requires threading cancellation tokens through write paths or documenting the 10s timeout as intended behavior.
+- **KnowledgeStore.close() timeout behavior** — already safe: writes register
+  into the active-write set before the close-in-progress check can be seen,
+  and LanceDB table handles keep working after the owning connection closes,
+  so a timed-out close no longer strands or corrupts an in-flight write.
+- **Cross-session teardown via shared singletons** — not reachable: pi fully
+  serializes a session's teardown before the next one is created, so shared
+  singletons are never disposed out from under a still-live session.
+- **SIGINT-adjacent cancellation race** — real gap, fixed: a cancelled run
+  that had already produced a report returned through the orchestrator's
+  normal (non-throwing) partial-synthesis path, so the CLI's success branch
+  never saw the cancellation latch and reported `ok:true`/exit 0 for a run
+  the user had stopped. The success path now checks the latch and reports
+  the same `cancelled: true` / `128+signal` contract the error path already
+  used.
+- **Knowledge-store migration vs. concurrent access** — already safe: a
+  cross-process file lock serializes migrations, and every read/write
+  re-resolves its table handle, so a migration racing another process's
+  handle fails that operation cleanly instead of serving stale data.
+- **Global activity gate reused for per-session decisions** — real gap,
+  fixed: steering messages already consumed by a finished research run
+  survived in session state and leaked into the next, unrelated run's
+  system-prompt injection and final-report attribution. Only genuinely
+  still-queued messages now survive a run boundary.
+- **Zombie queued browser tasks after timeout** — already fixed (in the
+  first post-1.2.0 audit round): a queued task's client-side timeout now
+  actually removes it from the scheduler's queue instead of leaving it to
+  be dispatched later.
+- **Non-atomic `clearBrowserServer`** — real gap, fixed: the file write
+  itself was already atomic, but the read-decide-clear sequence around it
+  was not — a dead-leader restart path could wipe a legitimately new
+  leader's registration elected in the same window. `clearBrowserServer`
+  now takes an optional expected-owner argument and compares-and-deletes
+  inside the lock, mirroring the embedding leader's existing CAS.
+- **Inconsistent `knowledge --json` payload shapes** — real gap, fixed: the
+  success payload never carried `ok:true` despite a comment claiming parity
+  with the error shape, and `knowledge-config`'s failure path had no
+  try/catch at all and fell through to a plain-text-only handler even under
+  `--json`. Both now emit a consistent, documented shape.
+- **Backward-clock-step tolerance across multiple rate limiters** — already
+  safe: every limiter's timing arithmetic leans toward waiting longer on a
+  negative clock delta, never toward a burst or a permanent wedge.
 
-2. **Cross-session teardown via shared singletons** - Session shutdown handlers run process-wide cleanup for reload/new/fork events. The correct behavior depends on pi's session model semantics and needs further investigation.
+Two further items surfaced and closed in the same pass, found via later
+audit rounds' own deferred lists rather than the v1.0.7 one:
+- **SSRF: `isPrivateIpv6` missed `fec0::/10`** (deprecated site-local) and
+  **`64:ff9b::/96`** (the NAT64 well-known prefix — actively deployed today,
+  and a real bypass vector on a host whose egress traverses a NAT64
+  gateway). Both ranges are now blocked.
+- **Chunk boundaries could split a UTF-16 surrogate pair**, corrupting one
+  character (renders as U+FFFD) in stored/embedded text at an unlucky
+  boundary — the same class of bug already handled in three other places
+  in the codebase, now handled here too, on both the truncation and the
+  overlap-derived start boundary.
+- **Steering-extended round budgets weren't visible to the round-phase
+  prompt.** When mid-run steering extended the round cap beyond the base
+  per-complexity value, the planning service still computed guidance
+  against the base value, producing an impossible "Round 4 of 3" and,
+  more consequentially, prematurely selecting LATE-phase framing during
+  rounds steering had explicitly unlocked.
 
-3. **Lower-severity hardening items** - Various low-confidence or low-impact findings noted for future investigation:
-   - SIGINT-adjacent cancellation race
-   - Knowledge-store migration vs. concurrent access
-   - Global activity gate reused for per-session decisions
-   - Zombie queued browser tasks after timeout
-   - Non-atomic `clearBrowserServer`
-   - Inconsistent `knowledge --json` payload shapes
-   - Backward-clock-step tolerance across multiple rate limiters
+One dead-code cleanup: `HealthCheckService` (a superseded, zero-consumer
+predecessor of the live `src/healthcheck/registry.ts` system) was removed.
 

@@ -47,9 +47,23 @@ export class StateBrowserManager implements IService {
   /**
    * Clear the browser server information
    * @param state The current state
+   * @param expected Optional identity the caller believes is currently registered.
+   *   When supplied, this is a compare-and-delete: the entry is only removed if it
+   *   still matches (mirrors StateManager.clearEmbeddingServer). browserServer is
+   *   shared cross-process state, and an unconditional delete lets a caller who
+   *   decided the *previous* leader was dead deregister a DIFFERENT process's
+   *   fresh, live registration that claimed the slot in the meantime — that new
+   *   leader then runs undiscoverable (state shows no browserServer), so the next
+   *   getScheduler() caller elects a second, redundant leader. A mismatch means
+   *   someone else already claimed the slot, and the clear must no-op.
    * @returns Updated state without browser server info
    */
-  clearBrowserServer(state: SingletonState): SingletonState {
+  clearBrowserServer(state: SingletonState, expected?: { pid?: number; schedulerId?: string }): SingletonState {
+    const entry = state.browserServer;
+    if (entry && expected !== undefined) {
+      if (expected.schedulerId !== undefined && entry.schedulerId !== expected.schedulerId) return state;
+      if (expected.pid !== undefined && entry.pid !== expected.pid) return state;
+    }
     delete state.browserServer;
     return state;
   }

@@ -158,6 +158,117 @@ describe('Chunker', () => {
     }).toThrow('overlap (75) must be less than targetSize (50)');
   });
 
+  describe('surrogate-pair safety', () => {
+    // Locates an unpaired UTF-16 surrogate in `str`: a high surrogate
+    // (0xD800-0xDBFF) not immediately followed by a low surrogate, or a low
+    // surrogate (0xDC00-0xDFFF) not immediately preceded by (and consumed
+    // with) a high surrogate. Returns the offending code-unit index, or null
+    // if the string is well-formed UTF-16. This is exactly the shape of
+    // corruption Node's UTF-16->UTF-8 conversion silently replaces with
+    // U+FFFD (JSON serialization, HTTP bodies, N-API string marshalling).
+    function findUnpairedSurrogate(str: string): number | null {
+      for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = str.charCodeAt(i + 1);
+          if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) {
+            return i;
+          }
+          i++; // valid pair — skip its low half
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          return i;
+        }
+      }
+      return null;
+    }
+
+    it('does not emit a lone high surrogate when a chunk boundary (end) lands mid-pair', () => {
+      // targetSize=20, overlap=0, with only 'a' filler around the emoji so
+      // none of the code-block/heading/sentence/newline/space heuristics can
+      // move `end` off start+targetSize: the boundary lands exactly between
+      // the emoji's high surrogate (index 19) and low surrogate (index 20).
+      const emoji = '\u{1F389}'; // 🎉 — high 0xD83C, low 0xDF89
+      const text = 'a'.repeat(19) + emoji + 'a'.repeat(20);
+      const c = new Chunker({ targetSize: 20, overlap: 0 });
+      const chunks = c.chunk(text);
+
+      // Pre-fix this first chunk is 19 'a's + the lone high surrogate (20
+      // units) — exactly the boundary the fix must pull back by one unit, so
+      // the fixed chunk is 19 units (just the 'a's, high surrogate excluded).
+      expect(chunks[0]!.text.length).toBe(19);
+
+      for (const chunk of chunks) {
+        expect(findUnpairedSurrogate(chunk.text)).toBeNull();
+      }
+
+      // The emoji must survive fully intact somewhere in the output.
+      expect(chunks.some(ch => ch.text.includes(emoji))).toBe(true);
+
+      let reconstructed = chunks[0]!.text;
+      for (let i = 1; i < chunks.length; i++) {
+        reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
+      }
+      expect(reconstructed).toBe(text);
+    });
+
+    it('does not emit a lone low surrogate when the overlap-derived start lands mid-pair', () => {
+      // targetSize=30, overlap=10: the FIRST chunk's end (30) lands cleanly
+      // past the emoji (at indices 19-20), so the end-side fix never touches
+      // it. But start = end - overlap = 30 - 10 = 20 lands exactly on the
+      // emoji's low surrogate — a boundary picked by raw overlap arithmetic,
+      // independent of any `end` adjustment, so it needs its own fix.
+      const emoji = '\u{1F389}';
+      const text = 'a'.repeat(19) + emoji + 'a'.repeat(40);
+      const c = new Chunker({ targetSize: 30, overlap: 10 });
+      const chunks = c.chunk(text);
+
+      expect(chunks.length).toBeGreaterThan(1);
+
+      for (const chunk of chunks) {
+        expect(findUnpairedSurrogate(chunk.text)).toBeNull();
+      }
+
+      expect(chunks.some(ch => ch.text.includes(emoji))).toBe(true);
+
+      let reconstructed = chunks[0]!.text;
+      for (let i = 1; i < chunks.length; i++) {
+        reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
+      }
+      expect(reconstructed).toBe(text);
+    });
+
+    it('never produces an unpaired surrogate across randomized astral-char placements', () => {
+      // Broader sweep: sprinkle astral characters (emoji from different
+      // planes, including a CJK Extension B/Compatibility-Supplement char)
+      // throughout otherwise plain text at several targetSize/overlap
+      // combinations, so boundaries land mid-pair at varying offsets.
+      const astral = ['\u{1F389}', '\u{1F600}', '\u{20000}', '\u{2F894}'];
+      const configs = [
+        { targetSize: 15, overlap: 0 },
+        { targetSize: 20, overlap: 5 },
+        { targetSize: 37, overlap: 11 },
+      ];
+      for (const config of configs) {
+        let text = '';
+        for (let i = 0; i < 300; i++) {
+          text += (i % 7 === 0) ? astral[i % astral.length] : 'x';
+        }
+        const c = new Chunker(config);
+        const chunks = c.chunk(text);
+
+        for (const chunk of chunks) {
+          expect(findUnpairedSurrogate(chunk.text)).toBeNull();
+        }
+
+        let reconstructed = chunks[0]!.text;
+        for (let i = 1; i < chunks.length; i++) {
+          reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
+        }
+        expect(reconstructed).toBe(text);
+      }
+    });
+  });
+
   describe('Property-based lossless reconstruction', () => {
     const generateRandomText = (length: number) => {
       const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n#.`';

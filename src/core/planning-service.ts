@@ -434,7 +434,12 @@ export class PlanningService implements IPlanningService {
     
     const maxTeamSize = this.getTeamSize(complexity);
     const queryBudget = this.getQueryBudget(complexity);
-    const maxRounds = _getMaxRounds(complexity);
+    // Prefer the caller's live, steering-extended round budget (e.g. the
+    // orchestrator's maxRounds, which grows past the base complexity-table
+    // value once steering messages unlock extra rounds). Only fall back to
+    // the base per-complexity value when the caller doesn't supply one, so
+    // callers that don't pass it (other/test callers) keep prior behavior.
+    const maxRounds = options.maxRounds ?? _getMaxRounds(complexity);
     const complexityGuidance = this.getEvaluatorComplexityGuidance(complexity);
     const roundPhaseGuidance = this.getRoundPhaseGuidance(round, maxRounds, complexity, maxTeamSize);
 

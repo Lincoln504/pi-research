@@ -8,7 +8,6 @@
 export const ServiceNames = {
   SCHEDULER: 'scheduler',
   SCHEDULER_FACTORY: 'scheduler-factory',
-  HEALTH_CHECK_CACHE: 'health-check-cache',
   STATE_MANAGER: 'state-manager',
   KNOWLEDGE_STORE: 'knowledge-store',
   WRITER_QUEUE: 'writer-queue',

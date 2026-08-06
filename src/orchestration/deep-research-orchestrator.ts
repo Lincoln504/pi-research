@@ -244,6 +244,11 @@ export class DeepResearchOrchestrator {
                 reports: synthesisService.getAllReports(researchId),
                 previousPlan: planningService.getCurrentPlan(researchId),
                 totalResearchersPlanned: planningService.getTotalResearchersPlanned(researchId),
+                // Live, steering-extended budget — see maxRounds comment above. Without
+                // this, updatePlanForRound recomputes the BASE complexity-table value
+                // internally and understates the denominator once steering has extended
+                // the round budget, prematurely skewing its round-phase guidance to LATE.
+                maxRounds,
                 signal,
                 observer,
                 excludeTools: this.options.excludeTools,
@@ -477,6 +482,8 @@ export class DeepResearchOrchestrator {
               previousPlan: planningService.getCurrentPlan(researchId),
               totalResearchersPlanned: planningService.getTotalResearchersPlanned(researchId),
               mustSynthesize: true,
+              // Live, steering-extended budget — see the in-loop call above.
+              maxRounds,
               signal,
               observer,
               excludeTools: this.options.excludeTools,

@@ -7,6 +7,7 @@ import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-resear
 import { resetServiceContainer, registerService, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import { getFailedResearchers, getResearcherFailureReasons } from '../../../src/orchestration/session-state.ts';
+import { MAX_ROUNDS_LEVEL_1 } from '../../../src/constants.ts';
 
 // Mock the service registry
 vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {
@@ -448,6 +449,43 @@ describe('DeepResearchOrchestrator', () => {
     const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
     expect(updateCalls.length).toBe(1);
     expect((updateCalls[0]![0] as any)?.mustSynthesize).toBe(true);
+  });
+
+  it('should pass its own live, steering-extended maxRounds through to updatePlanForRound (not the base complexity value)', async () => {
+    // Regression: PlanningService.updatePlanForRound used to recompute maxRounds
+    // internally from the base complexity table alone, blind to the orchestrator's
+    // steering-driven extension — understating the round-phase-guidance denominator
+    // once steering unlocked extra rounds. The orchestrator must now forward its own
+    // live `maxRounds` (base + steering bonus) on every call site.
+    const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(consumeQueuedMessages).mockReturnValue([
+      { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+      { id: '2', text: 'and Y', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+    ]);
+
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      if (opts.mustSynthesize) {
+        return { action: 'synthesize', content: 'Final synthesis' };
+      }
+      return {
+        action: 'delegate',
+        researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+        allQueries: ['q'],
+      };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 });
+    await orchestrator.run();
+
+    // Base budget (MAX_ROUNDS_LEVEL_1 = 2) + 2 queued steering messages (cap 2) = 4.
+    const extendedMaxRounds = MAX_ROUNDS_LEVEL_1 + 2;
+    const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
+    expect(updateCalls.length).toBeGreaterThan(0);
+    for (const [callOptions] of updateCalls) {
+      // Every call — in-loop evaluator AND the forced final synthesis — must carry
+      // the extended value, never the understated base (2).
+      expect((callOptions as any).maxRounds).toBe(extendedMaxRounds);
+    }
   });
 
   it('should cap extra rounds at MAX_EXTRA_ROUNDS_WITH_STEERING even with many queued messages', async () => {

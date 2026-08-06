@@ -343,6 +343,11 @@ function isPrivateIpv6(ip: string): boolean {
   // Link-local (fe80::/10)
   if (normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
       normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
+  // Deprecated site-local (fec0::/10, RFC 3879, deprecated 2004). No OS
+  // auto-routes to it today, but it's still squarely "private/reserved"
+  // address space — the sibling range immediately above this one.
+  if (normalized.startsWith('fec') || normalized.startsWith('fed') ||
+      normalized.startsWith('fee') || normalized.startsWith('fef')) return true;
   // IPv4-mapped ::ffff:x.x.x.x — check the embedded IPv4 part. The mapped tail
   // can arrive dotted-decimal (::ffff:127.0.0.1) OR hex (::ffff:7f00:1) — Node's
   // URL parser normalizes literals to the hex form — and the prefix can be
@@ -357,6 +362,14 @@ function isPrivateIpv6(ip: string): boolean {
   // legitimate scrape target, so block the whole ranges rather than decode them.
   if (normalized.startsWith('2002:')) return true;
   if (/^2001:0{0,4}:/.test(normalized) || normalized.startsWith('2001::')) return true;
+  // NAT64 well-known prefix (64:ff9b::/96, RFC 6052) also tunnels an IPv4
+  // address, and unlike the transitional ranges above it's actively deployed
+  // today (464XLAT on IPv6-only mobile/enterprise networks). A host whose
+  // outbound path traverses a NAT64 gateway gets this transparently
+  // translated to a direct connection to the embedded IPv4 (e.g. the cloud
+  // metadata service) — block the whole prefix regardless of what it wraps,
+  // same rationale as the 6to4/Teredo ranges just above.
+  if (normalized.startsWith('64:ff9b:')) return true;
   // All-zeros (unspecified address)
   if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
   return false;

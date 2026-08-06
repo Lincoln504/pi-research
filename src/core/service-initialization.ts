@@ -10,7 +10,6 @@ import type { ServiceContainer } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
-import { HealthCheckService } from './health-check-service.ts';
 import { PlanningService } from './planning-service.ts';
 import { logger } from '../logger.ts';
 
@@ -24,17 +23,6 @@ export function registerCoreServices(container: ServiceContainer = getServiceCon
   registerService(
     ServiceNames.SCHEDULER,
     () => new SchedulerService(),
-    {
-      allowOverwrite: false,
-      enableLogging: true,
-    },
-    container
-  );
-
-  // Register Health Check Cache Service
-  registerService(
-    ServiceNames.HEALTH_CHECK_CACHE,
-    () => new HealthCheckService(),
     {
       allowOverwrite: false,
       enableLogging: true,
@@ -83,7 +71,6 @@ export async function initializeCoreServices(ctx?: any, container: ServiceContai
     { name: ServiceNames.STATE_VALIDATOR, label: 'State Validator' },
     { name: ServiceNames.GPU_RESOURCE_SERVICE, label: 'GPU Resource Service' },
     { name: ServiceNames.STATE_MANAGER, label: 'State Manager Service' },
-    { name: ServiceNames.HEALTH_CHECK_CACHE, label: 'Health Check Cache Service' },
     { name: ServiceNames.HEALTH_REGISTRY, label: 'Health Registry Service' },
   ];
 

@@ -520,6 +520,17 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
   // but preserve steering messages if any remain (they might arrive between
   // the last research end and the next research start)
   if (state.order.length === 0 && state.panels.size === 0) {
+    // Drop steering messages this run already consumed ('active') — and any
+    // 'popped' remnants, which are likewise already resolved — before deciding
+    // whether to keep the session alive. Without this, a message the run that
+    // just ended already consumed stayed in the array and leaked into a later,
+    // unrelated run's steering (both getActiveSteeringMessages/getSteeringMessages
+    // reads and the before_agent_start injection gate), since nothing distinguishes
+    // "steering for THIS run" from "steering already applied to a finished run".
+    // Only messages still 'queued' (arrived in the gap, never attached to any run)
+    // are genuinely eligible for the gap-preservation this block performs.
+    state.steeringMessages = state.steeringMessages.filter(m => m.status === 'queued');
+
     // Only fully delete if there are no remaining steering messages
     const hasRemainingSteering = state.steeringMessages.length > 0;
     if (!hasRemainingSteering) {

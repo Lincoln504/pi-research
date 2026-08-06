@@ -6,12 +6,58 @@
  * paths that can run without a live model (help, version, bad args).
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// ---------------------------------------------------------------------------
+// Mocks for the cmdResearch / cmdKnowledge / cmdKnowledgeConfig unit coverage
+// further below. sdk.ts is fully replaced — cli.ts only ever touches these 6
+// named exports, and the real module pulls in the embedding/orchestration
+// stack that these tests must never spin up. config.ts keeps its REAL
+// implementation (via importOriginal): only saveConfig is swapped for a
+// controllable stub, so getConfig/resetConfig/describeKnowledgeStoreMode
+// behave exactly as they do for every other command in this file.
+// ---------------------------------------------------------------------------
+const {
+  mockInitResearchSDK,
+  mockRunDeepResearch,
+  mockSearchKnowledge,
+  mockShutdownResearchSDK,
+  mockGetLastErrorReport,
+  mockGetLastResearcherOutcome,
+  mockSaveConfig,
+} = vi.hoisted(() => ({
+  mockInitResearchSDK: vi.fn(async () => {}),
+  mockRunDeepResearch: vi.fn(async () => 'mock report body'),
+  mockSearchKnowledge: vi.fn(async () => ({
+    text: 'mock knowledge text',
+    found: 'yes' as const,
+    documentsSearched: 1,
+    citations: [] as string[],
+  })),
+  mockShutdownResearchSDK: vi.fn(async () => {}),
+  mockGetLastErrorReport: vi.fn(() => null),
+  mockGetLastResearcherOutcome: vi.fn(() => null),
+  mockSaveConfig: vi.fn(),
+}));
+
+vi.mock('../../src/sdk.ts', () => ({
+  initResearchSDK: mockInitResearchSDK,
+  runDeepResearch: mockRunDeepResearch,
+  searchKnowledge: mockSearchKnowledge,
+  shutdownResearchSDK: mockShutdownResearchSDK,
+  getLastErrorReport: mockGetLastErrorReport,
+  getLastResearcherOutcome: mockGetLastResearcherOutcome,
+}));
+
+vi.mock('../../src/config.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/config.ts')>();
+  return { ...actual, saveConfig: mockSaveConfig };
+});
 
 // ---------------------------------------------------------------------------
 // parseArgs (unit)
@@ -30,9 +76,13 @@ import {
   _markCancellationForTests,
   _signalDisposition,
   _resetSignalDispositionForTests,
+  cmdResearch,
+  cmdKnowledge,
+  cmdKnowledgeConfig,
 } from '../../src/cli.ts';
 import { createResearchStopError } from '../../src/orchestration/session-state.ts';
 import { ResearchRunCapacityError } from '../../src/infrastructure/research-run-semaphore.ts';
+import { resetConfig } from '../../src/config.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(ROOT, 'dist', 'cli.mjs');
@@ -603,6 +653,221 @@ describe('_signalDisposition — duplicate absorption vs force exit', () => {
     expect(_signalDisposition(1_000_000)).toBe('begin-cleanup');
     expect(_signalDisposition(1_000_900)).toBe('absorb-duplicate');
     expect(_signalDisposition(1_001_100)).toBe('force-exit');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cmdResearch — cancellation reporting (mocked SDK)
+// ---------------------------------------------------------------------------
+
+// DeepResearchOrchestrator.run() does not throw on cancellation once at least
+// one researcher has produced a report — it returns the fallback synthesis
+// through its NORMAL return path (deep-research-orchestrator.ts, the
+// synthesisService.hasReports(researchId) branch ~584-618). cmdResearch's
+// success branch used to be blind to the cancellation latch the SIGINT/SIGTERM
+// handler sets, so a Ctrl-C mid-run that still produced a report was reported
+// exactly like an ordinary completed run: ok:true, exit 0, no `cancelled` flag.
+describe('cmdResearch — cancellation reporting', () => {
+  const ENV_KEYS = ['PI_RESEARCH_API_KEY', 'PI_RESEARCH_PROVIDER', 'PI_RESEARCH_MODEL', 'PI_RESEARCH_REPORT_EXPORT_ENABLED'];
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+    // Explicit-env credential path (see detectCredentials): a provider-qualified
+    // model + an API key satisfy the pre-flight regardless of the machine's own
+    // ambient pi/config.env setup.
+    process.env['PI_RESEARCH_API_KEY'] = 'test-key';
+    process.env['PI_RESEARCH_PROVIDER'] = 'mock-provider';
+    process.env['PI_RESEARCH_MODEL'] = 'mock-provider/mock-model';
+    // Force the file-export side effect off regardless of ambient config — this
+    // test must never touch the filesystem.
+    process.env['PI_RESEARCH_REPORT_EXPORT_ENABLED'] = 'false';
+    resetConfig();
+    mockRunDeepResearch.mockClear();
+    mockRunDeepResearch.mockResolvedValue('partial report from fallback synthesis');
+    // safeShutdown() races shutdownResearchSDK() against an 8s setTimeout; fake
+    // timers keep that timer from actually pending for real wall-clock seconds
+    // after the (already-mocked, immediately-resolving) shutdown wins the race.
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    resetConfig();
+    _resetCancellationLatchForTests();
+  });
+
+  it('reports ok:true + cancelled:true + the signalled exit code — not a bare ok:true/exit 0 — when a cancellation was latched before runDeepResearch resolved', async () => {
+    // Simulates the real sequence: onSignal() latches cancellation and aborts
+    // the run's AbortController, then the orchestrator returns its fallback
+    // report through the normal (non-throwing) return path.
+    _markCancellationForTests('SIGTERM');
+
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      out.push(String(chunk));
+      return true;
+    });
+    let exitCode: number;
+    try {
+      exitCode = await cmdResearch({ query: 'what is rust ownership', json: true });
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Must mirror reportError's own formula for the throwing case (143 for
+    // SIGTERM), not the flat EXIT.OK (0) the current bug emits.
+    expect(exitCode).toBe(exitCodeForSignal('SIGTERM'));
+    expect(exitCode).not.toBe(EXIT.OK);
+    const payload = JSON.parse(out.join(''));
+    expect(payload).toMatchObject({
+      ok: true,
+      cancelled: true,
+      report: 'partial report from fallback synthesis',
+    });
+  });
+
+  it('does not set cancelled or change the exit code for an ordinary completed run', async () => {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      out.push(String(chunk));
+      return true;
+    });
+    let exitCode: number;
+    try {
+      exitCode = await cmdResearch({ query: 'what is rust ownership', json: true });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(exitCode).toBe(EXIT.OK);
+    const payload = JSON.parse(out.join(''));
+    expect(payload.ok).toBe(true);
+    expect(payload.cancelled).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cmdKnowledge — --json payload shape
+// ---------------------------------------------------------------------------
+
+// Both the success shape and the "store disabled" shape used to omit `ok`
+// entirely, even though reportError's own --json error branch claims (in a
+// comment) to mirror an `{ ok: true, ... }` success shape — it didn't, because
+// knowledge's success payload never set it. `ok` must be a reliable
+// success/failure discriminant across every knowledge --json variant.
+describe('cmdKnowledge — --json payload shape', () => {
+  const ENV_KEYS = ['PI_RESEARCH_API_KEY', 'PI_RESEARCH_PROVIDER', 'PI_RESEARCH_MODEL', 'PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+    process.env['PI_RESEARCH_API_KEY'] = 'test-key';
+    process.env['PI_RESEARCH_PROVIDER'] = 'mock-provider';
+    process.env['PI_RESEARCH_MODEL'] = 'mock-provider/mock-model';
+    mockSearchKnowledge.mockClear();
+    mockSearchKnowledge.mockResolvedValue({
+      text: 'mock knowledge text',
+      found: 'yes' as const,
+      documentsSearched: 2,
+      citations: ['https://example.com'],
+    });
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    resetConfig();
+  });
+
+  it('success payload includes ok:true alongside the existing KnowledgeSearchResult fields', async () => {
+    process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = 'global';
+    resetConfig();
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      out.push(String(chunk));
+      return true;
+    });
+    try {
+      await cmdKnowledge(['what is rust'], true);
+    } finally {
+      spy.mockRestore();
+    }
+    const payload = JSON.parse(out.join(''));
+    expect(payload).toMatchObject({
+      ok: true,
+      found: 'yes',
+      documentsSearched: 2,
+      text: 'mock knowledge text',
+    });
+  });
+
+  it("disabled-store payload includes ok:true — it's a successful 'not configured' response, not an error", async () => {
+    process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = 'none';
+    resetConfig();
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      out.push(String(chunk));
+      return true;
+    });
+    try {
+      await cmdKnowledge(['what is rust'], true);
+    } finally {
+      spy.mockRestore();
+    }
+    const payload = JSON.parse(out.join(''));
+    expect(payload).toMatchObject({ ok: true, found: 'no', configured: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cmdKnowledgeConfig — --json error contract
+// ---------------------------------------------------------------------------
+
+// cmdKnowledgeConfig had no try/catch at all: a thrown error (e.g. saveConfig
+// failing to write the per-directory registry) escaped straight past this
+// function to main()'s top-level catch, which ALWAYS writes plain text to
+// stderr regardless of --json — silently breaking the documented
+// `--json: Emit a JSON object` contract for this one subcommand.
+describe('cmdKnowledgeConfig — --json error contract', () => {
+  afterEach(() => {
+    mockSaveConfig.mockReset();
+  });
+
+  it('emits a JSON {ok:false, error} object on stdout when saveConfig throws, instead of letting the error escape uncaught', async () => {
+    mockSaveConfig.mockImplementation(() => {
+      throw new Error('ENOSPC: no space left on device, write');
+    });
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      out.push(String(chunk));
+      return true;
+    });
+    let thrown: unknown = null;
+    let exitCode: number | undefined;
+    try {
+      exitCode = await cmdKnowledgeConfig({ action: 'set', mode: 'global', json: true });
+    } catch (err) {
+      thrown = err;
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Pre-fix, cmdKnowledgeConfig had no try/catch: the rejection above would
+    // land in `thrown`, not in a --json payload — proving the escape.
+    expect(thrown).toBeNull();
+    expect(exitCode).not.toBe(EXIT.OK);
+    const payload = JSON.parse(out.join(''));
+    expect(payload.ok).toBe(false);
+    expect(typeof payload.error).toBe('string');
+    expect(payload.error).toContain('ENOSPC');
   });
 });
 

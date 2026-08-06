@@ -546,7 +546,7 @@ interface ResearchArgs {
  * Research subcommand. Initializes the SDK, runs deep/quick research, prints the
  * markdown report to stdout, and always shuts down (even on failure).
  */
-async function cmdResearch(args: ResearchArgs): Promise<number> {
+export async function cmdResearch(args: ResearchArgs): Promise<number> {
   // Pre-flight with the per-run --model flag folded in: it satisfies the
   // model-required check and steers the provider-aware key detection.
   const det = await detectCredentials(args.model);
@@ -619,6 +619,18 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
       }
     }
 
+    // DeepResearchOrchestrator.run() does not throw on cancellation once at least
+    // one researcher has produced a report — it returns a fallback synthesis
+    // through its normal return path (synthesisService.hasReports branch; see
+    // deep-research-orchestrator.ts ~line 584-618). Left unchecked, a Ctrl-C
+    // mid-run that still yields a partial report would fall straight through to
+    // the unconditional success handling below and report ok:true / exit 0 —
+    // indistinguishable from an ordinary completed run. Mirrors reportError's
+    // own classification (same exitCodeForSignal formula) for the throwing case.
+    if (cancellationRequested) {
+      exit = cancellationSignal ? exitCodeForSignal(cancellationSignal) : EXIT.CANCELLED;
+    }
+
     if (args.json) {
       // Surface the internal quality/health signals that were previously log-only
       // (ISSUES-ANALYSIS-2026-07-09.md, Symptom 4): a caller reading only stdout/JSON
@@ -631,12 +643,20 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
         depth,
         report,
         ...(reportPath ? { reportPath } : {}),
+        // The run DID produce a real, complete report — ok stays true. `cancelled`
+        // is the qualifier a --json consumer needs to tell "user stopped it, here's
+        // what we had" apart from an ordinary finish.
+        ...(cancellationRequested ? { cancelled: true } : {}),
         ...(outcome ? { researchers: { planned: outcome.planned, launched: outcome.launched, succeeded: outcome.succeeded, failed: outcome.failed } } : {}),
         ...(errorReport && errorReport.totalErrors > 0 ? {
           trackedErrors: { total: errorReport.totalErrors, uniquePatterns: errorReport.uniquePatterns },
         } : {}),
       }));
     } else {
+      // Still a real, useful report — print it as before. The note goes to stderr
+      // (alongside the other lifecycle lines) so it never contaminates the report
+      // text a plain-mode caller pipes from stdout.
+      if (cancellationRequested) toStderr('[pi-research] run was cancelled — showing the partial report.\n');
       toStdout(report.endsWith('\n') ? report : report + '\n');
     }
   } catch (err) {
@@ -653,7 +673,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
  * result; `found: 'no'`/`'maybe'` tells the caller to follow up with live
  * research.
  */
-async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> {
+export async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> {
   const det = await detectCredentials();
   if (det.problem) {
     if (json) { toStdout(pretty({ ok: false, error: det.problem, exitCode: EXIT.CONFIG })); return EXIT.CONFIG; }
@@ -668,7 +688,7 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
       'Knowledge store is disabled (PI_RESEARCH_KNOWLEDGE_STORE_MODE=none). ' +
       "Set it to 'project' or 'global' to enable local knowledge search.\n\n" +
       `Configure in:\n  ${paths.configEnv}\n  ${paths.cliIfaceEnv}  (cli overlay)\n  or via PI_RESEARCH_KNOWLEDGE_STORE_MODE env var`;
-    if (json) toStdout(pretty({ found: 'no', text: msg, configured: false }));
+    if (json) toStdout(pretty({ ok: true, found: 'no', text: msg, configured: false }));
     else toStderr(`\n[pi-research] ${msg}\n`);
     return EXIT.CONFIG;
   }
@@ -692,7 +712,10 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
   }
 
   if (json) {
-    toStdout(pretty(result));
+    // `ok: true` makes `ok` a reliable success/failure discriminant across every
+    // knowledge JSON variant (disabled-store above, reportError's ok:false below,
+    // and this success shape) — additive only, every existing field is unchanged.
+    toStdout(pretty({ ok: true, ...result }));
   } else {
     toStdout((result.text.endsWith('\n') ? result.text : result.text + '\n'));
   }
@@ -747,51 +770,60 @@ async function cmdStatus(json?: boolean): Promise<number> {
  * setting on the user's behalf without hand-editing the locked registry JSON. A machine-wide
  * default is set instead via the PI_RESEARCH_KNOWLEDGE_STORE_MODE env var (per-run) or config.env.
  */
-async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeConfig']>): Promise<number> {
+export async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeConfig']>): Promise<number> {
   const cwd = process.cwd();
 
-  if (kc.action === 'set') {
-    const before = getConfig(cwd, 'cli').KNOWLEDGE_STORE_MODE;
-    const cfg = { ...getConfig(cwd, 'cli'), KNOWLEDGE_STORE_MODE: kc.mode! };
-    // Persist ONLY the knowledge-store mode for this directory — not the whole local-key set —
-    // so an unrelated per-directory DEFAULT_RESEARCH_DEPTH isn't frozen as a side effect.
-    saveConfig(cfg, 'local', cwd, ['PI_RESEARCH_KNOWLEDGE_STORE_MODE']); // per-directory registry write
-    resetConfig();                 // drop the cached config so `after` re-resolves from disk
+  // Wrapped like cmdKnowledge's own try/catch → reportError: without this, a
+  // thrown error (e.g. saveConfig failing to write the registry) escaped all the
+  // way to main()'s top-level catch, which ALWAYS writes plain text to stderr —
+  // silently breaking the documented `--json: Emit a JSON object` contract for
+  // this one subcommand.
+  try {
+    if (kc.action === 'set') {
+      const before = getConfig(cwd, 'cli').KNOWLEDGE_STORE_MODE;
+      const cfg = { ...getConfig(cwd, 'cli'), KNOWLEDGE_STORE_MODE: kc.mode! };
+      // Persist ONLY the knowledge-store mode for this directory — not the whole local-key set —
+      // so an unrelated per-directory DEFAULT_RESEARCH_DEPTH isn't frozen as a side effect.
+      saveConfig(cfg, 'local', cwd, ['PI_RESEARCH_KNOWLEDGE_STORE_MODE']); // per-directory registry write
+      resetConfig();                 // drop the cached config so `after` re-resolves from disk
+      const info = describeKnowledgeStoreMode(cwd, 'cli');
+      // The write always persists to the registry, but a real env var out-ranks the registry, so
+      // the EFFECTIVE mode can still differ from what was requested. Surface that instead of
+      // silently reporting a no-op.
+      const overridden = info.mode !== kc.mode;
+      if (kc.json) {
+        toStdout(pretty({ command: 'knowledge-config', action: 'set', requested: kc.mode, previous: before, saved: true, effectiveOverriddenBy: overridden ? info.origin : null, ...info, cwd }));
+        return EXIT.OK;
+      }
+      toStdout(
+        `knowledge store mode for this directory: ${before} -> ${kc.mode}  (saved per-directory)\n` +
+        `  scope:   ${kc.mode === 'none' ? 'disabled here' : kc.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
+        `  saved:   per-directory (${cwd})\n` +
+        `  db dir:  ${info.dbDir}\n` +
+        (overridden
+          ? `\nNOTE: the effective mode here is still '${info.mode}' because a higher-precedence ${info.origin} overrides it. Clear that source for this setting to take effect.\n`
+          : ''),
+      );
+      return EXIT.OK;
+    }
+
+    // show
     const info = describeKnowledgeStoreMode(cwd, 'cli');
-    // The write always persists to the registry, but a real env var out-ranks the registry, so
-    // the EFFECTIVE mode can still differ from what was requested. Surface that instead of
-    // silently reporting a no-op.
-    const overridden = info.mode !== kc.mode;
     if (kc.json) {
-      toStdout(pretty({ command: 'knowledge-config', action: 'set', requested: kc.mode, previous: before, saved: true, effectiveOverriddenBy: overridden ? info.origin : null, ...info, cwd }));
+      toStdout(pretty({ command: 'knowledge-config', action: 'show', ...info, cwd }));
       return EXIT.OK;
     }
     toStdout(
-      `knowledge store mode for this directory: ${before} -> ${kc.mode}  (saved per-directory)\n` +
-      `  scope:   ${kc.mode === 'none' ? 'disabled here' : kc.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
-      `  saved:   per-directory (${cwd})\n` +
+      `knowledge store mode: ${info.mode}   (source: ${info.origin})\n` +
+      `  scope:   ${info.mode === 'none' ? 'disabled here' : info.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
       `  db dir:  ${info.dbDir}\n` +
-      (overridden
-        ? `\nNOTE: the effective mode here is still '${info.mode}' because a higher-precedence ${info.origin} overrides it. Clear that source for this setting to take effect.\n`
-        : ''),
+      `\nchange it for THIS directory:  ${BINARY_NAME} knowledge-config set <none|project|global>\n` +
+      `change the machine-wide default: set PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode> in ${resolvedConfigPaths().configEnv}\n`,
     );
     return EXIT.OK;
+  } catch (err) {
+    return reportError(err, 'knowledge-config', kc.json);
   }
-
-  // show
-  const info = describeKnowledgeStoreMode(cwd, 'cli');
-  if (kc.json) {
-    toStdout(pretty({ command: 'knowledge-config', action: 'show', ...info, cwd }));
-    return EXIT.OK;
-  }
-  toStdout(
-    `knowledge store mode: ${info.mode}   (source: ${info.origin})\n` +
-    `  scope:   ${info.mode === 'none' ? 'disabled here' : info.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
-    `  db dir:  ${info.dbDir}\n` +
-    `\nchange it for THIS directory:  ${BINARY_NAME} knowledge-config set <none|project|global>\n` +
-    `change the machine-wide default: set PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode> in ${resolvedConfigPaths().configEnv}\n`,
-  );
-  return EXIT.OK;
 }
 
 // ---------------------------------------------------------------------------
