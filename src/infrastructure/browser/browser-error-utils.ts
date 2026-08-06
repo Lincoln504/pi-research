@@ -185,22 +185,6 @@ export function clearSessionCircuitBreaker(sessionId: string): void {
 }
 
 /**
- * Clear every session circuit breaker whose key starts with `prefix`.
- *
- * Breakers are keyed by researchId (`${piSessionId}-<8 hex>` — see how
- * tools/scrape.ts threads getGlobalState().researchId into runBrowserTask's
- * BrowserTask.sessionId), but the research-cleanup path only knows the parent
- * piSessionId: its exact-key clear was a no-op there, leaking one breaker per
- * run until the MAX_SESSION_BREAKERS eviction. Callers that DO hold the full
- * researchId (research-orchestration-service) keep using the exact-key clear.
- */
-export function clearSessionCircuitBreakersByPrefix(prefix: string): void {
-    for (const key of sessionCircuitBreakers.keys()) {
-        if (key.startsWith(prefix)) sessionCircuitBreakers.delete(key);
-    }
-}
-
-/**
  * Global fallback circuit breaker — used when no sessionId is available.
  */
 export const browserCircuitBreaker = new CircuitBreaker(DEFAULT_BREAKER_CONFIG);

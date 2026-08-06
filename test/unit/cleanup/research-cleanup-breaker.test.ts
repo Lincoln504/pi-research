@@ -1,12 +1,18 @@
 /**
- * Research-cleanup — session circuit-breaker clearing (FIX #10 key mismatch).
+ * Research-cleanup — session circuit-breaker clearing (FIX #10 key format).
  *
- * Breakers are keyed by researchId (`${piSessionId}-<8 hex>`, threaded by
- * tools/scrape.ts as BrowserTask.sessionId), but createCleanupFunction only
- * knows the parent piSessionId and called clearSessionCircuitBreaker with it —
- * a no-op, so every research run leaked its breaker (state included: a breaker
- * OPEN from a bad run stayed open for any future run that reused the key).
- * The cleanup must sweep all breakers under the `${piSessionId}-` prefix.
+ * Breakers are keyed by the plain researchId — createResearchRunId() produces it
+ * (`run-<8 hex>`) independently of piSessionId, and tools/scrape.ts / tools/search.ts
+ * thread that same bare researchId into getBrowserCircuitBreaker() as
+ * BrowserTask.sessionId. createCleanupFunction previously assumed a
+ * `${piSessionId}-<8 hex>` key shape (the shape generateSessionId() would produce,
+ * but that function has no production caller) and cleared by that prefix / the bare
+ * piSessionId — both no-ops against the real key, so every research run leaked its
+ * breaker (state included: a breaker OPEN from a bad run stayed open for any future
+ * run that reused the key) on any path where research-cleanup.ts's own cleanup runs
+ * without research-orchestration-service.ts's cleanupResearchServices() also having
+ * run (e.g. a throw before orchestrator.run() is ever reached). The fix clears by
+ * the exact researchId.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -30,7 +36,6 @@ vi.mock('../../../src/logger.ts', () => ({
 import { createCleanupFunction } from '../../../src/cleanup/research-cleanup.ts';
 import {
   getBrowserCircuitBreaker,
-  clearSessionCircuitBreakersByPrefix,
   resetBrowserCircuitBreaker,
 } from '../../../src/infrastructure/browser/browser-error-utils.ts';
 
@@ -38,25 +43,14 @@ afterEach(() => {
   resetBrowserCircuitBreaker();
 });
 
-describe('clearSessionCircuitBreakersByPrefix', () => {
-  it('clears every breaker under the prefix and leaves other sessions untouched', () => {
-    const a1 = getBrowserCircuitBreaker('sessA-11111111');
-    const a2 = getBrowserCircuitBreaker('sessA-22222222');
-    const b1 = getBrowserCircuitBreaker('sessB-33333333');
-
-    clearSessionCircuitBreakersByPrefix('sessA-');
-
-    // Cleared keys yield FRESH breaker instances; the untouched one is retained.
-    expect(getBrowserCircuitBreaker('sessA-11111111')).not.toBe(a1);
-    expect(getBrowserCircuitBreaker('sessA-22222222')).not.toBe(a2);
-    expect(getBrowserCircuitBreaker('sessB-33333333')).toBe(b1);
-  });
-});
-
-describe('createCleanupFunction — breaker key mismatch', () => {
-  it('clears a breaker keyed by researchId even though cleanup only holds the piSessionId', async () => {
+describe('createCleanupFunction — breaker key format', () => {
+  it('clears the breaker keyed by the real researchId format, generated independently of piSessionId', async () => {
+    // Matches production: createResearchRunId() in log-utils.ts produces `run-<8 hex>`
+    // with no relation to piSessionId, and that bare researchId is exactly what
+    // tools/scrape.ts / tools/search.ts pass to getBrowserCircuitBreaker() as
+    // BrowserTask.sessionId.
     const piSessionId = 'pisess-w7';
-    const researchId = `${piSessionId}-a1b2c3d4`; // how shared-links generateSessionId builds it
+    const researchId = 'run-a1b2c3d4';
     const stale = getBrowserCircuitBreaker(researchId);
 
     const cleanup = createCleanupFunction(
@@ -72,8 +66,8 @@ describe('createCleanupFunction — breaker key mismatch', () => {
     );
     await cleanup();
 
-    // Pre-fix: clearSessionCircuitBreaker(piSessionId) was a no-op for this key,
-    // so the SAME stale instance came back.
+    // Pre-fix: the code cleared by the `${piSessionId}-` prefix / bare piSessionId,
+    // neither of which matches `run-a1b2c3d4` — the SAME stale instance came back.
     expect(getBrowserCircuitBreaker(researchId)).not.toBe(stale);
   });
 });

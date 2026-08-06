@@ -42,6 +42,7 @@ export class Chunker {
     let spaceExtensions = 0;
 
     while (start < text.length) {
+      const iterationStart = start;
       let end = start + this.targetSize;
       
       if (end < text.length) {
@@ -150,6 +151,19 @@ export class Chunker {
           const staysPastPrev = chunks.length === 0 || candidate > prevEnd;
           if (candidate > start && staysPastPrev) {
             end = candidate;
+          } else {
+            // Backing off would violate the forward-progress guard above (or empty
+            // the chunk) — this happens when targetSize and overlap sit within one
+            // code unit of each other. Grow past the low surrogate instead: taking
+            // the full pair into THIS chunk only ever increases `end`, so it can
+            // never re-collide with the guard it just failed, and it still avoids
+            // splitting the pair (the alternative — leaving `end` right after the
+            // lone high surrogate — is the silent corruption this block exists to
+            // prevent).
+            const low = text.charCodeAt(end);
+            if (low >= 0xdc00 && low <= 0xdfff) {
+              end = Math.min(end + 1, text.length);
+            }
           }
         }
       }
@@ -169,6 +183,19 @@ export class Chunker {
       if (start < 0) start = 0;
       if (start >= end) start = end - 1;
 
+      // Forward-progress invariant, start side: the constructor rejects
+      // overlap >= targetSize specifically "to prevent infinite loops," but that
+      // guarantee only holds for the raw arithmetic above — it says nothing about
+      // the end-side forward-progress guard earlier in this loop reusing the same
+      // `end` two iterations in a row, which can leave `start` no greater than the
+      // value this same iteration started with, reproducing an identical chunk
+      // forever (observed: OOM from an unbounded chunks array on a small
+      // targetSize/overlap gap plus a boundary emoji). Guarantee real progress
+      // independent of every heuristic above, mirroring the `end`-side guard.
+      // Applied BEFORE the surrogate-pair check below so that check always
+      // adjusts an already-safe value instead of being able to undo this guard.
+      if (start <= iterationStart) start = iterationStart + 1;
+
       // Surrogate-pair safety, read side: `start` (end - overlap, further
       // clamped above) is an independent raw code-unit index — it is not
       // derived from any of the textual heuristics that picked `end` above,
@@ -177,10 +204,19 @@ export class Chunker {
       // surrogate. The pair's high half is already inside the chunk just
       // pushed (it sits before `end`), so pulling `start` back one unit only
       // widens that chunk's overlap by one code unit — it never drops text.
+      // Only pull back when doing so keeps the forward-progress guard above
+      // satisfied; otherwise push forward past the low surrogate instead — the
+      // pair's high half is guaranteed already present in the chunk just
+      // pushed, so skipping the low half here loses nothing, it just narrows
+      // this chunk's overlap by one code unit instead of widening it.
       if (start > 0) {
         const code = text.charCodeAt(start);
         if (code >= 0xdc00 && code <= 0xdfff) {
-          start -= 1;
+          if (start - 1 > iterationStart) {
+            start -= 1;
+          } else if (start + 1 < end) {
+            start += 1;
+          }
         }
       }
     }

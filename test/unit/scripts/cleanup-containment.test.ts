@@ -85,8 +85,44 @@ describe('cleanup.cjs — PI_RESEARCH_STATE_DIR containment', () => {
     }
   });
 
-  it('a pi-research-namespaced override is still removed wholesale', () => {
-    const namespaced = path.join(HOME, 'opt', 'pi-research', 'state');
+  it('an override that merely has a "pi-research"-named segment is NOT treated as proof of exclusive ownership', () => {
+    // Regression: isPiResearchNamespaced() used to treat ANY path segment
+    // literally equal to "pi-research" as sufficient proof the whole directory
+    // was exclusively ours, and wholesale-rm'd it. But naming a directory after
+    // the tool you point it at is a completely natural thing for a user to do —
+    // e.g. organizing several tools' state side by side under
+    // ~/agents-state/<tool-name>/ — and nothing stops them from also keeping
+    // unrelated content in that same folder. A bare name match can't tell the
+    // two cases apart, so it must never authorize wholesale deletion; only the
+    // exact default `<dirName>/research` layout (something WE constructed) can.
+    const namespaced = path.join(HOME, 'agents-state', 'pi-research');
+    plantStateEntries(namespaced);
+    fs.writeFileSync(path.join(namespaced, 'keep.txt'), 'user data', 'utf-8');
+
+    const r = runCleanup({ PI_RESEARCH_STATE_DIR: namespaced });
+    expect(r.status).toBe(0);
+
+    // The directory and the user's foreign content survive…
+    expect(fs.existsSync(namespaced)).toBe(true);
+    expect(fs.readFileSync(path.join(namespaced, 'keep.txt'), 'utf-8')).toBe('user data');
+    // …while every pi-research-owned entry is still gone.
+    for (const name of [
+      'research-state.json',
+      'research-state-deadbeef.tmp',
+      '.locks',
+      'backups',
+      'project-settings.json',
+      'project-settings.json.lock',
+      'research-run-slot-0.lock',
+    ]) {
+      expect(fs.existsSync(path.join(namespaced, name)), name).toBe(false);
+    }
+  });
+
+  it('an override matching the exact default <dirName>/research layout is still removed wholesale', () => {
+    // Provably ours: this is the same layout the runtime would construct with
+    // no override at all, just rooted under a different HOME-equivalent.
+    const namespaced = path.join(HOME, 'opt', '.pi', 'research');
     plantStateEntries(namespaced);
     const r = runCleanup({ PI_RESEARCH_STATE_DIR: namespaced });
     expect(r.status).toBe(0);

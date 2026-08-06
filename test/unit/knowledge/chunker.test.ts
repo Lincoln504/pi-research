@@ -267,6 +267,37 @@ describe('Chunker', () => {
         expect(reconstructed).toBe(text);
       }
     });
+    it('terminates and never emits an unpaired surrogate when targetSize/overlap sit one code unit apart (regression: OOM)', () => {
+      // Pre-fix: when a chunk boundary's low-surrogate backoff (start side) hits the
+      // exact fixed point produced by the end-side forward-progress guard, `start`
+      // and `end` freeze at the same pair of values forever — the chunks array grows
+      // without bound until the process OOMs. Reproduced directly (not simulated) on
+      // the pre-fix code: `new Chunker({targetSize:5, overlap:4}).chunk(...)` crashed
+      // the worker process with an out-of-memory error rather than merely timing out.
+      // A brute-force sweep of small targetSize/overlap/emoji-position combinations
+      // guards the whole neighborhood, not just this one triple.
+      const deadline = Date.now() + 5000;
+      for (let targetSize = 3; targetSize <= 8; targetSize++) {
+        for (let overlap = 1; overlap < targetSize; overlap++) {
+          for (let prefix = 0; prefix < 15; prefix++) {
+            expect(Date.now()).toBeLessThan(deadline);
+            const text = 'x'.repeat(prefix) + '\u{1F389}' + 'y'.repeat(40 - prefix);
+            const c = new Chunker({ targetSize, overlap });
+            const chunks = c.chunk(text);
+
+            for (const chunk of chunks) {
+              expect(findUnpairedSurrogate(chunk.text)).toBeNull();
+            }
+
+            let reconstructed = chunks[0]!.text;
+            for (let i = 1; i < chunks.length; i++) {
+              reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
+            }
+            expect(reconstructed).toBe(text);
+          }
+        }
+      }
+    });
   });
 
   describe('Property-based lossless reconstruction', () => {

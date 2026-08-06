@@ -283,6 +283,32 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       throw registrationError;
     }
 
+    // Post-registration self-check: this session is now visible to
+    // abortAllSessions(), but that scan is point-in-time — a stop/cancel that
+    // landed anywhere between createResearcherSession() resolving and
+    // registerSession() actually running (the `await getService(...)` above can
+    // yield the event loop) would have missed this session entirely, and every
+    // other guard in this function only fires BEFORE session creation or
+    // BETWEEN attempts. Nothing between here and session.prompt() below awaits
+    // anything, so this single check closes the whole window: either it fires
+    // here, or the run is not stopping and prompt() is about to make this
+    // session's registration meaningful. Mirrors the top-of-loop launch
+    // boundary above exactly (signal throws, fast-stop returns quietly) —
+    // deliberately NOT container?.isDisposing: like that boundary, this is
+    // still attempt 1's launch, and a disposing container must let this
+    // attempt's own session.prompt() fail naturally into the catch block's
+    // disposal classification rather than being pre-empted here.
+    if (signal?.aborted || stopRequested()) {
+      logger.debug(`[ResearcherExecutor] Researcher ${id} exiting right after session creation: fast-stop/cancel landed before prompt() was reached.`);
+      await boundSessionAbort(
+        session.abort().catch((err) => logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id} on post-creation fast-stop:`, err)),
+        () => logger.warn(`[ResearcherExecutor] Researcher ${id} session abort did not settle within 10s; continuing cleanup`),
+      );
+      sessionService.unregisterSession(researchId, id);
+      if (signal?.aborted) throw new Error('Aborted');
+      return;
+    }
+
     let lastSteeringCheck = Date.now();
 
     // User-supplied observer callbacks (SDK consumers) are invoked from inside

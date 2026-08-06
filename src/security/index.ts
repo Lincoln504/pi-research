@@ -60,16 +60,21 @@ function isValidSeverity(value: unknown): value is Severity {
   );
 }
 
+// Called ONCE per search(), before dispatch, and the result is shared by every
+// requested backend (NVD, GitHub, OSV) — see the call site in search(). Do not
+// call this per-leg: that previously let NVD normalize while GitHub/OSV read
+// params.severity raw, so the same unrecognized value ran NVD unfiltered while
+// silently zeroing GitHub/OSV's strict filters.
 function getSeverityParam(params: SecuritySearchParams): Severity | undefined {
   if (params.severity === undefined) return undefined;
   // NVD requires the exact uppercase enum. GitHub/OSV normalize case and the
-  // MODERATE↔MEDIUM synonym in their clients (github-advisories.ts, osv-client.ts);
-  // without the same treatment here, severity:"high" or "Moderate" silently ran
-  // NVD unfiltered while the other databases filtered.
+  // MODERATE↔MEDIUM synonym in their own clients (github-advisories.ts,
+  // osv-client.ts) as well, so applying the same normalization here keeps all
+  // three backends in agreement on what severity:"high" or "Moderate" means.
   const upper = params.severity.trim().toUpperCase();
   const normalized = upper === 'MODERATE' ? 'MEDIUM' : upper;
   if (isValidSeverity(normalized)) return normalized;
-  logger.warn(`[security] Unknown severity filter "${params.severity}" (valid: LOW, MEDIUM, HIGH, CRITICAL) — NVD results are unfiltered`);
+  logger.warn(`[security] Unknown severity filter "${params.severity}" (valid: LOW, MEDIUM, HIGH, CRITICAL) — no database will be severity-filtered`);
   return undefined;
 }
 
@@ -109,6 +114,15 @@ export class SecuritySearcher {
     const errors: string[] = [];
     let totalVulnerabilities = 0;
 
+    // Normalize severity ONCE, before dispatch, so every backend that receives a
+    // severity filter sees the exact same value. Previously this call sat inline
+    // in the NVD branch only; GitHub and OSV read the raw, unvalidated
+    // params.severity directly, so an unrecognized value ran NVD unfiltered while
+    // silently zeroing GitHub/OSV (or vice versa depending on each client's own
+    // parsing) — the single-chokepoint fix has to normalize before the fan-out,
+    // not duplicate the call at each leg.
+    const severity = getSeverityParam(params);
+
     // Normalize database names before dispatch: callers (agents, SDK users) write
     // "NVD" / " osv " etc. An unrecognized name must surface in `errors` rather than
     // silently contributing an authoritative-looking "0 vulnerabilities" for a
@@ -128,7 +142,7 @@ export class SecuritySearcher {
       searchPromises.push((async () => {
         try {
           const nvdResult = await this.searchNVD(params.terms, {
-              severity: getSeverityParam(params),
+              severity,
               maxResults: params.maxResults,
               includeExploited: params.includeExploited,
               signal,
@@ -158,7 +172,7 @@ export class SecuritySearcher {
         try {
           const githubResult = await this.searchGitHub(params.terms, {
             ecosystem: params.ecosystem,
-            severity: params.severity,
+            severity,
             maxResults: params.maxResults,
             repo: params.githubRepo,
             signal,
@@ -176,7 +190,7 @@ export class SecuritySearcher {
         try {
           const osvResult = await this.searchOSV(params.terms, {
             ecosystem: params.ecosystem,
-            severity: params.severity,
+            severity,
             maxResults: params.maxResults,
             signal,
           });

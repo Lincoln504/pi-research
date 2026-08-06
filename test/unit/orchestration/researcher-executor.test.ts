@@ -715,6 +715,38 @@ describe('runResearcher', () => {
         vi.useRealTimers();
       }
     });
+
+    it('does not prompt when the threshold crosses in the window between session creation and registration', async () => {
+      // THE gap the other three checkpoints (top-of-loop, initial-links loop,
+      // post-backoff) do not cover: createResearcherSession() has just resolved
+      // but the session is not registered yet (registerSession runs after an
+      // `await getService(...)`), so abortAllSessions()'s point-in-time scan
+      // cannot reach it. Simulate the threshold tripping inside that async gap
+      // by crossing it from within the session-creation mock itself — by the
+      // time control returns to runResearcher, the stop has already happened
+      // and nothing has checked it yet.
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      vi.mocked(createResearcherSession).mockImplementationOnce(async (opts?: any) => {
+        crossThreshold();
+        if (!opts?.excludeTools?.includes('scrape')) {
+          opts?.onUrlScrapeResult?.('https://example.com/scraped', true);
+        }
+        return {
+          session: { prompt: mockPrompt, abort: mockAbort, subscribe: mockSubscribe } as any,
+          resolvedModel: { id: 'test-model' } as any,
+        };
+      });
+
+      await expect(runResearcher(makeOptions())).resolves.toBeUndefined();
+
+      // The billed session prompt must never fire once the run has decided to stop.
+      expect(mockPrompt).not.toHaveBeenCalled();
+      // The session was registered (creation succeeded before the check) and must
+      // be cleanly aborted and unregistered rather than left to run unsupervised.
+      expect(mockRegister).toHaveBeenCalled();
+      expect(mockAbort).toHaveBeenCalled();
+      expect(mockUnregister).toHaveBeenCalled();
+    });
   });
 
   // ── Abort signal ────────────────────────────────────────────────────────────

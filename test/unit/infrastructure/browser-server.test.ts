@@ -177,4 +177,55 @@ describe('BrowserServer — follower cancellation crosses the HTTP hop', () => {
     expect(receivedSignal).toBeDefined();
     expect(receivedSignal!.aborted).toBe(false);
   });
+
+  // Regression: onHealthCheck did not receive the per-request signal at all —
+  // its BrowserServerOptions type had no signal parameter, and the /healthcheck
+  // case called `this.options.onHealthCheck()` with no argument, unlike the
+  // /search and /scrape cases a few lines above. Masked in production because
+  // the one caller (src/healthcheck/index.ts) never passes a signal — but the
+  // interface gap means any future caller that does pass one is silently
+  // ignored, with no compiler error to catch it.
+  it('aborts the leader-side healthcheck task when the client socket closes before completion', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    let healthcheckStarted!: () => void;
+    const started = new Promise<void>((r) => { healthcheckStarted = r; });
+    server = new BrowserServer({
+      onSearch: async () => ([]),
+      onScrape: async () => ({}),
+      onHealthCheck: (signal?: AbortSignal) => {
+        receivedSignal = signal;
+        healthcheckStarted();
+        return new Promise((resolve) => {
+          signal?.addEventListener('abort', () => resolve({ success: false }), { once: true });
+        });
+      },
+    });
+    const port = await server.start();
+
+    const req = http.request({
+      host: '127.0.0.1',
+      port,
+      path: '/healthcheck',
+      method: 'POST',
+      headers: {
+        'X-Browser-Auth': getBrowserServerAuthSecret(),
+        'Content-Type': 'application/json',
+      },
+    });
+    req.on('error', () => { /* expected on destroy */ });
+    req.end(JSON.stringify({}));
+
+    await started;
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
+
+    // The follower gives up mid-flight.
+    req.destroy();
+
+    const deadline = Date.now() + 2000;
+    while (!receivedSignal!.aborted && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(receivedSignal!.aborted).toBe(true);
+  });
 });

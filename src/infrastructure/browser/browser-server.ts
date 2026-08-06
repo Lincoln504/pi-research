@@ -8,7 +8,7 @@ import { isCloudflareBlockError, isPoolShutdownError } from './browser-error-uti
 export interface BrowserServerOptions {
     onSearch: (query: string, signal?: AbortSignal) => Promise<SearchResult[]>;
     onScrape: (url: string, signal?: AbortSignal) => Promise<any>;
-    onHealthCheck: () => Promise<{ success: boolean }>;
+    onHealthCheck: (signal?: AbortSignal) => Promise<{ success: boolean }>;
 }
 
 /**
@@ -179,7 +179,7 @@ export class BrowserServer {
                                 result = await this.options.onScrape(data.url, requestAbort.signal);
                                 break;
                             case '/healthcheck':
-                                result = await this.options.onHealthCheck();
+                                result = await this.options.onHealthCheck(requestAbort.signal);
                                 break;
                             default:
                                 res.writeHead(404);

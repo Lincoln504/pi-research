@@ -711,6 +711,66 @@ describe('SecuritySearcher', () => {
 
       expect(mockNVD.getSearchCalls()[0]!.options?.severity).toBe('MEDIUM');
     });
+
+    // These tests call SecuritySearcher.search() directly, bypassing
+    // src/tools/security.ts's own duplicate severity validation — that wrapper
+    // is the only production caller today and rejects an unrecognized severity
+    // before ever reaching this module, which is why the gap below is not
+    // currently reachable through the shipped CLI tool. Any other caller of
+    // this module (a future tool, an SDK consumer, a script) hits it directly.
+    it('normalizes severity identically for NVD, GitHub, and OSV from the same input', async () => {
+      const mockNVD = new MockNVDClient();
+      const mockGitHub = new MockGitHubClient();
+      const mockOSV = new MockOSVClient();
+      const searcher = createFastSearcher({
+        nvdClient: mockNVD,
+        githubAdvisoriesClient: mockGitHub,
+        osvClient: mockOSV,
+      });
+
+      // Lowercase, valid severity: every backend should receive the SAME
+      // normalized (uppercased) value.
+      await searcher.search({
+        terms: ['test'],
+        databases: ['nvd', 'github', 'osv'],
+        severity: 'high',
+      });
+
+      expect(mockNVD.getSearchCalls()[0]!.options?.severity).toBe('HIGH');
+      expect(mockGitHub.getSearchCalls()[0]!.options?.severity).toBe('HIGH');
+      expect(mockOSV.getSearchCalls()[0]!.options?.severity).toBe('HIGH');
+    });
+
+    it('rejects an unrecognized severity identically for NVD, GitHub, and OSV instead of only unfiltering NVD', async () => {
+      const mockNVD = new MockNVDClient();
+      const mockGitHub = new MockGitHubClient();
+      const mockOSV = new MockOSVClient();
+      const searcher = createFastSearcher({
+        nvdClient: mockNVD,
+        githubAdvisoriesClient: mockGitHub,
+        osvClient: mockOSV,
+      });
+
+      // An unrecognized severity must be dropped (undefined) the same way for
+      // every backend. Pre-fix, only the NVD leg ran the value through
+      // getSeverityParam(); GitHub and OSV received the raw, unvalidated
+      // string, so — depending on the real client's own parsing — they would
+      // silently filter to zero results while NVD ran unfiltered, reproducing
+      // the exact inconsistency the "single chokepoint" fix was meant to close.
+      await searcher.search({
+        terms: ['test'],
+        databases: ['nvd', 'github', 'osv'],
+        severity: 'not-a-real-severity',
+      });
+
+      const nvdSeverity = mockNVD.getSearchCalls()[0]!.options?.severity;
+      const githubSeverity = mockGitHub.getSearchCalls()[0]!.options?.severity;
+      const osvSeverity = mockOSV.getSearchCalls()[0]!.options?.severity;
+
+      expect(nvdSeverity).toBeUndefined();
+      expect(githubSeverity).toBe(nvdSeverity);
+      expect(osvSeverity).toBe(nvdSeverity);
+    });
   });
 });
 

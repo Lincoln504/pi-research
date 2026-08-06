@@ -183,17 +183,24 @@ const dirName = rawDirName && !rawDirName.includes('/') && !rawDirName.includes(
   : '.pi';
 
 /**
- * Is this path itself namespaced to pi-research — a `pi-research` segment, or
- * the default `<dirName>/research` layout? Wholesale rm of a state-dir override
- * is only safe when the answer is yes: PI_RESEARCH_STATE_DIR may point at a
- * SHARED directory, and rm'ing the override itself (unlike the cache sweep,
+ * Is this path PROVABLY equivalent to the layout the runtime itself would have
+ * constructed by default (`<dirName>/research`)? Wholesale rm of a state-dir
+ * override is only safe when the answer is yes: PI_RESEARCH_STATE_DIR may point
+ * at a SHARED directory, and rm'ing the override itself (unlike the cache sweep,
  * which is namespaced via join(cacheHome, 'pi-research')) deleted everything the
  * user kept beside our state.
+ *
+ * Deliberately NOT a bare "does any segment literally say pi-research" check —
+ * that matches naming convention, not ownership. A user is entirely free to
+ * point the override at, say, `~/agents-state/pi-research/` while keeping other
+ * tools' notes alongside it in the same folder (a natural way to organize
+ * several tools' state by name); a substring match would treat that shared
+ * folder as exclusively ours and wholesale-delete it. Only the exact default
+ * layout is something WE constructed and can therefore prove is ours.
  */
 function isPiResearchNamespaced(p) {
   const segs = p.split(/[\\/]+/).filter(Boolean);
-  for (let i = 0; i < segs.length; i++) {
-    if (segs[i] === 'pi-research') return true;
+  for (let i = 0; i < segs.length - 1; i++) {
     if (segs[i] === dirName && segs[i + 1] === 'research') return true;
   }
   return false;

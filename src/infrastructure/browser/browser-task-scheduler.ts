@@ -206,9 +206,12 @@ export class BrowserTaskScheduler implements IScheduler {
             // before completion, so the leader-side task releases its queue
             // claim (abort-while-queued/running is the PriorityTaskQueue's own
             // pinned semantics) instead of holding the slot to full timeout.
+            // Healthcheck mirrors search/scrape here even though its one current
+            // production caller (src/healthcheck/index.ts) never passes a signal —
+            // the wiring must not silently drop one the moment a caller does.
             onSearch: (q, signal) => this.runSearch(q, undefined, signal),
             onScrape: (u, signal) => this.runScrape(u, undefined, signal),
-            onHealthCheck: () => this.runHealthCheck(),
+            onHealthCheck: (signal) => this.runHealthCheck(undefined, signal),
         });
         // FIX (#21): Expose auth secret to child processes via env
         process.env['PI_BROWSER_AUTH_SECRET'] = getBrowserServerAuthSecret();
@@ -275,6 +278,18 @@ export class BrowserTaskScheduler implements IScheduler {
             // the error metric/tracker, so a normal quit-mid-run doesn't inflate ERROR counts.
             if (isPoolShutdownError(error)) {
                 logger.debug(`[BrowserTaskScheduler] Search abandoned during shutdown: "${query}"`);
+                throw error;
+            }
+            // The caller's own signal aborting (follower socket closed / research run
+            // cancelled) is what PriorityTaskQueue's abort-while-queued/running
+            // rejection above reports. This is routine, expected cancellation, not a
+            // fault — cancelling a run routinely cancels its in-flight browser tasks,
+            // so this fires often. Checking the signal directly (rather than matching
+            // the queue's rejection text) mirrors how BrowserServer's own catch block
+            // and task-execution-service.ts already classify this. Demote to DEBUG so
+            // it doesn't inflate ERROR counts / browser_search_errors_total.
+            if (signal?.aborted) {
+                logger.debug(`[BrowserTaskScheduler] Search cancelled by caller: "${query}"`);
                 throw error;
             }
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
@@ -355,6 +370,12 @@ export class BrowserTaskScheduler implements IScheduler {
                 logger.debug(`[BrowserTaskScheduler] Scrape abandoned during shutdown: "${url}"`);
                 throw error;
             }
+            // See runSearch: the caller's own signal aborting is routine cancellation
+            // (follower disconnect / run cancelled), not a fault — demote to DEBUG.
+            if (signal?.aborted) {
+                logger.debug(`[BrowserTaskScheduler] Scrape cancelled by caller: "${url}"`);
+                throw error;
+            }
             metrics.increment('browser_scrape_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
                 component: 'browser-manager',
@@ -419,6 +440,13 @@ export class BrowserTaskScheduler implements IScheduler {
             // demote to DEBUG and don't inflate the error metric/tracker (mirrors runSearch).
             if (isPoolShutdownError(error)) {
                 logger.debug(`[BrowserTaskScheduler] Healthcheck abandoned during shutdown`);
+                throw error;
+            }
+            // See runSearch: the caller's own signal aborting is routine cancellation,
+            // not a fault — demote to DEBUG. Reachable now that startServer() forwards
+            // a signal into onHealthCheck (see BrowserServer's onHealthCheck wiring).
+            if (signal?.aborted) {
+                logger.debug(`[BrowserTaskScheduler] Healthcheck cancelled by caller`);
                 throw error;
             }
             metrics.increment('browser_healthcheck_errors_total', 1);

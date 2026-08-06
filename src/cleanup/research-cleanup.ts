@@ -82,15 +82,19 @@ export function createCleanupFunction(
     const { resetLogger } = await import('../logger.ts');
     resetLogger(researchId);
     
-    // FIX (#10): Clear session circuit breakers to prevent unbounded map growth.
-    // Breakers are keyed by researchId (`${piSessionId}-<8 hex>`), so the
-    // exact-key clear alone was a no-op on this path — sweep by prefix, and keep
-    // the exact-key clear for any breaker keyed by the bare session id.
-    const { clearSessionCircuitBreaker, clearSessionCircuitBreakersByPrefix } = await import('../infrastructure/browser/browser-error-utils.ts');
-    if (piSessionId) {
-      clearSessionCircuitBreakersByPrefix(`${piSessionId}-`);
-      clearSessionCircuitBreaker(piSessionId);
-    }
+    // FIX (#10): Clear the session's browser circuit breaker to prevent unbounded
+    // map growth. Breakers are keyed by the plain researchId — createResearchRunId()
+    // generates it (`run-<8 hex>`) independently of piSessionId in
+    // research-tool-definition.ts, and tools/scrape.ts / tools/search.ts thread that
+    // same bare researchId into getBrowserCircuitBreaker() as BrowserTask.sessionId.
+    // (The `${piSessionId}-<8 hex>` shape this comment used to assume is produced
+    // only by generateSessionId(), which has no production caller.) This duplicates
+    // the clearSessionCircuitBreaker(targetId) call research-orchestration-service.ts
+    // already makes in its own finally block on the normal run-completion path; it
+    // matters here on paths where this cleanup runs alone, e.g. a throw before
+    // orchestrator.run() is ever reached.
+    const { clearSessionCircuitBreaker } = await import('../infrastructure/browser/browser-error-utils.ts');
+    clearSessionCircuitBreaker(researchId);
     
     const activePanels = getPiActivePanels(piSessionId);
     if (activePanels.length === 0) {

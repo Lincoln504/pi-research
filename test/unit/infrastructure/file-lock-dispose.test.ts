@@ -58,9 +58,18 @@ describe('FileLockService — teardown during a held lock', () => {
 
     let sectionFinished = false;
     let lockFilePresentDuringSection = false;
+    let sectionStarted!: () => void;
+    const sectionHasStarted = new Promise<void>((r) => { sectionStarted = r; });
 
     const critical = lock.withLock(async () => {
-      // dispose() lands here, mid-section.
+      // withLock only invokes this callback after acquireLock() has fully
+      // committed (this.lockHandle set), so signalling here — instead of
+      // guessing with a fixed sleep — proves the lock is genuinely held
+      // before dispose() is allowed to land. A fixed sleep raced the real
+      // open+write+fsync of acquireLock() and could catch dispose() landing
+      // mid-acquisition on a loaded CI runner instead of mid-section — the
+      // separate, already-intentional case covered below.
+      sectionStarted();
       await new Promise((r) => setTimeout(r, 300));
       lockFilePresentDuringSection = await fs
         .access(lockPath)
@@ -69,7 +78,7 @@ describe('FileLockService — teardown during a held lock', () => {
       sectionFinished = true;
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await sectionHasStarted;
     await lock.dispose();
 
     await critical;
