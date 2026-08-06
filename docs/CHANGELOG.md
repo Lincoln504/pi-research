@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-06
+
+A dedicated post-release investigation pass over 1.3.0 — three independent
+agents (fresh-eyes code review, packaging/release-artifact audit, isolated
+runtime CLI smoke test) plus a full from-scratch local gate run — to confirm
+the shipped artifact and codebase were correct before considering the
+release closed. The packaging audit and runtime smoke test found nothing;
+the code review found one real, currently-live defect, fixed below.
+
+### Fixed
+
+- **The pi-extension research tool could report a cancelled-but-partial run as an ordinary success.** `DeepResearchOrchestrator.run()` does not throw on cancellation once at least one researcher has produced a report — it resolves normally with a fallback synthesis (the same documented contract 1.3.0's `cmdResearch` fix was built around). `research-tool-definition.ts`'s abort check only lived in its `catch` block, so this resolves-normally path fell straight through to unconditional success handling: metrics recorded `status: 'success'`, and the text handed back to the calling agent carried no indication it was a partial report. This matters more here than at the CLI: `AgentToolResult`'s `details` field is logs/UI-only by its own type contract, so `content[].text` is the *only* channel the calling agent has to learn a report is partial rather than complete — a silent miscategorization here could lead an agent to treat cut-short research as a finished answer. Same bug class as the 1.3.0 CLI fix, at a call site that round's review missed. Fixed by checking the abort signal immediately after `runResearch()` resolves: the metrics status now reflects the real outcome, and a cancellation note is prepended to the report text itself.
+
+Not a minor bump: unlike 1.3.0's `cmdResearch` fix, this does not touch the CLI's exit-code contract — it is scoped entirely to the pi-extension tool call path.
+
 ## [1.3.0] - 2026-08-06
 
 Bundles three unreleased fix rounds that accumulated on top of 1.2.0 (each
