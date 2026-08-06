@@ -3,6 +3,7 @@ import { KnowledgeStoreService } from '../../../src/infrastructure/knowledge-sto
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import * as knowledge from '../../../src/knowledge/index.ts';
 import * as coreRegistry from '../../../src/core/service-registry.ts';
+import * as embeddingFactory from '../../../src/infrastructure/embedding/embedding-factory.ts';
 
 vi.mock('../../../src/knowledge/index.ts', () => ({
   createKnowledgeStoreComponents: vi.fn(),
@@ -255,5 +256,29 @@ describe('KnowledgeStoreService', () => {
     expect(mockStore.close).toHaveBeenCalled();
     expect(mockEmbedder.dispose).toHaveBeenCalled();
     expect(service.lifecycle).toBe(ServiceLifecycle.DISPOSED);
+  });
+
+  it('dispose clears the embedding factory cache so a later re-init cannot be handed the disposed instance', async () => {
+    // The factory's getEmbedder() fast path has no liveness check: after this
+    // service disposes its embedder (leader: EmbeddingServer.shutdown), the
+    // module-level cache would keep serving the dead instance and a re-init
+    // (cwd/mode re-scope) would burn every warm-up retry on it.
+    const mockEmbedder = {
+      dispose: vi.fn(),
+      getOriginalDevice: vi.fn().mockReturnValue('cpu'),
+      isInitialized: vi.fn().mockReturnValue(true),
+      getDevice: vi.fn().mockReturnValue('cpu'),
+    };
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValue({
+      embedder: mockEmbedder as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+
+    await service.initialize();
+    expect(embeddingFactory.clearEmbeddingInstance).not.toHaveBeenCalled();
+
+    await service.dispose();
+    expect(embeddingFactory.clearEmbeddingInstance).toHaveBeenCalled();
   });
 });

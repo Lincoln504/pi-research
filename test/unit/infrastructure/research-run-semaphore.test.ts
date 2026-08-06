@@ -201,6 +201,45 @@ describe('ResearchRunSemaphore', () => {
     expect(setGauge).toHaveBeenCalledWith('research_run_slots_held', 0, { slot: '0' });
   });
 
+  describe('broken-slot fail-open (I/O errors are not capacity)', () => {
+    it('rejects with the underlying I/O error — not ResearchRunCapacityError — when the slot dir is unusable', async () => {
+      const base = await makeTempDir();
+      dirs.push(base);
+      // A regular FILE where the slot dir's parent should be: every slot-file
+      // open fails with a genuine errno (ENOTDIR/ENOENT), never contention.
+      // Both mkdirs are warn-only, so nothing repairs this before acquire.
+      const blocker = pathmod.join(base, 'blocker');
+      await fs.writeFile(blocker, 'not a directory');
+      const sem = new ResearchRunSemaphore(pathmod.join(blocker, 'slots'), null, 2, 5_000);
+      await sem.initialize();
+
+      const start = Date.now();
+      const err = await sem.acquire().then(() => null, (e: unknown) => e);
+      // Pre-fix this polled out the whole 5s window and produced a FALSE
+      // capacity error, which the CLI classifies as retryable — while the
+      // orchestration caller's fail-open branch (non-capacity errors) starved.
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ResearchRunCapacityError);
+      expect(typeof (err as NodeJS.ErrnoException).code).toBe('string');
+      expect(Date.now() - start).toBeLessThan(2_000); // failed promptly, no poll-out
+    });
+
+    it('still acquires when one slot is broken but another is free (mixed case)', async () => {
+      const { sem } = await newSemaphore(2, 0);
+      // Break slot 0 only, at the trySlot boundary, with the errno shape a
+      // genuine I/O failure propagates — the sweep must carry on to slot 1.
+      const realTrySlot = (sem as any).trySlot.bind(sem);
+      (sem as any).trySlot = async (i: number) => {
+        if (i === 0) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+        return realTrySlot(i);
+      };
+
+      const got = await sem.acquire();
+      expect(got.slotIndex).toBe(1);
+      await got.release();
+    });
+  });
+
   describe('production defaults', () => {
     // These are the values that decide what a user actually experiences under
     // contention, so they are asserted explicitly rather than left implicit.

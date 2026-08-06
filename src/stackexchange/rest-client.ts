@@ -11,6 +11,16 @@ import { readJsonCapped, BodyTooLargeError } from '../utils/http-body.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 
+// How long quota-exhaustion evidence keeps the request gate armed. quotaRemaining
+// is only refreshed from a successful response, and the tool-level gate
+// (stackexchange/index.ts) blocks every request while isQuotaExhausted() — so a
+// plain `quotaRemaining <= 0` check could never observe SE's real daily reset and
+// wedged the process-wide client until restart or an API-key change. After the
+// cooldown one probe request is allowed: it either refreshes the quota (clearing
+// the stamp) or shows 0 / throttles again, re-arming the gate — at most one
+// wasted request per cooldown.
+const QUOTA_PROBE_COOLDOWN_MS = 10 * 60 * 1000;
+
 export interface RequestOptions {
   method: string;
   endpoint: string;
@@ -22,6 +32,9 @@ export class StackExchangeClient {
   private readonly _timeout: number;
   private quotaRemaining = 300;
   private quotaMax = 300;
+  // Timestamp of the last quota-exhaustion evidence (a response reporting
+  // quota_remaining <= 0, or a throttle_violation API error). null = no evidence.
+  private quotaExhaustedAt: number | null = null;
   private requestCount = 0;
   private lastBackoff: number | null = null;
   private circuitBreaker: CircuitBreaker;
@@ -122,6 +135,12 @@ export class StackExchangeClient {
         // Handle API errors
         if (data.error_id) {
           const errorName = data.error_name ?? 'unknown';
+          // A throttle_violation is quota-exhaustion evidence even though no
+          // quota_remaining arrives with it (this throw happens before the quota
+          // update below) — stamp it so the gate arms/re-arms.
+          if (errorName === 'throttle_violation') {
+            this.quotaExhaustedAt = Date.now();
+          }
           metrics.increment('stackexchange_errors_total', 1, { 
             endpoint: options.endpoint, 
             error_id: data.error_id.toString(),
@@ -136,6 +155,15 @@ export class StackExchangeClient {
         this.quotaRemaining = data.quota_remaining;
         this.quotaMax = data.quota_max;
         this.requestCount++;
+        // Stamp (or clear) exhaustion evidence: isQuotaExhausted() reads the
+        // stamp, not quotaRemaining — which can never refresh while the gate
+        // blocks requests — so a probe after the cooldown self-corrects once
+        // SE's daily reset has happened.
+        if (data.quota_remaining <= 0) {
+          this.quotaExhaustedAt = Date.now();
+        } else {
+          this.quotaExhaustedAt = null;
+        }
         
         // Track quota metrics
         metrics.setGauge('stackexchange_quota_remaining', this.quotaRemaining);
@@ -197,7 +225,13 @@ export class StackExchangeClient {
   }
 
   isQuotaExhausted(): boolean {
-    return this.quotaRemaining <= 0;
+    // True only within the probe cooldown of the last exhaustion evidence. After
+    // it elapses, one probe request is allowed through the tool-level gate; the
+    // probe's outcome refreshes or clears the stamp (see request()).
+    return (
+      this.quotaExhaustedAt !== null &&
+      Date.now() - this.quotaExhaustedAt < QUOTA_PROBE_COOLDOWN_MS
+    );
   }
 
   isQuotaLow(): boolean {

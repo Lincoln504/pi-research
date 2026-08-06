@@ -141,9 +141,13 @@ async function isPiOwnedSweepDir(dir: string): Promise<boolean> {
   if (realDir === realTmp) return false;
   const hasPiSegment = (p: string) =>
     p.split(/[\\/]+/).some((segment) => segment.toLowerCase().startsWith('pi-research'));
-  // Check the canonical path AND the given one: a symlinked profile dir whose
-  // target lacks the marker is still recognizably ours by its configured path.
-  return hasPiSegment(realDir) || hasPiSegment(path.resolve(dir));
+  // Only the CANONICAL path counts. A symlinked dir whose target lacks the
+  // marker is NOT sweep-safe: approving it by its configured name would send the
+  // recursive rm THROUGH the symlink into a directory we do not own (e.g. a
+  // /tmp/pi-research/profiles link pre-created by another user under a
+  // world-writable PI_RESEARCH_TMP_DIR). Unknowns are spared; the prefix-matched
+  // playwright profile cleanup still runs either way.
+  return hasPiSegment(realDir);
 }
 
 /**

@@ -47,6 +47,12 @@ vi.mock('pdf-oxide-wasm', () => {
       constructor(bytes: Uint8Array) {
         pdfMockState.lastBytes = bytes;
         if (bytes.length === 0) throw new Error('empty or corrupt PDF buffer');
+        // Sentinel for the verbose-parser-error regression: a long diagnostic
+        // (≥50 words / ≥200 non-ws chars) whose in-band "*Error: ...*" banner
+        // used to clear validateContent's stub gate and get cached as content.
+        if (Buffer.from(bytes).toString().startsWith('%PDF-CORRUPT')) {
+          throw new Error('parse failure: ' + 'very long diagnostic detail '.repeat(12));
+        }
       }
       pageCount = () => 1;
       toMarkdown = () => 'PDF content';
@@ -358,6 +364,22 @@ describe('scrapers', () => {
       expect(result.success).toBe(true);
       expect(pdfMockState.lastBytes).not.toBeNull();
       expect(Buffer.from(pdfMockState.lastBytes!).equals(PDF_BYTES)).toBe(true);
+    });
+
+    it('fails the scrape when extraction throws a VERBOSE parser error (a long banner must never become citable content)', async () => {
+      // A diagnostic ≥50 words / ≥200 non-whitespace chars passes validateContent's
+      // stub gate, so the old in-band "*Error: Could not extract...*" return was
+      // recorded — and cached — as a successful scrape. Extraction failure must throw.
+      mockRunBrowserTask.mockResolvedValue({
+        contentType: 'application/pdf',
+        bufferB64: Buffer.from('%PDF-CORRUPT garbage bytes').toString('base64'),
+      });
+
+      const result = await scrapeSingle('https://some-site.org/corrupt.pdf');
+
+      expect(result.success).toBe(false);
+      expect(result.markdown).toBe('');
+      expect(result.error).toContain('Could not extract content from PDF');
     });
 
     it('reports FAILURE when PDF extraction yields an error string (never a cached success)', async () => {

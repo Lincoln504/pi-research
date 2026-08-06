@@ -28,6 +28,8 @@ import {
   exitCodeForSignal,
   _resetCancellationLatchForTests,
   _markCancellationForTests,
+  _signalDisposition,
+  _resetSignalDispositionForTests,
 } from '../../src/cli.ts';
 import { createResearchStopError } from '../../src/orchestration/session-state.ts';
 import { ResearchRunCapacityError } from '../../src/infrastructure/research-run-semaphore.ts';
@@ -115,6 +117,21 @@ describe('parseArgs — status', () => {
     const r = parseArgs(['node', 'cli.mjs', 'status', '--config', '/tmp/x.env']);
     expect(r.command).toBe('status');
     expect(r.configPath).toBe('/tmp/x.env');
+  });
+
+  // Regression: the ad-hoc rest.includes('--json') accepted anything — a typo'd
+  // `status --jsn` (or `--json=true`) exited 0 with human output instead of
+  // failing fast at exit 64 like every other subcommand.
+  it('status --jsn (unknown option) → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'status', '--jsn'])).toThrow(UsageError);
+  });
+
+  it('status --json=true (not the supported form) → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'status', '--json=true'])).toThrow(UsageError);
+  });
+
+  it('status stray positional → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'status', 'extra'])).toThrow(UsageError);
   });
 });
 
@@ -557,6 +574,39 @@ describe('reportError — exit-code classification', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Signal disposition — duplicate absorption vs force exit
+// ---------------------------------------------------------------------------
+
+describe('_signalDisposition — duplicate absorption vs force exit', () => {
+  afterEach(() => _resetSignalDispositionForTests());
+
+  it('the first cancelling signal begins cleanup', () => {
+    expect(_signalDisposition(1_000_000)).toBe('begin-cleanup');
+  });
+
+  it("absorbs the launcher's forwarded duplicate (arrives within ms of the tty's group-wide delivery)", () => {
+    // With stdio:'inherit' the engine sits in the tty foreground group, so a
+    // Ctrl-C delivers SIGINT directly AND the launcher forwards its own copy
+    // milliseconds later. Pre-fix the process.once handler was CONSUMED by the
+    // first delivery, so the duplicate hit the default disposition and killed
+    // the engine instantly — mid-safeShutdown, skipping browser/embedder teardown.
+    expect(_signalDisposition(1_000_000)).toBe('begin-cleanup');
+    expect(_signalDisposition(1_000_005)).toBe('absorb-duplicate');
+  });
+
+  it('a repeat WELL after the first (a human at a stuck cleanup) force-exits', () => {
+    expect(_signalDisposition(1_000_000)).toBe('begin-cleanup');
+    expect(_signalDisposition(1_001_500)).toBe('force-exit');
+  });
+
+  it('the force-exit window is anchored to the FIRST signal, not re-armed by duplicates', () => {
+    expect(_signalDisposition(1_000_000)).toBe('begin-cleanup');
+    expect(_signalDisposition(1_000_900)).toBe('absorb-duplicate');
+    expect(_signalDisposition(1_001_100)).toBe('force-exit');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Subprocess — CLI binary end-to-end (requires dist/cli.mjs to be built)
 // ---------------------------------------------------------------------------
 
@@ -635,6 +685,12 @@ describe('CLI subprocess — status', () => {
     expect(r.status).toBe(0);
   });
 
+  it('status --jsn (typo) exits 64 naming the valid options', () => {
+    const r = runCli(['status', '--jsn']);
+    expect(r.status).toBe(64);
+    expect(r.stderr).toContain('--jsn');
+  });
+
   it('status --json exits 0 and emits valid JSON', () => {
     const r = runCli(['status', '--json']);
     expect(r.status).toBe(0);
@@ -644,6 +700,57 @@ describe('CLI subprocess — status', () => {
     expect(parsed).toHaveProperty('ready');
     expect(parsed).toHaveProperty('credentials');
     expect(parsed).toHaveProperty('paths');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subprocess — an EXPLICIT --config file must exist and be readable.
+// Regression: bridgeConfigEnv treated the named file with the same tolerance as
+// the optional ambient layers, so a typo'd `--config /path/ci.evn` silently ran
+// on ambient config and reported success. Ambient tolerance (a missing
+// config.env/cli.env) must stay unchanged — the status tests above prove that.
+// ---------------------------------------------------------------------------
+
+describe('CLI subprocess — explicit --config must exist and be readable', () => {
+  it('a missing explicit --config exits 78 naming the path, on every command that accepts it', () => {
+    const missing = path.join(SUBPROCESS_HOME, 'no-such-dir', 'ci.evn');
+    for (const args of [
+      ['status', '--config', missing],
+      ['research', 'topic', '--config', missing],
+      ['knowledge', 'topic', '--config', missing],
+      ['knowledge-config', '--config', missing],
+    ]) {
+      const r = runCli(args);
+      expect(r.status, `command: ${args[0]}`).toBe(EXIT.CONFIG);
+      expect(r.stderr, `command: ${args[0]}`).toContain(missing);
+    }
+  });
+
+  it('an unreadable explicit --config exits 78 (POSIX permissions)', () => {
+    // chmod 0 is meaningless on Windows and a no-op for root.
+    if (process.platform === 'win32') return;
+    if (typeof process.getuid === 'function' && process.getuid() === 0) return;
+    const p = path.join(SUBPROCESS_HOME, 'unreadable.env');
+    writeFileSync(p, 'PI_RESEARCH_MODEL=prov/id\n', { mode: 0o000 });
+    try {
+      const r = runCli(['status', '--config', p]);
+      expect(r.status).toBe(EXIT.CONFIG);
+      expect(r.stderr).toContain(p);
+    } finally {
+      rmSync(p, { force: true });
+    }
+  });
+
+  it('an existing, readable explicit --config still applies (status stays 0)', () => {
+    const p = path.join(SUBPROCESS_HOME, 'ok.env');
+    writeFileSync(p, 'PI_RESEARCH_MODEL=prov/id\n', 'utf-8');
+    try {
+      const r = runCli(['status', '--json', '--config', p]);
+      expect(r.status).toBe(0);
+      expect(JSON.parse(r.stdout).credentials.model).toBe('prov/id');
+    } finally {
+      rmSync(p, { force: true });
+    }
   });
 });
 

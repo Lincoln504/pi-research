@@ -353,6 +353,11 @@ function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
 
   return nvdCircuitBreaker.execute(async () => {
     return retryWithBackoff(async () => {
+      // Every attempt — the first AND each 2s/4s retry — must hold a rate-limiter
+      // slot: the limiter's spacing is the ONLY mechanism enforcing NVD's ~6s
+      // inter-request interval (the post-sweep sleep was removed), and an acquire
+      // outside this closure let 429/5xx retries re-hit the API faster than it.
+      await nvdRateLimiter.acquire(signal);
       let response: Response;
       try {
         response = await fetch(url, createFetchOptions(signal));
@@ -392,8 +397,8 @@ async function fetchPaginated(
     if (signal?.aborted) break; // stop paginating promptly on cancel
     const url = buildURL(term, options, pageSize, startIndex, severityVersion);
 
-    await nvdRateLimiter.acquire(signal);
-
+    // No acquire here: fetchWithRetry acquires a rate-limiter slot per ATTEMPT,
+    // so retries are spaced too — a second acquire would double-charge the page.
     const response = await fetchWithRetry(url, signal);
     let data: unknown;
     try {

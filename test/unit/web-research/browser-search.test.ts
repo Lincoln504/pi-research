@@ -138,6 +138,12 @@ describe('browser-search', () => {
       expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, expect.any(AbortSignal), 1, undefined, expect.any(Object));
     });
 
+    it('passes sessionId through to runWorkerSearch so the per-session circuit breaker applies', async () => {
+      await performSearch(['test'], undefined, undefined, undefined, undefined, undefined, 'pisess-abcd1234');
+
+      expect(runWorkerSearch).toHaveBeenCalledWith('test', undefined, expect.any(AbortSignal), 1, 'pisess-abcd1234', expect.any(Object));
+    });
+
     it('should use max workers from browser-manager', async () => {
       vi.mocked(getMaxWorkers).mockReturnValue(8);
 

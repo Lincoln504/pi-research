@@ -282,6 +282,66 @@ describe('Embedder WebGPU Fallback', () => {
     await embedder.dispose();
   }, 20_000);
 
+  it('runtime device loss drains a caller parked on the per-call GPU lock before disposing the pipeline', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    // stateManager whose PER-CALL lock we can park caller B on. The init-time
+    // acquire (30s timeout) and every later acquire resolve immediately.
+    let releaseLock!: (v: boolean) => void;
+    const parkedLock = new Promise<boolean>(resolve => { releaseLock = resolve; });
+    let perCallAcquires = 0;
+    const stateManager = {
+      acquireGpuLock: vi.fn(async (_owner?: unknown, timeoutMs?: number) => {
+        if (timeoutMs === 15_000) {
+          perCallAcquires++;
+          if (perCallAcquires === 1) return parkedLock; // B parks here
+        }
+        return true;
+      }),
+      releaseGpuLock: vi.fn(async () => {}),
+    } as any;
+
+    const embedder = new Embedder({ model: 'test-model', device: 'webgpu', stateManager });
+    await embedder.initialize();
+    expect(embedder.getDevice()).toBe('webgpu');
+
+    // Recovery's CPU reload is parked so the pre-fix pipeline-null window stays
+    // open long enough for B to hit it deterministically.
+    let releaseRecoveryLoad!: () => void;
+    const parkedRecoveryLoad = new Promise<void>(resolve => { releaseRecoveryLoad = resolve; });
+    vi.mocked(pipeline).mockImplementationOnce(async () => {
+      await parkedRecoveryLoad;
+      return mockPipelineFn as any;
+    });
+    // A's inference dies with a device error; B never reaches the model before then.
+    vi.mocked(mockPipelineFn).mockRejectedValueOnce(new Error('WebGPU device lost'));
+
+    const embedB = embedder.embed('b'); // holds its activeEmbeddings slot, parked on the lock
+    await vi.waitFor(() => expect(perCallAcquires).toBe(1));
+    const embedA = embedder.embed('a'); // acquires the lock, fails, starts recovery
+    await vi.waitFor(() => expect((embedder as any).recoveryPromise).not.toBeNull());
+
+    try {
+      // Let the drain loop take a few ticks, then release B. Pre-fix the drain
+      // counted only activeInferences (0 — A's inference already threw, B never
+      // started one), so the pipeline was already disposed+nulled under B and its
+      // embed rejected unrecovered, masking the device loss. The fixed drain
+      // (activeEmbeddings - recoveryWaiters > 1) holds disposal until B finishes
+      // against the still-live pipeline.
+      await new Promise(resolve => setTimeout(resolve, 150));
+      releaseLock(true);
+      await expect(embedB).resolves.toBeInstanceOf(Float32Array);
+    } finally {
+      releaseRecoveryLoad();
+      await embedA.catch(() => { /* settled either way — no dangling rejection */ });
+      await embedder.dispose();
+    }
+
+    // A itself recovered onto CPU once the drain and reload completed.
+    await expect(embedA).resolves.toBeInstanceOf(Float32Array);
+    expect(embedder.getDevice()).toBe('cpu');
+  }, 20_000);
+
   it('should handle CPU fallback warmup failure', async () => {
     const { pipeline } = await import('@huggingface/transformers');
     

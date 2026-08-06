@@ -36,12 +36,17 @@ export class DiskSpaceChecker {
       if (availableBytes < this.MIN_DISK_SPACE_BYTES) {
         this.hasDiskSpace = false;
         // Write directly to stderr — this check runs inside the logger itself,
-        // so using the logger here would create a circular dependency.
-        process.stderr.write(
-          `[pi-research] Insufficient disk space for logging: ` +
-          `${Math.round(availableBytes / 1024 / 1024)}MB available, ` +
-          `minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required\n`
-        );
+        // so using the logger here would create a circular dependency. Guarded:
+        // when the parent has already closed the pipe, a bare write throws
+        // EPIPE/ERR_STREAM_DESTROYED and (with no global uncaughtException
+        // handler in the main process) would crash the run over a diagnostic.
+        try {
+          process.stderr.write(
+            `[pi-research] Insufficient disk space for logging: ` +
+            `${Math.round(availableBytes / 1024 / 1024)}MB available, ` +
+            `minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required\n`
+          );
+        } catch { /* stderr gone — the flag above already halts log writes */ }
       } else {
         this.hasDiskSpace = true;
       }

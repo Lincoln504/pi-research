@@ -117,6 +117,28 @@ export function createSecuritySearchTool(options: {
           details: { error: 'unknown_databases', requested: p.databases, validDatabases: VALID_DATABASES },
         };
       }
+      // Normalize the severity filter at the single dispatch chokepoint (schema
+      // accepts free text). Only NVD's path normalized (security/index.ts
+      // getSeverityParam): GitHub/OSV received the raw string, so "med" or
+      // "HIGH,CRITICAL" ran NVD unfiltered while their strict filters silently
+      // returned zero. An unrecognized value must fail loudly BEFORE any database
+      // is queried rather than let the databases silently diverge.
+      const VALID_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+      let severity: string | undefined;
+      if (p.severity !== undefined) {
+        const upper = p.severity.trim().toUpperCase();
+        severity = upper === 'MODERATE' ? 'MEDIUM' : upper;
+        if (!(VALID_SEVERITIES as readonly string[]).includes(severity)) {
+          metrics.increment('tool_security_search_calls_total', 1, { status: 'invalid_severity' });
+          return {
+            content: [{
+              type: 'text',
+              text: `[Error] Unknown severity "${p.severity}" — valid: LOW, MEDIUM, HIGH, CRITICAL (MODERATE accepted as MEDIUM). No databases were queried.`,
+            }],
+            details: { error: 'invalid_severity', requested: p.severity, validSeverities: VALID_SEVERITIES },
+          };
+        }
+      }
       const maxResults = p.maxResults ?? 20;
 
       metrics.increment('tool_security_search_terms_total', terms.length);
@@ -127,7 +149,7 @@ export function createSecuritySearchTool(options: {
         const searchParams: SecuritySearchParams = {
           terms,
           databases,
-          severity: p.severity,
+          severity,
           maxResults,
           includeExploited: p.includeExploited ?? false,
           ecosystem: p.ecosystem,
@@ -189,7 +211,13 @@ export function createSecuritySearchTool(options: {
         markdown += '## NIST NVD\n\n';
         if (results.results.nvd.error !== undefined) {
           markdown += `[Error] ${results.results.nvd.error}\n\n`;
-        } else {
+        }
+        // Partial failures: the clients deliberately return whatever they fetched
+        // PLUS an error annotation (e.g. "NVD lookup failed for 1/2 term(s)"), so
+        // the data must render alongside the [Error] line — the header's totals
+        // already count it. Only a total failure (error with zero rows) stays
+        // error-only, so it can't read as an authoritative "found nothing".
+        if (results.results.nvd.error === undefined || results.results.nvd.vulnerabilities.length > 0) {
           markdown += `Found: ${results.results.nvd.count} vulnerabilities\n\n`;
           for (const vuln of results.results.nvd.vulnerabilities.slice(0, 20)) {
             markdown += `### ${vuln.id}\n`;
@@ -229,7 +257,9 @@ export function createSecuritySearchTool(options: {
         markdown += '## CISA Known Exploited Vulnerabilities\n\n';
         if (results.results.cisa_kev.error !== undefined) {
           markdown += `[Error] ${results.results.cisa_kev.error}\n\n`;
-        } else {
+        }
+        // Partial failure: render the data alongside the error (see NVD section).
+        if (results.results.cisa_kev.error === undefined || results.results.cisa_kev.vulnerabilities.length > 0) {
           markdown += `Found: ${results.results.cisa_kev.count} actively exploited vulnerabilities\n\n`;
           for (const vuln of results.results.cisa_kev.vulnerabilities.slice(0, 20)) {
             markdown += `### ${vuln.id}\n`;
@@ -262,8 +292,16 @@ export function createSecuritySearchTool(options: {
         markdown += '## GitHub Security Advisories\n\n';
         if (results.results.github.error !== undefined) {
           markdown += `[Error] ${results.results.github.error}\n\n`;
-        } else {
+        }
+        // Partial failure: render the data alongside the error (see NVD section).
+        if (results.results.github.error === undefined || results.results.github.advisories.length > 0) {
           markdown += `Found: ${results.results.github.count} advisories\n\n`;
+          if (p.includeExploited === true) {
+            // includeExploited reaches only NVD (hasKev) and CISA KEV (inherently
+            // exploited-only); GitHub carries no exploitation signal, so these
+            // results are NOT filtered by it — say so rather than imply they were.
+            markdown += '*Note: GitHub Advisories are not filtered by known-exploitation — that signal exists only in NVD and CISA KEV.*\n\n';
+          }
           for (const adv of results.results.github.advisories.slice(0, 20)) {
             markdown += `### ${adv.id}\n`;
             markdown += `- **Severity:** ${adv.severity}\n`;
@@ -294,8 +332,14 @@ export function createSecuritySearchTool(options: {
         markdown += '## Open Source Vulnerabilities (OSV)\n\n';
         if (results.results.osv.error !== undefined) {
           markdown += `[Error] ${results.results.osv.error}\n\n`;
-        } else {
+        }
+        // Partial failure: render the data alongside the error (see NVD section).
+        if (results.results.osv.error === undefined || results.results.osv.vulnerabilities.length > 0) {
           markdown += `Found: ${results.results.osv.count} vulnerabilities\n\n`;
+          if (p.includeExploited === true) {
+            // Same caveat as GitHub: OSV carries no exploitation signal.
+            markdown += '*Note: OSV results are not filtered by known-exploitation — that signal exists only in NVD and CISA KEV.*\n\n';
+          }
           for (const vuln of results.results.osv.vulnerabilities.slice(0, 20)) {
             markdown += `### ${vuln.id}\n`;
             markdown += `- **Severity:** ${vuln.severity}\n`;

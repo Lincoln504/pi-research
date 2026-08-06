@@ -23,6 +23,9 @@ import type { ServiceContainer } from '../core/service-registry.ts';
  * @param config - Optional configuration override
  * @param signal - Optional AbortSignal
  * @param onProgress - Optional callback with cumulative link count across completed queries
+ * @param container - Service container for scheduler resolution
+ * @param sessionId - Research/session id keying the per-session circuit breaker
+ *   (mirrors the scrape path); undefined callers share the global breaker
  * @returns Promise<QueryResultWithError[]> - Array of search results with error information
  */
 export async function search(
@@ -30,7 +33,8 @@ export async function search(
   config?: Config,
   signal?: AbortSignal,
   onProgress?: (links: number) => void,
-  container: ServiceContainer = getServiceContainer()
+  container: ServiceContainer = getServiceContainer(),
+  sessionId?: string
 ): Promise<QueryResultWithError[]> {
   if (queries.length === 0) return [];
   
@@ -42,7 +46,7 @@ export async function search(
     // Per-query failures (timeout / dead worker) come back separately from the
     // results so an empty result set can be attributed correctly below.
     const failures = new Map<string, QueryFailure>();
-    const resultMap = await performSearch(queries, config, signal, onProgress, container, failures);
+    const resultMap = await performSearch(queries, config, signal, onProgress, container, failures, sessionId);
     const searchDuration = Date.now() - searchStart;
     metrics.observe('search_latency_ms', searchDuration);
     

@@ -86,6 +86,11 @@ const MAX_LOG_MESSAGE_LENGTH = 10_000;
 const ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
 // Credentials embedded in a URL userinfo component: scheme://user:pass@host
 const URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
+// Cookie / Set-Cookie headers. The KV value class below stops at whitespace, so
+// "Cookie: lang=en; SID=secret123" would mask only the first pair and leave every
+// later one exposed. A cookie string is a ;-and-space separated list of secrets,
+// not a single token — mask the ENTIRE header value to end-of-line.
+const COOKIE_HEADER_PATTERN = /\b(set[_-]?cookie|cookie)\b(["']?\s*[:=]\s*["']?)([^\r\n]+)/gi;
 // key=value / key: "value" pairs whose key names a secret.
 const SENSITIVE_KV_PATTERN =
   /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
@@ -137,11 +142,46 @@ export function redactSecrets(message: string): string {
   // Before the KV pass, for the same reason as Basic above: the KV value class
   // stops at the space after "Bearer", leaving an opaque token exposed.
   out = out.replace(BEARER_AUTH_PATTERN, 'Bearer [REDACTED]');
+  // Whole-header cookie masking before the KV pass, which would otherwise stop
+  // at the first whitespace and leave every subsequent pair in the clear.
+  out = out.replace(COOKIE_HEADER_PATTERN, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
   out = out.replace(SENSITIVE_KV_PATTERN, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
   out = out.replace(KNOWN_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(PROVIDER_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(LONG_HEX_SECRET_PATTERN, '[REDACTED]');
   return out;
+}
+
+// Every ESC-initiated terminal sequence — not just the colour/style CSI subset
+// ANSI_PATTERN strips. Alternatives, tried in order at each ESC:
+//   1. CSI with parameter (incl. private-mode `?`), intermediate, and final
+//      bytes per ECMA-48 — catches \x1b[?25l (hide cursor) and kin.
+//   2. OSC to BEL or ST (or truncated) — catches \x1b]0;title\x07 retitling.
+//   3. DCS/SOS/PM/APC to ST (or truncated).
+//   4. Bare ESC plus at most one byte — the fallback that also swallows a
+//      trailing/truncated ESC rather than leaking it.
+// (Built from strings, so no-control-regex has nothing to flag here.)
+const TERMINAL_ESCAPE_PATTERN = new RegExp(
+  '\\x1b\\[[0-?]*[ -/]*[@-~]?' +
+  '|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)?' +
+  '|\\x1b[PX^_][^\\x1b]*(?:\\x1b\\\\)?' +
+  '|\\x1b.?',
+  'g',
+);
+
+/**
+ * Strip terminal escape sequences and residual control bytes from a line bound
+ * for the CONSOLE sink. redactSecrets' ANSI_PATTERN removes only plain CSI
+ * colour/style sequences, so private-mode CSI (\x1b[?25l), OSC window-retitling
+ * (\x1b]0;…\x07), and DCS/SOS/PM/APC embedded in untrusted content would
+ * otherwise reach the user's terminal verbatim under PI_RESEARCH_CONSOLE_LOG.
+ * The console sink keeps its own explicit CR/LF→"" replace (the form CodeQL
+ * recognizes as the log-injection sanitizer); this handles everything else,
+ * spacing out any leftover C0/DEL byte (BEL, backspace, …) like
+ * neutralizeControlChars does.
+ */
+export function stripTerminalEscapes(message: string): string {
+  return message.replace(TERMINAL_ESCAPE_PATTERN, '').replace(CONTROL_CHARS_PATTERN, ' ');
 }
 
 /**

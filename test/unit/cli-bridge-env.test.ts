@@ -21,7 +21,7 @@ vi.mock('../../src/utils/host-config.ts', () => ({
   getConfigDirName: () => FIXTURE_DIR_NAME,
 }));
 
-import { bridgeConfigEnv } from '../../src/cli.ts';
+import { bridgeConfigEnv, ConfigFileError } from '../../src/cli.ts';
 
 describe('bridgeConfigEnv precedence', () => {
   it('cli.env overlay overrides config.env base; base still fills unshadowed keys', () => {
@@ -86,6 +86,24 @@ describe('bridgeConfigEnv precedence', () => {
       else process.env['PI_RESEARCH_MODEL'] = savedModel;
       if (savedMode === undefined) delete process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
       else process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = savedMode;
+    }
+  });
+
+  it('a missing EXPLICIT --config file throws ConfigFileError; missing ambient files stay tolerated', () => {
+    // Regression: the explicit file got the same existsSync-continue tolerance as
+    // the optional ambient layers, so a typo'd --config path silently ran the
+    // command on ambient config and reported success.
+    const researchDir = path.join(os.homedir(), FIXTURE_DIR_NAME, 'research');
+    try {
+      mkdirSync(researchDir, { recursive: true });
+      const missing = path.join(researchDir, 'ci.evn');
+      expect(() => bridgeConfigEnv(missing)).toThrow(ConfigFileError);
+      expect(() => bridgeConfigEnv(missing)).toThrow(missing);
+      // Ambient layers absent is not an error — the bridge just reports nothing loaded.
+      expect(() => bridgeConfigEnv()).not.toThrow();
+      expect(bridgeConfigEnv().loaded).toBe(false);
+    } finally {
+      rmSync(path.join(os.homedir(), FIXTURE_DIR_NAME), { recursive: true, force: true });
     }
   });
 

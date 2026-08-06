@@ -304,6 +304,14 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
 
       if (this._embedder) {
         await this._embedder.dispose?.();
+        // The embedding factory's module-level cache still points at the instance
+        // just disposed — its fast path has no liveness check, so a later re-init
+        // (cwd/mode re-scope) would be handed the dead instance and burn every
+        // warm-up/init retry on it. clearEmbeddingInstance() re-disposes
+        // (idempotent) and nulls the cache; when this process was the leader, its
+        // shutdown deregisters via the serverId CAS, and a client instance's
+        // dispose is a no-op — a FOREIGN leader's registration is never touched.
+        await clearEmbeddingInstance();
       }
 
       if (this._initLock) {

@@ -217,12 +217,28 @@ export function readManifest(opts?: { home?: string }): Manifest {
   return { version: 1, package: PACKAGE_NAME, entries: [] };
 }
 
+/** Monotonic per-process suffix for manifest tmp files (see writeManifest). */
+let manifestTmpSeq = 0;
+
 function writeManifest(manifest: Manifest, opts?: { home?: string }): void {
   const p = getManifestPath(opts);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  const tmp = `${p}.tmp`;
+  // Unique tmp name (pid + timestamp + counter, mirroring config.ts's registry
+  // writer): a FIXED `${p}.tmp` was a shared collision surface — concurrent
+  // runs' reconciles (the run cap allows 3 live runs) staged through the same
+  // path, the winner renamed it away, and the loser's renameSync threw ENOENT,
+  // surfacing as a spurious skill-install error. The read-modify-write around
+  // this stays deliberately UNLOCKED: a lost update is self-healing churn (the
+  // next reconcile re-derives the same state from disk), unlike the hard
+  // failure a tmp-name collision caused.
+  const tmp = `${p}.tmp.${process.pid}.${Date.now()}.${manifestTmpSeq++}`;
   fs.writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
-  fs.renameSync(tmp, p);
+  try {
+    fs.renameSync(tmp, p);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+    throw err;
+  }
 }
 
 function upsertEntry(manifest: Manifest, entry: ManifestEntry): void {

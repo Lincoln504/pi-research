@@ -95,16 +95,32 @@ export interface HealthMonitor {
 
 export function createHealthMonitor(): HealthMonitor {
   let timer: NodeJS.Timeout | null = null;
+  // Critical components already warned this run, so a persistently failing check
+  // logs once rather than on every 30s tick.
+  const warnedCritical = new Set<string>();
 
   const start = () => {
     if (timer) return;
-    
+    warnedCritical.clear();
+
+    // Note: the registry API (runAll) only supports { force } — there is no surface
+    // for selecting/skipping individual checks, so each tick runs the full set
+    // (including the real BrowserRuntime page-load probe when the pool is active).
     timer = setInterval(async () => {
       try {
         const health = await healthRegistry.runAll();
-        const failedNonCritical = health.components.filter(c => !c.healthy && !healthRegistry.isCritical(c.component));
+        const failed = health.components.filter(c => !c.healthy);
+        const failedNonCritical = failed.filter(c => !healthRegistry.isCritical(c.component));
         if (failedNonCritical.length > 0) {
           logger.warn(`[research] Periodic health check: non-critical components degraded: ${failedNonCritical.map(c => c.component).join(', ')}`);
+        }
+        // Critical failures are worth surfacing too — the run itself keeps going
+        // (per-task timeouts bound the real work), but silently burning probes while
+        // a critical component is down left the monitor with no output at all.
+        for (const c of failed.filter(f => healthRegistry.isCritical(f.component))) {
+          if (warnedCritical.has(c.component)) continue;
+          warnedCritical.add(c.component);
+          logger.warn(`[research] Periodic health check: critical component unhealthy mid-run: ${c.component}${c.error ? ` (${c.error})` : ''}`);
         }
       } catch (error) {
         logger.debug('[research] Periodic health check failed (non-blocking):', error);

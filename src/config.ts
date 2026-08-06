@@ -303,6 +303,33 @@ function sleepSync(ms: number): void {
  * `mutate` receives the latest on-disk registry and edits it in place.
  */
 /**
+ * Age past which a leftover reclaim file (see the failed-restore branch below) is
+ * swept. Well beyond the 30s lock-staleness threshold, so a reclaim file another
+ * contender is still inspecting mid-steal is never yanked out from under it.
+ */
+const RECLAIM_FILE_SWEEP_AGE_MS = 120_000;
+
+/**
+ * Sweep reclaim files left behind by an earlier steal whose ABA restore lost the
+ * path race (that branch leaves them in place ON PURPOSE — see below). Runs only
+ * at steal time, which is already the rare contended path, so normal acquires
+ * pay nothing.
+ */
+function sweepLeftoverReclaimFiles(lockPath: string): void {
+  try {
+    const dir = path.dirname(lockPath);
+    const prefix = `${path.basename(lockPath)}.stale-`;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.startsWith(prefix)) continue;
+      const p = path.join(dir, name);
+      try {
+        if (Date.now() - fs.statSync(p).mtimeMs > RECLAIM_FILE_SWEEP_AGE_MS) fs.unlinkSync(p);
+      } catch { /* raced with another sweeper — ignore */ }
+    }
+  } catch { /* hygiene only — never block the steal */ }
+}
+
+/**
  * Reclaim a lock file already judged stale, without the unlink race.
  *
  * A direct `unlinkSync(lockPath)` lets two contenders both judge the SAME lock
@@ -317,6 +344,7 @@ function sleepSync(ms: number): void {
  * never grants the lock, it only makes the steal single-winner.
  */
 function stealStaleLock(lockPath: string, judgedStale: fs.Stats): void {
+  sweepLeftoverReclaimFiles(lockPath);
   const reclaimPath = `${lockPath}.stale-${process.pid}-${Date.now()}`;
   try {
     fs.renameSync(lockPath, reclaimPath);
@@ -327,11 +355,28 @@ function stealStaleLock(lockPath: string, judgedStale: fs.Stats): void {
     const claimed = fs.statSync(reclaimPath);
     if (claimed.ino !== judgedStale.ino) {
       // We grabbed a lock created after our staleness judgment — put it back.
-      try { fs.linkSync(reclaimPath, lockPath); } catch { /* a newer lock holds the path */ }
+      try {
+        fs.linkSync(reclaimPath, lockPath);
+      } catch {
+        // A newer lock claimed the path before the restore (EEXIST). Do NOT
+        // unlink the reclaim file: it is the displaced FRESH lock's inode —
+        // falling through to the unlink below permanently destroyed a live
+        // holder's lock (and the post-mortem evidence of this race). Leaving it
+        // costs one stale file, collected by the age-gated sweep above.
+        return;
+      }
     }
   } catch { /* ignore */ }
   try { fs.unlinkSync(reclaimPath); } catch { /* ignore */ }
 }
+
+/**
+ * Test seam: stealStaleLock's race windows (a contender's O_EXCL create landing
+ * between the rename and the linkSync restore) cannot be interleaved through the
+ * public save/update API — the code is synchronous with no yield points — so
+ * tests drive the helper directly.
+ */
+export const _stealStaleLockForTests = stealStaleLock;
 
 function updateProjectSettingsRegistry(mutate: (registry: Record<string, Record<string, string>>) => void): void {
   const registryPath = getProjectSettingsRegistryPath();

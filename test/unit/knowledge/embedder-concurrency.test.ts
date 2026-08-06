@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Embedder } from '../../../src/knowledge/embedder.ts';
+import { isEmbedderUnreachable } from '../../../src/knowledge/embedder-utils.ts';
 import { pipeline } from '@huggingface/transformers';
 
 // Mock dependencies
@@ -52,6 +53,55 @@ describe('Embedder Concurrency & Lifecycle', () => {
 
     expect((embedder as any).state).toBe('idle');
     expect((embedder as any).pipeline).toBeNull();
+  });
+
+  it('a terminal dispose racing an embed parked on init waits for that embed instead of nulling the pipeline under it', async () => {
+    const embedder = new Embedder({ model: 'test-model', device: 'cpu' });
+
+    // Block the pipeline load so the embed's initialize() is verifiably in
+    // flight when dispose() starts.
+    let releaseLoad!: () => void;
+    const blockedLoad = new Promise<void>(resolve => { releaseLoad = resolve; });
+    vi.mocked(pipeline).mockImplementationOnce(async () => {
+      await blockedLoad;
+      return vi.fn().mockResolvedValue({ dims: [384], data: new Float32Array(384).fill(0.1) }) as any;
+    });
+
+    // The embed increments activeEmbeddings only AFTER init resolves — i.e.
+    // after dispose()'s first drain has already passed with a count of 0.
+    const embedA = embedder.embed('parked on init');
+    await vi.waitFor(() => expect((embedder as any).initializingPromise).not.toBeNull());
+    const disposeP = embedder.dispose();
+    releaseLoad();
+
+    // Pre-fix, dispose's continuation nulled the pipeline synchronously after
+    // awaiting init (initialize()'s disposed-mid-init branch returns cleanly),
+    // so the parked embed dereferenced a null pipeline and rejected. The re-drain
+    // must let it finish against the still-live pipeline first.
+    await expect(embedA).resolves.toBeInstanceOf(Float32Array);
+    await disposeP;
+
+    expect((embedder as any).state).toBe('idle');
+    expect((embedder as any).pipeline).toBeNull();
+  });
+
+  it('a null-pipeline race surfaces as a reconnect-classified error, not a bare TypeError', async () => {
+    const embedder = new Embedder({ model: 'test-model', device: 'cpu' });
+    await embedder.initialize();
+
+    // Simulate the narrow interleaving where a disposal/recovery nulled the
+    // pipeline between an embed passing its guards and runInference
+    // dereferencing it.
+    (embedder as any).pipeline = null;
+
+    const err = await embedder.embed('x').catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(TypeError);
+    // The writer queue only retries what the reconnect classifier recognizes —
+    // a bare TypeError was dropped as a generic ingest_error.
+    expect(isEmbedderUnreachable(err)).toBe(true);
+
+    await embedder.dispose();
   });
 
   it('activeEmbeddings counter increments during embed and decrements on completion', async () => {

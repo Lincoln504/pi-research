@@ -195,7 +195,18 @@ export class ResearchRunSemaphore implements IService {
     try {
       await slot.initialize(); // resolves own startTime (cached) + startup stale cleanup
       await slot.acquireLock(); // try-take: wins, reclaims a dead owner, or throws fast
-    } catch {
+    } catch (err) {
+      // Contention and breakage are different outcomes and must not be conflated.
+      // FileLockService synthesizes its own Errors (no errno code) for the two
+      // contention shapes a try-take produces — a live-contended slot ("timeout
+      // after 0ms", cause EEXIST) and a lost reclaim race ("after N retries") —
+      // and those genuinely mean "slot busy". A real I/O failure (ENOENT/EACCES/
+      // ENOSPC: the slot file is uncreatable; both mkdirs are warn-only) instead
+      // propagates the raw errno error. Swallowing that as "busy" would poll out
+      // the whole acquire window and reject with a FALSE ResearchRunCapacityError,
+      // making the documented fail-open contract (research proceeds when the
+      // semaphore is broken) unreachable. Rethrow so acquire() can tell them apart.
+      if (typeof (err as NodeJS.ErrnoException | null)?.code === 'string') throw err;
       return null; // busy (live owner) or lost a reclaim race — try the next slot
     }
     return {
@@ -246,16 +257,39 @@ export class ResearchRunSemaphore implements IService {
       // Round-robin from a rotating start so contending processes don't synchronize on slot 0.
       const start = this.nextStartIndex;
       this.nextStartIndex = (this.nextStartIndex + 1) % this.maxSlots;
+      // Slot BREAKAGE (I/O error) is tracked separately from contention within
+      // this sweep — a broken slot must never be reported as a busy one.
+      let brokenSlots = 0;
+      let firstBreakage: unknown = null;
       for (let offset = 0; offset < this.maxSlots; offset++) {
         const i = (start + offset) % this.maxSlots;
-        const got = await this.trySlot(i);
+        let got: RunSlotAcquisition | null;
+        try {
+          got = await this.trySlot(i);
+        } catch (err) {
+          // This slot is broken, not busy. Keep sweeping — another slot may still
+          // be acquirable (mixed case: slot 0 uncreatable, slot 1 free).
+          brokenSlots++;
+          firstBreakage ??= err;
+          logger.debug(`[ResearchRunSemaphore] Slot ${i} errored (broken, not busy): ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
         if (got) {
           metrics.setGauge('research_run_slots_held', 1, { slot: String(i) });
           metrics.increment('research_run_acquire_total', 1, { status: 'acquired' });
           return got;
         }
       }
-      // Every slot is held by a live process.
+      // EVERY slot errored: the semaphore itself is broken, not at capacity.
+      // Waiting cannot help — nothing is held that could free up — and a
+      // ResearchRunCapacityError here would misclassify breakage as retryable
+      // contention while the caller's fail-open path (research proceeds without
+      // the cap) stays unreachable. Rethrow the I/O error instead.
+      if (brokenSlots === this.maxSlots) {
+        metrics.increment('research_run_acquire_total', 1, { status: 'error' });
+        throw firstBreakage;
+      }
+      // Every remaining slot is held by a live process.
       if (Date.now() >= deadline) {
         metrics.increment('research_run_acquire_total', 1, { status: 'exhausted' });
         throw new ResearchRunCapacityError(this.maxSlots, maxWaitMs);

@@ -16,6 +16,14 @@ vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {
   };
 });
 
+// Spy wrapper (behavior preserved): lets tests assert the wait sleep's timer is
+// never unref'd — during a 'wait' that timer is the run's SOLE pending handle,
+// so an unref'd one lets the process drain its event loop and exit 0 mid-run.
+vi.mock('../../../src/utils/safe-unref.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/utils/safe-unref.ts')>();
+  return { ...actual, safeUnref: vi.fn(actual.safeUnref) };
+});
+
 // Mock dependencies
 vi.mock('../../../src/logger.ts', () => ({
   logger: {
@@ -158,6 +166,35 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
       const result = await runPromise;
       expect(result).toBe('Success');
       expect(call).toBe(2);
+    });
+  });
+
+  describe('Wait Sleep Liveness', () => {
+    it('keeps the 5s wait timer REFERENCED — never unref\'d', async () => {
+      // Regression (unref'd-semaphore incident class): the wait sleep IS the
+      // run's only pending operation at that moment. safeUnref on it let Node
+      // drain the event loop and exit 0 silently mid-run when no other
+      // referenced handle existed.
+      vi.useFakeTimers();
+      const { safeUnref } = await import('../../../src/utils/safe-unref.ts');
+      vi.mocked(safeUnref).mockClear();
+
+      let call = 0;
+      mockPlanningService.generatePlan.mockImplementation(async () => {
+        call++;
+        if (call === 1) return { action: 'wait' };
+        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
+      });
+      mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'ok' });
+
+      const orchestrator = new DeepResearchOrchestrator(baseOptions);
+      const runPromise = orchestrator.run();
+
+      await vi.advanceTimersByTimeAsync(5000); // resolves the wait sleep
+      await vi.runAllTimersAsync();
+      await runPromise;
+
+      expect(vi.mocked(safeUnref)).not.toHaveBeenCalled();
     });
   });
 

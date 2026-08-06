@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { EmbeddingServer, _SerialQueue, getEmbeddingServerAuthSecret } from '../../../src/infrastructure/embedding/embedding-server';
+import { hasWebGpuFallback, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedder-utils';
 import type { IStateManager } from '../../../src/core/interfaces/state-manager-interfaces';
 import type { Embedder } from '../../../src/knowledge/embedder';
 
@@ -147,11 +148,12 @@ describe('EmbeddingServer', () => {
 
   describe('handleRequest — headers-sent guard in the catch path', () => {
     it('destroys the response instead of writeHead(500) when headers were already sent', async () => {
-      // JSON.stringify(BigInt) throws — but only AFTER res.writeHead(200) has
-      // already been called: the exact partially-sent-response case. Pre-fix,
-      // the catch block's writeHead(500) threw ERR_HTTP_HEADERS_SENT inside the
-      // async 'end' listener (an unhandledRejection in the leader process).
-      const embedder = { embed: vi.fn().mockResolvedValue([1n]) } as any;
+      // res.end() throws AFTER res.writeHead(200) has already been called (a
+      // socket torn down mid-response): the exact partially-sent-response case.
+      // Pre-fix, the catch block's writeHead(500) threw ERR_HTTP_HEADERS_SENT
+      // inside the async 'end' listener (an unhandledRejection in the leader
+      // process).
+      const embedder = { embed: vi.fn().mockResolvedValue(new Float32Array([1])) } as any;
       const s = new EmbeddingServer(embedder, mockStateManager, 'headers-sent-test');
 
       const req = new EventEmitter() as any;
@@ -165,7 +167,7 @@ describe('EmbeddingServer', () => {
       const res: any = {
         headersSent: false,
         writeHead: vi.fn(() => { res.headersSent = true; }),
-        end: vi.fn(),
+        end: vi.fn(() => { throw new Error('socket torn down mid-response'); }),
         destroy: vi.fn(),
       };
 
@@ -177,7 +179,9 @@ describe('EmbeddingServer', () => {
       expect(res.writeHead).toHaveBeenCalledTimes(1);
       expect(res.writeHead).toHaveBeenCalledWith(200, expect.anything());
       expect(res.destroy).toHaveBeenCalledTimes(1);
-      expect(res.end).not.toHaveBeenCalled();
+      // res.end was the call that failed — the catch must not attempt a second
+      // (headers-sent) writeHead/end pair on top of it.
+      expect(res.end).toHaveBeenCalledTimes(1);
     });
 
     it('still writes a clean 500 when the failure happens before any header is sent', async () => {
@@ -208,6 +212,105 @@ describe('EmbeddingServer', () => {
       expect(res.writeHead).toHaveBeenCalledWith(500, expect.anything());
       expect(res.end).toHaveBeenCalledWith(JSON.stringify({ error: 'boom' }));
       expect(res.destroy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('non-finite embedding guard on the HTTP path', () => {
+    // Shared harness for handler-level requests (mirrors the headers-sent tests).
+    const makeReqRes = (url: string, payload: unknown) => {
+      const req = new EventEmitter() as any;
+      req.method = 'POST';
+      req.url = url;
+      // Requests are authorized before the body is read, so these post-auth
+      // paths must present the secret to reach the logic under test.
+      req.headers = { 'x-embedding-auth': getEmbeddingServerAuthSecret() };
+      req.resume = () => {};
+      const res: any = {
+        headersSent: false,
+        writeHead: vi.fn(() => { res.headersSent = true; }),
+        end: vi.fn(),
+        destroy: vi.fn(),
+      };
+      const drive = (s: EmbeddingServer) => {
+        const done = (s as any).handleRequest(req, res);
+        req.emit('data', Buffer.from(JSON.stringify(payload)));
+        req.emit('end');
+        return done;
+      };
+      return { req, res, drive };
+    };
+
+    it('fails /embed with an error response instead of serializing NaN (JSON null → client 0)', async () => {
+      // A device-lost mid-inference yields NaN entries. Pre-fix the server
+      // serialized them (JSON.stringify(NaN) → null) and the client's
+      // new Float32Array coerced null → 0 — a silently part-zeroed vector that
+      // passed the store's finite gate into the ANN index.
+      const embedder = { embed: vi.fn().mockResolvedValue(new Float32Array([0.1, NaN, 0.3])) } as any;
+      const s = new EmbeddingServer(embedder, mockStateManager, 'nan-embed-test');
+
+      const { res, drive } = makeReqRes('/embed', { text: 'hello' });
+      await drive(s);
+
+      expect(res.writeHead).toHaveBeenCalledTimes(1);
+      expect(res.writeHead).toHaveBeenCalledWith(500, expect.anything());
+      const body = JSON.parse(res.end.mock.calls[0][0]);
+      expect(body.error).toMatch(/non-finite/i);
+    });
+
+    it('fails /embedMany when ANY vector in the batch carries a non-finite entry', async () => {
+      const embedder = {
+        embedMany: vi.fn().mockResolvedValue([
+          new Float32Array([0.1, 0.2]),
+          new Float32Array([Infinity, 0.2]),
+        ]),
+      } as any;
+      const s = new EmbeddingServer(embedder, mockStateManager, 'nan-embedmany-test');
+
+      const { res, drive } = makeReqRes('/embedMany', { texts: ['a', 'b'] });
+      await drive(s);
+
+      expect(res.writeHead).toHaveBeenCalledWith(500, expect.anything());
+      const body = JSON.parse(res.end.mock.calls[0][0]);
+      expect(body.error).toMatch(/non-finite/i);
+    });
+
+    it('still serves fully finite vectors untouched', async () => {
+      const embedder = { embed: vi.fn().mockResolvedValue(new Float32Array([0.5, -0.5])) } as any;
+      const s = new EmbeddingServer(embedder, mockStateManager, 'finite-embed-test');
+
+      const { res, drive } = makeReqRes('/embed', { text: 'hello' });
+      await drive(s);
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.anything());
+      const body = JSON.parse(res.end.mock.calls[0][0]);
+      expect(body.data).toEqual([0.5, -0.5]);
+    });
+  });
+
+  describe('queue poisoning', () => {
+    it('latches the process-wide WebGPU fallback so a same-process re-election cannot re-init WebGPU beside the wedged GPU call', async () => {
+      resetWebGpuFallbackFlag();
+      try {
+        const onPoison = vi.fn();
+        const sm = {
+          getEmbeddingServer: vi.fn().mockResolvedValue(null),
+          clearEmbeddingServer: vi.fn().mockResolvedValue(undefined),
+        } as any;
+        const s = new EmbeddingServer({} as any, sm, 'poison-latch-test', onPoison);
+
+        expect(hasWebGpuFallback()).toBe(false);
+        (s as any).handleQueuePoisoned(new Error('SerialQueue: embed permanently hung — embedder poisoned; leader stepping down'));
+
+        // The hung native inference still holds the same-PID re-entrant GPU lock;
+        // the next getEmbedder() in THIS process must build on CPU, never WebGPU.
+        expect(hasWebGpuFallback()).toBe(true);
+        expect(onPoison).toHaveBeenCalledOnce();
+        // Existing step-down semantics kept: registration cleared, serving refused.
+        await vi.waitFor(() => expect(sm.clearEmbeddingServer).toHaveBeenCalled());
+        await expect(s.embed('x')).rejects.toThrow(/ECONNREFUSED/);
+      } finally {
+        resetWebGpuFallbackFlag();
+      }
     });
   });
 

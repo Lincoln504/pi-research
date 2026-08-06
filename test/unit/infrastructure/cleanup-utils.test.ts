@@ -345,6 +345,50 @@ describe('cleanup-utils', () => {
       }
     });
 
+    it('does not sweep unknowns through a pi-research-named SYMLINK whose target lacks the marker', async (ctx) => {
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
+
+      // The attack shape: a world-writable tmp dir where another user pre-created
+      // `pi-research…` as a symlink into a directory we do NOT own. The CONFIGURED
+      // path carries the pi-research segment, but the canonical target does not —
+      // approving the sweep by the configured name would recursively rm THROUGH
+      // the symlink into the victim directory.
+      const victimBase = path.join(os.tmpdir(), `cleanup-victim-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+      mkdirSync(victimBase, { recursive: true });
+      const link = path.join(os.tmpdir(), `pi-research-link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+      try {
+        try {
+          fs.symlinkSync(victimBase, link, 'dir');
+        } catch {
+          // Symlink creation needs privilege on Windows — skip VISIBLY there
+          // rather than return a silent green.
+          return ctx.skip();
+        }
+
+        const old = new Date(Date.now() - STALE_AGE_MS);
+        // A stale unknown entry in the VICTIM dir — previously deleted via the link.
+        const unknown = path.join(victimBase, 'user-data');
+        mkdirSync(unknown, { recursive: true });
+        writeFileSync(path.join(unknown, 'important.bin'), 'x');
+        utimesSync(unknown, old, old);
+        // A genuinely leaked prefix-matched profile: still reclaimed either way.
+        const leaked = path.join(victimBase, 'playwright_firefoxdev_profile-leak');
+        mkdirSync(leaked, { recursive: true });
+        writeFileSync(path.join(leaked, 'prefs.js'), '{}');
+        utimesSync(leaked, old, old);
+
+        const result = await cleanupStaleProfiles(link);
+
+        expect(fs.existsSync(unknown)).toBe(true);
+        expect(fs.existsSync(path.join(unknown, 'important.bin'))).toBe(true);
+        expect(fs.existsSync(leaked)).toBe(false);
+        expect(result.removed).toBe(1);
+      } finally {
+        try { fs.unlinkSync(link); } catch { /* may not exist */ }
+        rmSync(victimBase, { recursive: true, force: true });
+      }
+    });
+
     it('handles very old profiles (months old)', async () => {
       const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 

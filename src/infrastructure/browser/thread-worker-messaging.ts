@@ -8,6 +8,7 @@ let workerId: string = '';
 
 import { appendFileSync } from 'node:fs';
 import { redactSecrets } from '../../utils/log-utils.ts';
+import { MAX_HTML_SIZE, MAX_PDF_SIZE } from '../../web-research/scraper-types.ts';
 
 /**
  * Mutex lock to serialize page creation. Playwright/Firefox can deadlock if newPage()
@@ -458,10 +459,37 @@ export async function executeScrapeTask(
     }
 
     const contentType = (await response?.headerValue('content-type')) || '';
+    // HTTP status of the final navigation response. Never consulting it let
+    // 404/500/403 pages return as normal {contentType, html} results — major
+    // sites' rich error pages cleared the stub gate, were cached as scrape
+    // SUCCESS, and became citable. The fetch layer enforces !response.ok; this
+    // layer must match it (`HTTP <status>` is benign-classified per URL). The
+    // one legitimate exception is a Cloudflare challenge, which arrives with
+    // 403/503 — the HTML branch defers to the challenge wait below for that.
+    const status = response?.status?.() ?? 0;
 
     if (contentType.includes('application/pdf')) {
       if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
+      // An errored "PDF" is an error page: fail BEFORE buffering its body.
+      if (status >= 400) throw new Error(`HTTP ${status}`);
+      // Enforce the parent's PDF cap HERE, not only after the IPC transfer:
+      // buffering a multi-hundred-MB PDF (plus the base64 copy below) in the
+      // worker can OOM-kill the process — stranding every sibling task — or hit
+      // ERR_STRING_TOO_LONG. Content-Length first (free when present, and it
+      // skips the read entirely)...
+      const declaredLength = parseInt((await response.headerValue('content-length').catch(() => null)) || '', 10);
+      if (Number.isFinite(declaredLength) && declaredLength > MAX_PDF_SIZE) {
+        const sizeMB = Math.round(declaredLength / 1024 / 1024);
+        throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+      }
       const buffer = await response.body();
+      // ...then the actual bytes: the header is advisory and absent on chunked
+      // responses, so the byte count is the check that actually bounds memory.
+      // Checked BEFORE toString('base64') doubles the allocation.
+      if (buffer.byteLength > MAX_PDF_SIZE) {
+        const sizeMB = Math.round(buffer.byteLength / 1024 / 1024);
+        throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+      }
       // Discard the bytes if any observed response came from a private address.
       await Promise.allSettled(pendingAddrChecks);
       if (poisonedError) throw poisonedError;
@@ -480,6 +508,15 @@ export async function executeScrapeTask(
     // DETECT CLOUDFLARE CHALLENGE
     const cfPatterns = ['_cf_chl_', 'cdn-cgi/challenge-platform', 'cf_chl_opt', 'Just a moment...', 'Checking your browser before accessing'];
     const hasCloudflare = cfPatterns.some((pattern: string) => html.includes(pattern));
+
+    // HTTP-error enforcement for HTML (see the PDF branch above). A Cloudflare
+    // challenge legitimately arrives with 403/503 and the wait below may clear
+    // it to the real page, so a challenged response defers to that wait — whose
+    // failure path already throws its own 'Fetch blocked:' error. Everything
+    // else with a 4xx/5xx status is an error page, not content.
+    if (status >= 400 && !hasCloudflare) {
+      throw new Error(`HTTP ${status}`);
+    }
 
     if (hasCloudflare) {
       logToDebugFile('WARN', `[Worker-${workerId}] Cloudflare challenge detected for: ${url}`);
@@ -524,6 +561,16 @@ export async function executeScrapeTask(
     if (needsWait) {
       await page.waitForLoadState('networkidle', { timeout: 10000 }).catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
       html = await page.content();
+    }
+
+    // Enforce the parent's rendered-HTML cap worker-side, BEFORE the string
+    // crosses JSON IPC (and, for followers, a second JSON hop through the
+    // leader's browser-server). The parent's identical check in web-scraper.ts
+    // runs only after the transfer — too late to protect this process from a
+    // pathological/hostile page ballooning worker memory. Same error wording.
+    if (html.length > MAX_HTML_SIZE) {
+      const sizeMB = Math.round(html.length / 1024 / 1024);
+      throw new Error(`Browser HTML too large (${sizeMB}MB, max 25MB)`);
     }
 
     // Skip jitter in mock mode; in real browsing, add 500–1500ms to mimic human behavior

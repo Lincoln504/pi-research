@@ -196,6 +196,22 @@ describe('installSkill — symlink (default)', () => {
     expect(r[0]!.status).toBe('installed');
     expect(fs.existsSync(skillPathFor('pi'))).toBe(true);
   });
+
+  it('manifest write does not depend on the FIXED `<manifest>.tmp` name (concurrent-run collision surface)', () => {
+    // Regression: writeManifest staged through a fixed `${p}.tmp`, so two
+    // concurrent runs' reconciles (unlocked read-modify-write; the run cap allows
+    // 3 live runs) shared ONE staging path — the winner renamed it away and the
+    // loser's renameSync threw ENOENT, surfacing as a spurious skill-install
+    // error. Occupying the fixed name proves the write no longer touches it.
+    mkHarnessBase('claude');
+    const fixedTmp = `${getManifestPath(opts())}.tmp`;
+    fs.mkdirSync(path.dirname(fixedTmp), { recursive: true });
+    fs.mkdirSync(fixedTmp); // a directory at the fixed name breaks any write that still uses it
+    const results = installSkill(['claude'], opts());
+    expect(results[0]!.status).toBe('installed');
+    expect(readManifest(opts()).entries).toHaveLength(1);
+    expect(fs.existsSync(fixedTmp)).toBe(true); // untouched — writes use unique names now
+  });
 });
 
 describe('installSkill — copy', () => {

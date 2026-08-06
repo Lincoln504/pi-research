@@ -16,7 +16,7 @@
  */
 
 const { spawnSync } = require('child_process');
-const { rmSync, existsSync, lstatSync, readlinkSync, readFileSync, writeFileSync, unlinkSync } = require('fs');
+const { rmSync, existsSync, lstatSync, readdirSync, readlinkSync, readFileSync, writeFileSync, unlinkSync } = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -181,9 +181,64 @@ const rawDirName = process.env.PI_RESEARCH_CONFIG_DIR_NAME;
 const dirName = rawDirName && !rawDirName.includes('/') && !rawDirName.includes('\\') && rawDirName !== '.' && rawDirName !== '..'
   ? rawDirName
   : '.pi';
+
+/**
+ * Is this path itself namespaced to pi-research — a `pi-research` segment, or
+ * the default `<dirName>/research` layout? Wholesale rm of a state-dir override
+ * is only safe when the answer is yes: PI_RESEARCH_STATE_DIR may point at a
+ * SHARED directory, and rm'ing the override itself (unlike the cache sweep,
+ * which is namespaced via join(cacheHome, 'pi-research')) deleted everything the
+ * user kept beside our state.
+ */
+function isPiResearchNamespaced(p) {
+  const segs = p.split(/[\\/]+/).filter(Boolean);
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i] === 'pi-research') return true;
+    if (segs[i] === dirName && segs[i + 1] === 'research') return true;
+  }
+  return false;
+}
+
+/**
+ * Targeted state sweep for a non-namespaced override dir: delete ONLY the
+ * entries the runtime actually creates there and leave everything else — and
+ * the directory itself — untouched. The entry list mirrors the writers:
+ *   research-state.json + research-state-<hex>.tmp   (state-manager)
+ *   .locks/, backups/                                 (state-path-configuration)
+ *   project-settings.json + its .lock / .tmp. / .lock.stale- companions (config.ts)
+ *   research-run-slot-<i>.lock                        (research-run-semaphore)
+ * Best-effort; never throws.
+ */
+function removeOwnedStateEntries(dir) {
+  if (!dir || !existsSync(dir)) return;
+  let entries;
+  try { entries = readdirSync(dir); } catch { return; }
+  const owned = (name) =>
+    name === 'research-state.json' ||
+    (name.startsWith('research-state-') && name.endsWith('.tmp')) ||
+    name === '.locks' ||
+    name === 'backups' ||
+    name === 'project-settings.json' ||
+    name.startsWith('project-settings.json.') ||
+    /^research-run-slot-\d+\.lock$/.test(name);
+  for (const name of entries) {
+    if (!owned(name)) continue;
+    try {
+      rmSync(path.join(dir, name), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch (error) {
+      console.warn(`pi-research: could not remove state entry ${path.join(dir, name)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  console.log(`pi-research: removed pi-research state entries from ${dir} (directory preserved — not a pi-research-namespaced path).`);
+}
+
 const stateDir = stateOverride && path.isAbsolute(stateOverride)
   ? stateOverride
   : path.join(os.homedir(), dirName, 'research', 'state');
-removeOwnedScratchDir('state dir', stateDir);
+if (stateOverride && path.isAbsolute(stateOverride) && !isPiResearchNamespaced(stateDir)) {
+  removeOwnedStateEntries(stateDir);
+} else {
+  removeOwnedScratchDir('state dir', stateDir);
+}
 
 process.exit(0);

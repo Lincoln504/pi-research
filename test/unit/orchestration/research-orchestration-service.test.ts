@@ -415,6 +415,98 @@ describe('ResearchOrchestrationService', () => {
       expect(onResearcherFailure).toHaveBeenCalledWith('1', 'provider exploded');
     });
 
+    it('classifies a container-disposal error as clean teardown — no failure record, no red slice', async () => {
+      // SIGTERM mid-run disposes the container; the executor rethrows
+      // "Cannot get service … during container disposal". Recording that as a
+      // researcher failure painted red slices with bogus root causes and could
+      // trip shouldStopResearch during shutdown.
+      vi.mocked(shouldStopResearch).mockReturnValue(false);
+      vi.mocked(runResearcher).mockRejectedValue(new Error("Cannot get service 'research-synthesis-service' during container disposal"));
+      const onResearcherFailure = vi.fn();
+
+      await service.runResearchers(makeRunOptions({ onResearcherFailure }));
+
+      expect(recordResearcherFailure).not.toHaveBeenCalled();
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+    });
+
+    it('classifies any researcher error as clean teardown while the container is disposing', async () => {
+      vi.mocked(shouldStopResearch).mockReturnValue(false);
+      vi.mocked(runResearcher).mockRejectedValue(new Error('worker pool destroyed mid-teardown'));
+      const onResearcherFailure = vi.fn();
+      const opts = makeRunOptions({ onResearcherFailure });
+      opts.options.ctx.container = { tryGet: () => undefined, isDisposing: true };
+
+      await service.runResearchers(opts);
+
+      expect(recordResearcherFailure).not.toHaveBeenCalled();
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+    });
+
+    it('fast-stop bound-awaits in-flight researchers before throwing the stop error', async () => {
+      // Regression (zombie researchers): the stop error used to propagate — and
+      // release the run-cap slot — while unregistered researchers were still in
+      // flight; they then ran full LLM sessions after the run had returned. The
+      // stop must first give the active set a bounded chance to self-stop.
+      let resolveResearcher!: () => void;
+      vi.mocked(runResearcher).mockImplementation(() => new Promise<void>((res) => { resolveResearcher = res; }));
+      vi.mocked(shouldStopResearch)
+        .mockReturnValueOnce(false) // pre-launch check: let the researcher start
+        .mockReturnValue(true);     // post-stagger check: threshold crossed while in flight
+      vi.mocked(createResearchStopError).mockImplementation(
+        () => Object.assign(new Error('Research stopped'), { code: 'RESEARCH_STOPPED' }),
+      );
+
+      let settled = false;
+      const run = service.runResearchers(makeRunOptions()).catch((e) => { settled = true; return e; });
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+      expect(settled).toBe(false); // pre-fix: threw without awaiting the in-flight researcher
+
+      resolveResearcher();
+      const err = await run;
+      expect(settled).toBe(true);
+      expect((err as Error).message).toBe('Research stopped');
+    });
+
+    it('fast-stop still throws within the bound when an in-flight researcher never settles', async () => {
+      // The active-set await is bounded like boundSessionAbort: one wedged
+      // researcher must not hang the already-decided stop.
+      vi.useFakeTimers();
+      try {
+        vi.mocked(runResearcher).mockImplementation(() => new Promise<void>(() => { /* never settles */ }));
+        vi.mocked(shouldStopResearch).mockReturnValueOnce(false).mockReturnValue(true);
+        vi.mocked(createResearchStopError).mockImplementation(
+          () => Object.assign(new Error('Research stopped'), { code: 'RESEARCH_STOPPED' }),
+        );
+
+        const run = service.runResearchers(makeRunOptions());
+        const expectation = expect(run).rejects.toThrow('Research stopped');
+        await vi.advanceTimersByTimeAsync(10_001);
+        await expectation;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('fast-stop throws the STOP error — not the raw service error — when getService rejects during disposal', async () => {
+      // shouldStopResearch tripping DURING teardown: the unguarded getService at
+      // the fast-stop site threw "Cannot get service … during container disposal",
+      // replacing the already-decided stop error.
+      vi.mocked(shouldStopResearch).mockReturnValue(true);
+      vi.mocked(createResearchStopError).mockImplementation(
+        () => Object.assign(new Error('Research stopped'), { code: 'RESEARCH_STOPPED' }),
+      );
+      const opts = makeRunOptions();
+      vi.mocked(getService).mockImplementation(async (name: any) => {
+        if (name === ServiceNames.PLANNING) return { getCurrentPlan: vi.fn(() => null) } as any;
+        if (name === ServiceNames.RESEARCH_SESSION_SERVICE) throw new Error("Cannot get service 'session-service' during container disposal");
+        return null;
+      });
+
+      await expect(service.runResearchers(opts)).rejects.toThrow('Research stopped');
+    });
+
     it('fast-stop throws within the bound even when abortAllSessions never settles', async () => {
       // The fast-stop throw used to gate on an UNBOUNDED await of
       // abortAllSessions(); one wedged session.abort() hung the run forever

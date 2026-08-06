@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-const mockState = vi.hoisted(() => ({ failRename: false }));
+const mockState = vi.hoisted(() => ({ failRename: false, raceRecreate: false }));
 
 // Pass-through fs mock: only renameSync is interceptable, so every other call in
 // both the module under test and this file hits the real filesystem.
@@ -31,7 +31,15 @@ vi.mock('node:fs', async (importOriginal) => {
         err.code = 'EBUSY';
         throw err;
       }
-      return actual.renameSync(oldPath, newPath);
+      const result = actual.renameSync(oldPath, newPath);
+      if (mockState.raceRecreate) {
+        // Interleave the hazard under test: a concurrent process's async append
+        // lands between the rename and the 0o600 recreate, materializing the
+        // live log at umask-default perms (chmod pins them umask-independently).
+        actual.writeFileSync(oldPath, 'concurrent append\n');
+        actual.chmodSync(oldPath, 0o644);
+      }
+      return result;
     }) as typeof actual.renameSync,
   };
 });
@@ -65,6 +73,7 @@ describe('LogRotation', () => {
 
   beforeEach(() => {
     mockState.failRename = false;
+    mockState.raceRecreate = false;
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-log-rotation-test-'));
     logFile = path.join(dir, 'research-debug.log');
   });
@@ -106,6 +115,21 @@ describe('LogRotation', () => {
     const archives = fs.readdirSync(dir).filter((f) => f.startsWith('research-debug.log.'));
     expect(archives).toHaveLength(0);
     expect(logger.lines.join('\n')).toContain('Log rotation skipped');
+  });
+
+  it('re-stamps 0600 when a concurrent append recreates the log between rename and recreate', () => {
+    // chmod is advisory on win32 and this asserts POSIX modes.
+    if (process.platform === 'win32') return;
+    fs.writeFileSync(logFile, Buffer.alloc(OVERSIZE, 0x61));
+    mockState.raceRecreate = true;
+
+    new LogRotation(recordingLogger()).rotateLogFile(logFile, dir);
+
+    // Mode applies only at creation, so without the explicit post-recreate chmod
+    // the racy 0644 file persists indefinitely in a world-traversable tmpdir.
+    expect(fs.statSync(logFile).mode & 0o777).toBe(0o600);
+    // The concurrent append's data survives: the recreate opens append-mode.
+    expect(fs.readFileSync(logFile, 'utf8')).toContain('concurrent append');
   });
 
   it('leaves a file under the size cap alone', () => {

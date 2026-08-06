@@ -24,10 +24,12 @@ export interface QueryResultWithError {
  * at all about the query and should prompt a retry instead. Collapsing the two —
  * reporting every zero-result query as "the query may be too narrow" — sent the
  * agent off rewriting perfectly good queries whenever the browser pool was the
- * thing that failed.
+ * thing that failed. `all_duplicates` is the third case: the query SUCCEEDED,
+ * but every result deduplicated away against URLs earlier queries in the batch
+ * already returned — coverage feedback, not query-quality feedback.
  */
 export interface QueryFailure {
-  type: 'empty_results' | 'service_unavailable' | 'timeout' | 'network_error' | 'unknown';
+  type: 'empty_results' | 'all_duplicates' | 'service_unavailable' | 'timeout' | 'network_error' | 'unknown';
   message: string;
 }
 

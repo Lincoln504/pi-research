@@ -577,6 +577,62 @@ describe('PlanningService', () => {
       expect(plan.action).toBe('synthesize');
     });
 
+    it('continues the prior agenda when a mid-run delegate caps to zero runnable researchers', async () => {
+      // Regression: a delegate whose researchers ALL had empty query arrays was
+      // capResearcherQueries-filtered to zero and force-synthesized — a bogus
+      // synthesis decision indistinguishable from a real one, ending the run
+      // with rounds remaining. Mirror generatePlan's empty-after-cap guard:
+      // with a runnable prior agenda, re-delegate it.
+      const bogusDelegate = JSON.stringify({
+        action: 'delegate',
+        content: 'rationale prose the orchestrator must not ship as the report',
+        researchers: [{ id: '1', name: 'Empty', goal: 'g', queries: [] }],
+        allQueries: [],
+      });
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(bogusDelegate));
+      const plan = await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        previousPlan: { action: 'delegate' as const, researchers: [{ id: '1', name: 'PriorR', goal: 'g', queries: ['q'] }], allQueries: ['q'] },
+      });
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers!.map((r) => r.name)).toContain('PriorR');
+    });
+
+    it('degrades a zero-runnable delegate to an EMPTY synthesize — never the rationale — when no prior agenda is runnable', async () => {
+      // Same failure with nothing to re-delegate: degrade exactly like a
+      // transient evaluator failure (empty content), so the orchestrator's
+      // reports-based fallback synthesis — not the delegate's rationale prose —
+      // produces the report.
+      const bogusDelegate = JSON.stringify({
+        action: 'delegate',
+        content: 'rationale prose the orchestrator must not ship as the report',
+        researchers: [{ id: '1', name: 'Empty', goal: 'g', queries: [] }],
+        allQueries: [],
+      });
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(bogusDelegate));
+      const plan = await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        previousPlan: { action: 'delegate' as const, researchers: [], allQueries: [] },
+      });
+      expect(plan.action).toBe('synthesize');
+      expect(plan.content ?? '').toBe('');
+    });
+
+    it('degrades — not throws — when a NON-degradable error hits the forced FINAL synthesis call', async () => {
+      // Regression: the mid-loop hard-throw gate also fired on the one-shot
+      // mustSynthesize call, discarding every collected report on e.g. a
+      // context-overflow 400. The final call has no rounds left to protect, so
+      // it degrades to the empty-synthesize plan and the orchestrator's
+      // buildFallbackSynthesis salvages a report.
+      vi.mocked(completeSimple).mockRejectedValue(
+        new Error("400 This model's maximum context length is 131072 tokens, however you requested 142935 tokens"),
+      );
+      const plan = await service.updatePlanForRound({ ...BASE_OPTIONS, mustSynthesize: true });
+      expect(plan.action).toBe('synthesize');
+      expect(plan.content).toBe('');
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // non-transient → not retried
+    });
+
     it('falls back to a synthesize plan wrapping the raw text when JSON parsing completely fails', async () => {
       const longFallbackText = 'This is completely unparseable text that cannot be parsed as valid JSON by any means whatsoever.';
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(longFallbackText));

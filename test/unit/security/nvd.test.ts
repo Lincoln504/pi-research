@@ -159,6 +159,34 @@ describe('NVD Client', () => {
     expect(callCount).toBe(2);
   });
 
+  it('rate-limits every retry attempt, not just the first request of a page', async () => {
+    // The module-level NVDRateLimiter is the ONLY spacing mechanism (the
+    // post-sweep sleep was removed), so a 429/5xx retry re-hitting the API on the
+    // 2s backoff alone violated the ~6s no-key interval. Every attempt — first
+    // AND retries — must acquire a limiter slot.
+    const prevKey = process.env['NVD_API_KEY'];
+    delete process.env['NVD_API_KEY']; // no key → 6000ms spacing
+    try {
+      const fetchTimes: number[] = [];
+      vi.mocked(fetch).mockImplementation(async () => {
+        fetchTimes.push(Date.now());
+        if (fetchTimes.length === 1) return { ok: false, status: 429 } as Response;
+        return { ok: true, json: async () => ({ vulnerabilities: [] }) } as Response;
+      });
+
+      const searchPromise = searchNVD(['term']);
+      for (let i = 0; i < 6; i++) await vi.runAllTimersAsync();
+      await searchPromise;
+
+      expect(fetchTimes.length).toBe(2);
+      // Retry backoff alone is 2-3s; only a limiter slot per attempt yields ≥6s.
+      expect(fetchTimes[1]! - fetchTimes[0]!).toBeGreaterThanOrEqual(6000);
+    } finally {
+      if (prevKey === undefined) delete process.env['NVD_API_KEY'];
+      else process.env['NVD_API_KEY'] = prevKey;
+    }
+  });
+
   it('should handle non-retryable 4xx errors', async () => {
     vi.mocked(fetch).mockImplementation(async () => ({ ok: false, status: 400, statusText: 'Bad' } as Response));
     const searchPromise = searchNVD(['term']);

@@ -133,11 +133,41 @@ describe('ToolUsageTracker', () => {
   });
 
   describe('getLimitMessage', () => {
-    it('returns SEARCH LIMIT REACHED message for search with limit=1', () => {
+    it('returns SEARCH LIMIT REACHED message when the search per-tool limit tripped', () => {
       const tracker = new ToolUsageTracker({ search: 1 });
+      tracker.recordCall('search'); // per-tool limit now tripped
       const msg = tracker.getLimitMessage('search');
       expect(msg).toContain('SEARCH LIMIT REACHED');
       expect(msg).toContain('one search call');
+    });
+
+    it('first-ever search blocked by the shared gathering cap gets the GATHERING message, not "one search call"', () => {
+      // The message must reflect which limit actually tripped: claiming "you have
+      // already used your one search call" on a never-used search makes the agent
+      // wrongly believe it searched.
+      const tracker = new ToolUsageTracker({ gathering: 2, search: 1 });
+      tracker.recordCall('security_search');
+      tracker.recordCall('stackexchange'); // gathering cap full; search never called
+      expect(tracker.recordCall('search')).toBe(false);
+      const msg = tracker.getLimitMessage('search');
+      expect(msg).toContain('GATHERING LIMIT REACHED');
+      expect(msg).not.toContain('one search call');
+    });
+
+    it('first-ever youtube_transcript blocked by the gathering cap gets the GATHERING message', () => {
+      const tracker = new ToolUsageTracker({ gathering: 1, youtube_transcript: 1 });
+      tracker.recordCall('search'); // gathering cap full; youtube_transcript never called
+      expect(tracker.recordCall('youtube_transcript')).toBe(false);
+      const msg = tracker.getLimitMessage('youtube_transcript');
+      expect(msg).toContain('GATHERING LIMIT REACHED');
+      expect(msg).not.toContain('one youtube_transcript call');
+    });
+
+    it('search blocked by its own limit after being used still gets the SEARCH message', () => {
+      const tracker = new ToolUsageTracker({ gathering: 10, search: 1 });
+      tracker.recordCall('search');
+      expect(tracker.recordCall('search')).toBe(false);
+      expect(tracker.getLimitMessage('search')).toContain('SEARCH LIMIT REACHED');
     });
 
     it('returns SCRAPE PROTOCOL COMPLETE for scrape', () => {

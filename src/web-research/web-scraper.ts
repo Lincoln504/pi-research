@@ -80,7 +80,11 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
     const sizeMB = Math.round(bytes.length / 1024 / 1024);
     logger.warn(`[Scrapers] PDF too large (${sizeMB}MB, max 100MB), skipping extraction`);
     metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'size_exceeded' });
-    return `*Error: PDF too large (${sizeMB}MB, max 100MB).*`;
+    // THROW, never an in-band "*Error: ...*" string: a returned banner flowed
+    // into validateContent as if it were page content, and a verbose one
+    // (≥50 words / ≥200 chars) cleared the stub gate — the failure banner was
+    // then cached and cited as a successful scrape.
+    throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
   }
 
   const pdfExtractionStart = Date.now();
@@ -114,7 +118,9 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
       contentType: 'pdf',
       errorType: 'extraction_failed',
     });
-    return `*Error: Could not extract content from PDF (${msg}).*`;
+    // See the size branch above: an extraction failure must FAIL the scrape,
+    // not travel in-band as pseudo-content.
+    throw new Error(`Could not extract content from PDF (${msg})`, { cause: e });
   }
 }
 
@@ -373,9 +379,10 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
 
     if (pdfBytes !== null) {
       const markdown = await extractPdfToMarkdown(pdfBytes);
-      // Mirror the fetch layer's PDF branch: an extraction-error string (or an
-      // otherwise empty extraction) must FAIL the scrape via validateContent,
-      // not be recorded — and cached — as successful content.
+      // Mirror the fetch layer's PDF branch: extraction failures THROW from
+      // extractPdfToMarkdown, and validateContent still fails a nominally
+      // successful extraction that produced no real content — neither may be
+      // recorded (and cached) as a success.
       validateContent('', markdown, _url);
       metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'pdf', status: 'success' });
       metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'pdf', status: 'success' });

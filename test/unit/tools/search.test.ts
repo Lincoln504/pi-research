@@ -47,7 +47,8 @@ describe('tools/search', () => {
       undefined, // options.config
       undefined, // signal
       expect.any(Function), // implementation wraps onProgress in a lambda
-      expect.any(Object) // container
+      expect.any(Object), // container
+      undefined // sessionId — this fixture has no getGlobalState
     );
     expect(vi.mocked(search).mock.calls[0][0].length).toBe(30);
   });

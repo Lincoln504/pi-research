@@ -33,6 +33,11 @@ export class LogRotation {
         try {
           fs.closeSync(fs.openSync(logFile, 'a', 0o600));
         } catch { /* best-effort — the next append recreates the file */ }
+        // And, as there, re-stamp the mode: a concurrent append landing between
+        // the unlink and the open makes the creation-time 0o600 a no-op.
+        try {
+          fs.chmodSync(logFile, 0o600);
+        } catch { /* best-effort */ }
       }
 
       const files = fs.readdirSync(logDir);
@@ -92,6 +97,15 @@ export class LogRotation {
       try {
         fs.closeSync(fs.openSync(logFile, 'a', 0o600));
       } catch { /* best-effort — the next append recreates the file */ }
+      // The mode above applies only if THIS open created the file. Several
+      // processes append to this consolidated log, so a concurrent async append
+      // can recreate it at umask perms between the rename and the open, turning
+      // the 0o600 into a no-op — stamp the mode unconditionally to close that
+      // window for good. ENOENT (nothing recreated it and the open failed) is
+      // tolerable: best-effort posture, same as the recreate itself.
+      try {
+        fs.chmodSync(logFile, 0o600);
+      } catch { /* best-effort */ }
 
 
       // Clean up old archives

@@ -51,11 +51,16 @@ function warnIfUnpriced(model: Model<any>, tokens: number, cost: number): void {
   );
 }
 
-/** Structural subset of the run observer — just the token sink. Kept structural (rather
+/** Structural subset of the run observer — just the token sinks. Kept structural (rather
  *  than importing ResearchObserver from core/) so this foundation-layer helper does not
  *  depend on an upper layer; the full ResearchObserver satisfies it. */
 export interface TokenSink {
   onTokensConsumed?: (tokens: number, cost: number) => void;
+  /** Phase-scoped sinks, fed from the `component` label ('coordinator'/'evaluator');
+   *  they drive the TUI coord/eval cost rows and the SDK planning_tokens /
+   *  evaluation_tokens events. */
+  onPlanningTokens?: (tokens: number, cost: number) => void;
+  onEvaluationTokens?: (tokens: number, cost: number) => void;
 }
 
 export interface RecordUsageOptions {
@@ -86,6 +91,17 @@ export function recordLlmUsage(
     metrics.increment('llm_tokens_total', tokens, labels);
     metrics.increment('llm_cost_total', cost, labels);
     opts.observer?.onTokensConsumed?.(tokens, cost);
+    // Phase-scoped events: coordinator/evaluator call sites label their usage
+    // 'coordinator'/'evaluator' (see planning-service.ts); route those to the
+    // dedicated observer hooks so the TUI coord/eval cost rows and the SDK
+    // planning_tokens/evaluation_tokens events fire. Before this mapping the hooks
+    // had zero emit sites (regression in c90d7f37) — coordinator/evaluator usage
+    // reached only onTokensConsumed, which the TUI observer does not implement.
+    if (opts.component === 'coordinator') {
+      opts.observer?.onPlanningTokens?.(tokens, cost);
+    } else if (opts.component === 'evaluator') {
+      opts.observer?.onEvaluationTokens?.(tokens, cost);
+    }
   }
   return { tokens, cost };
 }

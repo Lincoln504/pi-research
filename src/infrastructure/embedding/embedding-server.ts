@@ -16,6 +16,7 @@ import { Utf8Body } from '../../utils/http-body.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import type { Embedder } from '../../knowledge/embedder.ts';
+import { markWebGpuFallback } from '../../knowledge/embedder-utils.ts';
 
 /**
  * Per-process shared secret every embed request must present.
@@ -47,6 +48,24 @@ function isAuthorized(presented: string | string[] | undefined): boolean {
   const expected = Buffer.from(getEmbeddingServerAuthSecret(), 'utf8');
   const actual = Buffer.from(header ?? '', 'utf8');
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+/**
+ * Refuse to serialize a vector containing NaN/±Infinity. JSON.stringify emits
+ * `null` for non-finite numbers, and the client's `new Float32Array(resp.data)`
+ * coerces null back to 0 — a silently part-zeroed vector that passes every
+ * downstream width/finite gate (0 IS finite) and lands in the ANN index. Failing
+ * the request instead surfaces it as an ordinary embed failure on the client.
+ */
+function assertFiniteVector(vec: ArrayLike<number>, vectorIndex?: number): void {
+  for (let i = 0; i < vec.length; i++) {
+    if (!Number.isFinite(vec[i]!)) {
+      const where = vectorIndex === undefined ? `position ${i}` : `vector ${vectorIndex}, position ${i}`;
+      throw new Error(
+        `[EmbeddingServer] embedder produced a non-finite value (${vec[i]}) at ${where} — refusing to serialize (JSON would launder it to null/0)`,
+      );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +293,15 @@ export class EmbeddingServer implements IEmbedder {
       'Stepping down as leader so a fresh process can re-elect with a clean GPU context. ' +
       err.message,
     );
+    // INVARIANT: after a poisoned (permanently hung) inference, THIS process must
+    // never touch WebGPU again. The wedged native call still holds the same-PID
+    // re-entrant GPU lock, so if this process wins the next election and
+    // re-initializes WebGPU it would run a second inference beside the stuck one —
+    // the concurrent-GPU-inference segfault class the SerialQueue exists to
+    // prevent. Latch the process-wide fallback so any embedder built in this
+    // process from here on comes up on CPU; only a FRESH process may re-elect
+    // with a clean GPU context.
+    markWebGpuFallback();
     // Step down WITHOUT disposing the embedder: pipeline.dispose() would join the
     // stuck native thread (itself hanging) or touch a device-lost context. Clearing
     // the state registration + closing the HTTP server is enough for re-election;
@@ -552,6 +580,9 @@ export class EmbeddingServer implements IEmbedder {
               // message drives the client to reconnect to the new leader.
               this.assertServing();
               const result = await this.queue.enqueue(() => this.embedder.embed(data.text as string));
+              // Scan BEFORE serialization: a device-lost mid-inference yields NaN
+              // entries that JSON would launder into null → 0 on the client.
+              assertFiniteVector(result);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ data: Array.from(result) }));
               break;
@@ -559,6 +590,8 @@ export class EmbeddingServer implements IEmbedder {
             case '/embedMany': {
               this.assertServing();
               const results = await this.queue.enqueue(() => this.embedder.embedMany(data.texts as string[]));
+              // Same non-finite scan as /embed, per vector (see assertFiniteVector).
+              for (let i = 0; i < results.length; i++) assertFiniteVector(results[i]!, i);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ results: results.map(r => Array.from(r)) }));
               break;

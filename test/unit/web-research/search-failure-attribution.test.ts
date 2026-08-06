@@ -72,6 +72,40 @@ describe('search — attributes an empty result set to the right cause', () => {
     expect(results[0]!.results).toHaveLength(1);
   });
 
+  it('labels a query whose results ALL deduplicated away as all_duplicates, not "too narrow"', async () => {
+    // Cross-query dedup: the second query returns only a URL the first already
+    // surfaced. Pre-fix it got no failures entry, so search() attached the
+    // default empty_results "query may be too narrow" message — sending the
+    // researcher off rewriting a query that worked.
+    vi.mocked(runWorkerSearch).mockImplementation(async (q: string) => {
+      if (q === 'first') return okResult;
+      // Resolve after 'first' so the dedup order is deterministic.
+      await new Promise((r) => setTimeout(r, 20));
+      return [{ title: 'Same page', url: 'https://example.com/a', content: 'C' }];
+    });
+
+    const results = await search(['first', 'second']);
+
+    const deduped = results.find((r) => r.query === 'second')!;
+    expect(deduped.results).toHaveLength(0);
+    expect(deduped.error?.type).toBe('all_duplicates');
+    expect(deduped.error?.message).toMatch(/duplicated URLs already returned by earlier queries/);
+    expect(deduped.error?.message).not.toMatch(/too narrow/);
+  });
+
+  it('threads the sessionId through to runWorkerSearch (per-session circuit breaker applies to search)', async () => {
+    // The scrape path keys per-session breakers via BrowserTask.sessionId; the
+    // search path hard-coded undefined at this hop, so search failures always
+    // hit the GLOBAL breaker regardless of session.
+    vi.mocked(runWorkerSearch).mockResolvedValue(okResult);
+
+    await search(['q'], undefined, undefined, undefined, undefined as any, 'pisess-1a2b3c4d');
+
+    expect(runWorkerSearch).toHaveBeenCalledWith(
+      'q', undefined, expect.any(AbortSignal), 1, 'pisess-1a2b3c4d', expect.anything(),
+    );
+  });
+
   it('propagates a cancellation instead of reporting per-query failures', async () => {
     const controller = new AbortController();
     vi.mocked(runWorkerSearch).mockImplementation(async () => {

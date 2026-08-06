@@ -39,6 +39,16 @@ const CLEANUP_DRAIN_TIMEOUT_MS = 5_000;
 const TRASH_SWEEP_AGE_MS = 10 * 60_000;
 
 /**
+ * Floor for the held-lock mtime heartbeat interval (see _startHeartbeat), so a
+ * small liveOwnerStaleThreshold cannot turn maintenance into a utimes storm.
+ */
+const HEARTBEAT_MIN_INTERVAL_MS = 2_000;
+
+/** setTimeout/setInterval clamp delays above 2^31-1 to 1ms — treat anything
+ *  bigger as "no heartbeat" rather than a busy-loop. */
+const MAX_TIMER_DELAY_MS = 0x7fffffff;
+
+/**
  * Lock configuration options
  */
 export interface FileLockOptions {
@@ -101,9 +111,17 @@ export class FileLockService implements IService {
   // Set by cleanup(). A retired instance no longer manages the lock file, so
   // acquiring through it would hand out exclusivity it cannot honour.
   private _retired = false;
+  // Refreshes the held lock file's mtime while a critical section runs (see
+  // _startHeartbeat). Null whenever no lock is held.
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  // Stable short lock identity for metrics labels — without it every instance
+  // (state lock, knowledge init, browser init, run slots) shares one gauge and
+  // any release zeroes it globally.
+  private readonly lockName: string;
 
   constructor(options: FileLockOptions) {
     this.lockFilePath = options.lockFilePath;
+    this.lockName = pathmod.basename(options.lockFilePath);
     this.lockTimeout = options.lockTimeout ?? 20000;
     this.lockRetries = options.lockRetries ?? 200;
     this.lockRetryDelay = options.lockRetryDelay ?? 100;
@@ -252,6 +270,48 @@ export class FileLockService implements IService {
     const resolve = this.resolveTurn;
     this.resolveTurn = null;
     if (resolve) resolve();
+  }
+
+  /**
+   * While the lock is HELD, refresh its mtime on an interval well inside
+   * liveOwnerStaleThreshold. Peers judge a live owner purely by lock-file age
+   * (_shouldReclaim), and nothing else touches the file during a critical
+   * section — so without a heartbeat a legitimately long one (e.g. a multi-minute
+   * knowledge-store model-change migration under the 240s init-lock threshold)
+   * ages past the limit and is stolen from a LIVE owner, admitting a concurrent
+   * writer. With the heartbeat, a live owner is only stolen after genuinely
+   * wedging: no refresh for the full threshold.
+   *
+   * unref() is CORRECT here, unlike a timer that IS the operation: the heartbeat
+   * is maintenance on behalf of a critical section that keeps the process alive
+   * by itself, and the process must never be kept alive just to freshen a lock.
+   *
+   * The refresh goes through the held FileHandle (futimes), not the path, so if
+   * the lock changed hands (renamed/unlinked by a reclaiming peer) we can only
+   * ever touch OUR old inode — never freshen a peer's lock by mistake.
+   */
+  private _startHeartbeat(): void {
+    this._stopHeartbeat();
+    const interval = Math.max(HEARTBEAT_MIN_INTERVAL_MS, Math.ceil(this.liveOwnerStaleThreshold / 4));
+    // An effectively-infinite threshold (the run-semaphore's never-steal-from-a-
+    // live-owner opt-out) needs no heartbeat — and would overflow the 32-bit
+    // timer delay, which Node clamps to 1ms (a utimes busy-loop). Skip entirely;
+    // the opt-out's semantics are unchanged.
+    if (interval > MAX_TIMER_DELAY_MS) return;
+    this.heartbeatTimer = setInterval(() => {
+      const handle = this.lockHandle;
+      if (handle === null) return;
+      const now = new Date();
+      handle.utimes(now, now).catch(() => { /* best-effort maintenance */ });
+    }, interval);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private _stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   /**
@@ -448,6 +508,9 @@ export class FileLockService implements IService {
           // Fully acquired — commit to instance state
           this.lockHandle = handle;
           this.lockCount = 1;
+          // Keep the held lock's mtime fresh so a long critical section is not
+          // mistaken for a wedged owner and stolen (see _startHeartbeat).
+          this._startHeartbeat();
 
           // Track in ALS for nested calls
           if (heldLocks) {
@@ -457,7 +520,7 @@ export class FileLockService implements IService {
           const duration = Date.now() - startTime;
           metrics.observe('state_lock_acquire_duration_ms', duration);
           metrics.increment('state_lock_acquire_total', 1, { status: 'success' });
-          metrics.setGauge('state_lock_held', 1);
+          metrics.setGauge('state_lock_held', 1, { lock: this.lockName });
           if (contentionCount > 0) {
             metrics.increment('state_lock_contention_total', 1);
             metrics.observe('state_lock_contention_retries', contentionCount);
@@ -596,6 +659,10 @@ export class FileLockService implements IService {
       return;
     }
 
+    // Fully releasing (not a re-entrant pop) — the mtime heartbeat must stop
+    // with the hold it maintains.
+    this._stopHeartbeat();
+
     try {
       // 1. Double check ownership before unlinking
       const content = await fs.readFile(this.lockFilePath, 'utf8').catch(() => '');
@@ -615,7 +682,7 @@ export class FileLockService implements IService {
         heldLocks.delete(`${this.lockFilePath}:${this.lockUuid}`);
       }
 
-      metrics.setGauge('state_lock_held', 0);
+      metrics.setGauge('state_lock_held', 0, { lock: this.lockName });
     } finally {
       // 4. Signal the next caller in the queue that it's their turn.
       this._releaseTurn();
@@ -674,6 +741,9 @@ export class FileLockService implements IService {
     // Retire BEFORE releasing the turn, so a waiter woken below re-checks and
     // fails fast instead of acquiring a lock this instance no longer manages.
     this._retired = true;
+    // The forced-teardown path bypasses releaseLock, so stop the heartbeat here
+    // too — a retired instance must not keep freshening a lock it forfeited.
+    this._stopHeartbeat();
 
     if (this.lockHandle) {
       try {

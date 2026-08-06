@@ -56,8 +56,13 @@ export function formatAnswersTable(answers: Answer[]): string {
     output += `- **Question ID:** ${a.question_id}\n`;
     output += `- **Created:** ${new Date(a.creation_date * 1000).toLocaleString()}\n`;
 
-    if (a.body && a.body.length < 2000) {
-      output += `\n### Answer Body\n\n${a.body}\n`;
+    if (a.body) {
+      // Truncate long bodies to a preview rather than dropping them entirely — the
+      // previous `length < 2000` guard omitted the body for exactly the longest
+      // answers (same class as the question-body fix above; answers get a more
+      // generous bound since the body is the whole point of an answer).
+      const body = a.body.length > 2000 ? `${a.body.substring(0, 2000)}...` : a.body;
+      output += `\n### Answer Body\n\n${body}\n`;
     }
 
     output += '\n---\n\n';

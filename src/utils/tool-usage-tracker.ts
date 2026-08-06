@@ -125,13 +125,20 @@ export class ToolUsageTracker {
     
     const toolLimit = this.limits[toolName as keyof ToolLimits];
     const catLimit = usage.limit;
+    // Decide by which limit actually tripped, computed exactly as recordCall
+    // computes it: a first-ever `search` blocked by the shared gathering cap must
+    // NOT claim "you have already used your one search call" — the agent would
+    // wrongly believe it had searched. The per-tool wording is only correct when
+    // the per-tool counter itself is at its limit.
+    const toolCount = usage.toolCounts.get(toolName) || 0;
+    const toolLimitTripped = toolLimit !== undefined && toolCount >= toolLimit;
 
-    if (toolName === 'search' && toolLimit === 1) {
+    if (toolName === 'search' && toolLimit === 1 && toolLimitTripped) {
         return `SEARCH LIMIT REACHED: You have already used your one search call. ` +
             `Proceed to scraping: use the scrape tool for full deep-dives into your best search results.`;
     }
 
-    if (toolName === 'youtube_transcript' && toolLimit === 1) {
+    if (toolName === 'youtube_transcript' && toolLimit === 1 && toolLimitTripped) {
         return `YOUTUBE TRANSCRIPT LIMIT REACHED: You have already used your one youtube_transcript call. ` +
             `Continue with your other gathering tools (search, scrape) and proceed to synthesis.`;
     }

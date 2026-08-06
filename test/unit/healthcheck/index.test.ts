@@ -424,6 +424,58 @@ describe('healthcheck', () => {
     expect(result.status).not.toBe('unhealthy');
   });
 
+  it('embedding-server outage on the OPTIONAL knowledge cache degrades health but does NOT abort', async () => {
+    // T1 regression: the KnowledgeStore is "the optional cache" research must run
+    // without (see the darwin-x64 design comments in src/healthcheck/index.ts). When
+    // its embedding server is down the check must still REPORT the outage, but as a
+    // non-critical degradation: overall success stays true and no ECONNREFUSED leaks
+    // into runHealthCheck().error — previously the TUI fed that raw string to its
+    // browser-oriented formatter and aborted the run with a bogus "check your
+    // internet connection" diagnosis.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => ({
+        name: 'knowledge-store',
+        lifecycle: ServiceLifecycle.INITIALIZED,
+        isReady: () => true,
+        getCwd: () => process.cwd(),
+        async initialize() {},
+        async dispose() {},
+        async getEmbedder() {
+          return {
+            isInitialized: () => true,
+            getDevice: () => 'cpu',
+            getOriginalDevice: () => 'cpu',
+            // Dead embedding server: the liveness probe refuses the connection.
+            fetchHealth: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:7070'); },
+          };
+        },
+        async getStore() {
+          return { countScoped: async () => ({ local: 0, global: 0, projects: 0 }) };
+        },
+      }),
+      { allowOverwrite: true, enableLogging: false }
+    );
+    // Resolve so the NON-forced already-initialized path runs the liveness probe —
+    // exactly what the TUI pre-flight check (ensureFunctionalHealth) hits mid-session.
+    await getService(ServiceNames.KNOWLEDGE_STORE);
+
+    const result = await runHealthCheck(); // non-forced, as the TUI pre-flight calls it
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(false); // the outage IS still reported...
+    expect(result.status).toBe('degraded'); // ...but only degrades the aggregate
+    expect(result.success).toBe(true); // research proceeds without the optional cache
+    expect(result.error).toBeUndefined(); // no store error to misattribute downstream
+  });
+
   it('should fail when browser pool health check fails', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
     vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: false });

@@ -158,19 +158,40 @@ describe('stackexchange/output/table', () => {
       expect(result).toContain('**Score:** 10 [Accepted]');
     });
 
-    it('should handle very long answer body', () => {
+    it('should truncate very long answer body to a preview (not drop it)', () => {
       const answers = [{
         is_accepted: true,
         score: 10,
         question_id: 123,
         creation_date: 1609459200,
         owner: { display_name: 'VerboseUser' },
-        body: 'A'.repeat(2001), // Too long body
+        body: 'A'.repeat(2001), // Long body
       }] as any;
 
       const result = formatAnswersTable(answers);
       expect(result).toContain('## Answer by VerboseUser');
-      expect(result).not.toContain('### Answer Body'); // Body too long
+      // A long body is truncated to a preview (not dropped entirely, which used to
+      // hide the body for exactly the longest answers — same class as the
+      // question-body fix above).
+      expect(result).toContain('### Answer Body');
+      expect(result).toContain(`${'A'.repeat(2000)}...`);
+      expect(result).not.toContain('A'.repeat(2001));
+    });
+
+    it('should keep a short answer body verbatim', () => {
+      const answers = [{
+        is_accepted: false,
+        score: 3,
+        question_id: 123,
+        creation_date: 1609459200,
+        owner: { display_name: 'TerseUser' },
+        body: 'B'.repeat(2000), // At the bound — no truncation
+      }] as any;
+
+      const result = formatAnswersTable(answers);
+      expect(result).toContain('### Answer Body');
+      expect(result).toContain('B'.repeat(2000));
+      expect(result).not.toContain(`${'B'.repeat(2000)}...`);
     });
   });
 

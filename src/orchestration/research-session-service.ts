@@ -111,8 +111,16 @@ export class ResearchSessionService implements IService {
    */
   async abortAllSessions(sessionId?: string): Promise<void> {
     if (sessionId) {
-      const sessionMap = this.getSessionMap(sessionId);
-      const aborts = Array.from(sessionMap.values()).map((entry, index) =>
+      // Read path: peek, never create — getSessionMap would resurrect an empty
+      // bucket for an already-completed researchId and leak it forever.
+      const sessionMap = this.peekSessionMap(sessionId);
+      if (!sessionMap) return;
+      // Snapshot BEFORE awaiting: only the entries aborted below may be removed.
+      // A session registered (or re-registered under the same id) DURING the
+      // bounded awaits — e.g. a researcher retry building a fresh session — was
+      // never aborted here; a blanket clear() would silently orphan it live.
+      const snapshot = Array.from(sessionMap.entries());
+      const aborts = snapshot.map(([, entry], index) =>
         boundSessionAbort(
           entry.abort().catch((err) => {
             logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
@@ -121,8 +129,12 @@ export class ResearchSessionService implements IService {
         )
       );
       await Promise.all(aborts);
-      sessionMap.clear();
-      this.sessions.delete(sessionId);
+      for (const [id, entry] of snapshot) {
+        // Identity check: delete only the exact entry we aborted, not a
+        // same-id replacement registered while we awaited.
+        if (sessionMap.get(id) === entry) sessionMap.delete(id);
+      }
+      if (sessionMap.size === 0) this.sessions.delete(sessionId);
     } else {
       const aborts: Promise<void>[] = [];
       for (const sessionMap of this.sessions.values()) {

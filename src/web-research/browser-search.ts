@@ -27,14 +27,22 @@ export async function performSearch(
     onProgress?: (links: number) => void,
     container: ServiceContainer = getServiceContainer(),
     /**
-     * Optional sink for per-query FAILURES (timeout / worker error). Populated as
-     * an out-param rather than folded into the return value because the returned
-     * map's `query -> results` shape is what every caller consumes; a query absent
-     * from this map produced zero results with no failure, i.e. the search really
-     * did come back empty. Without this the caller cannot tell those apart and
-     * reports every empty query as a too-narrow query.
+     * Optional sink for per-query FAILURES (timeout / worker error / cross-query
+     * dedup). Populated as an out-param rather than folded into the return value
+     * because the returned map's `query -> results` shape is what every caller
+     * consumes; a query absent from this map produced zero results with no
+     * failure, i.e. the search really did come back empty. Without this the
+     * caller cannot tell those apart and reports every empty query as a
+     * too-narrow query.
      */
     failures?: Map<string, QueryFailure>,
+    /**
+     * Session/research id keying the per-session circuit breaker inside
+     * runWorkerSearch — mirroring the scrape path, which threads it via
+     * BrowserTask.sessionId. Callers without a session (undefined) share the
+     * global breaker, as before.
+     */
+    sessionId?: string,
 ): Promise<Map<string, SearchResult[]>> {
     const startTime = Date.now();
     const resultMap = new Map<string, SearchResult[]>();
@@ -116,7 +124,7 @@ export async function performSearch(
               ? AbortSignal.any([signal, timeoutController.signal])
               : timeoutController.signal;
 
-            const results = await runWorkerSearch(query, config, querySignal, 1, undefined, container);
+            const results = await runWorkerSearch(query, config, querySignal, 1, sessionId, container);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
 
@@ -141,6 +149,17 @@ export async function performSearch(
                         seenUrls.add(key);
                         uniqueResults.push(r);
                     }
+                }
+                if (uniqueResults.length === 0) {
+                    // Every raw result deduplicated away against URLs earlier
+                    // queries in this batch already returned. Without an entry
+                    // here the query fell through to the empty_results default —
+                    // "the query may be too narrow" — sending the researcher off
+                    // rewriting a query that actually worked.
+                    failures?.set(query, {
+                        type: 'all_duplicates',
+                        message: `All ${results.length} results for this query duplicated URLs already returned by earlier queries in this batch. The query succeeded but surfaced nothing new — do not rewrite it; try a different angle only if you still need additional sources.`,
+                    });
                 }
                 resultMap.set(query, uniqueResults);
             } else {

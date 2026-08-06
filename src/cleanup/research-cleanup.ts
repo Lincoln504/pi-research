@@ -82,9 +82,13 @@ export function createCleanupFunction(
     const { resetLogger } = await import('../logger.ts');
     resetLogger(researchId);
     
-    // FIX (#10): Clear session circuit breaker to prevent unbounded map growth.
-    const { clearSessionCircuitBreaker } = await import('../infrastructure/browser/browser-error-utils.ts');
+    // FIX (#10): Clear session circuit breakers to prevent unbounded map growth.
+    // Breakers are keyed by researchId (`${piSessionId}-<8 hex>`), so the
+    // exact-key clear alone was a no-op on this path — sweep by prefix, and keep
+    // the exact-key clear for any breaker keyed by the bare session id.
+    const { clearSessionCircuitBreaker, clearSessionCircuitBreakersByPrefix } = await import('../infrastructure/browser/browser-error-utils.ts');
     if (piSessionId) {
+      clearSessionCircuitBreakersByPrefix(`${piSessionId}-`);
       clearSessionCircuitBreaker(piSessionId);
     }
     

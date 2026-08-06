@@ -6,8 +6,8 @@ import type { SearchResult } from '../../web-research/types.ts';
 import { isCloudflareBlockError, isPoolShutdownError } from './browser-error-utils.ts';
 
 export interface BrowserServerOptions {
-    onSearch: (query: string) => Promise<SearchResult[]>;
-    onScrape: (url: string) => Promise<any>;
+    onSearch: (query: string, signal?: AbortSignal) => Promise<SearchResult[]>;
+    onScrape: (url: string, signal?: AbortSignal) => Promise<any>;
     onHealthCheck: () => Promise<{ success: boolean }>;
 }
 
@@ -126,6 +126,18 @@ export class BrowserServer {
                     return;
                 }
 
+                // Follower cancellation must cross this HTTP hop: when the
+                // client's socket dies before the response completes (the
+                // follower aborted its request), the leader-side task previously
+                // kept its queue slot and worker page until its full timeout.
+                // Abort the task the moment the connection tears down. 'close'
+                // also fires after a normally completed response, so gate on
+                // writableEnded to abort only a premature teardown.
+                const requestAbort = new AbortController();
+                res.on('close', () => {
+                    if (!res.writableEnded) requestAbort.abort();
+                });
+
                 // Decoded once at 'end' rather than per chunk: `body += chunk`
                 // mangles any multi-byte character that straddles a chunk boundary.
                 // See Utf8Body.
@@ -161,10 +173,10 @@ export class BrowserServer {
 
                         switch (req.url) {
                             case '/search':
-                                result = await this.options.onSearch(data.query);
+                                result = await this.options.onSearch(data.query, requestAbort.signal);
                                 break;
                             case '/scrape':
-                                result = await this.options.onScrape(data.url);
+                                result = await this.options.onScrape(data.url, requestAbort.signal);
                                 break;
                             case '/healthcheck':
                                 result = await this.options.onHealthCheck();
@@ -181,7 +193,12 @@ export class BrowserServer {
                         // A Cloudflare/bot challenge is an EXPECTED scrape outcome, not a
                         // server fault — log it at WARN so it doesn't inflate ERROR counts.
                         // Everything else is a genuine request-handling error.
-                        if (isCloudflareBlockError(error)) {
+                        if (requestAbort.signal.aborted) {
+                            // The client disconnected before completion; the abort above
+                            // cancelled the leader-side task and nobody is waiting for
+                            // this reply — expected teardown, not a server fault.
+                            logger.debug('[BrowserServer] Client disconnected mid-request; task aborted:', error instanceof Error ? error.message : String(error));
+                        } else if (isCloudflareBlockError(error)) {
                             logger.warn('[BrowserServer] Request blocked by bot protection:', error instanceof Error ? error.message : String(error));
                         } else if (isPoolShutdownError(error)) {
                             // Pool destroyed mid-request during quit/SIGTERM teardown — expected,

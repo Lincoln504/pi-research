@@ -557,7 +557,11 @@ export async function runDeepResearch(
       metrics.recordRunSummary(_lastRunSummary);
       _lastErrorReport = runTracker.getReport();
       logRunErrorSummary(_lastErrorReport, depthLabel, 'success');
-      _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot, plannedResearchers);
+      // Re-check the generation AFTER the await: the gate above was evaluated
+      // before it, so a shutdown completing during the capture would otherwise
+      // land this assignment after the wipe — a phantom outcome from a dead run.
+      const outcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot, plannedResearchers);
+      if (runGeneration === _sdkGeneration) _lastResearcherOutcome = outcome;
     }
     return result;
   } catch (err) {
@@ -573,7 +577,9 @@ export async function runDeepResearch(
       metrics.recordRunSummary(_lastRunSummary);
       _lastErrorReport = runTracker.getReport();
       logRunErrorSummary(_lastErrorReport, depthLabel, 'error');
-      _lastResearcherOutcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot, plannedResearchers);
+      // Re-check after the await — see the success path above.
+      const outcome = await captureResearcherOutcome(sessionId, researchId, _lastRunSummary.snapshot, plannedResearchers);
+      if (runGeneration === _sdkGeneration) _lastResearcherOutcome = outcome;
     }
     throw err;
   } finally {
@@ -914,6 +920,14 @@ export async function shutdownResearchSDK(): Promise<void> {
 async function _doShutdown(): Promise<void> {
   logger.log('[SDK] Shutting down Research SDK...');
 
+  // Invalidate the pending telemetry writes of any run still in flight FIRST —
+  // before runCleanup and the other long awaits below. The invariant: a run
+  // settling at ANY point after shutdown begins fails the generation gate. Bumping
+  // at the end instead left the whole teardown (cleanup, clearSession, service
+  // disposal) as a window in which a settling run passed the gate and wrote a
+  // phantom run-summary into the just-cleared session metrics.
+  _sdkGeneration++;
+
   const errors: Error[] = [];
 
   try {
@@ -975,10 +989,9 @@ async function _doShutdown(): Promise<void> {
   _lastRunSummary = null;
   _lastErrorReport = null;
   _lastResearcherOutcome = null;
-  // Invalidate the pending telemetry writes of any run still in flight: it settles
-  // after this wipe and its catch/finally would otherwise repopulate the `_last*`
-  // accessors and session metrics with a phantom run from this (now-dead) lifetime.
-  _sdkGeneration++;
+  // (No generation bump here — it happened at the TOP of this function, so any
+  // run settling during the teardown above already failed the gate and could not
+  // repopulate the `_last*` accessors or session metrics being wiped.)
   // The module-level config cache survives the globals above. Without this, a
   // shutdown → env/config-file change → re-init cycle in one process silently
   // reuses the first init's config. (The CLI/skill are unaffected — they pass

@@ -80,7 +80,12 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     // respected (same pattern as the KnowledgeStore check's Math.max floor).
   }, { timeoutMs: Math.max(healthTimeoutMs, 150000), critical: true });
 
-  // Register Knowledge Store Check
+  // Register Knowledge Store Check — NON-critical: the store is the optional cache
+  // research must run without (see the darwin-x64 comment below). A failure here
+  // (e.g. a dead embedding server, ECONNREFUSED) must degrade health, not flip the
+  // aggregate to unhealthy: as a critical check it aborted runs, and the raw store
+  // error then fed the TUI's browser-oriented formatter, which misattributed it as
+  // "the browser hit a network error / check your internet connection".
   registry.register('KnowledgeStore', async (options) => {
     // Idle fast-path — mirrors the BrowserRuntime check above. Read the ALREADY
     // resolved instance via tryGet(), which does NOT initialize the service;
@@ -222,7 +227,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       }
       return { healthy: false, error: `Knowledge store healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
     }
-  }, { timeoutMs: Math.max(healthTimeoutMs, 45000) });
+  }, { timeoutMs: Math.max(healthTimeoutMs, 45000), critical: false });
 
   // Register State Manager Check
   registry.register('StateManager', async () => {

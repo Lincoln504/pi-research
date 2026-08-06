@@ -65,6 +65,49 @@ describe('ResearchSessionService', () => {
       }
     });
 
+    it('does not erase — or orphan live — a session registered DURING the bounded abort awaits', async () => {
+      // Regression: the per-sessionId branch snapshotted the entries, awaited the
+      // bounded aborts, then blanket-clear()ed the map — erasing (without
+      // aborting) any session registered while the awaits were in flight, e.g. a
+      // researcher retry building a fresh session. Only the snapshotted entries
+      // may be removed.
+      const lateAbort = vi.fn(async () => {});
+      const firstAbort = vi.fn(async () => {
+        service.registerSession('r1', 'late', STUB_SESSION, lateAbort);
+      });
+      service.registerSession('r1', 'first', STUB_SESSION, firstAbort);
+
+      await service.abortAllSessions('r1');
+
+      expect(firstAbort).toHaveBeenCalledOnce();
+      // The late session was never aborted here, so it must still be registered
+      // (its owner's cleanup path remains responsible for it).
+      expect(lateAbort).not.toHaveBeenCalled();
+      expect(service.hasSession('r1', 'late')).toBe(true);
+      expect(service.hasSession('r1', 'first')).toBe(false);
+    });
+
+    it('a session re-registered under the same id during the aborts survives (identity check)', async () => {
+      const replacementEntry = { fresh: true } as any;
+      const replacementAbort = vi.fn(async () => {});
+      const firstAbort = vi.fn(async () => {
+        service.registerSession('r1', 'a', replacementEntry, replacementAbort);
+      });
+      service.registerSession('r1', 'a', STUB_SESSION, firstAbort);
+
+      await service.abortAllSessions('r1');
+
+      expect(replacementAbort).not.toHaveBeenCalled();
+      expect(service.getSession('r1', 'a')?.session).toBe(replacementEntry);
+    });
+
+    it('does not resurrect an empty bucket for an unknown id (read path uses peek)', async () => {
+      await service.abortAllSessions('completed-run');
+      // Create-on-write on this read path would leak one empty map per completed
+      // researchId for the lifetime of the host process.
+      expect((service as any).sessions.has('completed-run')).toBe(false);
+    });
+
     it('cleanup() (run() finally path) is bounded the same way for the all-sessions branch', async () => {
       vi.useFakeTimers();
       try {

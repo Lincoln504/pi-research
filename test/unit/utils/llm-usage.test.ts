@@ -65,6 +65,60 @@ describe('recordLlmUsage', () => {
   });
 
   /**
+   * Regression for c90d7f37: onPlanningTokens/onEvaluationTokens had ZERO emit sites —
+   * coordinator/evaluator usage flowed only through onTokensConsumed, which the TUI
+   * observer does not implement, so the coord/eval cost rows stayed permanently blank
+   * and the SDK planning_tokens/evaluation_tokens events never fired. recordLlmUsage is
+   * the single accounting primitive every call site routes through, so it owns the
+   * component→phase-hook mapping ('coordinator' → planning, 'evaluator' → evaluation).
+   */
+  describe('phase-scoped observer events', () => {
+    const phaseObserver = () => ({
+      onTokensConsumed: vi.fn(),
+      onPlanningTokens: vi.fn(),
+      onEvaluationTokens: vi.fn(),
+    });
+
+    it("routes component 'coordinator' to onPlanningTokens with the same numbers", async () => {
+      const observer = phaseObserver();
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(model, usage, { component: 'coordinator', complexity: 2, observer });
+      });
+      expect(observer.onPlanningTokens).toHaveBeenCalledTimes(1);
+      expect(observer.onPlanningTokens).toHaveBeenCalledWith(150, 0.03);
+      expect(observer.onEvaluationTokens).not.toHaveBeenCalled();
+      // The aggregate sink still fires — phase hooks are additive, not a replacement.
+      expect(observer.onTokensConsumed).toHaveBeenCalledWith(150, 0.03);
+    });
+
+    it("routes component 'evaluator' to onEvaluationTokens with the same numbers", async () => {
+      const observer = phaseObserver();
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(model, usage, { component: 'evaluator', complexity: 2, observer });
+      });
+      expect(observer.onEvaluationTokens).toHaveBeenCalledTimes(1);
+      expect(observer.onEvaluationTokens).toHaveBeenCalledWith(150, 0.03);
+      expect(observer.onPlanningTokens).not.toHaveBeenCalled();
+      expect(observer.onTokensConsumed).toHaveBeenCalledWith(150, 0.03);
+    });
+
+    it('fires no phase hook for other components or for zero usage', async () => {
+      const observer = phaseObserver();
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(model, usage, { component: 'researcher', observer });
+        recordLlmUsage(model, usage, { component: 'knowledge_search', observer });
+        // Zero usage is a no-op for ALL sinks, phase hooks included.
+        recordLlmUsage(model, { input: 0, output: 0, totalTokens: 0, cost: { total: 0 } }, { component: 'coordinator', observer });
+      });
+      expect(observer.onPlanningTokens).not.toHaveBeenCalled();
+      expect(observer.onEvaluationTokens).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * Regression guard for a real, weeks-long silent failure: a model whose price
    * table is all zeros bills tokens but reports $0.00 forever, because cost is
    * computed locally as tokens x price rather than read off the wire. Every display

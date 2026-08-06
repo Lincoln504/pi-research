@@ -202,8 +202,12 @@ export class BrowserTaskScheduler implements IScheduler {
 
     async startServer(): Promise<number> {
         this.server = new BrowserServer({
-            onSearch: (q) => this.runSearch(q),
-            onScrape: (u) => this.runScrape(u),
+            // The per-request signal aborts when the follower's socket closes
+            // before completion, so the leader-side task releases its queue
+            // claim (abort-while-queued/running is the PriorityTaskQueue's own
+            // pinned semantics) instead of holding the slot to full timeout.
+            onSearch: (q, signal) => this.runSearch(q, undefined, signal),
+            onScrape: (u, signal) => this.runScrape(u, undefined, signal),
             onHealthCheck: () => this.runHealthCheck(),
         });
         // FIX (#21): Expose auth secret to child processes via env

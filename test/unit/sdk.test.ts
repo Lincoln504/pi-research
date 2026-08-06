@@ -149,9 +149,10 @@ import {
   getLastErrorReport,
 } from '../../src/sdk.ts';
 import { metrics } from '../../src/utils/metrics.ts';
-import { 
-  registerCoreServices, 
-  initializeCoreServices, 
+import {
+  registerCoreServices,
+  initializeCoreServices,
+  disposeCoreServices,
 } from '../../src/core/service-initialization.ts';
 import { 
   registerInfrastructureServices, 
@@ -161,7 +162,7 @@ import {
 } from '../../src/orchestration/service-initialization.ts';
 import { logger } from '../../src/logger.ts';
 import { getConfig } from '../../src/config.ts';
-import { resetServiceContainer, disposeAllServices } from '../../src/core/service-registry.ts';
+import { resetServiceContainer, disposeAllServices, getService } from '../../src/core/service-registry.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -428,6 +429,74 @@ describe('SDK Lifecycle', () => {
       // ...nor recorded a session run summary into the fresh lifetime.
       expect(recordSpy).not.toHaveBeenCalled();
       recordSpy.mockRestore();
+    });
+
+    it('a run settling while shutdown is IN PROGRESS cannot record telemetry into the mid-wipe session metrics', async () => {
+      // Regression: the generation used to be bumped at the END of _doShutdown,
+      // AFTER metrics.clearSession() and the long service-disposal awaits — a run
+      // settling in that window passed the gate and wrote a phantom run-summary
+      // into the just-cleared session metrics. The bump now happens at the TOP:
+      // anything settling after shutdown BEGINS fails the gate.
+      await initSDK();
+      let rejectRun!: (e: Error) => void;
+      mockDeepRun.mockImplementation(() => new Promise<string>((_res, rej) => { rejectRun = rej; }));
+      const runPromise = runDeepResearch('q');
+      await new Promise((r) => setImmediate(r)); // run reaches the orchestrator await
+
+      // Stall shutdown INSIDE disposeCoreServices — after clearSession(), before
+      // the old end-of-function generation bump.
+      let releaseDispose!: () => void;
+      vi.mocked(disposeCoreServices).mockImplementationOnce(() => new Promise<void>((res) => { releaseDispose = res; }));
+      const recordSpy = vi.spyOn(metrics, 'recordRunSummary');
+      const shutdownPromise = shutdownResearchSDK();
+      await new Promise((r) => setImmediate(r)); // shutdown is wedged in the stalled dispose
+      recordSpy.mockClear();
+
+      rejectRun(new Error('late failure'));
+      try {
+        await expect(runPromise).rejects.toThrow('late failure');
+        expect(recordSpy).not.toHaveBeenCalled(); // pre-fix: phantom summary recorded mid-wipe
+      } finally {
+        // Always release the stalled dispose — a failed assertion must not leave
+        // the coalesced shutdown pending and wedge afterEach's shutdown await.
+        releaseDispose();
+        await shutdownPromise;
+        recordSpy.mockRestore();
+      }
+    });
+
+    it('a shutdown completing during the researcher-outcome capture cannot resurrect the outcome', async () => {
+      // Regression: the generation gate was checked BEFORE the awaited
+      // captureResearcherOutcome(), but `_lastResearcherOutcome = await …` lands
+      // the assignment AFTER it — a shutdown completing inside that await window
+      // wiped the accessor and was then overwritten by the stale run.
+      await initSDK();
+      const prevImpl = vi.mocked(getService).getMockImplementation();
+      let releasePlanning!: () => void;
+      vi.mocked(getService).mockImplementation(async (name: any) => {
+        if (name === 'research-orchestration') return { runResearch: mockDeepRun } as any;
+        if (name === 'research-synthesis-service') return { getAllReports: vi.fn().mockResolvedValue(new Map()), appendMetadata: vi.fn((r: string) => r) } as any;
+        if (name === 'planning') {
+          // Stall the outcome capture until the test has completed a full shutdown.
+          await new Promise<void>((res) => { releasePlanning = res; });
+          return { getTotalResearchersPlanned: vi.fn().mockReturnValue(3) } as any;
+        }
+        return {} as any;
+      });
+      try {
+        const runPromise = runDeepResearch('q'); // orchestrator resolves 'deep result'
+        // Let the run reach the stalled planning lookup inside captureResearcherOutcome.
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+
+        await shutdownResearchSDK(); // completes fully; wipes _lastResearcherOutcome
+
+        releasePlanning(); // the stale capture settles AFTER the wipe
+        await expect(runPromise).resolves.toBe('deep result');
+        expect(getLastResearcherOutcome()).toBeNull(); // pre-fix: phantom outcome resurrected
+      } finally {
+        vi.mocked(getService).mockImplementation(prevImpl!);
+      }
     });
 
     it('a run in the SAME lifetime still records telemetry after an unrelated earlier shutdown', async () => {

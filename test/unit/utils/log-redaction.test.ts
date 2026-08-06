@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, neutralizeControlChars } from '../../../src/utils/log-utils.ts';
+import { redactSecrets, neutralizeControlChars, stripTerminalEscapes } from '../../../src/utils/log-utils.ts';
 
 describe('redactSecrets', () => {
   it('masks credentials embedded in URL userinfo', () => {
@@ -21,6 +21,21 @@ describe('redactSecrets', () => {
     expect(redactSecrets('api_key=abcdef123456')).not.toContain('abcdef123456');
     expect(redactSecrets('"password": "hunter2"')).not.toContain('hunter2');
     expect(redactSecrets('Cookie: sessionid=deadbeefdeadbeef')).not.toContain('deadbeefdeadbeef');
+  });
+
+  it('masks the ENTIRE Cookie header value, not just the first pair', () => {
+    // The KV value class stops at whitespace, so pre-fix only `lang=en;` was
+    // masked and every later pair — including the actual credential — survived.
+    const out = redactSecrets('Cookie: lang=en; SID=secret123; theme=dark');
+    expect(out).not.toContain('secret123');
+    expect(out).not.toContain('theme=dark');
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('masks the ENTIRE Set-Cookie header value', () => {
+    const out = redactSecrets('Set-Cookie: SSID=tok4bcde; Path=/; HttpOnly; Secure');
+    expect(out).not.toContain('tok4bcde');
+    expect(out).not.toContain('HttpOnly');
   });
 
   it('masks known opaque token formats', () => {
@@ -79,6 +94,29 @@ describe('redactSecrets', () => {
     const out = redactSecrets('x'.repeat(20_000));
     expect(out.length).toBeLessThan(11_000);
     expect(out).toContain('truncated');
+  });
+});
+
+describe('stripTerminalEscapes', () => {
+  it('strips private-mode CSI sequences the colour-only ANSI pattern misses', () => {
+    expect(stripTerminalEscapes('a\x1b[?25lb')).toBe('ab'); // hide-cursor
+    expect(stripTerminalEscapes('a\x1b[31mb')).toBe('ab'); // plain colour too
+  });
+
+  it('strips OSC sequences terminated by BEL or ST', () => {
+    expect(stripTerminalEscapes('x\x1b]0;evil title\x07y')).toBe('xy');
+    expect(stripTerminalEscapes('x\x1b]8;;http://evil\x1b\\y')).toBe('xy');
+  });
+
+  it('strips DCS/SOS/PM/APC sequences and truncated/bare escapes', () => {
+    expect(stripTerminalEscapes('x\x1bP+q544e\x1b\\y')).toBe('xy'); // DCS
+    expect(stripTerminalEscapes('x\x1b_payload\x1b\\y')).toBe('xy'); // APC
+    expect(stripTerminalEscapes('truncated\x1b]0;no-terminator')).toBe('truncated');
+    expect(stripTerminalEscapes('dangling\x1b')).toBe('dangling');
+  });
+
+  it('spaces out residual raw control bytes (BEL, NUL)', () => {
+    expect(stripTerminalEscapes('a\x07b\x00c')).toBe('a b c');
   });
 });
 

@@ -19,7 +19,7 @@ import { getService, tryGetServiceContainerFromCtx } from '../core/service-regis
 import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../core/llm/prompts.ts';
 import { injectCurrentDate } from '../core/llm/inject-date.ts';
-import { recordResearcherFailure, getSteeringMessages } from './session-state.ts';
+import { recordResearcherFailure, getSteeringMessages, shouldStopResearch } from './session-state.ts';
 import { isAbortSentinel, boundSessionAbort } from './abort-utils.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 import { search } from '../web-research/search.ts';
@@ -47,6 +47,15 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   
   const id = String(researcherConfig.id);
   const container = tryGetServiceContainerFromCtx(ctx);
+
+  // Fast-stop self-check: when the run's failure threshold trips, runResearchers'
+  // fast-stop path aborts only REGISTERED sessions — a researcher that is still
+  // acquiring initial links, sleeping between attempts, or rebuilding a session
+  // has none, and would otherwise sail on into a full LLM session + scrape burst
+  // AFTER the run already returned and released its run-cap slot. Every launch /
+  // retry boundary below consults this and exits quietly instead (the stop error
+  // is the run's outcome, not this researcher's failure).
+  const stopRequested = (): boolean => shouldStopResearch(sessionId, researchId, config.MAX_FAILED_RESEARCHERS);
   observer?.onResearcherStart?.(id, researcherConfig.name, researcherConfig.goal, round);
   metrics.increment('researchers_launched_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
 
@@ -82,12 +91,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     const maxLinkAttempts = config.RESEARCHER_MAX_RETRIES + 1;
     for (let linkAttempt = 1; linkAttempt <= maxLinkAttempts && effectiveInitialLinks.length === 0; linkAttempt++) {
       if (linkAttempt > 1) {
-        if (signal?.aborted || container?.isDisposing) break;
+        if (signal?.aborted || container?.isDisposing || stopRequested()) break;
         const delay = Math.min(1000 * Math.pow(2, linkAttempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
         logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results; retry ${linkAttempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
         await new Promise(r => setTimeout(r, delay));
       }
-      if (signal?.aborted || container?.isDisposing) break;
+      if (signal?.aborted || container?.isDisposing || stopRequested()) break;
       try {
         const queryResults = await search(retryQueries, config, signal, undefined, container);
         const urls = new Set<string>();
@@ -100,12 +109,13 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       }
     }
 
-    // A cancel/teardown lands here with zero links because the loop above breaks
-    // on abort/disposal — that is a clean stop, not a "search produced nothing"
-    // researcher failure. Return quietly (mirrors the cancellation treatment in
-    // runResearchers) instead of recording a failure, bumping the skip metric,
-    // and painting a red failed slice with a bogus root cause on a plain cancel.
-    if (signal?.aborted || container?.isDisposing) {
+    // A cancel/teardown/fast-stop lands here with zero links because the loop
+    // above breaks on abort/disposal/stop — that is a clean stop, not a "search
+    // produced nothing" researcher failure. Return quietly (mirrors the
+    // cancellation treatment in runResearchers) instead of recording a failure,
+    // bumping the skip metric, and painting a red failed slice with a bogus root
+    // cause on a plain cancel.
+    if (signal?.aborted || container?.isDisposing || stopRequested()) {
       logger.debug(`[ResearcherExecutor] Researcher ${id} cancelled while acquiring initial links; skipping quietly.`);
       return;
     }
@@ -135,11 +145,44 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   const deliveredSteeringIds = new Set<string>();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Launch boundary: never build a session for a run that is already cancelled
+    // or fast-stopped. The abort sentinel keeps the wrapper's clean-cancel
+    // classification (runResearchers treats it exactly like the race's throw);
+    // the fast-stop exit is quiet — see stopRequested above.
+    if (signal?.aborted) throw new Error('Aborted');
+    if (stopRequested()) {
+      logger.debug(`[ResearcherExecutor] Researcher ${id} exiting before attempt ${attempt}: fast-stop threshold crossed.`);
+      return;
+    }
     if (attempt > 1) {
       const delay = Math.min(1000 * Math.pow(2, attempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
       logger.warn(`[ResearcherExecutor] Researcher ${id} retry ${attempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
       observer?.onResearcherProgress?.(id, 'retry');
-      await new Promise(r => setTimeout(r, delay));
+      // Abortable: a cancel during this backoff must wake the sleep immediately —
+      // an inert setTimeout held the loop for up to RESEARCHER_MAX_RETRY_DELAY_MS
+      // after the cancel and then re-entered a full attempt (fresh session +
+      // billed prompt). Mirrors the stagger sleep in runResearchers.
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          if (signal) signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, delay);
+        const onAbort = () => { clearTimeout(timer); resolve(); };
+        if (signal) {
+          if (signal.aborted) onAbort();
+          else signal.addEventListener('abort', onAbort, { once: true });
+        }
+      });
+      // Re-launch boundary after the sleep: a cancel, fast-stop, or container
+      // teardown landing DURING the backoff must not re-enter a full attempt —
+      // this is exactly the window the fast-stop path cannot reach, because
+      // abortAllSessions only aborts registered sessions and a between-attempts
+      // researcher has none.
+      if (signal?.aborted) throw new Error('Aborted');
+      if (stopRequested() || container?.isDisposing) {
+        logger.debug(`[ResearcherExecutor] Researcher ${id} exiting after backoff: fast-stop or container teardown.`);
+        return;
+      }
     }
 
     // Generate prompt for this attempt, incorporating ALL steering messages delivered so far

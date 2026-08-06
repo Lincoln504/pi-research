@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -462,6 +462,104 @@ describe('FileLockService', () => {
       await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
       // Many ticks happened (200ms / 5ms ≈ 40), but the stable owner is checked once.
       expect(calls).toBe(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Held-lock mtime heartbeat (live-owner steal prevention)
+  // ---------------------------------------------------------------------------
+
+  describe('held-lock mtime heartbeat', () => {
+    it('refreshes a held lock aged past liveOwnerStaleThreshold so a peer backs off instead of stealing it', async () => {
+      // The steal this prevents: _shouldReclaim treats a verified-ALIVE owner as
+      // stealable purely on lockAge > liveOwnerStaleThreshold, and pre-fix
+      // nothing refreshed the file while held — so a legitimately long critical
+      // section (e.g. a >4-minute knowledge-store migration under the 240s
+      // init-lock threshold) lost its lock mid-write to a concurrent opener.
+      service = new FileLockService({
+        lockFilePath,
+        lockStaleThreshold: 1_000,
+        liveOwnerStaleThreshold: 4_000, // heartbeat interval = max(2s, 1s) = 2s
+        lockTimeout: 300,
+        lockRetryDelay: 20,
+      });
+      await service.initialize();
+      await service.acquireLock();
+
+      // Simulate the long critical section: age the lock file past the threshold.
+      const aged = new Date(Date.now() - 300_000);
+      await fs.utimes(lockFilePath, aged, aged);
+
+      // One heartbeat tick (2s interval) must re-freshen it; the extra second is
+      // slack for a loaded CI event loop delaying the tick.
+      await new Promise((r) => setTimeout(r, 3_000));
+      const stats = await fs.stat(lockFilePath);
+      expect(Date.now() - stats.mtimeMs).toBeLessThan(60_000);
+
+      // A contending peer now sees a FRESH live-owner lock: genuine contention
+      // (timeout) — never a steal, which would admit a second writer.
+      const peer = new FileLockService({
+        lockFilePath,
+        lockStaleThreshold: 1_000,
+        liveOwnerStaleThreshold: 4_000,
+        lockTimeout: 300,
+        lockRetryDelay: 20,
+      });
+      try {
+        await peer.initialize();
+        await expect(peer.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
+        const parsed = JSON.parse((await fs.readFile(lockFilePath, 'utf-8')).trim()) as { uuid: string };
+        expect(parsed.uuid).toBe(service.getLockUuid());
+      } finally {
+        await service.releaseLock();
+        await peer.dispose();
+      }
+    }, 15_000);
+
+    it('starts no heartbeat under the effectively-infinite opt-out and clears it on release', async () => {
+      // MAX_SAFE_INTEGER (the run-semaphore's never-steal-from-a-live-owner
+      // config) must not start a timer at all: Node clamps delays over 2^31-1
+      // to 1ms, which would turn maintenance into a utimes busy-loop.
+      service = new FileLockService({ lockFilePath, liveOwnerStaleThreshold: Number.MAX_SAFE_INTEGER });
+      await service.initialize();
+      await service.acquireLock();
+      expect((service as any).heartbeatTimer).toBeNull();
+      await service.releaseLock();
+
+      // A default-threshold instance runs one while held and clears it on release.
+      const normal = new FileLockService({ lockFilePath });
+      try {
+        await normal.initialize();
+        await normal.acquireLock();
+        expect((normal as any).heartbeatTimer).not.toBeNull();
+        await normal.releaseLock();
+        expect((normal as any).heartbeatTimer).toBeNull();
+      } finally {
+        await normal.dispose();
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Metrics gauge labeling
+  // ---------------------------------------------------------------------------
+
+  describe('held-gauge labeling', () => {
+    it('labels state_lock_held with the lock identity so one release cannot zero every peer gauge', async () => {
+      // Unlabeled, every instance (state lock, knowledge init, browser init,
+      // run slots) shared a single gauge and any release zeroed it globally.
+      const { metrics } = await import('../../../src/utils/metrics.ts');
+      const setGauge = vi.spyOn(metrics, 'setGauge');
+      try {
+        service = new FileLockService({ lockFilePath });
+        await service.initialize();
+        await service.acquireLock();
+        expect(setGauge).toHaveBeenCalledWith('state_lock_held', 1, { lock: 'test.lock' });
+        await service.releaseLock();
+        expect(setGauge).toHaveBeenCalledWith('state_lock_held', 0, { lock: 'test.lock' });
+      } finally {
+        setGauge.mockRestore();
+      }
     });
   });
 

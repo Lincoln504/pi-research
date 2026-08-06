@@ -7,7 +7,6 @@
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
-import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons } from './session-state.ts';
 import { MAX_EXTRA_ROUNDS_WITH_STEERING, resolveExcludedTools } from '../constants.ts';
@@ -294,11 +293,15 @@ export class DeepResearchOrchestrator {
                     clearTimeout(timeout);
                     reject(new Error('Research cancelled'));
                 };
+                // Deliberately REFERENCED: this sleep IS the run's sole pending
+                // operation at this moment (nothing else is in flight during a
+                // 'wait'), so an unref'd timer would let the process drain its
+                // event loop and exit 0 silently mid-run. Abortability, not
+                // unref, is what keeps cancellation responsive here.
                 const timeout = setTimeout(() => {
                     signal?.removeEventListener('abort', onAbort);
                     resolve();
                 }, 5000);
-                safeUnref(timeout);
                 signal?.addEventListener('abort', onAbort, { once: true });
             });
             

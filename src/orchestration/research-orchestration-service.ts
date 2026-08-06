@@ -345,14 +345,33 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       // without this an early check, up to maxConcurrent-1 extra researchers could
       // start past the stop threshold and waste a browser slot + an LLM call.
       if (shouldStopResearch(sessionId, researchId, maxFailedResearchers)) {
-        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
-        // Bounded: abortAllSessions awaits each session's abort, and session.abort()
-        // can wedge on the very in-flight call it is cancelling — an unbounded await
-        // here would hang the fast-stop throw for as long as the wedged call takes.
-        // Proceed after the bound; the abandoned aborts drain in the background.
+        // A SIGTERM mid-run disposes the container, and getService then throws
+        // "Cannot get service … during container disposal" — which would REPLACE
+        // the already-decided stop error with a raw service error. Teardown is
+        // happening either way, so a failure here must not gate the stop throw.
+        try {
+          const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
+          // Bounded: abortAllSessions awaits each session's abort, and session.abort()
+          // can wedge on the very in-flight call it is cancelling — an unbounded await
+          // here would hang the fast-stop throw for as long as the wedged call takes.
+          // Proceed after the bound; the abandoned aborts drain in the background.
+          await boundSessionAbort(
+            sessionService.abortAllSessions(researchId),
+            () => logger.debug('[ResearchOrchestrationService] Fast-stop abortAllSessions did not settle within bound; proceeding with stop'),
+          );
+        } catch (abortErr) {
+          logger.debug(`[ResearchOrchestrationService] Fast-stop session abort unavailable (container disposing?): ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
+        }
+        // abortAllSessions only reaches REGISTERED sessions; a researcher still
+        // building a session, in a retry backoff, or in its initial-links search
+        // loop self-stops via shouldStopResearch (researcher-executor.ts). Bound-
+        // await the active set so those self-stops settle BEFORE the stop error
+        // returns the run and releases its run-cap slot — bounded for the same
+        // reason as boundSessionAbort: one wedged researcher must not hang the
+        // already-decided stop.
         await boundSessionAbort(
-          sessionService.abortAllSessions(researchId),
-          () => logger.debug('[ResearchOrchestrationService] Fast-stop abortAllSessions did not settle within bound; proceeding with stop'),
+          Promise.allSettled(active).then(() => undefined),
+          () => logger.debug('[ResearchOrchestrationService] Fast-stop: active researchers did not settle within bound; proceeding with stop'),
         );
         throw createResearchStopError(sessionId, researchId);
       }
@@ -405,11 +424,15 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           // A user cancellation (quit mid-run) surfaces here as an abort-sentinel
           // throw — either the race's bare 'Aborted' or the '<id>: Aborted' that
           // ensureAssistantResponse raises for an externally-aborted session (the
-          // fast-stop path). That is a clean stop, not a researcher failure: don't
-          // log it at ERROR, don't count it toward the fast-stop threshold, and
-          // don't paint the TUI researcher slice red. Mirrors the guard in
+          // fast-stop path). Container disposal (SIGTERM mid-run) is the same
+          // clean-teardown class: the executor stops retrying on it, and counting
+          // its "during container disposal" throw as a researcher failure both
+          // paints a red slice with a bogus root cause and can trip
+          // shouldStopResearch during shutdown. None of these are researcher
+          // failures: don't log at ERROR, don't count toward the fast-stop
+          // threshold, don't paint the TUI slice red. Mirrors the guard in
           // researcher-executor.ts.
-          if (signal?.aborted || isAbortSentinel(errMsg)) {
+          if (signal?.aborted || isAbortSentinel(errMsg) || container?.isDisposing || errMsg.includes('during container disposal')) {
             logger.debug(`[ResearchOrchestrationService] Researcher ${id} cancelled (aborted).`);
           } else {
             logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
@@ -447,13 +470,26 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       if (shouldStopResearch(sessionId, researchId, maxFailedResearchers)) {
-        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
-        // Abort sessions specifically for this researchId, not the whole piSessionId.
-        // Bounded for the same reason as the pre-launch fast-stop above: a wedged
-        // session.abort() must not gate the stop error that is already decided.
+        // getService can throw during container disposal — same guard as the
+        // pre-launch fast-stop above: the stop error must win, not a raw
+        // "Cannot get service … during container disposal".
+        try {
+          const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
+          // Abort sessions specifically for this researchId, not the whole piSessionId.
+          // Bounded for the same reason as the pre-launch fast-stop above: a wedged
+          // session.abort() must not gate the stop error that is already decided.
+          await boundSessionAbort(
+            sessionService.abortAllSessions(researchId),
+            () => logger.debug('[ResearchOrchestrationService] Fast-stop abortAllSessions did not settle within bound; proceeding with stop'),
+          );
+        } catch (abortErr) {
+          logger.debug(`[ResearchOrchestrationService] Fast-stop session abort unavailable (container disposing?): ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
+        }
+        // Bound-await the active set so unregistered researchers self-stop before
+        // the stop error releases the run-cap slot (see the pre-launch site).
         await boundSessionAbort(
-          sessionService.abortAllSessions(researchId),
-          () => logger.debug('[ResearchOrchestrationService] Fast-stop abortAllSessions did not settle within bound; proceeding with stop'),
+          Promise.allSettled(active).then(() => undefined),
+          () => logger.debug('[ResearchOrchestrationService] Fast-stop: active researchers did not settle within bound; proceeding with stop'),
         );
 
         throw createResearchStopError(sessionId, researchId);

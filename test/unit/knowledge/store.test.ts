@@ -466,6 +466,73 @@ describe('KnowledgeStore', () => {
     await expect(store.rebuildFtsIndex()).resolves.toBe(true);
   });
 
+  it('rebuildFtsIndex does not absorb rows committed DURING the rebuild into the skip baseline', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/a', text: 'first', metadata: {}, timestamp: Date.now() },
+    ]);
+
+    // Inject a concurrent addDocuments between the two createIndex calls —
+    // addDocuments takes no lock, so this interleaving is reachable in
+    // production. Pre-fix the baseline was re-read through a FRESH handle after
+    // the rebuild, recording the mid-rebuild row as already-indexed even though
+    // the 'text' index (built before it landed) never saw it.
+    const origOpenFresh = (store as any).openFreshTable.bind(store);
+    (store as any).openFreshTable = async () => {
+      (store as any).openFreshTable = origOpenFresh; // doctor only the rebuild's own handle
+      const res = await origOpenFresh();
+      const table = res.table;
+      const origCreateIndex = table.createIndex.bind(table);
+      let injected = false;
+      table.createIndex = async (...args: unknown[]) => {
+        const out = await (origCreateIndex as any)(...args);
+        if (!injected) {
+          injected = true;
+          await store.addDocuments([
+            { url: 'https://example.com/mid', text: 'landed mid-rebuild', metadata: {}, timestamp: Date.now() },
+          ]);
+        }
+        return out;
+      };
+      return res;
+    };
+
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+    // The mid-rebuild row is not covered by the 'text' index — the next cleanup
+    // must rebuild, not skip.
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+  });
+
+  it('optimize() does not absorb rows committed during its window into the FTS skip baseline', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/a', text: 'first', metadata: {}, timestamp: Date.now() },
+    ]);
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+
+    // A row lands between optimize's baseline-currency check and its compaction
+    // commits. Pre-fix the post-optimize baseline was re-read through a FRESH
+    // handle, absorbing the row as already-indexed.
+    const origOpenFresh = (store as any).openFreshTable.bind(store);
+    (store as any).openFreshTable = async () => {
+      (store as any).openFreshTable = origOpenFresh;
+      const res = await origOpenFresh();
+      const table = res.table;
+      const origOptimize = table.optimize.bind(table);
+      table.optimize = async (...args: unknown[]) => {
+        await store.addDocuments([
+          { url: 'https://example.com/mid', text: 'landed mid-optimize', metadata: {}, timestamp: Date.now() },
+        ]);
+        return (origOptimize as any)(...args);
+      };
+      return res;
+    };
+    await expect(store.optimize()).resolves.toBe(true);
+
+    // The mid-optimize row is not in the FTS index — the next cleanup must rebuild.
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+  });
+
   it('optimize() compacts and prunes without error, and is a no-op while closing', async () => {
     await store.open();
     await store.addDocuments([

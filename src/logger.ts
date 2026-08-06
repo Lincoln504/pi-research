@@ -35,6 +35,7 @@ import {
   safeJsonStringify,
   formatArg,
   redactSecrets,
+  stripTerminalEscapes,
   type LogContext,
 } from './utils/log-utils.ts';
 import { LogRotation } from './utils/log-rotation.ts';
@@ -286,7 +287,10 @@ export class Logger implements ILogger {
       // escapes control chars on its own. CodeQL (js/log-injection) StringReplaceSanitizer
       // requires the replacement to be "" (empty string) — not ' ' — per its QL definition:
       //   replaces(s, "") and s.regexpMatch("\\n")
-      const msg = message.replace(/[\r\n]/g, '');
+      // redactSecrets removed only the colour/style CSI subset, so private-mode
+      // CSI (\x1b[?25l), OSC retitling, and DCS would still reach the terminal
+      // here — stripTerminalEscapes drops those plus residual control bytes.
+      const msg = stripTerminalEscapes(message.replace(/[\r\n]/g, ''));
       const rawSid = this.sessionId ?? '';
       const sid = rawSid.replace(/[\r\n]/g, '');
       const prefix = sid ? `[${sid}] ` : '';

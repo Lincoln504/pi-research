@@ -79,6 +79,18 @@ export class Embedder {
    */
   private activeInferences = 0;
   /**
+   * Callers parked on recoveryPromise — they JOINED an in-flight recovery while
+   * still holding their activeEmbeddings slot (the decrement runs downstream in
+   * their finally, after the joined recovery settles). recoverToCpu's drain must
+   * distinguish them from callers still progressing toward the pipeline (parked
+   * on the per-call GPU lock, or between embedMany batches): parked joiners can
+   * never finish until recovery completes (waiting on them deadlocks into the
+   * drain timeout), while the progressing callers MUST be waited for — disposing
+   * the pipeline under them raises a TypeError no device-error classifier
+   * recognizes, so their embed fails unrecovered.
+   */
+  private recoveryWaiters = 0;
+  /**
    * Why the in-flight dispose was started. An IDLE dispose is a memory-reclaim
    * pause that a later embed is expected to undo, so initialize() waits it out and
    * re-initializes. A TERMINAL dispose (shutdown, config change, explicit
@@ -404,6 +416,14 @@ export class Embedder {
    * drain loop waits only on calls genuinely inside the model.
    */
   private async runInference(input: string | string[]): Promise<any> {
+    // A disposal/recovery that raced this call may have nulled the pipeline out
+    // from under us. Calling through null raises a bare TypeError that nothing
+    // classifies (the writer queue drops the document as a generic ingest_error);
+    // throw the reconnect-classified signal instead — isEmbedderUnreachable
+    // matches "aborted" — so the caller retries via a fresh embedder.
+    if (!this.pipeline) {
+      throw new Error('[embedder] embed aborted: pipeline disposed before inference could run — reconnect required');
+    }
     this.activeInferences++;
     try {
       return await logger.runCapturingStderr(async () => {
@@ -530,7 +550,17 @@ export class Embedder {
   }
 
   private async recoverToCpu(): Promise<void> {
-    if (this.recoveryPromise) return this.recoveryPromise;
+    if (this.recoveryPromise) {
+      // Counted join: this caller still holds its activeEmbeddings slot while
+      // parked here, and the drain below must not wait on parked joiners (see
+      // the recoveryWaiters field comment).
+      this.recoveryWaiters++;
+      try {
+        return await this.recoveryPromise;
+      } finally {
+        this.recoveryWaiters--;
+      }
+    }
 
     // Guard: if disposal has already started, skip recovery — the embedder is going away.
     if (this.state === 'disposing' || this.state === 'idle') {
@@ -557,14 +587,23 @@ export class Embedder {
       await releaseGpuLock(this.stateManager, this.gpuLockHeld);
       this.gpuLockHeld = false;
 
-      // Drain in-flight pipeline calls before disposing the pipeline. Counts
-      // activeInferences, NOT activeEmbeddings: concurrent callers that hit the
-      // same device error park on recoveryPromise while still holding their
-      // activeEmbeddings slot (see the field comment), so an activeEmbeddings
-      // drain always burned the full timeout under multi-caller device loss.
+      // Drain in-flight callers before disposing the pipeline, on BOTH counts:
+      //  - activeInferences > 0: a call genuinely inside the model.
+      //  - activeEmbeddings - recoveryWaiters > 1: callers past initialize() but
+      //    not yet inside the model — parked on the per-call GPU lock, or between
+      //    embedMany batches. Self counts as 1 (this recovery runs from a caller
+      //    holding its own slot); parked joiners are subtracted because they can
+      //    never finish until THIS recovery completes (an uncorrected
+      //    activeEmbeddings drain always burned the full timeout under
+      //    multi-caller device loss). An inferences-only drain (the prior form)
+      //    disposed the pipeline under a lock-parked caller, whose embed then
+      //    failed with an unclassified TypeError, masking the device loss.
       const maxWaitMs = 15000;
       const startTime = Date.now();
-      while (this.activeInferences > 0 && (Date.now() - startTime) < maxWaitMs) {
+      while (
+        (this.activeInferences > 0 || this.activeEmbeddings - this.recoveryWaiters > 1) &&
+        (Date.now() - startTime) < maxWaitMs
+      ) {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
 
@@ -633,14 +672,16 @@ export class Embedder {
     this.disposePromise = (async () => {
       // Wait for all active embeddings to complete
       const maxWaitMs = 5000;
-      const startTime = Date.now();
-      while (this.activeEmbeddings > 0 && (Date.now() - startTime) < maxWaitMs) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-
-      if (this.activeEmbeddings > 0) {
-        logger.warn(`[embedder] Disposing with ${this.activeEmbeddings} active embeddings (timed out)`);
-      }
+      const drainActiveEmbeddings = async (): Promise<void> => {
+        const startTime = Date.now();
+        while (this.activeEmbeddings > 0 && (Date.now() - startTime) < maxWaitMs) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        if (this.activeEmbeddings > 0) {
+          logger.warn(`[embedder] Disposing with ${this.activeEmbeddings} active embeddings (timed out)`);
+        }
+      };
+      await drainActiveEmbeddings();
 
       if (this.initializingPromise) {
         try {
@@ -648,6 +689,15 @@ export class Embedder {
         } catch (_e) {
           // Initialize failed, which is fine
         }
+        // A caller parked on that same init increments activeEmbeddings only
+        // AFTER init resolves — i.e. after the drain above already passed — and
+        // initialize()'s disposed-mid-init branch returns cleanly, so its embed
+        // proceeds into runInference. Yield one macrotask so those callers reach
+        // their increment, then drain AGAIN; otherwise the pipeline below is
+        // torn down under a just-started inference (an unclassified TypeError
+        // the writer queue drops as a generic ingest_error).
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await drainActiveEmbeddings();
       }
 
       if (this.pipeline) {

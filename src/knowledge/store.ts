@@ -256,7 +256,12 @@ export class KnowledgeStore implements IKnowledgeStore {
             // getDimension() report the correct new width. (re-embed needs the warm
             // embedder regardless.)
             if (this.options.embedder.getDimension() === null) {
-              await this.options.embedder.embedMany([' ']);
+              // Reconnect-wrapped: after a service re-scope this warm-up can be
+              // the FIRST embed against a stale cached instance (a stepped-down
+              // leader fast-fails with ECONNREFUSED); without the wrapper that
+              // single fast-fail aborted the whole open, burning an init retry
+              // per attempt against the same dead instance.
+              await this.withEmbedderReconnect(embedder => embedder.embedMany([' ']));
             }
             try {
               await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
@@ -977,9 +982,19 @@ export class KnowledgeStore implements IKnowledgeStore {
         config: Index.fts(),
         replace: true,
       });
-      // Record the version AFTER indexing (createIndex commits its own transactions) so the
-      // next call compares against this post-rebuild baseline and only rebuilds on real writes.
-      this.lastFtsVersion = await (await this.getFreshTable()).version();
+      // Record the post-rebuild baseline from THIS handle, whose version() is
+      // checkout-stable: it advances with our own createIndex commits but not with
+      // commits from other handles/processes. Re-reading through a fresh handle
+      // here (the old code) read the LATEST version instead — addDocuments takes
+      // no lock, so rows committed DURING the rebuild were absorbed into the
+      // baseline as already-indexed and stayed out of the BM25 leg until an
+      // unrelated later commit. Each createIndex commits exactly one version
+      // (measured on lancedb 0.29, fresh and replace alike); anything beyond
+      // version+2 means a concurrent commit rebased beneath our index commits, so
+      // fall back to the conservative pre-rebuild baseline — the next cleanup
+      // sees version > baseline and rebuilds over the missed rows.
+      const postVersion = await table.version();
+      this.lastFtsVersion = postVersion <= version + 2 ? postVersion : version;
       logger.info('[store] FTS indexes rebuilt (text + content).');
       return true;
     } catch (err) {
@@ -1027,7 +1042,12 @@ export class KnowledgeStore implements IKnowledgeStore {
         // rebuilds + re-optimizes (the disk-bloat regression). A stale baseline (index not
         // current, or never built) is left untouched so the next rebuild still detects the
         // pending change.
-        const wasFtsIndexCurrent = !stale && this.lastFtsVersion !== null && this.lastFtsVersion === await table.version();
+        // The row count is sampled BEFORE the version read: since optimize never changes
+        // the row set, a same-handle count that differs after the call proves rows were
+        // committed DURING optimize's window (rebased beneath its compaction commits) —
+        // rows the FTS index does not cover, which the baseline advance below must skip.
+        const rowCountBefore = !stale && this.lastFtsVersion !== null ? await table.countRows() : null;
+        const wasFtsIndexCurrent = rowCountBefore !== null && this.lastFtsVersion === await table.version();
         // cleanupOlderThan defaults to now: prune every prunable old version. The
         // current version is always retained, and (with deleteUnverified=false)
         // physical files inside LanceDB's safety window are kept regardless.
@@ -1043,9 +1063,14 @@ export class KnowledgeStore implements IKnowledgeStore {
         const bytesRemoved = stats?.prune?.bytesRemoved ?? 0;
         logger.info(`[store] Optimize complete: removed ${removed} old version(s), reclaimed ${bytesRemoved} bytes (${duration}ms).`);
         // Keep the FTS skip-guard baseline in sync with optimize's layout-only version bump
-        // so the next rebuildFtsIndex correctly skips when no content changed.
-        if (wasFtsIndexCurrent) {
-          this.lastFtsVersion = await (await this.getFreshTable()).version();
+        // so the next rebuildFtsIndex correctly skips when no content changed. Stamp from
+        // THIS handle (checkout-stable: it advances with optimize's own commits but not
+        // with foreign ones — a fresh re-open here read the latest version and absorbed
+        // concurrent commits), and only when the row count is unchanged: a differing count
+        // means an addDocuments landed inside optimize's window and must not be recorded
+        // as already-indexed (the baseline stays put, so the next rebuild catches it).
+        if (wasFtsIndexCurrent && (await table.countRows()) === rowCountBefore) {
+          this.lastFtsVersion = await table.version();
         }
         return true;
       } catch (err) {

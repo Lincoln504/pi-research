@@ -13,6 +13,9 @@ import { runResearcher } from '../../../src/orchestration/researcher-executor.ts
 import type { RunResearcherOptions } from '../../../src/orchestration/orchestration-types.ts';
 import { getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+// Real (unmocked) session-state: the executor's fast-stop self-check reads live
+// failure counts, so tests drive it through the real recordResearcherFailure.
+import { recordResearcherFailure, resetAllPiSessions } from '../../../src/orchestration/session-state.ts';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -145,6 +148,10 @@ function makeOptions(overrides: Partial<RunResearcherOptions> = {}): RunResearch
 
 describe('runResearcher', () => {
   beforeEach(async () => {
+    // The executor now consults the REAL session-state failure counts
+    // (fast-stop self-check); failures recorded by earlier tests under the shared
+    // 'test-session'/'test-research-id' ids must not leak across tests.
+    resetAllPiSessions();
     mockPrompt.mockClear().mockResolvedValue(undefined);
     mockAbort.mockClear().mockResolvedValue(undefined);
     mockSubscribe.mockClear().mockReturnValue(vi.fn());
@@ -642,9 +649,102 @@ describe('runResearcher', () => {
     });
   });
 
+  // ── Fast-stop self-check (regression: zombie researchers) ───────────────────
+
+  describe('fast-stop self-check', () => {
+    // Regression: when the run's failure threshold trips, the fast-stop path in
+    // runResearchers aborts only REGISTERED sessions — a researcher still between
+    // attempts or acquiring initial links has none, and used to proceed into a
+    // full LLM session + scrape burst AFTER the run had already returned and
+    // released its run-cap slot. The executor must now self-stop at every
+    // launch/retry boundary.
+
+    function crossThreshold() {
+      // DEFAULT_MAX_FAILED_RESEARCHERS = 2 unique failed researchers.
+      recordResearcherFailure('test-session', 'test-research-id', 'failed-a', 'boom');
+      recordResearcherFailure('test-session', 'test-research-id', 'failed-b', 'boom');
+    }
+
+    it('exits before building a session when the threshold is already crossed', async () => {
+      crossThreshold();
+      const onResearcherFailure = vi.fn();
+
+      await expect(runResearcher(makeOptions({ observer: { onResearcherFailure } as any })))
+        .resolves.toBeUndefined();
+
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      expect(vi.mocked(createResearcherSession)).not.toHaveBeenCalled();
+      expect(mockPrompt).not.toHaveBeenCalled();
+      // A self-stop is the run's outcome, not this researcher's failure.
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+    });
+
+    it('returns quietly from the initial-links search loop when the threshold is crossed', async () => {
+      crossThreshold();
+      const onResearcherFailure = vi.fn();
+
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [],
+        observer: { onResearcherFailure } as any,
+      }));
+
+      expect(mockSearch).not.toHaveBeenCalled();
+      expect(mockPrompt).not.toHaveBeenCalled();
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+    });
+
+    it('does not build a new session when the threshold is crossed during the retry backoff', async () => {
+      // THE zombie scenario: attempt 1 fails, the researcher sleeps its backoff,
+      // and the fast-stop trips meanwhile (its session set is empty, so
+      // abortAllSessions cannot reach it). On wake it must exit, not relaunch.
+      vi.useFakeTimers();
+      try {
+        mockPrompt.mockRejectedValueOnce(new Error('transient failure'));
+        const run = runResearcher(makeOptions({
+          researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 1, RESEARCHER_MAX_RETRY_DELAY_MS: 100 } as any,
+        }));
+
+        await vi.advanceTimersByTimeAsync(0); // attempt 1 fails; backoff sleep armed
+        crossThreshold();                     // threshold crossed mid-sleep
+        await vi.advanceTimersByTimeAsync(1_000); // backoff elapses
+
+        await expect(run).resolves.toBeUndefined();
+        expect(mockPrompt).toHaveBeenCalledTimes(1); // no second (billed) attempt
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   // ── Abort signal ────────────────────────────────────────────────────────────
 
   describe('abort signal', () => {
+    it('does not re-enter a billed attempt when cancel lands during the inter-attempt backoff', async () => {
+      // Regression: the backoff sleep was a bare setTimeout — a cancel during it
+      // was ignored and the loop re-entered a full attempt (fresh session +
+      // billed prompt) that only then lost the abort race.
+      vi.useFakeTimers();
+      try {
+        const controller = new AbortController();
+        mockPrompt.mockRejectedValueOnce(new Error('transient failure'));
+        const outcome = runResearcher(makeOptions({
+          signal: controller.signal,
+          researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 1, RESEARCHER_MAX_RETRY_DELAY_MS: 60_000 } as any,
+        })).then(() => 'resolved', (e: Error) => `rejected: ${e.message}`);
+
+        await vi.advanceTimersByTimeAsync(0); // attempt 1 fails; backoff sleep armed
+        controller.abort();                   // lands during the sleep
+        await vi.advanceTimersByTimeAsync(2_000); // pre-fix: sleep elapses, attempt 2 launches
+
+        // The abort sentinel keeps runResearchers' clean-cancel classification.
+        expect(await outcome).toBe('rejected: Aborted');
+        expect(mockPrompt).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('rejects with a pre-aborted signal when prompt is pending', async () => {
       const controller = new AbortController();
       controller.abort();

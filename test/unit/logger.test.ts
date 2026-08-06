@@ -5,7 +5,7 @@
  * Tests also verify logging stays scoped and never patches console methods.
  */
 
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -319,6 +319,31 @@ describe('logger', () => {
       const content = readFileSync(TEST_LOG_PATH, 'utf-8');
       expect(content).toContain('Direct native write');
       expect(content).toContain('"level":"FS_WRITE_SYNC_STDERR"');
+    });
+  });
+
+  describe('console sink sanitization', () => {
+    it('strips non-CSI terminal escapes (private-mode CSI, OSC, DCS) from console output', () => {
+      // redactSecrets removes only the colour/style CSI subset, so pre-fix these
+      // sequences reached the user's terminal verbatim under
+      // PI_RESEARCH_CONSOLE_LOG=true — hiding the cursor, retitling the window.
+      const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH, consoleLog: true });
+        logger.warn('before \x1b[?25l\x1b]0;pwned\x07\x1bP+q544e\x1b\\ after');
+
+        expect(spy).toHaveBeenCalledTimes(1);
+        const line = String(spy.mock.calls[0]![0]);
+        expect(line).toContain('before');
+        expect(line).toContain('after');
+        // The sink's OWN colour prefix is expected; the smuggled sequences are not.
+        expect(line).not.toContain('\x1b[?25l');
+        expect(line).not.toContain(']0;pwned');
+        expect(line).not.toContain('\x07');
+        expect(line).not.toContain('\x1bP');
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

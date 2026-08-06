@@ -210,10 +210,23 @@ function makeProgressObserver(): HeadlessObserverOptions {
 
 
 /**
+ * Thrown by bridgeConfigEnv when an EXPLICIT `--config` file is missing or
+ * unreadable. The ambient layers (config.env, cli.env) are optional overlays and
+ * stay tolerant — but a file the user named on this exact invocation silently
+ * not applying meant a typo'd `--config /path/ci.evn` ran on ambient config and
+ * reported success. main() maps this to EXIT.CONFIG for every command that
+ * accepts --config.
+ */
+export class ConfigFileError extends Error {}
+
+/**
  * Bridge the CLI's config files into process.env for keys not already set in the
  * real environment. Layers the base `~/.pi/research/config.env` then the CLI's
- * own `~/.pi/research/cli.env` overlay (overlay wins), or a `--config <path>`
- * override in place of the base.
+ * own `~/.pi/research/cli.env` overlay (overlay wins). With an explicit
+ * `--config <path>` the NAMED file layers on top of cli.env instead (highest
+ * file precedence); it does not replace the base — getConfig() still reads
+ * config.env as a lower-precedence file layer, so base keys the named file does
+ * not set still apply, and real environment variables always win.
  *
  * Why: auth values (PI_RESEARCH_API_KEY / _PROVIDER) are read directly from
  * process.env, NOT from the typed Config, so a key placed only in a config file
@@ -243,16 +256,28 @@ export function bridgeConfigEnv(explicitConfigPath?: string): { path: string; lo
     ? [cliOverlayPath, basePath]
     : [basePath, cliOverlayPath];
   for (const filePath of layers) {
+    // Only the EXPLICIT --config file fails loudly (see ConfigFileError above);
+    // the ambient layers keep their missing/unreadable tolerance unchanged.
+    const isExplicit = explicitConfigPath !== undefined && filePath === basePath;
     try {
-      if (!fs.existsSync(filePath)) continue;
+      if (!fs.existsSync(filePath)) {
+        if (isExplicit) throw new ConfigFileError(`--config file not found: ${filePath}`);
+        continue;
+      }
       const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
       Object.assign(merged, parsed);
-      if (explicitConfigPath !== undefined && filePath === basePath) {
+      if (isExplicit) {
         for (const k of Object.keys(parsed)) fromExplicitBase.add(k);
       }
       loaded = true;
-    } catch {
-      // ignore unreadable file; fall through to the next
+    } catch (err) {
+      if (err instanceof ConfigFileError) throw err;
+      if (isExplicit) {
+        throw new ConfigFileError(
+          `--config file could not be read: ${filePath} (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
+      // ignore unreadable ambient file; fall through to the next
     }
   }
   for (const [k, v] of Object.entries(merged)) {
@@ -1065,21 +1090,25 @@ COMMANDS
     --model <provider/id>        Model for this run (outranks PI_RESEARCH_MODEL; satisfies the required-model check).
     --exclude-tools <a,b>        Disable internal tools (e.g. security_search,stackexchange).
     --initial-links <url ...>    Seed URLs to investigate first; requires a query (-- ends options).
-    --config <path>              Use this config file instead of the base config.env.
+    --config <path>              Layer this config file on top (highest file precedence; base
+                                 config.env keys it does not set still apply; env vars still win).
     --json                       Emit a JSON object instead of a markdown report.
 
   knowledge "<q1>" ["<q2>" ...]  Search local knowledge store before live research (up to 5 queries).
-    --config <path>              Use this config file instead of the base config.env.
+    --config <path>              Layer this config file on top (highest file precedence; base
+                                 config.env keys it does not set still apply; env vars still win).
     --json                       Emit a JSON object.
 
   knowledge-config [show]        Show the knowledge-store mode for this directory + its source.
-    --config <path>              Use this config file instead of the base config.env.
+    --config <path>              Layer this config file on top (highest file precedence; base
+                                 config.env keys it does not set still apply; env vars still win).
     --json                       Emit a JSON object.
   knowledge-config set <mode>    Set the mode for THIS directory (none | project | global);
                                  persisted per-directory. Takes effect on the next run.
 
   status                         Show detected config, model/key, and readiness.
-    --config <path>              Use this config file instead of the base config.env.
+    --config <path>              Layer this config file on top (highest file precedence; base
+                                 config.env keys it does not set still apply; env vars still win).
     --json                       Emit a JSON object.
 
   skill [status]                 Show where the agent skill is installed across your coding agents.
@@ -1161,10 +1190,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const rest = args.slice(1);
 
   if (cmd === 'status') {
-    const json = rest.includes('--json');
+    // Same unknown-option rejection loop as the other subcommands. The previous
+    // ad-hoc rest.includes('--json') accepted anything — `status --jsn` and
+    // `status --json=true` exited 0 with human output instead of failing fast.
+    let json = false;
     let configPath: string | undefined;
-    const ci = rest.indexOf('--config');
-    if (ci !== -1) configPath = takeOptionValue(rest, ci + 1, '--config');
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === '--json') json = true;
+      else if (a === '--config') configPath = takeOptionValue(rest, ++i, '--config');
+      else if (a?.startsWith('--')) {
+        throw new UsageError(`unknown option for status: ${a}. Valid options: --json, --config <path>.`);
+      } else if (a !== undefined) {
+        throw new UsageError(`unexpected argument "${a}" after "status".`);
+      }
+    }
     out.command = 'status';
     out.status = { json };
     out.configPath = configPath;
@@ -1400,14 +1440,63 @@ export function _markCancellationForTests(sig?: NodeJS.Signals): void {
   cancellationSignal = sig ?? null;
 }
 
+/**
+ * When the FIRST cancelling signal was handled (epoch ms), or null before one
+ * arrives. Module-scoped rather than a main() closure so the duplicate-vs-force
+ * decision below is directly testable through the seams underneath.
+ */
+let firstSignalAtMs: number | null = null;
+
+/**
+ * How long after the first signal a repeat still reads as a MECHANICAL
+ * duplicate. The skill launcher forwards every cancelling signal to this
+ * process — but with stdio:'inherit' a tty Ctrl-C has ALREADY delivered SIGINT
+ * to the whole foreground group, so the forwarded copy lands within
+ * milliseconds of the first. A human's second Ctrl-C at a stuck cleanup comes
+ * seconds later; 1s cleanly separates the two.
+ */
+const SIGNAL_FORCE_EXIT_GRACE_MS = 1_000;
+
+export type SignalDisposition = 'begin-cleanup' | 'absorb-duplicate' | 'force-exit';
+
+/**
+ * Decide what a delivered cancelling signal means, latching the first arrival.
+ * Exported as the test seam for the duplicate-absorption contract: the race
+ * windows (a forwarded duplicate landing mid-safeShutdown) cannot be timed
+ * reliably through a spawned CLI, so tests drive the decision directly —
+ * mirroring the _markCancellationForTests seam above.
+ */
+export function _signalDisposition(now: number = Date.now()): SignalDisposition {
+  if (firstSignalAtMs === null) {
+    firstSignalAtMs = now;
+    return 'begin-cleanup';
+  }
+  return now - firstSignalAtMs > SIGNAL_FORCE_EXIT_GRACE_MS ? 'force-exit' : 'absorb-duplicate';
+}
+
+export function _resetSignalDispositionForTests(): void {
+  firstSignalAtMs = null;
+}
+
 async function main(argv: string[]): Promise<number> {
   // Register signal handlers so SIGINT/SIGTERM always trigger SDK shutdown
   // before the process exits. safeShutdown() is idempotent — safe to call
   // before SDK init (it no-ops) and safe to call from multiple signals.
-  let _signalCleanupDone = false;
   const onSignal = (sig: string) => {
-    if (_signalCleanupDone) return;
-    _signalCleanupDone = true;
+    switch (_signalDisposition()) {
+      case 'absorb-duplicate':
+        // The launcher's forwarded copy of a signal the tty already delivered
+        // to the whole foreground group — cleanup is running; swallow it.
+        return;
+      case 'force-exit':
+        // A repeat WELL after the first is a human (or an escalating harness)
+        // at a stuck cleanup: honour it immediately, on the true 128+N.
+        toStderr(`\n[pi-research] ${sig} again — force exit\n`);
+        process.exit(exitCodeForSignal(sig as NodeJS.Signals));
+        return;
+      case 'begin-cleanup':
+        break;
+    }
     cancellationRequested = true;
     cancellationSignal = sig as NodeJS.Signals;
     toStderr(`\n[pi-research] ${sig} — cleaning up…\n`);
@@ -1424,8 +1513,15 @@ async function main(argv: string[]): Promise<number> {
     // exit status depend on whether this handler beat a force-kill.
     void safeShutdown().finally(() => flushAndExit(exitCodeForSignal(sig as NodeJS.Signals)));
   };
-  process.once('SIGINT', () => onSignal('SIGINT'));
-  process.once('SIGTERM', () => onSignal('SIGTERM'));
+  // process.on, NOT process.once: a once-handler is CONSUMED by its first
+  // delivery, restoring the default disposition — and the launcher forwards
+  // every cancelling signal it receives, so a tty Ctrl-C (delivered group-wide
+  // by the terminal AND re-forwarded by the launcher) had its duplicate kill
+  // this process instantly, mid-safeShutdown, skipping browser/embedder
+  // teardown. Persistent handlers absorb duplicates via _signalDisposition,
+  // which still preserves a human force-quit escape after the grace window.
+  process.on('SIGINT', () => onSignal('SIGINT'));
+  process.on('SIGTERM', () => onSignal('SIGTERM'));
   // SIGHUP (terminal closed) and, on Windows, SIGBREAK (Ctrl+Break). Without these
   // the run dies without cancelling: no abort of the in-flight research, no browser
   // or embedding-server teardown, and no 128+N exit code. On Windows it matters
@@ -1434,9 +1530,9 @@ async function main(argv: string[]): Promise<number> {
   // The SDK already registers both (see _addSignalHandlers); the CLI did not, which
   // left the SDK's handler to tear the container down underneath a live orchestrator
   // — exactly the race the CLI installs its own handlers to avoid.
-  process.once('SIGHUP', () => onSignal('SIGHUP'));
+  process.on('SIGHUP', () => onSignal('SIGHUP'));
   if (process.platform === 'win32') {
-    process.once('SIGBREAK', () => onSignal('SIGBREAK'));
+    process.on('SIGBREAK', () => onSignal('SIGBREAK'));
   }
 
   let parsed: ParsedArgs;
@@ -1452,7 +1548,17 @@ async function main(argv: string[]): Promise<number> {
   // help/version are pure and need no credentials/config.
   const noBridge = new Set(['help', 'version']);
   if (!noBridge.has(parsed.command ?? '')) {
-    bridgeConfigEnv(parsed.configPath);
+    try {
+      bridgeConfigEnv(parsed.configPath);
+    } catch (err) {
+      if (err instanceof ConfigFileError) {
+        // An explicit --config that does not apply is a setup error: silently
+        // running on ambient config and reporting success would mask the typo.
+        toStderr(`\nError: ${err.message}\n`);
+        return EXIT.CONFIG;
+      }
+      throw err;
+    }
     // Self-heal cross-harness skill installs on every engine-touching CLI run. The
     // CLI — not the interactive pi extension — is the surface that skill invocations
     // from Claude Code / Codex / OpenClaw actually drive, so without this an update

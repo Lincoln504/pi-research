@@ -606,6 +606,32 @@ export class PlanningService implements IPlanningService {
       // Final safety cap if delegating
       if (finalPlan.action === 'delegate') {
           const capped = this.capResearcherQueries(finalPlan, complexity, this.name);
+          // Mirror generatePlan's empty-after-cap guard, adapted to mid-run: a
+          // delegate whose researchers ALL had empty query arrays caps to zero and
+          // comes back force-synthesized — indistinguishable to the orchestrator
+          // from a real synthesis decision, so its rationale prose (or nothing)
+          // would ship as the final report with rounds remaining. Treat it like a
+          // degradable evaluator failure instead: continue the prior agenda when
+          // one exists, else synthesize with empty content so the orchestrator's
+          // reports-based fallback (not the rationale) produces the report.
+          if (!capped.researchers || capped.researchers.length === 0) {
+              if (previousPlan?.researchers && previousPlan.researchers.length > 0) {
+                  const fallback = this.capResearcherQueries(
+                    { action: 'delegate', content: '', researchers: previousPlan.researchers },
+                    complexity,
+                    this.name,
+                  );
+                  if (fallback.researchers && fallback.researchers.length > 0) {
+                      logger.warn('[PlanningService] Evaluator delegated zero runnable researchers; continuing the prior agenda rather than synthesizing early');
+                      this.currentPlans.set(sessionId, fallback);
+                      return fallback;
+                  }
+              }
+              logger.warn('[PlanningService] Evaluator delegated zero runnable researchers and no prior agenda is runnable; synthesizing from collected reports');
+              const fallback: ResearchPlan = { action: 'synthesize', content: '', researchers: [] };
+              this.currentPlans.set(sessionId, fallback);
+              return fallback;
+          }
           this.currentPlans.set(sessionId, capped);
           return capped;
       }
@@ -618,12 +644,17 @@ export class PlanningService implements IPlanningService {
       // "Failed to update plan" line (matching generatePlan's abort hygiene).
       if (signal?.aborted) throw err;
       logger.error('[PlanningService] Failed to update plan:', err);
-      // Degrading below is only sound for a transient failure (timeout, empty response,
-      // transport abort) — the same isDegradableLlmError gate generatePlan applies. A hard
-      // failure (revoked/missing auth, explicit provider rejection) would hit every
-      // remaining round identically, burning each one on doomed search bursts and
-      // researcher launches instead of surfacing the real cause — so it stays fatal.
-      if (!isDegradableLlmError(err, signal)) throw err;
+      // Degrading below is only sound MID-LOOP for a transient failure (timeout, empty
+      // response, transport abort) — the same isDegradableLlmError gate generatePlan
+      // applies. A hard failure (revoked/missing auth, explicit provider rejection)
+      // would hit every remaining round identically, burning each one on doomed search
+      // bursts and researcher launches instead of surfacing the real cause — so it
+      // stays fatal mid-loop. The forced FINAL synthesis (mustSynthesize) is different:
+      // it is a one-shot call with no rounds left to protect, and a hard throw there
+      // (e.g. a context-overflow 400 from oversized findings) discards every collected
+      // report — degrade instead, so the orchestrator's reports-based fallback
+      // synthesis still salvages a report.
+      if (!mustSynthesize && !isDegradableLlmError(err, signal)) throw err;
       // Otherwise degrade gracefully: a transient evaluator failure (timeout, empty
       // or provider error) reaches here BEFORE the JSON-parse fallback above and used
       // to throw — aborting the whole run with no decision (looks like "the evaluator

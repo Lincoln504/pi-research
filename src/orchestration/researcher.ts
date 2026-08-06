@@ -23,6 +23,7 @@ import { logger } from '../logger.ts';
 
 import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 import { getRuntimeForRegistry } from '../core/llm/model-registry-factory.ts';
+import { boundSessionAbort } from './abort-utils.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -158,27 +159,45 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       thinkingLevel: config?.LLM_THINKING_LEVEL ?? 'off',
     });
 
-    // Customize the agent thinking label for researchers (e.g. "Researcher 1.1")
-    // so non-TUI surfaces can tell concurrent researchers apart. Skip this in the
-    // research TUI (mode === 'tui'): the panel already shows every researcher, and
-    // the host renders this label as dim/italic thinking text ABOVE the panel —
-    // stray output the panel was meant to replace. Use the researcherId passed by
-    // the caller (not regex on the prompt, since the ID is never templated in).
-    if (extensionCtx.mode !== 'tui' && extensionCtx.hasUI && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
-      extensionCtx.ui.setHiddenThinkingLabel(
-        researcherId ? `Researcher ${researcherId}` : undefined
-      );
+    // The session above is LIVE from here on, but the caller only receives it at
+    // the return below — a throw anywhere in this tail (a host UI callback, the
+    // validity check) would rethrow a session nobody owns, leaking it unaborted.
+    // Abort it best-effort (bounded: session.abort() awaits the in-flight call it
+    // cancels and may never settle) before rethrowing.
+    try {
+      // Customize the agent thinking label for researchers (e.g. "Researcher 1.1")
+      // so non-TUI surfaces can tell concurrent researchers apart. Skip this in the
+      // research TUI (mode === 'tui'): the panel already shows every researcher, and
+      // the host renders this label as dim/italic thinking text ABOVE the panel —
+      // stray output the panel was meant to replace. Use the researcherId passed by
+      // the caller (not regex on the prompt, since the ID is never templated in).
+      if (extensionCtx.mode !== 'tui' && extensionCtx.hasUI && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
+        extensionCtx.ui.setHiddenThinkingLabel(
+          researcherId ? `Researcher ${researcherId}` : undefined
+        );
+      }
+
+      logger.log(`[Researcher] Created session with model=${modelToUse?.id || 'unknown'}`);
+
+      if (!result || !result.session) {
+        throw new Error('Session creation returned invalid result');
+      }
+
+      sessionRef.session = result.session;
+
+      return { session: result.session, resolvedModel: modelToUse };
+    } catch (tailError) {
+      const session = result?.session;
+      if (session && typeof session.abort === 'function') {
+        await boundSessionAbort(
+          (async () => session.abort())().catch((abortErr) => {
+            logger.warn('[Researcher] Failed to abort never-returned session:', abortErr);
+          }),
+          () => logger.warn('[Researcher] Never-returned session abort did not settle within bound; continuing'),
+        );
+      }
+      throw tailError;
     }
-
-    logger.log(`[Researcher] Created session with model=${modelToUse?.id || 'unknown'}`);
-
-    if (!result || !result.session) {
-      throw new Error('Session creation returned invalid result');
-    }
-
-    sessionRef.session = result.session;
-
-    return { session: result.session, resolvedModel: modelToUse };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create researcher session: ${errorMsg}`, {

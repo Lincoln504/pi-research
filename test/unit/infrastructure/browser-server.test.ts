@@ -101,3 +101,80 @@ describe('BrowserServer — headers-sent guard in the catch path', () => {
     expect(JSON.parse(outcome.data ?? '')).toEqual({ error: 'boom' });
   });
 });
+
+describe('BrowserServer — follower cancellation crosses the HTTP hop', () => {
+  let server: BrowserServer | null = null;
+
+  afterEach(async () => {
+    await server?.stop();
+    server = null;
+  });
+
+  it('aborts the leader-side task when the client socket closes before completion', async () => {
+    // Pre-fix the routes carried only query/url: when a follower aborted, its
+    // socket died but the leader-side task kept its queue slot (and worker
+    // page) until its full timeout. The per-request signal must abort the
+    // moment the connection tears down.
+    let receivedSignal: AbortSignal | undefined;
+    let searchStarted!: () => void;
+    const started = new Promise<void>((r) => { searchStarted = r; });
+    server = new BrowserServer({
+      onSearch: (_q: string, signal?: AbortSignal) => {
+        receivedSignal = signal;
+        searchStarted();
+        return new Promise((resolve) => {
+          signal?.addEventListener('abort', () => resolve([]), { once: true });
+        });
+      },
+      onScrape: async () => ({}),
+      onHealthCheck: async () => ({ success: true }),
+    });
+    const port = await server.start();
+
+    const req = http.request({
+      host: '127.0.0.1',
+      port,
+      path: '/search',
+      method: 'POST',
+      headers: {
+        'X-Browser-Auth': getBrowserServerAuthSecret(),
+        'Content-Type': 'application/json',
+      },
+    });
+    req.on('error', () => { /* expected on destroy */ });
+    req.end(JSON.stringify({ query: 'q' }));
+
+    await started;
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
+
+    // The follower gives up mid-flight.
+    req.destroy();
+
+    const deadline = Date.now() + 2000;
+    while (!receivedSignal!.aborted && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(receivedSignal!.aborted).toBe(true);
+  });
+
+  it('does NOT abort a request that completes normally', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    server = new BrowserServer({
+      onSearch: async (_q: string, signal?: AbortSignal) => {
+        receivedSignal = signal;
+        return [];
+      },
+      onScrape: async () => ({}),
+      onHealthCheck: async () => ({ success: true }),
+    });
+    const port = await server.start();
+
+    const outcome = await post(port, '/search', { query: 'q' });
+    expect(outcome.status).toBe(200);
+    // 'close' fires after a completed response too — it must not abort.
+    await new Promise((r) => setTimeout(r, 25));
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
+  });
+});

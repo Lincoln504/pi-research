@@ -9,6 +9,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { logger } from '../logger.ts';
 import { type Config, getConfig } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -18,6 +19,8 @@ export function createSearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
   onProgress?: (links: number) => void;
+  /** Research state accessor; its researchId keys the per-session circuit breaker (mirrors scrape). */
+  getGlobalState?: () => SystemResearchState;
   config?: Config;
 }): ToolDefinition {
   const youtubeEveryN = (options.config ?? getConfig(options.ctx.cwd)).YOUTUBE_QUERY_EVERY_N;
@@ -84,9 +87,15 @@ export function createSearchTool(options: {
 
       try {
         const container = tryGetServiceContainerFromCtx(ctx);
+        // Per-session circuit-breaker scoping: thread the researchId exactly as
+        // the scrape path does (tools/scrape.ts passes getGlobalState().researchId
+        // into scrape() → runBrowserTask). Search previously hard-coded
+        // sessionId=undefined at the runWorkerSearch hop, so its failures always
+        // hit the GLOBAL breaker while scrape's hit the per-run one.
+        const sessionId = options.getGlobalState?.().researchId;
         const results = await search(queries, options.config, signal, (links) => {
           if (options.onProgress) options.onProgress(links);
-        }, container);
+        }, container, sessionId);
         const elapsed = Date.now() - startTime;
         
         const totalResults = results.reduce((sum, r) => sum + r.results.length, 0);

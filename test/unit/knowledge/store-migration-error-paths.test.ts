@@ -219,6 +219,51 @@ describe('KnowledgeStore Migration Error Paths', () => {
     expect(fs.existsSync(path.join(testDbDir, parseableOld))).toBe(false);
   });
 
+  it('model-change warm-up reconnects through the reconnectFactory when the cached embedder is a dead leader', async () => {
+    // Store previously written under model-a.
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store1.initialize();
+    await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+    await store1.close();
+
+    // Re-open under model-b: the migration warm-up embedMany([' ']) is the FIRST
+    // embed and hits a stale factory-cached instance — a stepped-down leader
+    // fast-fails with ECONNREFUSED. Pre-fix that single fast-fail aborted the
+    // whole open (burning an init retry per attempt); it must instead reconnect
+    // and proceed with the migration.
+    const deadLeaderError = new Error(
+      '[EmbeddingServer] embedding endpoint gone (ECONNREFUSED): leader stepped down — reconnect required',
+    );
+    const deadEmbedder = {
+      getDimension: vi.fn().mockReturnValue(null),
+      setDimension: vi.fn(),
+      embed: vi.fn().mockRejectedValue(deadLeaderError),
+      embedMany: vi.fn().mockRejectedValue(deadLeaderError),
+      isInitialized: vi.fn().mockReturnValue(false),
+    };
+    const freshEmbedder = {
+      getDimension: vi.fn().mockReturnValue(384),
+      setDimension: vi.fn(),
+      embed: vi.fn().mockResolvedValue(new Float32Array(384)),
+      embedMany: vi.fn().mockImplementation(async (texts: string[]) => texts.map(() => new Float32Array(384))),
+      isInitialized: vi.fn().mockReturnValue(true),
+    };
+    const reconnectFactory = vi.fn(async () => freshEmbedder as any);
+
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: deadEmbedder as any,
+      modelName: 'model-b',
+      migrationStrategy: 'backup',
+      reconnectFactory });
+
+    await expect(store.initialize()).resolves.toBeUndefined();
+    expect(reconnectFactory).toHaveBeenCalled();
+    // Backup migration ran against the reconnected embedder: fresh empty table.
+    expect(await store.count()).toBe(0);
+  });
+
   it('backup migration failure ABORTS the open — never escalates to a data-destroying drop', async () => {
     // Regression: the fallback ladder used to escalate backup→drop, so a
     // (possibly transient) backup failure under the DEFAULT strategy silently
