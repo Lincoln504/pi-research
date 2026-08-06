@@ -259,7 +259,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
       metrics.increment('session_runs_started_total');
 
       try {
-        const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string }>(runRegistry, () =>
+        const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string; cancelled: boolean }>(runRegistry, () =>
           logger.runCapturingStderr(async () => {
           const config = getConfig(ctx.cwd, iface);
           validateConfig(config);
@@ -389,6 +389,17 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
                 config,
               }, internalAbort.signal);
 
+              // DeepResearchOrchestrator.run() does not throw on cancellation once at
+              // least one researcher has produced a report — it returns a fallback
+              // synthesis through its normal return path (see
+              // deep-research-orchestrator.ts's synthesisService.hasReports branch).
+              // Left unchecked, a cancel mid-run that still yields a partial report
+              // would fall straight through as if the run had completed normally,
+              // with no indication in the returned text — the only channel the
+              // calling agent sees — that it is reading a partial result. Mirrors the
+              // CLI's cancellation-latch check on its own success path (cmdResearch).
+              const wasCancelled = aborted?.aborted === true || internalAbort.signal.aborted;
+
               // Stop wave animation
               if (observerState && panelState) stopObserverWaveAnimation(observerState, panelState);
 
@@ -418,10 +429,17 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
               finalResult = synthesisService.appendMetadata(finalResult, selectedModel!.id);
 
-              return { result: finalResult, tokens: runTokens, researchId };
+              // The calling agent only ever sees `content[].text` — `details` is
+              // logs/UI-only (AgentToolResult's own doc comment) — so a cancellation
+              // note has to live IN the report text itself, not just in metadata.
+              if (wasCancelled) {
+                finalResult = `*Research cancelled — the report below is a partial synthesis from what had been collected before the run was stopped.*\n\n${finalResult}`;
+              }
+
+              return { result: finalResult, tokens: runTokens, researchId, cancelled: wasCancelled };
             } catch (error) {
               if (aborted?.aborted || internalAbort.signal.aborted) {
-                return { result: 'Research cancelled.', tokens: 0, researchId };
+                return { result: 'Research cancelled.', tokens: 0, researchId, cancelled: true };
               }
               throw error;
             } finally {
@@ -431,17 +449,27 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
           return researchRunResult;
         }));  // end runCapturingStderr / runWithRunRegistry
 
-        // Snapshot the run registry
+        // Snapshot the run registry. Both branches that produce researchRunResult
+        // (the success path above and its inner catch) can represent a cancelled
+        // run — status must reflect that, not assume every non-throwing outcome
+        // was an ordinary success.
         metrics.recordRunSummary({
           runId: researchId,
           startedAt: runStartedAt,
           completedAt: Date.now(),
           durationMs: Date.now() - runStartedAt,
-          status: 'success',
+          status: researchRunResult.cancelled ? 'cancelled' : 'success',
           snapshot: runRegistry.getSnapshot(),
         });
 
-        return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens, researchId: researchRunResult.researchId } };
+        return {
+          content: [{ type: 'text', text: researchRunResult.result }],
+          details: {
+            totalTokens: researchRunResult.tokens,
+            researchId: researchRunResult.researchId,
+            ...(researchRunResult.cancelled ? { cancelled: true } : {}),
+          },
+        };
       } catch (error) {
         if (aborted?.aborted || internalAbort.signal.aborted) {
           metrics.recordRunSummary({
