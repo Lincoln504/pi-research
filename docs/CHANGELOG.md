@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-08-07
+
+A full-tree re-audit of 1.3.1: 10 independent reviews, each assigned a
+disjoint slice of `src/`, calibrated toward the concurrency/IPC/resource-
+lifecycle defect classes prior rounds kept finding. Every fix below is
+paired with a regression test confirmed (via a local revert-and-rerun) to
+fail against the pre-fix code.
+
+### Fixed
+
+- **`knowledge` subcommand never wired cancellation.** `cmdKnowledge` called `searchKnowledge()` with no `AbortSignal`, so Ctrl-C during a knowledge search only raced `safeShutdown()`'s service teardown against the still-running, unsignaled search — the same class of gap 1.3.0/1.3.1 closed for `cmdResearch`/the pi-extension tool, one call site earlier. Now wired the same way `cmdResearch` already is.
+- **A relative `PI_RESEARCH_STATE_DIR` silently fragmented cross-process coordination.** Three independent, unguarded reads of the env var could each resolve a relative override against whatever `process.cwd()` a given process happened to have — splitting browser/embedding-server leader election and the run-cap semaphore across several non-communicating state directories. `scripts/cleanup.cjs` already treated a relative override as untrusted (falling back to the default); the runtime now agrees, via a single `getStateDir()` all three call sites share.
+- **`KnowledgeStoreService` had no mutual exclusion between `initialize()` and `dispose()`.** A concurrent re-init (an ordinary multi-workspace run, or a `/research-config` model/device change) could build fresh embedder/store/writer-queue handles that an in-flight `dispose()` — reading them dynamically, not captured — then closed out from under it, or the reverse: a disposal silently resurrected moments later with a stale instance.
+- **`rebuildDocument()` could return one chunk's fragment instead of the complete cached document.** Multiple chunks from the same ingest share an identical timestamp; sorting by timestamp alone is a no-op on that tie, so whichever chunk the store's internal scan happened to return first won — only chunk 0 carries the full original content. Ties now break on chunk index, and the fallback chain prefers the (always-complete) synthesized description over a lone chunk's own fragment.
+- **Log truncation could split a UTF-16 surrogate pair.** The 10k-character cap on every log line sliced at a raw offset with no surrogate check, silently corrupting to a replacement character (console) or an invalid escape (the JSON log file) whenever the cut landed inside an emoji or other non-BMP character in scraped content.
+- **A citation URL's genuinely balanced trailing `)` could be stripped.** The LLM-noise-bracket stripper compared flat open/close counts across the whole string rather than tracking a running balance, so an unrelated stray bracket earlier in the same URL could tip the count and truncate a legitimately balanced trailing parenthesis.
+- **The scrape tool could silently drop URLs cut off by cancellation.** A cancel mid-batch stopped dispatching further URLs but never accounted for the ones that never started — the tool's own "Successful: X, Failed: Y" summary undercounted with no indication a run was interrupted. Every URL now gets an entry either way.
+- **A single crashed browser tab could take down a healthy sibling task's scrape/search.** Cluster workers run more than one task at a time per process by default; a page-scoped browser error from one task used to reset the *whole shared browser*, failing any concurrently-running sibling task with a spurious, un-retried error. The reset now defers until no sibling task is still active.
+- **The service registry could hand a caller an instance mid-disposal, or leave a failed re-init registered indefinitely.** A `get()` call arriving while `clear()`/`replace()` was still tearing an instance down could either receive a reference to the instance being disposed or (with a scope-change context) re-initialize it while its `dispose()` was still running; separately, a failed context-scoped re-initialization used to leave the same now-inconsistent instance registered rather than clearing it for a clean rebuild, unlike an ordinary first-init failure.
+
+Also removed as dead code (confirmed zero production call sites): the
+wave-animation timer plumbing in `CleanupContext`/`ResearchPanelState`
+(`updateWaveTimer`, `stopWaveAnimation`), superseded by pulse-driven
+animation; and `StateManager.setBrowserServer` and its full delegation
+chain, superseded by the browser scheduler's own inline leader-registration
+logic.
+
+Patch, not minor: nothing here changes a documented CLI flag, tool output
+schema, or config key — every fix is either an internal robustness/
+correctness correction invisible to well-formed usage, or (the
+`cmdKnowledge` cancellation wiring) closes a race whose observable exit
+code was in practice already forced correct by the signal handler's own
+independent shutdown path.
+
 ## [1.3.1] - 2026-08-06
 
 A dedicated post-release investigation pass over 1.3.0 — three independent
