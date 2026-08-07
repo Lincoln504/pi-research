@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-08-07
+
+pi 0.84.1 compatibility. Triggered by updating the local `pi` install and
+auditing `@earendil-works/pi-coding-agent`'s CHANGELOG in full — not just
+grepped — from 0.84.1 back through 0.79.2 (the full range since this
+package's own last-tested line, plus further back for context) for anything
+that requires a fix or is worth adopting.
+
+### Fixed
+
+- **`ModelRuntime.setRuntimeApiKey()`'s `allowNetwork` option was removed in pi 0.84.0.** `buildModelRegistry`'s explicit-API-key path passed `{ allowNetwork: false }` to prevent a live model-catalog network connection from hanging indefinitely in network-restricted environments (verified previously). 0.84.0 narrowed `setRuntimeApiKey`'s own options to just `{ signal? }` — but its internal `synchronizeCredentialState()` now hardcodes that same `allowNetwork: false` unconditionally on every call, confirmed by reading pi-coding-agent's `model-runtime.js` directly rather than trusting the changelog prose alone. The now-invalid option is removed from the call; the behavior it protected is preserved by pi itself.
+- **`getApiKeyAndHeaders()`'s returned headers can now legitimately be `null`-valued.** pi 0.84.0 widened `ProviderHeaders` to `Record<string, string | null>` (`null` suppresses a provider/API default header with that name) — pi-research's own structural mirror of the auth-result type (kept separate from importing the real pi-coding-agent type, so a host version skew can't break the build) still declared `Record<string, string>`, which both fails to compile against 0.84.x's real type and would have mishandled a `null` header value. Widened at the one source type and its three downstream consumers (`agentic-repair.ts`, `research-knowledge-search.ts`); the `null` values flow through to `completeSimple()`'s own `SimpleStreamOptions.headers`, which already documents and handles them.
+
+### Changed
+
+- Raised the minimum supported pi version from 0.80.8 to 0.84.0 (`PI_MIN_VERSION` in `src/core/pi-version.ts`, and the `@earendil-works/pi-ai`/`pi-coding-agent`/`pi-tui` dependency floors in package.json) — the `setRuntimeApiKey` fix above only holds on 0.84.0+; an already-resolved older host would silently lose the network-hang protection. Bumped `PI_TESTED_MAX_VERSION` to 0.84.1 (actually installed and exercised: full unit + integration suite, including live SDK lifecycle tests against the real `ModelRuntime`).
+- Cleared three now-resolved `npm audit` exceptions (two `brace-expansion` GHSAs, one location-scoped `undici` exception) from `config/tooling/audit-exceptions.json`: pi-coding-agent@0.84.1's `npm-shrinkwrap.json` now pins `brace-expansion@5.0.9` and `undici@8.9.0`, the exact versions each exception's own `clearsWhen` condition named — verified directly against the installed shrinkwrap, not assumed. The `sharp` (libvips) exception remains; it is unrelated to this pi bump and still unfixed upstream in `@huggingface/transformers`.
+
+Patch, not minor: matches this project's established precedent for pi-floor
+compatibility bumps (1.0.9, 1.0.10) — raising the floor changes which HOST/
+dependency versions are supported, not pi-research's own CLI, tool, or SDK
+contract.
+
 ## [1.3.2] - 2026-08-07
 
 A full-tree re-audit of 1.3.1: 10 independent reviews, each assigned a
