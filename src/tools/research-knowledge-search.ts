@@ -412,7 +412,9 @@ export function isTransientSynthesisError(message: string): boolean {
 /** Exported for unit testing of the transient-retry loop. */
 export async function runBackgroundExtraction(
   model: Model<any>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  // headers values are string | null (pi-ai's ProviderHeaders) — forwarded
+  // to completeSimple's own SimpleStreamOptions.headers unchanged.
+  auth: { apiKey: string; headers?: Record<string, string | null> },
   conversationHistory: string,
   queries: string[],
   referenceDocuments: string,
@@ -561,7 +563,9 @@ export async function runBackgroundExtraction(
  */
 export async function triageRelevantUrls(
   model: Model<any>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  // headers values are string | null (pi-ai's ProviderHeaders) — forwarded
+  // to completeSimple's own SimpleStreamOptions.headers unchanged.
+  auth: { apiKey: string; headers?: Record<string, string | null> },
   conversationHistory: string,
   queries: string[],
   candidates: KnowledgeCandidate[],

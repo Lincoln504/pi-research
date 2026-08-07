@@ -36,9 +36,15 @@ export interface ModelRegistryLike {
  * Structural result of {@link ModelRegistryLike.getApiKeyAndHeaders}. Mirrors the
  * pi-coding-agent `ApiKeyAndHeaders` discriminated union without importing it, so
  * a host skew on the concrete type can't break our build.
+ *
+ * `headers` values are `string | null` (not just `string`) as of pi 0.84.0's
+ * `ProviderHeaders` type — `null` is a legitimate header-DELETION marker (e.g.
+ * stripping a placeholder credential before it reaches a gateway), not an
+ * absent value. Every consumer of `headers` below must treat `null` as "omit
+ * this header," not coerce it to the literal string `"null"`.
  */
 export type AuthResultLike =
-  | { ok: true; apiKey?: string; headers?: Record<string, string> }
+  | { ok: true; apiKey?: string; headers?: Record<string, string | null> }
   | { ok: false; error: string };
 
 /** Safe `getAll()` — returns [] if the host registry lacks the method. */
@@ -156,12 +162,16 @@ export async function buildModelRegistry(apiKey?: string, provider?: string): Pr
   // with an explicit model (enforced in cli.ts pre-flight), so resolution never
   // falls back to "first available".
   if (apiKey && provider) {
-    // allowNetwork:false is REQUIRED here, not just consistent with create():
-    // setRuntimeApiKey triggers a model-catalog refresh for the newly configured
-    // provider, and its default options open live catalog connections — verified
-    // to hang indefinitely (no timeout at this layer) in network-restricted
-    // environments, which would wedge every explicit-API-key pre-flight.
-    await runtime.setRuntimeApiKey(provider, apiKey, { allowNetwork: false });
+    // pi 0.84.0 removed `allowNetwork` from setRuntimeApiKey's own options
+    // (AuthOperationOptions is now just `{ signal? }`) — but its internal
+    // synchronizeCredentialState() now hardcodes `refresh({ allowNetwork:
+    // false, ... })` unconditionally on every call, so the "no live catalog
+    // connection, no indefinite hang in network-restricted environments"
+    // guarantee this call originally needed still holds without asking for
+    // it. Confirmed by reading pi-coding-agent's model-runtime.js directly,
+    // not just the changelog prose — verify this again on the next pi bump
+    // before assuming it's still unconditional.
+    await runtime.setRuntimeApiKey(provider, apiKey);
   }
 
   // The sync facade all our resolvers consume. getAvailable()/getApiKeyAndHeaders()

@@ -60,30 +60,31 @@ describe('compareVersions', () => {
 
 describe('checkPiCompatibility', () => {
   it('rejects a version below the floor as fatal', () => {
-    const r = checkPiCompatibility('0.80.7');
+    const r = checkPiCompatibility('0.83.0');
     expect(r.level).toBe('too-old');
     expect(r.fatal).toBe(true);
     expect(r.message).toMatch(/too old/i);
-    expect(r.message).toContain('0.80.8');
+    expect(r.message).toContain('0.84.0');
   });
 
   it('accepts exactly the floor', () => {
-    const r = checkPiCompatibility('0.80.8');
+    const r = checkPiCompatibility('0.84.0');
     expect(r.level).toBe('ok');
     expect(r.fatal).toBe(false);
     expect(r.message).toBeNull();
   });
 
   it('rejects a PRE-RELEASE of the floor version — semver orders it below the floor', () => {
-    // 0.80.8-rc.1 predates 0.80.8 and may lack the very APIs the floor guards
-    // (ModelRuntime landed IN 0.80.8). Discarding the tag let it pass as ok.
-    const r = checkPiCompatibility('0.80.8-rc.1');
+    // 0.84.0-rc.1 predates 0.84.0 and may lack the guarantee the floor exists
+    // for (setRuntimeApiKey's internal allowNetwork:false landed IN 0.84.0).
+    // Discarding the tag let it pass as ok.
+    const r = checkPiCompatibility('0.84.0-rc.1');
     expect(r.level).toBe('too-old');
     expect(r.fatal).toBe(true);
   });
 
   it('accepts a pre-release ABOVE the floor inside the tested window', () => {
-    const r = checkPiCompatibility('0.81.0-beta.1');
+    const r = checkPiCompatibility('0.84.1-beta.1');
     expect(r.level).toBe('ok');
   });
 

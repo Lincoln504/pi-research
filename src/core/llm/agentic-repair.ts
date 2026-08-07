@@ -63,7 +63,11 @@ export type LlmCompleter = (
 export async function repairJsonWithLlm<T = any>(
   text: string,
   completer: LlmCompleter,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  // headers values are string | null to match pi-ai's ProviderHeaders — a null
+  // entry suppresses a provider/API default header with that name, and is
+  // forwarded to `completer`'s SimpleStreamOptions.headers unchanged, where
+  // pi-ai already treats it as documented.
+  auth: { apiKey: string; headers?: Record<string, string | null> },
   options: JsonRepairOptions
 ): Promise<T | null> {
   const { model, context, schema, serviceName = 'RepairService', signal, maxTokens = 16384, thinkingLevel = 'off' } = options;

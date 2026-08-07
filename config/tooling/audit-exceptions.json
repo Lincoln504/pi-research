@@ -2,29 +2,6 @@
   "comment": "Documented exceptions for the production npm-audit release gate (scripts/audit-gate.cjs). Two shapes: (1) per-GHSA {id,...} allowlists ONE advisory; (2) location-scoped {package, locationContains,...} allowlists ANY advisory for `package` whose EVERY affected install path contains `locationContains` — for a transitive pinned inside an upstream npm-shrinkwrap.json (unfixable downstream), so each new disclosure for that frozen copy need not be re-listed. The 'every node in scope' rule keeps location-scoping precise: it fires only when no remediable copy is affected. Any advisory NOT matched (per-id or location) still fails the gate at moderate+. Every entry must carry reason, clearsWhen, reviewed. Re-verify at every release; the gate warns on stale entries.",
   "exceptions": [
     {
-      "id": "GHSA-mh99-v99m-4gvg",
-      "package": "brace-expansion",
-      "severity": "high",
-      "reason": "Vulnerable brace-expansion@5.0.7 is nested inside @earendil-works/pi-coding-agent, whose published npm-shrinkwrap.json freezes its transitive tree; by npm design a shrinkwrap is authoritative, so a downstream override cannot replace it (re-verified empirically 2026-08-03 against pi-coding-agent@0.83.0 — the LATEST release: adding a brace-expansion override to this repo updated the top-level copy to 5.0.9 but left the nested-in-shrinkwrap copy pinned at 5.0.7, so the advisory still fires). Exposure is a DoS via unbounded expansion of glob patterns inside pi's own CLI internals — not attacker-controlled input in pi-research's usage.",
-      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls brace-expansion >=5.0.9 (5.0.8 is NOT sufficient — it is itself in the vulnerable range 4.0.0–5.0.8 for the companion GHSA-rgw5-rvv9-x895 bypass; the fix landed in 5.0.9).",
-      "reviewed": "2026-08-03"
-    },
-    {
-      "id": "GHSA-rgw5-rvv9-x895",
-      "package": "brace-expansion",
-      "severity": "high",
-      "reason": "Same root cause and same frozen location as GHSA-mh99-v99m-4gvg: brace-expansion@5.0.7 nested inside @earendil-works/pi-coding-agent@0.83.0's authoritative npm-shrinkwrap.json. This advisory is the bypass of the CVE-2026-14257 mitigation that the companion advisory covers, and it widens the vulnerable range to 4.0.0–5.0.8 (so the previously-assumed 5.0.8 fix is itself vulnerable). Re-verified empirically 2026-08-03 that a downstream `overrides` entry cannot replace the nested copy (it stays at 5.0.7); the only remediation is an upstream pi-coding-agent release whose shrinkwrap pulls brace-expansion >=5.0.9. Same unreachable-code exposure (DoS on glob patterns in pi's CLI internals, not attacker-controlled input in pi-research).",
-      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls brace-expansion >=5.0.9.",
-      "reviewed": "2026-08-03"
-    },
-    {
-      "package": "undici",
-      "locationContains": "@earendil-works/pi-coding-agent",
-      "reason": "undici is nested inside @earendil-works/pi-coding-agent@0.83.0's authoritative npm-shrinkwrap.json (currently pinned at 8.5.0), which a downstream override cannot replace — re-verified empirically 2026-08-03: a nested overrides entry fixed jsdom's undici (7.28.0 -> 7.29.0, remediated) but left the pi-coding-agent copy pinned at its shrinkwrap version. Every advisory covering that frozen copy is therefore upstream-blocked by definition (the version is unfixable from this repo regardless of which disclosure lands), so this is a single location-scoped exception rather than a per-GHSA entry per disclosure. pi-research's OWN HTTP goes through the top-level undici (a direct ^8.9.0 dependency, the fixed line); the frozen copy serves only pi's CLI-internal fetches, not pi-research's scrape/fetch code. The 'every node in scope' match means this only fires while no remediable undici copy is affected.",
-      "clearsWhen": "pi-coding-agent publishes a release whose shrinkwrap pulls undici >=8.9.0 (the fixed line for the current 8.x disclosures).",
-      "reviewed": "2026-08-03"
-    },
-    {
       "id": "GHSA-f88m-g3jw-g9cj",
       "package": "sharp",
       "severity": "high",

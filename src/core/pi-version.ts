@@ -61,8 +61,21 @@ export function compareVersions(a: SemverParts, b: SemverParts): number {
  * `ModelRegistry.create()`. `buildModelRegistry` calls `ModelRuntime.create()`
  * unconditionally, and `createAgentSession()` is invoked without the removed
  * `modelRegistry` option, relying on the 0.80.8+ host to build its own.
+ *
+ * 0.84.0 removed `allowNetwork` from `ModelRuntime.setRuntimeApiKey()`'s own
+ * options (`AuthOperationOptions` is now just `{ signal? }`) — but its
+ * internal `synchronizeCredentialState()` now hardcodes `refresh({
+ * allowNetwork: false, ... })` unconditionally on every call, so
+ * `buildModelRegistry`'s explicit-API-key path (model-registry-factory.ts)
+ * no longer passes `allowNetwork` at all, RELYING on 0.84.0+'s own
+ * unconditional internal guard against a live network catalog connection.
+ * On an already-resolved pre-0.84.0 host, `setRuntimeApiKey`'s default
+ * (unspecified) network behavior applies instead — reintroducing the
+ * indefinite-hang-in-network-restricted-environments bug that explicit
+ * option originally existed to prevent. The floor moved to close that gap,
+ * not just because the type changed.
  */
-export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 80, patch: 8 };
+export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 84, patch: 0 };
 
 /**
  * Newest host line this release was actually exercised against (CI + a real run).
@@ -70,7 +83,7 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 80, patch: 8 };
  * Compared on MAJOR.MINOR only: a patch bump within a tested line is not a new
  * surface, and warning on it would be noise.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 83, patch: 0 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 84, patch: 1 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 
