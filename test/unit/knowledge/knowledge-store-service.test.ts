@@ -281,4 +281,62 @@ describe('KnowledgeStoreService', () => {
     await service.dispose();
     expect(embeddingFactory.clearEmbeddingInstance).toHaveBeenCalled();
   });
+
+  // Regression: none of initialize()'s lifecycle guards recognized DISPOSING,
+  // so an initialize() call arriving while dispose() was still mid-teardown
+  // would start rebuilding immediately (this.lifecycle = INITIALIZING
+  // unconditionally overwrote DISPOSING). Depending on timing, that either let
+  // the in-flight dispose() close/null the FRESH components the race just
+  // published, or let the race resurrect the service from DISPOSED back to
+  // INITIALIZED with components dispose() never got a chance to tear down.
+  it('a concurrent initialize() while dispose() is still awaiting store.close() does not race the fresh components', async () => {
+    let resolveFirstClose!: () => void;
+    const firstCloseGate = new Promise<void>((resolve) => { resolveFirstClose = resolve; });
+
+    const firstEmbedder = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu',
+    };
+    const firstStore = { close: vi.fn(() => firstCloseGate) };
+    const firstQueue = { dispose: vi.fn().mockResolvedValue(undefined) };
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce({
+      embedder: firstEmbedder as any, store: firstStore as any, writerQueue: firstQueue as any,
+    });
+    await service.initialize();
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+
+    const secondEmbedder = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu',
+    };
+    const secondStore = { close: vi.fn().mockResolvedValue(undefined) };
+    const secondQueue = { dispose: vi.fn().mockResolvedValue(undefined) };
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce({
+      embedder: secondEmbedder as any, store: secondStore as any, writerQueue: secondQueue as any,
+    });
+
+    // dispose() runs up to (and blocks on) firstStore.close() before yielding
+    // control back here — a concurrent initialize() must wait it out rather
+    // than starting a second build immediately.
+    const disposePromise = service.dispose();
+    const initPromise = service.initialize();
+
+    resolveFirstClose();
+    await disposePromise;
+    await initPromise;
+
+    // dispose() tore down exactly the components it was invoked for — never
+    // the ones the racing initialize() built.
+    expect(firstStore.close).toHaveBeenCalledTimes(1);
+    expect(secondStore.close).not.toHaveBeenCalled();
+    expect(firstEmbedder.dispose).toHaveBeenCalledTimes(1);
+    expect(secondEmbedder.dispose).not.toHaveBeenCalled();
+
+    // The service ends up INITIALIZED with the fresh (second) components —
+    // not DISPOSED with everything nulled, and not stuck serving the stale
+    // first components.
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+    expect(await service.getStore()).toBe(secondStore);
+    expect(await service.getEmbedder()).toBe(secondEmbedder);
+  });
 });

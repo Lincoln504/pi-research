@@ -31,18 +31,26 @@ export function stripTrailingLlmPunctuation(input: string): string {
       continue;
     }
     // Balance-aware removal of a trailing closing bracket: strip it only when it
-    // has no matching opener anywhere in the string (so a markdown/parenthetical
+    // has no matching opener earlier in the string (so a markdown/parenthetical
     // noise bracket is removed, but a balanced one that's part of the URL —
     // Wikipedia "..._(programming_language)", IPv6 "http://[::1]/" — is kept).
+    //
+    // A running balance over everything BEFORE this trailing bracket — not a
+    // flat total-count comparison. A flat count misjudges a string that both
+    // ends in a genuinely balanced pair AND carries an earlier, unrelated
+    // unbalanced bracket: "http://x.com/a)b(c)" has 2 ')' vs 1 '(' overall,
+    // so a flat count sees closes > opens and strips the real, balanced
+    // trailing ')' that closes "(c)" — corrupting the URL. balance > 0 here
+    // means an opener earlier in the string is still unmatched, and this
+    // trailing bracket is the one that closes it.
     if (last === ')' || last === ']' || last === '}') {
       const open = last === ')' ? '(' : last === ']' ? '[' : '{';
-      let opens = 0;
-      let closes = 0;
-      for (const ch of s) {
-        if (ch === open) opens++;
-        else if (ch === last) closes++;
+      let balance = 0;
+      for (const ch of s.slice(0, -1)) {
+        if (ch === open) balance++;
+        else if (ch === last) balance = Math.max(0, balance - 1);
       }
-      if (closes > opens) {
+      if (balance === 0) {
         s = s.slice(0, -1);
         continue;
       }

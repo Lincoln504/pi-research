@@ -24,27 +24,6 @@ export class StateBrowserManager implements IService {
   }
 
   /**
-   * Set the current browser server information
-   * @param state The current state
-   * @param port The browser server port
-   * @param pid The browser server process ID
-   * @param schedulerId Optional scheduler ID
-   * @param startTime Optional process start time
-   * @returns Updated state with browser server info
-   */
-  setBrowserServer(
-    state: SingletonState,
-    port: number,
-    pid: number,
-    schedulerId?: string,
-    startTime?: number | null,
-    authSecret?: string
-  ): SingletonState {
-    state.browserServer = { port, pid, schedulerId, startTime: startTime ?? undefined, authSecret };
-    return state;
-  }
-
-  /**
    * Clear the browser server information
    * @param state The current state
    * @param expected Optional identity the caller believes is currently registered.

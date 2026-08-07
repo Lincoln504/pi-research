@@ -18,11 +18,38 @@ let context: any = null;
 let initPromise: Promise<void> | null = null;
 let workerId: string = '';
 
+// How many tasks this worker process currently has in flight. poolifier's
+// tasksQueueOptions.concurrency (WORKER_CONCURRENCY, default 2 — see
+// worker-pool-manager.ts) dispatches more than one task at a time to the SAME
+// worker process, and every dispatched task shares this module's browser/
+// context singletons (each gets its own page via createPageSafe(context), but
+// the context/browser themselves are one shared instance). resetBrowser()
+// uses this to avoid tearing that shared instance down out from under a
+// sibling task that is still actively using it — see resetBrowser() below.
+let activeTaskCount = 0;
+// A reset that resetBrowser() deferred because sibling tasks were still
+// active, to be applied once the last one finishes.
+let resetPending = false;
+
 /**
  * Set the worker ID for logging purposes
  */
 export function setWorkerId(id: string): void {
   workerId = id;
+}
+
+/** Call when a task begins executing (before it touches the browser/context). */
+export function taskStarted(): void {
+  activeTaskCount++;
+}
+
+/** Call when a task finishes (success or failure), from a `finally` block. */
+export function taskFinished(): void {
+  activeTaskCount = Math.max(0, activeTaskCount - 1);
+  if (activeTaskCount === 0 && resetPending) {
+    resetPending = false;
+    doResetBrowser();
+  }
 }
 
 /**
@@ -247,14 +274,36 @@ export function getContext(): any {
   return context;
 }
 
-/**
- * Reset browser and context (used after crashes)
- */
-export function resetBrowser(): void {
+function doResetBrowser(): void {
   if (context) Promise.resolve(context.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during reset: ${err.message}`));
   if (browser) Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during reset: ${err.message}`));
   context = null;
   browser = null;
+}
+
+/**
+ * Reset browser and context (used after crashes).
+ *
+ * A page/session-scoped failure in ONE task (e.g. Playwright/Juggler's
+ * generic "Protocol error", thrown for a single crashed tab — not
+ * necessarily the whole browser) must not tear down the browser/context a
+ * CONCURRENTLY-RUNNING sibling task is still actively using (see
+ * activeTaskCount's doc comment): that collaterally fails the sibling's
+ * perfectly healthy work with a spurious "browser closed" error, un-retried.
+ *
+ * If other tasks are still in flight, defer instead of resetting immediately
+ * — the deferred reset runs once the last active task finishes (taskFinished
+ * above). A GENUINELY dead browser is still caught regardless: initBrowser()'s
+ * own isBrowserConnected() check on the very next task re-initializes either
+ * way, so deferring costs nothing in that case — it just avoids the
+ * collateral damage in the much more common single-crashed-tab case.
+ */
+export function resetBrowser(): void {
+  if (activeTaskCount > 1) {
+    resetPending = true;
+    return;
+  }
+  doResetBrowser();
 }
 
 /**

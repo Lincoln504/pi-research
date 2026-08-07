@@ -13,6 +13,7 @@ import { runResearcher } from '../../../src/orchestration/researcher-executor.ts
 import type { RunResearcherOptions } from '../../../src/orchestration/orchestration-types.ts';
 import { getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
 // Real (unmocked) session-state: the executor's fast-stop self-check reads live
 // failure counts, so tests drive it through the real recordResearcherFailure.
 import { recordResearcherFailure, resetAllPiSessions } from '../../../src/orchestration/session-state.ts';
@@ -646,6 +647,39 @@ describe('runResearcher', () => {
         // Module-level mock — restore the default so later tests keep their report.
         mockEnsure.mockImplementation(() => 'mock researcher report content');
       }
+    });
+
+    it('does not record a clean cancellation as an error in metrics', async () => {
+      // Regression: the catch block used to unconditionally observe
+      // status:'error' and increment researcher_errors_total BEFORE the
+      // torn-down classification a few lines later — so every cancelled
+      // researcher inflated error metrics despite the retry-skip logic
+      // correctly treating it as "not a failure."
+      vi.mocked(metrics.increment).mockClear();
+      vi.mocked(metrics.observe).mockClear();
+      mockPrompt.mockRejectedValue(new Error("Cannot get service 'x' during container disposal"));
+
+      await expect(runResearcher(makeOptions({
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 2 } as any,
+      }))).rejects.toThrow('during container disposal');
+
+      const latencyCall = vi.mocked(metrics.observe).mock.calls.find(([name]) => name === 'researcher_execution_latency_ms');
+      expect(latencyCall?.[2]).toMatchObject({ status: 'cancelled' });
+      expect(vi.mocked(metrics.increment)).not.toHaveBeenCalledWith('researcher_errors_total', expect.anything(), expect.anything());
+    });
+
+    it('still records a genuine (non-cancelled) failure as an error in metrics', async () => {
+      vi.mocked(metrics.increment).mockClear();
+      vi.mocked(metrics.observe).mockClear();
+      mockPrompt.mockRejectedValue(new Error('genuine transient failure'));
+
+      await expect(runResearcher(makeOptions({
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 0 } as any,
+      }))).rejects.toThrow('genuine transient failure');
+
+      const latencyCall = vi.mocked(metrics.observe).mock.calls.find(([name]) => name === 'researcher_execution_latency_ms');
+      expect(latencyCall?.[2]).toMatchObject({ status: 'error' });
+      expect(vi.mocked(metrics.increment)).toHaveBeenCalledWith('researcher_errors_total', 1, expect.anything());
     });
   });
 

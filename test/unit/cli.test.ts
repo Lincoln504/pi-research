@@ -751,6 +751,67 @@ describe('cmdResearch — cancellation reporting', () => {
 });
 
 // ---------------------------------------------------------------------------
+// cmdKnowledge — cancellation reporting
+// ---------------------------------------------------------------------------
+
+// cmdKnowledge used to call searchKnowledge() with no AbortSignal at all, so
+// onSignal's activeResearchAbortController.abort() had nothing to reach — a
+// Ctrl-C during a knowledge search only raced safeShutdown() against the
+// still-running, unsignaled search. Same bug class the cmdResearch suite
+// above covers, one call site earlier: verify the signal is actually threaded
+// through, and that a cancellation surfaced as a rejection is classified via
+// reportError's latch rather than reported as an ordinary failure.
+describe('cmdKnowledge — cancellation reporting', () => {
+  const ENV_KEYS = ['PI_RESEARCH_API_KEY', 'PI_RESEARCH_PROVIDER', 'PI_RESEARCH_MODEL', 'PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+    process.env['PI_RESEARCH_API_KEY'] = 'test-key';
+    process.env['PI_RESEARCH_PROVIDER'] = 'mock-provider';
+    process.env['PI_RESEARCH_MODEL'] = 'mock-provider/mock-model';
+    process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = 'global';
+    resetConfig();
+    mockSearchKnowledge.mockClear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    resetConfig();
+    _resetCancellationLatchForTests();
+  });
+
+  it('passes a real AbortSignal into searchKnowledge so onSignal can actually reach it', async () => {
+    mockSearchKnowledge.mockResolvedValue({
+      text: 'mock knowledge text', found: 'yes' as const, documentsSearched: 1, citations: [],
+    });
+    await cmdKnowledge(['what is rust'], true);
+    expect(mockSearchKnowledge).toHaveBeenCalledTimes(1);
+    const signalArg = (mockSearchKnowledge.mock.calls[0] as unknown as [string[], AbortSignal])[1];
+    expect(signalArg).toBeInstanceOf(AbortSignal);
+    expect(signalArg.aborted).toBe(false);
+  });
+
+  it('classifies a cancellation-shaped rejection via the latch instead of an ordinary failure', async () => {
+    // Simulates the real sequence: onSignal() latches cancellation and would
+    // abort this run's signal; research-knowledge-search.ts re-throws once it
+    // observes an aborted signal rather than returning a stale result.
+    _markCancellationForTests('SIGTERM');
+    mockSearchKnowledge.mockRejectedValue(new Error('Aborted'));
+
+    const exitCode = await cmdKnowledge(['what is rust'], true);
+
+    expect(exitCode).toBe(exitCodeForSignal('SIGTERM'));
+    expect(exitCode).not.toBe(EXIT.OK);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // cmdKnowledge — --json payload shape
 // ---------------------------------------------------------------------------
 

@@ -110,7 +110,17 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
     return markdown;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error(`[Scrapers] PDF extraction failed: ${msg}`);
+    // debug, not error: a malformed/encrypted/scanned-image-only PDF is an
+    // expected, non-actionable per-URL outcome, not a genuine fault — the same
+    // reason isBenignScrapeFailure (scraper-utils.ts) keeps stub/blocked/HTTP-error
+    // content out of ERROR. This is called from both the fetch layer (where a
+    // browser-layer fallback always follows — the fetch layer's own catch at line
+    // ~529 already logs ANY of its failures at debug for that reason) and the
+    // browser layer (the last resort — isBenignScrapeFailure now recognizes this
+    // message so that terminal call site's own classification stays consistent
+    // too). Logging ERROR here, before either caller gets a chance to classify,
+    // pre-empted both of those and always alarmed regardless.
+    logger.debug(`[Scrapers] PDF extraction failed: ${msg}`);
     metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'extraction_failed' });
     errorTracker.trackError(e instanceof Error ? e : String(e), {
       component: 'scrapers',
@@ -590,7 +600,22 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
     // settle via scrapeSingle's own cancellation classification. Without this,
     // every remaining batch still ran its full fetch + browser-fallback cycle
     // after a user cancel.
-    if (signal?.aborted) break;
+    if (signal?.aborted) {
+      // scrapeSingle reports {success:false, error:'Aborted'} for a URL that
+      // was already in flight when the signal fired — the sub-batches that
+      // never even got dispatched (everything from here on) need the same
+      // treatment. Without this, the caller's own results.length silently
+      // fell short of urls.length with no indication a run was cut short —
+      // the same "cancellation resolves through a normal, non-throwing path
+      // and is invisible to the caller" gap the v1.3.1 research-tool fix
+      // closed at the orchestrator level, recurring one layer down here.
+      for (const url of urls.slice(i)) {
+        const aborted: ScrapeResult = { url, success: false, error: 'Aborted', markdown: '' };
+        onUrlComplete?.(aborted);
+        results.push(aborted);
+      }
+      break;
+    }
     const batch = urls.slice(i, i + maxConcurrency);
     const batchRes = await Promise.all(
       batch.map(async url => {
@@ -601,10 +626,10 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
     );
     results.push(...batchRes);
   }
-  
+
   const batchDuration = Date.now() - batchStart;
   metrics.observe('scrape_batch_latency_ms', batchDuration);
-  
+
   return results;
 }
 

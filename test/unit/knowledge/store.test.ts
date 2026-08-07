@@ -376,6 +376,74 @@ describe('KnowledgeStore', () => {
     expect(result!.text).toBe('researcher description');
   });
 
+  // Regression: multiple chunk rows from the same write batch share one
+  // timestamp (writer-queue.ts's insertedAt), and only the chunk-0 row's
+  // `content` field carries the complete document — every other chunk's
+  // `content` is undefined by construction. Sorting on timestamp alone is a
+  // no-op between same-timestamp rows, so whichever chunk LanceDB's
+  // fragment-scan happened to return first won — silently serving a partial
+  // fragment (or, before the description-first fallback fix, an even more
+  // truncated one) as if it were the whole document. Forces the exact
+  // worst-case scan order (non-zero chunk first) via a stubbed table so the
+  // test doesn't depend on LanceDB's actual (unspecified) row ordering.
+  it('rebuildDocument returns the complete document even when a non-zero chunk row sorts first', async () => {
+    await store.open();
+    const url = 'https://example.com/multichunk';
+    const ts = Date.now();
+    const fullContent = 'first half of the document\n\nsecond half of the document';
+
+    const chunk1Row = {
+      url,
+      text: 'second half of the document',
+      content: undefined,
+      metadata: JSON.stringify({ ingestionType: 'synthesis-description', chunkIndex: 1, totalChunks: 2, description: 'A two-chunk document' }),
+      timestamp: ts,
+    };
+    const chunk0Row = {
+      url,
+      text: 'first half of the document',
+      content: fullContent,
+      metadata: JSON.stringify({ ingestionType: 'synthesis-description', chunkIndex: 0, totalChunks: 2, description: 'A two-chunk document' }),
+      timestamp: ts,
+    };
+    const fakeQuery: any = {
+      where: () => fakeQuery,
+      limit: () => fakeQuery,
+      toArray: async () => [chunk1Row, chunk0Row],
+    };
+    vi.spyOn(store as any, 'getFreshTable').mockResolvedValueOnce({ query: () => fakeQuery } as any);
+
+    const rebuilt = await store.rebuildDocument(url);
+    expect(rebuilt).not.toBeNull();
+    expect(rebuilt!.text).toBe(fullContent);
+  });
+
+  it('rebuildDocument falls back to the (complete) description, not a chunk fragment, when the selected row has no content field', async () => {
+    await store.open();
+    const url = 'https://example.com/desc-fallback';
+    const ts = Date.now();
+
+    // A single, non-zero chunk row with no `content` — description must win
+    // over this row's own (partial) text fragment.
+    const chunkRow = {
+      url,
+      text: 'only the second half is in this row',
+      content: undefined,
+      metadata: JSON.stringify({ ingestionType: 'synthesis-description', chunkIndex: 1, totalChunks: 2, description: 'the complete synthesized description' }),
+      timestamp: ts,
+    };
+    const fakeQuery: any = {
+      where: () => fakeQuery,
+      limit: () => fakeQuery,
+      toArray: async () => [chunkRow],
+    };
+    vi.spyOn(store as any, 'getFreshTable').mockResolvedValueOnce({ query: () => fakeQuery } as any);
+
+    const rebuilt = await store.rebuildDocument(url);
+    expect(rebuilt).not.toBeNull();
+    expect(rebuilt!.text).toBe('the complete synthesized description');
+  });
+
   it('rebuildDocument returns null for unknown URL', async () => {
     await store.open();
     const result = await store.rebuildDocument('https://nonexistent.example.com');

@@ -305,8 +305,6 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               researchId: startResearchSession(piSessionId, researchId),
               piSessionId,
               masterWidgetId: tuiManager.masterWidgetId,
-              panelState,
-              waveTimer: null,
               unsubOrder: null,
             };
             registerSessionAbort(piSessionId, cleanupCtx.researchId, internalAbort);

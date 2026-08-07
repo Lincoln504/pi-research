@@ -90,6 +90,13 @@ interface ServiceRegistration<T extends IService> {
   factory: ServiceFactory<T>;
   instance: T | null;
   initializationPromise: Promise<T> | null;
+  // A clear()/replace() disposal currently tearing this service's instance
+  // down. get() awaits this before touching registration.instance — without
+  // it, a concurrent get() arriving mid-disposal (instance still non-null;
+  // dispose() hasn't nulled it yet) would either re-initialize the very
+  // instance being disposed (ctx branch) or hand a caller a reference that's
+  // about to be (or already was) torn down.
+  disposalPromise: Promise<void> | null;
   options: ServiceContainerOptions;
 }
 
@@ -153,6 +160,7 @@ export class ServiceContainer {
       factory,
       instance: null,
       initializationPromise: null,
+      disposalPromise: null,
       options: mergedOptions,
     });
     
@@ -216,6 +224,16 @@ export class ServiceContainer {
       throw new Error(`Service '${name}' is not registered`);
     }
 
+    // A clear()/replace() disposal in flight must settle before anything below
+    // reads registration.instance — otherwise this call could re-initialize
+    // (ctx branch) or hand back a reference to the very instance currently
+    // being torn down. while(), not if(): a newer disposal can start again
+    // while we're awaiting (mirrors the initializationPromise wait pattern
+    // used throughout this method).
+    while (registration.disposalPromise) {
+      await registration.disposalPromise.catch(() => { /* disposal errors are logged by clear()/replace() */ });
+    }
+
     // Return existing instance if already initialized.
     if (registration.instance) {
       // `_initializeService` publishes `registration.instance` BEFORE awaiting the
@@ -255,12 +273,30 @@ export class ServiceContainer {
         // instance under a running initialize()), and concurrent callers
         // received the instance mid-re-initialization.
         registration.initializationPromise = reinit as Promise<IService>;
-        const clearIfCurrent = () => {
-          if (registration.initializationPromise === (reinit as Promise<IService>)) {
+        // Identity-guarded: only touch shared state if THIS reinit is still the
+        // one the registration is currently tracking — a newer reinit/init that
+        // superseded it (and already published its own result) must not be
+        // clobbered by a stale settlement arriving after it.
+        const isStillCurrent = () => registration.initializationPromise === (reinit as Promise<IService>);
+        reinit.then(
+          () => { if (isStillCurrent()) registration.initializationPromise = null; },
+          () => {
+            // A re-init failure can leave THIS SAME instance in an inconsistent
+            // internal state — e.g. KnowledgeStoreService disposes its old
+            // handles before rebuilding on a cwd/mode change, then can still
+            // throw mid-rebuild. Unlike a fresh _initializeService() failure
+            // (which nulls registration.instance so the next get() rebuilds via
+            // the factory), this path used to leave the registry believing the
+            // same now-broken object was still a valid instance indefinitely.
+            // Mirror _initializeService's own failure handling for consistency.
+            if (!isStillCurrent()) return;
             registration.initializationPromise = null;
-          }
-        };
-        reinit.then(clearIfCurrent, clearIfCurrent);
+            if (registration.instance) {
+              registration.instance.lifecycle = ServiceLifecycle.UNINITIALIZED;
+              registration.instance = null;
+            }
+          },
+        );
         return reinit;
       }
       return registration.instance as T;
@@ -344,27 +380,45 @@ export class ServiceContainer {
       throw new Error(`Service '${name}' is not registered`);
     }
 
-    // Settle an in-flight initialization first. Disposing the early-published
-    // instance while its initialize() is still running hands the awaiting get()
-    // caller a service that was disposed under it — observed as store-closed
-    // errors when /research-config cleared the knowledge store during a
-    // concurrent first search.
-    if (registration.initializationPromise) {
-      await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
+    // Join an already-in-flight clear()/replace() rather than starting a
+    // second disposal of the same registration.
+    if (registration.disposalPromise) {
+      return registration.disposalPromise;
     }
 
-    if (registration.instance && registration.instance.dispose) {
-      await registration.instance.dispose().catch((err: unknown) => {
-        logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
-      });
-    }
+    // Published for the whole body (not just the dispose() call below) so a
+    // concurrent get() — which now awaits this before touching
+    // registration.instance — cannot slip in during the init-settle wait
+    // either, not only during the dispose() call itself.
+    registration.disposalPromise = (async () => {
+      try {
+        // Settle an in-flight initialization first. Disposing the early-published
+        // instance while its initialize() is still running hands the awaiting get()
+        // caller a service that was disposed under it — observed as store-closed
+        // errors when /research-config cleared the knowledge store during a
+        // concurrent first search.
+        if (registration.initializationPromise) {
+          await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
+        }
 
-    registration.instance = null;
-    registration.initializationPromise = null;
+        if (registration.instance && registration.instance.dispose) {
+          await registration.instance.dispose().catch((err: unknown) => {
+            logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
+          });
+        }
 
-    if (registration.options.enableLogging) {
-      logger.debug(`[ServiceContainer] Cleared service '${name}'`);
-    }
+        registration.instance = null;
+        registration.initializationPromise = null;
+
+        if (registration.options.enableLogging) {
+          logger.debug(`[ServiceContainer] Cleared service '${name}'`);
+        }
+      } finally {
+        registration.disposalPromise = null;
+      }
+    })();
+
+    return registration.disposalPromise;
   }
 
   /**
@@ -376,24 +430,38 @@ export class ServiceContainer {
       throw new Error(`Service '${name}' is not registered`);
     }
 
-    // Settle an in-flight initialization before swapping — see clear().
-    if (registration.initializationPromise) {
-      await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
+    // Join an already-in-flight clear()/replace() — see clear().
+    if (registration.disposalPromise) {
+      await registration.disposalPromise;
     }
 
-    // Dispose old instance if present
-    if (registration.instance && registration.instance.dispose) {
-      await registration.instance.dispose().catch((err: unknown) => {
-        logger.warn(`[ServiceContainer] Error disposing old service '${name}':`, err);
-      });
-    }
+    // Published for the whole body — see clear()'s comment for why.
+    registration.disposalPromise = (async () => {
+      try {
+        // Settle an in-flight initialization before swapping — see clear().
+        if (registration.initializationPromise) {
+          await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
+        }
 
-    registration.instance = newInstance;
-    registration.initializationPromise = null;
+        // Dispose old instance if present
+        if (registration.instance && registration.instance.dispose) {
+          await registration.instance.dispose().catch((err: unknown) => {
+            logger.warn(`[ServiceContainer] Error disposing old service '${name}':`, err);
+          });
+        }
 
-    if (registration.options.enableLogging) {
-      logger.debug(`[ServiceContainer] Replaced service '${name}'`);
-    }
+        registration.instance = newInstance;
+        registration.initializationPromise = null;
+
+        if (registration.options.enableLogging) {
+          logger.debug(`[ServiceContainer] Replaced service '${name}'`);
+        }
+      } finally {
+        registration.disposalPromise = null;
+      }
+    })();
+
+    return registration.disposalPromise;
   }
 
   /**

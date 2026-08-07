@@ -26,6 +26,8 @@ import {
   getContext,
   resetBrowser,
   cleanupBrowser,
+  taskStarted,
+  taskFinished,
 } from './thread-worker-browser.ts';
 import {
   setWorkerId as setMessagingWorkerId,
@@ -102,6 +104,11 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     taskTimer = setTimeout(() => abortController.abort(new Error(`Task timed out after ${taskTimeoutMs}ms`)), taskTimeoutMs);
   }
 
+  // Registered around the whole browser-touching lifetime of this task so
+  // resetBrowser() (below) can tell whether a sibling task dispatched to this
+  // same worker process (WORKER_CONCURRENCY > 1) is still using the shared
+  // browser/context before tearing it down.
+  taskStarted();
   try {
     await initBrowser();
     const initMs = Date.now() - startTime;
@@ -149,6 +156,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     };
   } finally {
     if (taskTimer !== undefined) clearTimeout(taskTimer);
+    taskFinished();
   }
 }
 

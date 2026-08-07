@@ -454,11 +454,21 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       observer?.onResearcherComplete?.(id, responseText);
       return;
     } catch (err) {
-      const researcherDuration = Date.now() - researcherExecutionStartMs;
-      metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(complexity), round: String(round), status: 'error' });
-      metrics.increment('researcher_errors_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
       lastError = err;
       const errMsg = err instanceof Error ? err.message : String(err);
+      // Computed up front (not just at the retry-skip check below) so the
+      // metrics right after don't mislabel a clean cancellation as an error.
+      // The sentinel has TWO forms (see the retry-skip check's own comment);
+      // isAbortSentinel matches both.
+      const tornDown = Boolean(signal?.aborted || isAbortSentinel(errMsg) || errMsg.includes('during container disposal') || container?.isDisposing);
+      const researcherDuration = Date.now() - researcherExecutionStartMs;
+      metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(complexity), round: String(round), status: tornDown ? 'cancelled' : 'error' });
+      // A clean cancellation/teardown is not a researcher fault — mirrors
+      // quick-research-orchestrator's equivalent catch, which computes this
+      // same distinction before touching its own error-only counters.
+      if (!tornDown) {
+        metrics.increment('researcher_errors_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
+      }
 
       // Attempt to salvage partial content on timeout or error
       try {
@@ -490,8 +500,8 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       // Retrying during disposal is futile — services are being destroyed — and it
       // relaunches search bursts into a WorkerPool that dispose() is simultaneously
       // destroying, producing a storm of "Cannot execute a task on destroying pool"
-      // errors.
-      if (signal?.aborted || isAbortSentinel(errMsg) || errMsg.includes('during container disposal') || container?.isDisposing) {
+      // errors. (tornDown computed above, alongside the metrics it also gates.)
+      if (tornDown) {
         logger.debug(`[ResearcherExecutor] Researcher ${id} aborted or container disposing, skipping retries.`);
         break; // Break out of the attempt loop
       }

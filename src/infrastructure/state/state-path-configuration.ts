@@ -7,7 +7,7 @@
  */
 
 import * as path from 'node:path';
-import { getGlobalConfigDir } from '../../config.ts';
+import { getStateDir } from '../../config.ts';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
@@ -39,8 +39,12 @@ export class StatePathConfiguration implements IService {
 
   constructor(stateDir?: string) {
     // pi-research's own namespace (~/.pi/research/state), beside config.env and
-    // knowledge_db — not the host pi config root (~/.pi/state).
-    const resolvedStateDir = stateDir || path.join(getGlobalConfigDir(), 'state');
+    // knowledge_db — not the host pi config root (~/.pi/state). A non-absolute
+    // explicit override is ignored in favor of getStateDir()'s own resolution
+    // (which re-derives from PI_RESEARCH_STATE_DIR/the default and warns) — see
+    // getStateDir()'s doc comment for why a relative state dir must never be
+    // resolved against whatever process.cwd() happens to be at construction time.
+    const resolvedStateDir = stateDir && path.isAbsolute(stateDir) ? stateDir : getStateDir();
     this.stateDir = resolvedStateDir;
     this.stateFilePath = path.join(resolvedStateDir, 'research-state.json');
     this.lockDirPath = path.join(resolvedStateDir, '.locks');

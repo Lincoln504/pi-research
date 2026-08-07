@@ -278,6 +278,19 @@ describe('text-utils', () => {
       expect(stripTrailingLlmPunctuation('https://example.com/d]),')).toBe('https://example.com/d');
     });
 
+    // Regression: a flat open/close COUNT comparison (rather than a running
+    // balance) misjudges a string that both ends in a genuinely balanced pair
+    // AND carries an earlier, unrelated unbalanced bracket — the earlier stray
+    // ')' tips the total count (2 closes vs 1 open) even though the trailing
+    // ')' really does close "(c)" right before it.
+    it('does not strip a genuinely balanced trailing bracket when an earlier unbalanced one inflates the flat count', () => {
+      expect(stripTrailingLlmPunctuation('http://example.com/a)b(c)'))
+        .toBe('http://example.com/a)b(c)');
+      // Still strips when there truly is no opener anywhere for the trailing bracket.
+      expect(stripTrailingLlmPunctuation('http://example.com/a)b)'))
+        .toBe('http://example.com/a)b');
+    });
+
     it('drops a malformed/truncated URL fragment instead of emitting garbage (regression: "https://www")', () => {
       // A soft-wrapped URL leaves "https://www" on the first line of a citation.
       const report = [

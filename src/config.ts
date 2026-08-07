@@ -248,15 +248,40 @@ const USER_MIGRATION_KEYS = [
 // ============================================================================
 
 /**
+ * Returns the state directory: PI_RESEARCH_STATE_DIR if set and absolute,
+ * otherwise ~/.pi/research/state.
+ *
+ * A relative override is deliberately ignored (falls back to the default)
+ * rather than resolved against process.cwd(): this directory backs
+ * cross-process coordination (browser-server/embedding-server leader
+ * election, the GPU lock, the run semaphore) that requires every process —
+ * the CLI invoked from an arbitrary cwd, the pi extension host, cluster
+ * worker processes — to agree on the exact same path. Resolving relative to
+ * whichever cwd a given process happens to be launched from would silently
+ * fragment that coordination into several independent, non-communicating
+ * state directories. scripts/cleanup.cjs already treats a relative override
+ * the same way (falls back to the default rather than guessing a cwd) —
+ * this keeps every reader in agreement with what deletion tooling assumes.
+ */
+export function getStateDir(): string {
+  const override = process.env['PI_RESEARCH_STATE_DIR'];
+  if (override) {
+    if (path.isAbsolute(override)) return override;
+    logger.warn(
+      `[config] PI_RESEARCH_STATE_DIR must be an absolute path — ignoring relative value "${override}" and using the default state directory.`,
+    );
+  }
+  return path.join(getGlobalConfigDir(), 'state');
+}
+
+/**
  * Returns the path to the centralized project settings file.
  */
 export function getProjectSettingsRegistryPath(): string {
   // State lives under pi-research's OWN namespace (~/.pi/research/state), beside
   // config.env and knowledge_db — not in the host pi config dir root (~/.pi/state),
   // which would pollute and risk colliding with the host's own state.
-  const stateDir = process.env['PI_RESEARCH_STATE_DIR']
-    ?? path.join(getGlobalConfigDir(), 'state');
-  return path.join(stateDir, 'project-settings.json');
+  return path.join(getStateDir(), 'project-settings.json');
 }
 
 /**

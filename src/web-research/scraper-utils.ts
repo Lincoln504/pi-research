@@ -31,15 +31,19 @@ import { isCloudflareBlockError, isTaskTimeoutError, isPoolShutdownError } from 
  * failures at debug instead of error — keeping the ERROR log (and, via
  * logger.error's error-tracker re-track, the diagnostic error count) focused on
  * genuine faults. The messages matched here are produced by validateContent
- * (`Fetch blocked:` / `Fetch returned stub:`) and scrapeWithFetch (`HTTP <code>`);
- * the remaining cases delegate to the shared browser-layer predicates.
+ * (`Fetch blocked:` / `Fetch returned stub:`), scrapeWithFetch (`HTTP <code>`)
+ * and extractPdfToMarkdown (`Could not extract content from PDF`) — a
+ * malformed/encrypted/scanned-image-only PDF is routine on the open web and
+ * just as non-actionable as a stub page or a 404; the remaining cases
+ * delegate to the shared browser-layer predicates.
  */
 export function isBenignScrapeFailure(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   return (
-    msg.startsWith('Fetch blocked:') ||        // bot-protection interstitial (Cloudflare, DDoS-Guard, …)
-    msg.startsWith('Fetch returned stub:') ||  // nav-only / near-empty page
-    /^HTTP \d{3}\b/.test(msg) ||               // remote 4xx/5xx status
+    msg.startsWith('Fetch blocked:') ||                  // bot-protection interstitial (Cloudflare, DDoS-Guard, …)
+    msg.startsWith('Fetch returned stub:') ||             // nav-only / near-empty page
+    msg.startsWith('Could not extract content from PDF') || // malformed/encrypted/scanned-only PDF
+    /^HTTP \d{3}\b/.test(msg) ||                          // remote 4xx/5xx status
     isCloudflareBlockError(error) ||
     isTaskTimeoutError(error) ||
     isPoolShutdownError(error)

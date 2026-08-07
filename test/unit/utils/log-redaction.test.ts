@@ -95,6 +95,26 @@ describe('redactSecrets', () => {
     expect(out.length).toBeLessThan(11_000);
     expect(out).toContain('truncated');
   });
+
+  it('does not split a UTF-16 surrogate pair at the truncation boundary', () => {
+    // MAX_LOG_MESSAGE_LENGTH is 10_000 (log-utils.ts, not exported). Placed so
+    // the emoji's high surrogate lands exactly at index 9999 — straddling the
+    // 10_000-unit cut point. A naive slice(0, 10_000) would keep the lone
+    // high surrogate and drop its low surrogate: silently mangled to U+FFFD
+    // by the console sink's UTF-8 encode, and an invalid unpaired \uXXXX
+    // escape on the JSON-file sink.
+    // 'z' (not a hex digit) so the run isn't itself caught by
+    // LONG_HEX_SECRET_PATTERN — this test is purely about the truncation
+    // boundary, not redaction.
+    const message = 'z'.repeat(9999) + '\u{1F600}' + 'trailing text after the emoji';
+    const out = redactSecrets(message);
+    const body = out.slice(0, out.indexOf('…[truncated'));
+
+    const lastCode = body.charCodeAt(body.length - 1);
+    expect(lastCode >= 0xd800 && lastCode <= 0xdbff).toBe(false);
+    // Backs off to exclude the whole emoji rather than split it.
+    expect(body).toBe('z'.repeat(9999));
+  });
 });
 
 describe('stripTerminalEscapes', () => {

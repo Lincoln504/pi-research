@@ -207,9 +207,7 @@ vi.mock('../../src/tui/research-tui-manager.ts', () => ({
 
 vi.mock('../../src/cleanup/research-cleanup.ts', () => ({
   createCleanupFunction: vi.fn(() => vi.fn()),
-  updateWaveTimer: vi.fn(),
   updateUnsubOrder: vi.fn(),
-  stopWaveAnimation: vi.fn(),
 }));
 
 vi.mock('../../src/observers/research-observer-impl.ts', () => ({
@@ -217,7 +215,6 @@ vi.mock('../../src/observers/research-observer-impl.ts', () => ({
   createObserverState: vi.fn(() => ({
     progressCredits: new Map(),
     quickSliceLabel: '',
-    waveTimer: null,
   })),
   stopObserverWaveAnimation: vi.fn(),
 }));

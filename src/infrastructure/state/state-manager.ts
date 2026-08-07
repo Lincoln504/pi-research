@@ -435,17 +435,6 @@ export class StateManager {
     return this.browserApi.getBrowserServer(this.readState.bind(this));
   }
 
-  public async setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void> {
-    await this.browserApi.setBrowserServer(
-      port,
-      pid,
-      schedulerId,
-      this.updateState.bind(this),
-      this.processLifecycle.getProcessStartTime.bind(this.processLifecycle),
-      authSecret
-    );
-  }
-
   public async clearBrowserServer(expected?: { pid?: number; schedulerId?: string }): Promise<void> {
     await this.browserApi.clearBrowserServer(this.updateState.bind(this), expected);
   }

@@ -885,8 +885,27 @@ export class KnowledgeStore implements IKnowledgeStore {
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'miss' });
       return null;
     }
-    // Newest generation wins, never row order.
-    results.sort((a: any, b: any) => Number(b.timestamp) - Number(a.timestamp));
+    // Newest generation wins, never row order. Ties (multiple chunk rows from
+    // the same write batch share one timestamp — see writer-queue.ts's
+    // insertedAt) break on chunkIndex ascending: only the chunk-0 row carries
+    // the complete `content` field this method promises callers ("...→
+    // unfragmented original markdown, not stitched vector chunks" per
+    // rebuildDocuments()'s doc comment in research-knowledge-search.ts).
+    // LanceDB's fragment-scan order is not insertion order, so without this a
+    // non-zero chunk sorting first would silently return just that one
+    // chunk's own fragment in place of the full document.
+    const chunkIndexOf = (row: any): number => {
+      try {
+        const parsed = JSON.parse(row.metadata as string);
+        return typeof parsed.chunkIndex === 'number' ? parsed.chunkIndex : 0;
+      } catch {
+        return 0;
+      }
+    };
+    results.sort((a: any, b: any) => {
+      const tsDiff = Number(b.timestamp) - Number(a.timestamp);
+      return tsDiff !== 0 ? tsDiff : chunkIndexOf(a) - chunkIndexOf(b);
+    });
 
     const r = results[0];
     // Read-time freshness. The stored timestamp (ms) is otherwise discarded here;
@@ -908,7 +927,12 @@ export class KnowledgeStore implements IKnowledgeStore {
     try {
       const metadata = JSON.parse(r.metadata as string);
       const description: string | null = typeof metadata.description === 'string' ? metadata.description : null;
-      const textToReturn = (r.content as string) || (r.text as string) || description || '';
+      // description is complete on every chunk row (spread verbatim from
+      // item.metadata at ingest time — see writer-queue.ts's docs.map), unlike
+      // r.text, which is only that ONE row's own chunk fragment. Prefer it
+      // over r.text so a selected non-content, non-chunk-0 row still returns
+      // a complete (if shorter) document instead of a silently truncated one.
+      const textToReturn = (r.content as string) || description || (r.text as string) || '';
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'hit' });
       logger.log(`[store] Cache hit: synthesis-description for ${url} (${textToReturn.length} chars, ~${ageDays ?? '?'}d old)`);
       return { text: textToReturn, description, metadata, ageDays };
@@ -1091,7 +1115,12 @@ export class KnowledgeStore implements IKnowledgeStore {
       if (scopeFilter === '1 = 0') return;
 
       const ttlDays = this.options.ttlDays ?? 30;
-      const cutoffTimestamp = Date.now() - (ttlDays * 24 * 60 * 60 * 1000);
+      // Math.trunc: ttlDays is schema-typed as a plain number (fractional values
+      // are accepted), and BigInt() throws a RangeError on a non-integer — which
+      // would otherwise silently disable eviction entirely for this run (caught
+      // by the catch below and only logged) whenever the configured value or the
+      // current timestamp happens to leave a fractional cutoff.
+      const cutoffTimestamp = Math.trunc(Date.now() - (ttlDays * 24 * 60 * 60 * 1000));
       // Scope eviction to this workspace only — do not evict other projects' data.
       await table.delete(`timestamp < ${BigInt(cutoffTimestamp)} AND (${scopeFilter})`);
       logger.log(`[store] Ran eviction for records older than ${ttlDays} days [scope: ${scopeFilter}]`);

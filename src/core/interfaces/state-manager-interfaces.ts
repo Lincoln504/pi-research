@@ -16,7 +16,6 @@ export interface IStateManager extends IService {
   updateHeartbeat(sessionId: string): Promise<void>;
   cleanupStaleSessions(timeoutMs: number): Promise<number>;
   getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; authSecret?: string } | null>;
-  setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void>;
   // `expected` makes the clear a compare-and-delete: the entry is only removed when
   // the provided identity fields match, so a stale caller cannot deregister a leader
   // it does not own. Omit only when the caller has just verified ownership under the

@@ -3,7 +3,6 @@
  *
  * Handles cleanup operations for research sessions:
  * - Terminal input draining to prevent protocol response leaks
- * - Wave animation timer cleanup
  * - Session and panel cleanup
  * - Shared links cleanup
  */
@@ -17,7 +16,6 @@ import {
 } from '../orchestration/session-state.ts';
 import { cleanupSharedLinks } from '../utils/shared-links.ts';
 import type { CleanupContext } from '../types/index.ts';
-import type { ResearchPanelState } from '../types/research-panel-types.ts';
 
 export type { CleanupContext };
 
@@ -38,16 +36,13 @@ export function createCleanupFunction(
     researchId,
     piSessionId,
     masterWidgetId,
-    panelState,
-    waveTimer,
     unsubOrder,
   } = cleanupCtx;
-  
+
   const { ctx } = deps;
-  
+
   let cleanupCalled = false;
-  let waveTimerRef = waveTimer;
-  
+
   // Use reference objects to allow updating after creation
   const unsubOrderContainer = cleanupCtx.unsubOrderRef || { value: unsubOrder };
   
@@ -59,14 +54,6 @@ export function createCleanupFunction(
   return async () => {
     if (cleanupCalled) return;
     cleanupCalled = true;
-
-    // Clear wave animation timer
-    if (waveTimerRef) {
-      clearInterval(waveTimerRef);
-      waveTimerRef = null;
-      panelState.waveFrame = undefined;
-      panelState.waveColors = undefined;
-    }
 
     if (unsubOrderContainer.value) {
       unsubOrderContainer.value();
@@ -120,29 +107,10 @@ export function createCleanupFunction(
 }
 
 /**
- * Update the wave timer reference in the cleanup context
- */
-export function updateWaveTimer(cleanupCtx: CleanupContext, timer: NodeJS.Timeout | null): void {
-  (cleanupCtx as CleanupContext & { waveTimer?: NodeJS.Timeout | null }).waveTimer = timer;
-}
-
-/**
  * Update the unsubOrder reference in the cleanup context
  */
 export function updateUnsubOrder(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
   if (cleanupCtx.unsubOrderRef) {
     cleanupCtx.unsubOrderRef.value = unsub;
   }
-}
-
-/**
- * Stop and clear wave animation
- */
-export function stopWaveAnimation(panelState: ResearchPanelState): void {
-  if (panelState.waveTimer) {
-    clearInterval(panelState.waveTimer);
-    panelState.waveTimer = null;
-  }
-  panelState.waveFrame = undefined;
-  panelState.waveColors = undefined;
 }

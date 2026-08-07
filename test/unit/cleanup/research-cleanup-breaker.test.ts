@@ -58,8 +58,6 @@ describe('createCleanupFunction — breaker key format', () => {
         researchId,
         piSessionId,
         masterWidgetId: 'w',
-        panelState: {} as any,
-        waveTimer: null,
         unsubOrder: null,
       },
       { ctx: {} as any },

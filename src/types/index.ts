@@ -34,8 +34,6 @@ export interface CleanupContext {
   researchId: string;
   piSessionId: string;
   masterWidgetId: string;
-  panelState: import('./research-panel-types.ts').ResearchPanelState;
-  waveTimer: NodeJS.Timeout | null;
   unsubOrder: (() => void) | null;
   unsubOrderRef?: { value: (() => void) | null };
 }

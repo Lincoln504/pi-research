@@ -382,6 +382,24 @@ describe('scrapers', () => {
       expect(result.error).toContain('Could not extract content from PDF');
     });
 
+    it('logs a PDF extraction failure at debug, not error — an expected per-URL outcome, not an engine fault', async () => {
+      // Regression: extractPdfToMarkdown used to call logger.error unconditionally,
+      // before either caller (fetch layer, always-debug-a-fallback-follows; browser
+      // layer, isBenignScrapeFailure-gated) got a chance to classify it — an ERROR
+      // log on every malformed/encrypted/scanned-only PDF, routine on the open web.
+      const { logger } = await import('../../../src/logger.ts');
+      vi.mocked(logger.error).mockClear();
+      mockRunBrowserTask.mockResolvedValue({
+        contentType: 'application/pdf',
+        bufferB64: Buffer.from('%PDF-CORRUPT garbage bytes').toString('base64'),
+      });
+
+      const result = await scrapeSingle('https://some-site.org/corrupt2.pdf');
+
+      expect(result.success).toBe(false);
+      expect(vi.mocked(logger.error)).not.toHaveBeenCalled();
+    });
+
     it('reports FAILURE when PDF extraction yields an error string (never a cached success)', async () => {
       // Zero decoded bytes is exactly the old bug's symptom: extraction fails,
       // extractPdfToMarkdown returns "*Error: ...*", and the PDF branch used to
@@ -463,9 +481,18 @@ describe('scrapers', () => {
       // maxConcurrency 1 → four sequential batches; cancel after the first result.
       const results = await scrape(urls, 1, controller.signal, undefined, undefined, () => controller.abort());
 
-      // Only the first batch ran; the doomed fetch/browser cycle for the
-      // remaining URLs was skipped entirely.
-      expect(results).toHaveLength(1);
+      // Only the first batch actually ran — the doomed fetch/browser cycle for
+      // the remaining URLs was skipped entirely — but every URL still gets an
+      // entry: a caller must be able to tell "cancelled after 1 of 4" apart
+      // from "4 of 4 accounted for" (regression: the undispatched URLs used to
+      // vanish from the returned array with no indication of why).
+      expect(results).toHaveLength(4);
+      expect(results[0]).toMatchObject({ url: 'https://a.example/1', success: true });
+      expect(results.slice(1)).toEqual([
+        { url: 'https://a.example/2', success: false, error: 'Aborted', markdown: '' },
+        { url: 'https://a.example/3', success: false, error: 'Aborted', markdown: '' },
+        { url: 'https://a.example/4', success: false, error: 'Aborted', markdown: '' },
+      ]);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(mockRunBrowserTask).not.toHaveBeenCalled();
     });

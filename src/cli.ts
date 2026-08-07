@@ -41,7 +41,7 @@ import { RESEARCH_STOPPED_ERROR_CODE } from './orchestration/session-state.ts';
 import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import { validateInitialLink, MAX_INITIAL_LINKS } from './utils/url-utils.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
-import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey, parseDotEnv } from './config.ts';
+import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, getStateDir, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey, parseDotEnv } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { buildModelRegistry, safeGetAvailable } from './core/llm/model-registry-factory.ts';
 
@@ -327,7 +327,7 @@ function resolvedConfigPaths(): ResolvedConfigPaths {
     piIfaceEnv: getInterfaceEnvFilePath('pi'),
     piAuth: path.join(agentDir, 'auth.json'),
     piModels: path.join(agentDir, 'models.json'),
-    piState: process.env['PI_RESEARCH_STATE_DIR'] ?? path.join(getGlobalConfigDir(), 'state'),
+    piState: getStateDir(),
   };
 }
 
@@ -695,6 +695,13 @@ export async function cmdKnowledge(queries: string[], json?: boolean): Promise<n
 
   let result: KnowledgeSearchResult;
   let exit: number = EXIT.OK;
+  // Same rationale as cmdResearch: without wiring a signal in, Ctrl-C only tears
+  // down shared SDK services (safeShutdown, fired from onSignal) while this
+  // search keeps running unsignaled underneath it — a race that can either
+  // surface as a confusing mid-teardown failure or, worse, let the search
+  // resolve normally and report ok:true/exit 0 for an interrupted run.
+  const abortController = new AbortController();
+  activeResearchAbortController = abortController;
   try {
     await initResearchSDK({
       model: det.model,
@@ -704,10 +711,11 @@ export async function cmdKnowledge(queries: string[], json?: boolean): Promise<n
       ignoreGlobalConfig: true,
     });
     toStderr(`[pi-research] searching knowledge store (${queries.length} query/${queries.length === 1 ? '' : 's'})…\n`);
-    result = await searchKnowledge(queries);
+    result = await searchKnowledge(queries, abortController.signal);
   } catch (err) {
     return reportError(err, 'knowledge search', json);
   } finally {
+    if (activeResearchAbortController === abortController) activeResearchAbortController = null;
     await safeShutdown();
   }
 

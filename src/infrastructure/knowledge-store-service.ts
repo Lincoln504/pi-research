@@ -53,7 +53,23 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   // Initialization promise to prevent concurrent initialization
   private _initializationPromise: Promise<void> | null = null;
 
+  // Disposal promise: lets a concurrent initialize() wait out an in-flight
+  // dispose() instead of racing it. See dispose()'s own comment for the
+  // failure this closes — none of initialize()'s lifecycle guards below
+  // recognize DISPOSING, so without this an initialize() arriving while
+  // dispose() is mid-teardown would start rebuilding immediately, and the
+  // two would race to close/null each other's components.
+  private _disposalPromise: Promise<void> | null = null;
+
   async initialize(ctx?: any): Promise<void> {
+    // A dispose() in flight must settle before anything below inspects
+    // lifecycle or decides what to do — while() (not if()) because a newer
+    // disposal can start again during the await (mirrors the
+    // _initializationPromise wait loop further down).
+    while (this._disposalPromise) {
+      await this._disposalPromise;
+    }
+
     // Only an EXPLICIT ctx.cwd may re-scope the store. The lazy callers
     // (getStore/getEmbedder/getWriterQueue) call initialize() with no ctx — they
     // must NOT flip the scope. Resolving the missing cwd to process.cwd() here was
@@ -277,6 +293,13 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
       return;
     }
 
+    // Join an already-in-flight disposal rather than starting a second one —
+    // two concurrent dispose() calls would otherwise both try to close/null
+    // the same handles.
+    if (this._disposalPromise) {
+      return this._disposalPromise;
+    }
+
     // If an initialization is still in flight, let it finish before we tear down.
     // Otherwise the init closure would re-assign this._embedder/_store/_writerQueue
     // and flip lifecycle back to INITIALIZED *after* dispose() nulled everything —
@@ -293,42 +316,65 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     this.lifecycle = ServiceLifecycle.DISPOSING;
     logger.debug('[KnowledgeStoreService] Disposing...');
 
-    try {
-      if (this._writerQueue) {
-        await this._writerQueue.dispose?.();
-      }
-      
-      if (this._store) {
-        await this._store.close();
-      }
+    // Capture the components to tear down NOW, as local references — not
+    // re-read via this._embedder/this._store/etc. at each step below. A
+    // concurrent initialize() is blocked on _disposalPromise (see above) and
+    // cannot publish anything while we run, but capturing locally means this
+    // disposal only ever acts on what it was actually invoked to dispose,
+    // regardless of what the instance fields point at by the time each
+    // `await` below resumes — the same identity-capture discipline the
+    // embedding-leader CAS and file-lock PID+startTime checks elsewhere in
+    // this codebase already use for exactly this class of race.
+    const embedder = this._embedder;
+    const store = this._store;
+    const writerQueue = this._writerQueue;
+    const initLock = this._initLock;
 
-      if (this._embedder) {
-        await this._embedder.dispose?.();
-        // The embedding factory's module-level cache still points at the instance
-        // just disposed — its fast path has no liveness check, so a later re-init
-        // (cwd/mode re-scope) would be handed the dead instance and burn every
-        // warm-up/init retry on it. clearEmbeddingInstance() re-disposes
-        // (idempotent) and nulls the cache; when this process was the leader, its
-        // shutdown deregisters via the serverId CAS, and a client instance's
-        // dispose is a no-op — a FOREIGN leader's registration is never touched.
-        await clearEmbeddingInstance();
+    this._disposalPromise = (async () => {
+      try {
+        if (writerQueue) {
+          await writerQueue.dispose?.();
+        }
+
+        if (store) {
+          await store.close();
+        }
+
+        if (embedder) {
+          await embedder.dispose?.();
+          // The embedding factory's module-level cache still points at the instance
+          // just disposed — its fast path has no liveness check, so a later re-init
+          // (cwd/mode re-scope) would be handed the dead instance and burn every
+          // warm-up/init retry on it. clearEmbeddingInstance() re-disposes
+          // (idempotent) and nulls the cache; when this process was the leader, its
+          // shutdown deregisters via the serverId CAS, and a client instance's
+          // dispose is a no-op — a FOREIGN leader's registration is never touched.
+          await clearEmbeddingInstance();
+        }
+
+        if (initLock) {
+          await initLock.dispose();
+        }
+
+        // Only clear fields that still point at what we just disposed — a
+        // concurrent initialize() cannot have published anything while
+        // blocked on _disposalPromise, but this keeps the intent explicit
+        // rather than relying on that invariant holding forever.
+        if (this._embedder === embedder) this._embedder = null;
+        if (this._store === store) this._store = null;
+        if (this._writerQueue === writerQueue) this._writerQueue = null;
+        if (this._initLock === initLock) this._initLock = null;
+
+        logger.debug('[KnowledgeStoreService] Disposed');
+      } catch (err) {
+        logger.error('[KnowledgeStoreService] Error during disposal:', err);
+      } finally {
+        this.lifecycle = ServiceLifecycle.DISPOSED;
+        this._disposalPromise = null;
       }
+    })();
 
-      if (this._initLock) {
-        await this._initLock.dispose();
-      }
-
-      this._embedder = null;
-      this._store = null;
-      this._writerQueue = null;
-      this._initLock = null;
-
-      logger.debug('[KnowledgeStoreService] Disposed');
-    } catch (err) {
-      logger.error('[KnowledgeStoreService] Error during disposal:', err);
-    } finally {
-      this.lifecycle = ServiceLifecycle.DISPOSED;
-    }
+    return this._disposalPromise;
   }
 
   /**

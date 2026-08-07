@@ -129,8 +129,20 @@ const CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
  * neither sink receives clear-text secrets or unbounded network data.
  */
 export function redactSecrets(message: string): string {
+  // slice() counts UTF-16 code units, so a naive cut at MAX_LOG_MESSAGE_LENGTH
+  // can land between the two halves of a surrogate pair (non-BMP characters —
+  // routine in scraped CJK/emoji content). The console sink then writes a
+  // lone surrogate, silently mangled to U+FFFD on UTF-8 encode; the JSON-file
+  // sink emits an unpaired \uXXXX escape that many strict JSON consumers
+  // reject outright. Same back-off truncateWithMarker (text-utils.ts) already
+  // applies for the same reason.
+  let keep = MAX_LOG_MESSAGE_LENGTH;
+  if (message.length > keep) {
+    const lastKeptUnit = message.charCodeAt(keep - 1);
+    if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
+  }
   let out = message.length > MAX_LOG_MESSAGE_LENGTH
-    ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}…[truncated ${message.length - MAX_LOG_MESSAGE_LENGTH} chars]`
+    ? `${message.slice(0, keep)}…[truncated ${message.length - keep} chars]`
     : message;
   out = out.replace(ANSI_PATTERN, '');
   out = out.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]@');

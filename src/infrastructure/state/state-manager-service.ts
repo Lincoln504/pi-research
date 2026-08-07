@@ -179,13 +179,6 @@ export class StateManagerService implements IStateManager {
   }
 
   /**
-   * Set the current browser server information
-   */
-  async setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void> {
-    return this.getStateManager().setBrowserServer(port, pid, schedulerId, authSecret);
-  }
-
-  /**
    * Clear the browser server information
    */
   async clearBrowserServer(expected?: { pid?: number; schedulerId?: string }): Promise<void> {

@@ -49,8 +49,6 @@ export interface ResearchPanelState {
   waveFrame?: number;
   /** Last-visit frame per position for wave animation decay */
   waveColors?: number[];
-  /** Timer for wave animation */
-  waveTimer?: NodeJS.Timeout | null;
   /** Flag indicating whether completed researchers should be cleared */
   needsClear?: boolean;
   /** 1-2 word topic title derived from the query after the coordinator LLM responds */
