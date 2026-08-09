@@ -8,6 +8,7 @@ import { logger } from '../logger.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
 import { readJsonCapped, BodyTooLargeError } from '../utils/http-body.ts';
+import { createTimeoutSignal } from '../web-research/retry-utils.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 
@@ -88,32 +89,27 @@ export class StackExchangeClient {
         url.searchParams.set('site', 'stackoverflow.com');
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, this._timeout);
-
-      // Chain the signal if provided
-      const abortHandler = () => {
-        clearTimeout(timeoutId);
-        controller.abort();
-      };
-      if (signal) {
-        signal.addEventListener('abort', abortHandler, { once: true });
-      }
+      // createTimeoutSignal combines the timeout with an already-provided caller
+      // signal via AbortSignal.any, which — unlike a plain `signal.addEventListener
+      // ('abort', ...)` — correctly produces an already-aborted combined signal
+      // when the caller's signal is aborted BEFORE this call even starts (that
+      // 'abort' event already fired; a listener added afterward never sees it, so
+      // the request went to the network anyway despite the caller having already
+      // cancelled). Matches the same pattern used by the security/*.ts clients.
+      const requestSignal = createTimeoutSignal(this._timeout, signal);
 
       try {
         const response = await fetch(url.toString(), {
           method: options.method,
-          signal: controller.signal,
+          signal: requestSignal,
           headers: {
             'Accept': 'application/json',
           },
         });
 
-        // NB: the timeout is cleared in `finally`, not here. Clearing it now —
-        // when only the headers have arrived — would leave the body read
-        // (readJsonCapped below) with no timeout, so a stalled body could hang
+        // NB: requestSignal stays armed through the body read below (readJsonCapped) —
+        // createTimeoutSignal's underlying timer isn't cleared just because fetch()
+        // resolved with headers, so a stalled body still aborts rather than hanging
         // for the whole process lifetime.
 
         // The SE API returns a structured JSON wrapper (with error_id) even for
@@ -193,13 +189,6 @@ export class StackExchangeClient {
         }
 
         throw error;
-      } finally {
-        // Single clear point: covers both the success and error paths and keeps
-        // the timeout armed across the body read above.
-        clearTimeout(timeoutId);
-        if (signal) {
-          signal.removeEventListener('abort', abortHandler);
-        }
       }
     });
   }

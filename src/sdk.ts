@@ -34,6 +34,7 @@ import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
+import { redactSecrets } from './utils/log-utils.ts';
 import { getConfig, createConfig, validateConfig, resetConfig, type Config } from './config.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from './utils/metrics.ts';
 import type { IMetricsSnapshot, RunSummary } from './utils/metrics.ts';
@@ -633,10 +634,18 @@ export function getLastResearcherOutcome(): ResearcherOutcome | null {
  * Emit a single compact line summarizing a run's tracked errors, so they are visible in
  * the operator's log instead of silently accumulating. No-op when the run was clean.
  */
-function logRunErrorSummary(report: ErrorReport | null, depthLabel: string, status: 'success' | 'error'): void {
+export function logRunErrorSummary(report: ErrorReport | null, depthLabel: string, status: 'success' | 'error'): void {
   if (!report || report.totalErrors === 0) return;
+  // Redact BEFORE truncating to 48 chars: p.message is the RAW, unredacted
+  // first-seen error message (unlike p.signature, which extractSignature()
+  // already strips URLs from) — a scrape/navigation failure routinely echoes
+  // the failing URL verbatim, which can carry userinfo credentials
+  // (https://user:pass@host/...). A 48-char window makes landing mid-
+  // credential likely; truncating first would cut it before redactSecrets'
+  // patterns ever see the whole token. Same class of bug as the truncate-
+  // before-redact fix in log-utils.ts's redactSecrets itself.
   const top = report.patterns.slice(0, 3)
-    .map(p => `"${String(p.message ?? p.signature ?? 'error').slice(0, 48)}" ×${p.count}`)
+    .map(p => `"${redactSecrets(String(p.message ?? p.signature ?? 'error')).slice(0, 48)}" ×${p.count}`)
     .join(', ');
   logger.warn(`[SDK] run ${status} with ${report.totalErrors} tracked error(s) across ${report.uniquePatterns} pattern(s) [${depthLabel}]${top ? ` — top: ${top}` : ''}`);
 }

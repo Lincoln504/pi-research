@@ -2,13 +2,13 @@
  * Log Redaction & Sanitization Unit Tests
  *
  * Verifies that redactSecrets() masks the credential formats that can reach the
- * logger via scraped/network content, and that neutralizeControlChars() strips
- * the line-break/control-char log-injection vector. These guards back the
+ * logger via scraped/network content, and that stripTerminalEscapes() strips
+ * the terminal-escape/control-char log-injection vector. These guards back the
  * CodeQL "Network data written to file" / "Log injection" alerts on logger.ts.
  */
 
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, neutralizeControlChars, stripTerminalEscapes } from '../../../src/utils/log-utils.ts';
+import { redactSecrets, stripTerminalEscapes } from '../../../src/utils/log-utils.ts';
 
 describe('redactSecrets', () => {
   it('masks credentials embedded in URL userinfo', () => {
@@ -86,6 +86,20 @@ describe('redactSecrets', () => {
     expect(out).toContain('[REDACTED]');
   });
 
+  it('masks a bare "key=" parameter (e.g. the StackExchange ?key=<apikey> query param)', () => {
+    // rest-client.ts sets the SE API key via url.searchParams.set('key',
+    // apiKey) — no "api_"/"private_" qualifying prefix, so SENSITIVE_KV_PATTERN's
+    // key-name alternation needed the bare "key" entry to catch it.
+    const out = redactSecrets('GET https://api.stackexchange.com/2.3/questions?key=abcdef1234567890&site=stackoverflow');
+    expect(out).not.toContain('abcdef1234567890');
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('still redacts the qualified key forms without double-matching (api_key, private_key)', () => {
+    expect(redactSecrets('api_key=abc123secret')).not.toContain('abc123secret');
+    expect(redactSecrets('private_key=zzz999secret')).not.toContain('zzz999secret');
+  });
+
   it('does not redact short hex strings like run IDs', () => {
     expect(redactSecrets('run-deadbeef started')).toContain('run-deadbeef');
   });
@@ -115,6 +129,24 @@ describe('redactSecrets', () => {
     // Backs off to exclude the whole emoji rather than split it.
     expect(body).toBe('z'.repeat(9999));
   });
+
+  it('does not leak a fragment of a secret that straddles the truncation boundary', () => {
+    // MAX_LOG_MESSAGE_LENGTH is 10_000 (log-utils.ts, not exported). Pre-fix,
+    // truncation ran BEFORE redaction: a secret split by the cut left
+    // whichever fragment survived the cut too short for any pattern's length
+    // minimum (LONG_HEX_SECRET_PATTERN needs 32+ contiguous hex chars) —
+    // exposed in the clear right before the "…[truncated N chars]" marker.
+    const prefix = 'PI_BROWSER_AUTH_SECRET=';
+    const secret = 'a'.repeat(64);
+    const keptHexChars = 10; // how many hex chars of the secret land BEFORE the 10_000 cut
+    const filler = 'z'.repeat(10_000 - prefix.length - keptHexChars);
+    const message = filler + prefix + secret + ' trailing';
+
+    const out = redactSecrets(message);
+
+    expect(out).not.toContain('a'.repeat(keptHexChars));
+    expect(out).toContain('[REDACTED]');
+  });
 });
 
 describe('stripTerminalEscapes', () => {
@@ -137,19 +169,5 @@ describe('stripTerminalEscapes', () => {
 
   it('spaces out residual raw control bytes (BEL, NUL)', () => {
     expect(stripTerminalEscapes('a\x07b\x00c')).toBe('a b c');
-  });
-});
-
-describe('neutralizeControlChars', () => {
-  it('strips CR/LF so untrusted content cannot forge a log line', () => {
-    const out = neutralizeControlChars('clean\r\nINJECTED forged line');
-    expect(out).not.toContain('\n');
-    expect(out).not.toContain('\r');
-    // CRLF is one line break, collapsed to a single space.
-    expect(out).toBe('clean INJECTED forged line');
-  });
-
-  it('strips other C0 control chars and DEL', () => {
-    expect(neutralizeControlChars('a\x00b\x07c\x7fd')).toBe('a b c d');
   });
 });

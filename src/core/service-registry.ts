@@ -18,9 +18,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 
 /**
- * How long teardown waits for an initialization that is still in flight. Long
- * enough to cover a normal service coming up, short enough that a service blocked
- * on something slow (a model download) cannot hold shutdown open indefinitely.
+ * How long teardown waits for an initialization or a clear()/replace()
+ * disposal that is still in flight. Long enough to cover a normal service
+ * coming up or tearing down, short enough that a service blocked on
+ * something slow (a model download) cannot hold shutdown open indefinitely.
  */
 const DISPOSE_INFLIGHT_INIT_TIMEOUT_MS = 5_000;
 
@@ -519,6 +520,39 @@ export class ServiceContainer {
           }),
         ]);
         if (settleTimer) clearTimeout(settleTimer);
+      }
+
+      // A concurrent clear()/replace() can be mid-disposal right now: its
+      // async IIFE has already called instance.dispose() (or is about to)
+      // but hasn't yet nulled/replaced registration.instance. Snapshotting
+      // activeServices without waiting for this would include that service,
+      // and the loop below would call instance.dispose() a SECOND time on
+      // the very same instance concurrently with clear()/replace()'s own
+      // call — get() already guards against reading mid-disposal state (see
+      // its own disposalPromise wait above); teardown needs the same guard
+      // before it reads/touches registration.instance below. Bounded for the
+      // same reason as the init wait: a service stuck disposing must not
+      // hold overall teardown open indefinitely — the snapshot below still
+      // catches whatever state is left after the timeout.
+      const inFlightDisposals = Array.from(this.services.values())
+        .map((r) => r.disposalPromise)
+        .filter((p): p is Promise<void> => p != null);
+      if (inFlightDisposals.length > 0) {
+        if (this.defaultOptions.enableLogging) {
+          logger.debug(`[ServiceContainer] Waiting for ${inFlightDisposals.length} in-flight disposal(s) before teardown`);
+        }
+        let disposalSettleTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(inFlightDisposals),
+          new Promise<void>((resolve) => {
+            disposalSettleTimer = setTimeout(() => {
+              logger.warn('[ServiceContainer] Timed out waiting for in-flight service disposal; proceeding with teardown');
+              resolve();
+            }, DISPOSE_INFLIGHT_INIT_TIMEOUT_MS);
+            disposalSettleTimer.unref?.();
+          }),
+        ]);
+        if (disposalSettleTimer) clearTimeout(disposalSettleTimer);
       }
 
       const activeServices = Array.from(this.services.keys()).filter(name =>

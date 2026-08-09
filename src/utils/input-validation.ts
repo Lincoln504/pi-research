@@ -89,13 +89,3 @@ export function validateAndSanitizeQuery(query: string): string {
 
   return sanitizeQuery(query);
 }
-
-/**
- * Validate complexity level
- *
- * @param complexity - The complexity level to validate
- * @returns True if valid, false otherwise
- */
-export function validateComplexity(complexity: number): boolean {
-  return complexity === 0 || complexity === 1 || complexity === 2 || complexity === 3;
-}

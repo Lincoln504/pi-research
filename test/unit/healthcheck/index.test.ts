@@ -176,6 +176,22 @@ describe('healthcheck', () => {
     expect(result.status).toBe('healthy');
   });
 
+  it('StateManager diagnostic does not report a "sessions" count — nothing in production ever populates it', async () => {
+    // Regression: the diagnostic used to include `sessions: stats.activeSessions`
+    // from stateManager.getMetrics(). The session-tracking API that would ever
+    // populate state.sessions (addSession/removeSession/updateHeartbeat) has no
+    // production caller anywhere in the codebase, so this was permanently 0 —
+    // presented as if it were live data.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+
+    const result = await runHealthCheck();
+
+    const stateManagerCheck = result.components?.find(c => c.component === 'StateManager');
+    expect(stateManagerCheck?.healthy).toBe(true);
+    expect(stateManagerCheck?.diagnostic).not.toHaveProperty('sessions');
+  });
+
   it('should fail when browser is not available and not in mock mode', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(false);
     // Ensure mock env vars are absent so mock-mode bypass doesn't fire.

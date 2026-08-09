@@ -32,10 +32,14 @@ import { isCloudflareBlockError, isTaskTimeoutError, isPoolShutdownError } from 
  * logger.error's error-tracker re-track, the diagnostic error count) focused on
  * genuine faults. The messages matched here are produced by validateContent
  * (`Fetch blocked:` / `Fetch returned stub:`), scrapeWithFetch (`HTTP <code>`)
- * and extractPdfToMarkdown (`Could not extract content from PDF`) — a
- * malformed/encrypted/scanned-image-only PDF is routine on the open web and
+ * and extractPdfToMarkdown (`Could not extract content from PDF`, `PDF too
+ * large`) — a malformed/encrypted/scanned-image-only PDF, or one that simply
+ * exceeds the deliberate 100MB policy cap, is routine on the open web and
  * just as non-actionable as a stub page or a 404; the remaining cases
- * delegate to the shared browser-layer predicates.
+ * delegate to the shared browser-layer predicates. Deliberately does NOT
+ * match 'PDF extraction unavailable' (a pdf-oxide-wasm native-module load
+ * failure) — that is an infrastructure fault affecting every URL, not a
+ * routine per-PDF outcome, and must still surface at ERROR.
  */
 export function isBenignScrapeFailure(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
@@ -43,6 +47,7 @@ export function isBenignScrapeFailure(error: unknown): boolean {
     msg.startsWith('Fetch blocked:') ||                  // bot-protection interstitial (Cloudflare, DDoS-Guard, …)
     msg.startsWith('Fetch returned stub:') ||             // nav-only / near-empty page
     msg.startsWith('Could not extract content from PDF') || // malformed/encrypted/scanned-only PDF
+    msg.startsWith('PDF too large') ||                    // exceeds the deliberate 100MB policy cap
     /^HTTP \d{3}\b/.test(msg) ||                          // remote 4xx/5xx status
     isCloudflareBlockError(error) ||
     isTaskTimeoutError(error) ||

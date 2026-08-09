@@ -63,3 +63,34 @@ describe('captureStdio — LIFO restore under out-of-order completion', () => {
     expect(process.stdout.write).toBe(origStdout);
   });
 });
+
+describe('captureStdio — multi-byte UTF-8 split across separate writes', () => {
+  // Regression: the patched stderr.write/stdout.write/fs.writeSync all decoded
+  // each chunk with a bare `decoder.decode(chunk)` (no {stream: true}). A
+  // single native write can split a multi-byte UTF-8 character's bytes across
+  // two separate write() calls — decode() with no options treats every call
+  // as independently "final", so BOTH halves of a split character came out as
+  // U+FFFD replacement characters instead of reconstructing the original.
+  it('reconstructs a character split across two stderr.write() calls, with no replacement character', async () => {
+    const logFile = tmpLogFile();
+    // "日本語" — U+65E5's UTF-8 encoding is 3 bytes (E6 97 A5); split after
+    // the first 2 bytes so neither write alone contains a complete character.
+    const full = Buffer.from('日本語 test message');
+    const part1 = full.subarray(0, 2);
+    const part2 = full.subarray(2);
+
+    await captureStdio(logFile, () => true, async () => {
+      process.stderr.write(part1);
+      process.stderr.write(part2);
+    }, 'utf8-split-stderr');
+
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n').filter(Boolean);
+    const entries = lines.map((l) => JSON.parse(l));
+
+    // The buffered first write contributes nothing on its own — exactly one
+    // entry, from the second write, carries the fully reconstructed text.
+    expect(entries.length).toBe(1);
+    expect(entries[0].message).toBe('日本語 test message');
+    expect(entries[0].message).not.toContain('�');
+  });
+});

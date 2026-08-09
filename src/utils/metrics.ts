@@ -198,14 +198,6 @@ export function runWithRunRegistry<T>(
   return runRegistryStorage.run(registry, fn);
 }
 
-/**
- * Returns the run-scoped registry if called inside a runWithRunRegistry context,
- * undefined otherwise.
- */
-export function getCurrentRunRegistry(): MetricsRegistry | undefined {
-  return runRegistryStorage.getStore();
-}
-
 // ── Session-level manager ──────────────────────────────────────────────────
 
 const MAX_RUN_HISTORY = 10;

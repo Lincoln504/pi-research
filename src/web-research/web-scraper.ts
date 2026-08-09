@@ -88,8 +88,40 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
   }
 
   const pdfExtractionStart = Date.now();
+
+  // The native module load is caught SEPARATELY from the parse/extraction
+  // logic below: a failure here (missing prebuilt binary for this platform,
+  // corrupted install) is an INFRASTRUCTURE fault — PDF extraction is broken
+  // for every URL, not just this one — not the routine, expected outcome of
+  // a malformed/encrypted/scanned-image-only PDF. Sharing one catch with the
+  // parse logic used to log both at `debug` and lump both under
+  // 'extraction_failed', so a broken install produced an endless stream of
+  // silent per-PDF "failures" instead of ever surfacing the real cause.
+  let WasmPdfDocument: (new (bytes: Uint8Array) => {
+    pageCount(): number;
+    toMarkdownAll(): string;
+    toMarkdown(page: number): string;
+    free(): void;
+  });
   try {
-    const { WasmPdfDocument } = await import('pdf-oxide-wasm');
+    ({ WasmPdfDocument } = await import('pdf-oxide-wasm'));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error(`[Scrapers] pdf-oxide-wasm failed to load — PDF extraction is unavailable (not just for this URL): ${msg}`);
+    metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'native_module_unavailable' });
+    errorTracker.trackError(e instanceof Error ? e : String(e), {
+      component: 'scrapers',
+      operation: 'pdf-extract',
+      contentType: 'pdf',
+      errorType: 'native_module_unavailable',
+    });
+    // Deliberately does NOT start with 'Could not extract content from PDF' —
+    // isBenignScrapeFailure must NOT classify this as the routine per-PDF
+    // outcome it is for the parse-failure branch below.
+    throw new Error(`PDF extraction unavailable (pdf-oxide-wasm failed to load: ${msg})`, { cause: e });
+  }
+
+  try {
     const doc = new WasmPdfDocument(bytes);
     const pageCount = doc.pageCount();
     

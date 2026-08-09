@@ -275,9 +275,14 @@ describe('Chunker', () => {
       // the pre-fix code: `new Chunker({targetSize:5, overlap:4}).chunk(...)` crashed
       // the worker process with an out-of-memory error rather than merely timing out.
       // A brute-force sweep of small targetSize/overlap/emoji-position combinations
-      // guards the whole neighborhood, not just this one triple.
+      // guards the whole neighborhood, not just this one triple. Starts at 2 (the
+      // tightest legal targetSize with overlap>=1): targetSize:2/overlap:1 was its
+      // own separate regression (a lone LOW surrogate opening the next chunk,
+      // 'Chunker({targetSize:2,overlap:1}).chunk("🎉y")') — both of the read-side
+      // guard's escapes (pull back / push forward) were simultaneously blocked at
+      // that exact ratio, a case a sweep starting at 3 never exercised.
       const deadline = Date.now() + 5000;
-      for (let targetSize = 3; targetSize <= 8; targetSize++) {
+      for (let targetSize = 2; targetSize <= 8; targetSize++) {
         for (let overlap = 1; overlap < targetSize; overlap++) {
           for (let prefix = 0; prefix < 15; prefix++) {
             expect(Date.now()).toBeLessThan(deadline);

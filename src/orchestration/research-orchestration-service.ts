@@ -23,7 +23,6 @@ import { clearSessionCircuitBreaker } from '../infrastructure/browser/browser-er
 import { getService, ServiceLifecycle, tryGetService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type {
-  IWriterQueue,
   IKnowledgeStoreService,
   IHealthRegistryService,
   IResearchOrchestration,
@@ -548,8 +547,22 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-      const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE, ctx, container);
-      
+      // Resolve the writer queue directly from the already-fresh ksService rather
+      // than through the WRITER_QUEUE DI registration: that registration caches the
+      // FIRST IWriterQueue object it is ever handed, forever — WriterQueue's own
+      // initialize() is a no-arg lifecycle no-op that never rebuilds its bound
+      // store/chunker, so a later Knowledge Mode/cwd change that disposes and
+      // rebuilds ksService's internal writer queue left every future getService()
+      // call here still returning the stale, disposed one (writes silently dropped
+      // via its "store is closing" guard). ksService.getWriterQueue() always
+      // reflects whatever initialize() just settled on, which the isReady() check
+      // above already confirmed is live.
+      const writer = await ksService.getWriterQueue();
+      if (!writer) {
+        logger.debug('[ResearchOrchestrationService] Writer queue unavailable, skipping link descriptions');
+        return;
+      }
+
       const roundPrefix = `${round}.`;
       let enqueued = 0;
       let researcherCount = 0;

@@ -22,7 +22,7 @@ import { getMaxScrapeBatches, resolveExcludedTools } from '../constants.ts';
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
-import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
+import { ServiceNames, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck, isBusyPoolHealthFailure } from '../healthcheck/index.ts';
@@ -347,7 +347,17 @@ export class QuickResearchOrchestrator {
             if (this.config.KNOWLEDGE_STORE_MODE !== 'none') {
             const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
             if (ksService.isReady()) {
-              const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE, ctx, container);
+              // Resolve directly from ksService rather than the WRITER_QUEUE DI
+              // registration — that registration caches the first IWriterQueue it
+              // is ever handed forever, so it goes stale after a Knowledge
+              // Mode/cwd change disposes and rebuilds ksService's internal writer
+              // queue (see research-orchestration-service.ts's storeLinkDescriptions
+              // for the full explanation). ksService.getWriterQueue() always
+              // reflects what initialize() just settled on.
+              const writer = await ksService.getWriterQueue();
+              if (!writer) {
+                logger.debug('[QuickOrchestrator] Writer queue unavailable, skipping link descriptions');
+              } else {
               const citations = parseCitations(result);
               if (citations.length === 0) {
                 logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
@@ -375,6 +385,7 @@ export class QuickResearchOrchestrator {
               // Drain so concurrent or subsequent sessions see these entries immediately
               // rather than relying solely on shutdownKnowledgeStore's drain.
               if (enqueued > 0) await writer.drain();
+              }
             }
             }
           } catch (err) {

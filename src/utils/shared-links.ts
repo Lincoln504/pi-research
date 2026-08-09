@@ -202,20 +202,6 @@ export function registerResearcherScrapes(researchId: string, researcherId: stri
 }
 
 /**
- * Check if a specific researcher scraped a given URL.
- */
-export function didResearcherScrape(researchId: string, researcherId: string, url: string): boolean {
-    return researcherScrapes.get(researchId)?.get(researcherId)?.has(normalizeUrl(url)) ?? false;
-}
-
-/**
- * Get all URLs scraped by a specific researcher.
- */
-export function getResearcherScrapes(researchId: string, researcherId: string): string[] {
-    return Array.from(researcherScrapes.get(researchId)?.get(researcherId) ?? []);
-}
-
-/**
  * Build the Session URL Pool footer for scrape responses.
  * Shows URLs previously scraped in the session, filtered to exclude the current batch.
  * Capped at MAX_FOOTER_URLS (20).

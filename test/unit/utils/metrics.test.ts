@@ -12,9 +12,8 @@
  *  8. clearSession() resets session registry, run history, and session start time
  *  9. clear() is a backwards-compatible alias for clearSession()
  * 10. getSnapshot() returns the session snapshot (backwards compat)
- * 11. getCurrentRunRegistry() is undefined outside a run, the registry inside
- * 12. Infrastructure events before any run appear only in the session snapshot
- * 13. In-run infrastructure events appear only in the run registry
+ * 11. Infrastructure events before any run appear only in the session snapshot
+ * 12. In-run infrastructure events appear only in the run registry
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -22,7 +21,6 @@ import {
   MetricsRegistry,
   metrics,
   runWithRunRegistry,
-  getCurrentRunRegistry,
   type RunSummary,
   type IMetricsSnapshot,
 } from '../../../src/utils/metrics.ts';
@@ -169,18 +167,6 @@ describe('metrics singleton — routing', () => {
     expect(runReg.getSnapshot().counters['search_total']).toBe(4);
     expect(runReg.getSnapshot().histograms['latency_ms']!.avg).toBe(100);
     expect(isEmptySnapshot(metrics.getSessionSnapshot())).toBe(true);
-  });
-
-  it('getCurrentRunRegistry() is undefined outside a run', () => {
-    expect(getCurrentRunRegistry()).toBeUndefined();
-  });
-
-  it('getCurrentRunRegistry() returns the active registry inside a run', async () => {
-    const runReg = new MetricsRegistry();
-    await runWithRunRegistry(runReg, async () => {
-      expect(getCurrentRunRegistry()).toBe(runReg);
-    });
-    expect(getCurrentRunRegistry()).toBeUndefined();
   });
 
   it('measure() inside run context writes to the run registry', async () => {

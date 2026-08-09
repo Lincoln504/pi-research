@@ -311,6 +311,17 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
       } catch {
         // init failed; its own catch already reset state — nothing to wait on.
       }
+      // Re-check: a SECOND concurrent dispose() call can reach this same point
+      // (its own _disposalPromise check above also saw null, before either of
+      // us had published one) and, if it settles the await first, publish its
+      // own disposal while we were still awaiting. Without this, both calls
+      // would go on to capture the SAME embedder/store/writerQueue/initLock
+      // references below and each independently call .dispose()/.close() on
+      // them — the same double-teardown-of-one-instance class of bug fixed at
+      // the ServiceContainer level (disposeAll() vs clear()/replace()).
+      if (this._disposalPromise) {
+        return this._disposalPromise;
+      }
     }
 
     this.lifecycle = ServiceLifecycle.DISPOSING;
@@ -330,7 +341,10 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     const writerQueue = this._writerQueue;
     const initLock = this._initLock;
 
-    this._disposalPromise = (async () => {
+    // Named locally (mirrors initialize()'s initPromise) so the finally below
+    // can identity-check before clearing — see there for why.
+    let disposePromise: Promise<void> | null = null;
+    disposePromise = (async () => {
       try {
         if (writerQueue) {
           await writerQueue.dispose?.();
@@ -370,9 +384,20 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         logger.error('[KnowledgeStoreService] Error during disposal:', err);
       } finally {
         this.lifecycle = ServiceLifecycle.DISPOSED;
-        this._disposalPromise = null;
+        // Identity-guarded, mirroring initialize()'s own marker clear (see its
+        // finally): only the disposal that still owns _disposalPromise may
+        // null it. The re-check above closes the common race, but this is the
+        // same defense-in-depth initialize() uses — without it, a stale
+        // closure's completion could null a NEWER disposal's still-in-flight
+        // marker, making a concurrent initialize() believe nothing is
+        // disposing and rebuild components while that newer disposal is still
+        // tearing them down.
+        if (this._disposalPromise === disposePromise) {
+          this._disposalPromise = null;
+        }
       }
     })();
+    this._disposalPromise = disposePromise;
 
     return this._disposalPromise;
   }

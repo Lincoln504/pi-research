@@ -339,4 +339,50 @@ describe('KnowledgeStoreService', () => {
     expect(await service.getStore()).toBe(secondStore);
     expect(await service.getEmbedder()).toBe(secondEmbedder);
   });
+
+  // Regression: two concurrent dispose() calls arriving while an initialize()
+  // is still in flight both pass dispose()'s early checks (lifecycle not yet
+  // DISPOSED/UNINITIALIZED; _disposalPromise still null) and both then await
+  // the SAME _initializationPromise. Without a re-check after that await,
+  // both go on to capture the identical embedder/store/writerQueue snapshot
+  // and each build their OWN teardown closure — double-invoking
+  // dispose()/close() on the very same instances, the same double-teardown
+  // class of bug fixed at the ServiceContainer level for disposeAll() vs
+  // clear()/replace().
+  it('two concurrent dispose() calls racing an in-flight initialize() tear down each component exactly once', async () => {
+    let resolveComponents!: (v: any) => void;
+    const componentsGate = new Promise((resolve) => { resolveComponents = resolve; });
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockReturnValueOnce(componentsGate as any);
+
+    const embedder = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu',
+    };
+    const store = { close: vi.fn().mockResolvedValue(undefined) };
+    const writerQueue = { dispose: vi.fn().mockResolvedValue(undefined) };
+
+    // initialize() starts and blocks inside initLock.withLock() on the gated
+    // createKnowledgeStoreComponents call — _initializationPromise is now set
+    // and unresolved.
+    const initPromise = service.initialize();
+
+    // Two concurrent dispose() calls, both arriving while that init is still
+    // in flight.
+    const disposeA = service.dispose();
+    const disposeB = service.dispose();
+
+    // Release the gate: initialize() completes and publishes the components,
+    // which settles the shared _initializationPromise both dispose() calls
+    // were awaiting.
+    resolveComponents({ embedder, store, writerQueue });
+
+    await initPromise;
+    await disposeA;
+    await disposeB;
+
+    expect(writerQueue.dispose).toHaveBeenCalledTimes(1);
+    expect(store.close).toHaveBeenCalledTimes(1);
+    expect(embedder.dispose).toHaveBeenCalledTimes(1);
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISPOSED);
+  });
 });

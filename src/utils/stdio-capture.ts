@@ -217,7 +217,21 @@ export async function captureStdio<T>(
     isAnyLoggerCapturingOutput = true;
   }
 
-  const decoder = new TextDecoder();
+  // Separate decoder PER logical byte stream, each used with {stream: true}.
+  // A single native write/writeSync call can split a multi-byte UTF-8
+  // character across two calls — {stream: true} is what lets a TextDecoder
+  // carry an incomplete trailing sequence over to the next decode() and
+  // reconstruct it, rather than replacing each half with U+FFFD independently
+  // (decode() with no options treats every call as a complete, final input).
+  // A SHARED decoder across genuinely independent streams would be its own
+  // bug even with {stream: true}: stdout, stderr, and raw FD1/FD2 writes can
+  // interleave, and a decoder's carried-over partial bytes are only valid
+  // when the next call continues the SAME byte stream — mixing streams would
+  // try to complete one stream's dangling sequence with another's bytes.
+  const stderrDecoder = new TextDecoder();
+  const stdoutDecoder = new TextDecoder();
+  const fd1SyncDecoder = new TextDecoder();
+  const fd2SyncDecoder = new TextDecoder();
 
   // Save originals
   const originalStderrWrite = process.stderr.write;
@@ -269,7 +283,18 @@ export async function captureStdio<T>(
   // Patch stderr.write
   (process.stderr.write as any) = (chunk: string | Uint8Array, encodingOrCb?: any, callback?: any) => {
     const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
-    const message = typeof chunk === 'string' ? chunk : decoder.decode(chunk);
+    const message = typeof chunk === 'string' ? chunk : stderrDecoder.decode(chunk, { stream: true });
+
+    // A chunk that lands entirely inside a multi-byte character's bytes
+    // decodes to '' with {stream: true} — the bytes are buffered inside
+    // stderrDecoder and will surface once the completing chunk arrives. This
+    // patch (unlike stdout's) always diverts rather than passing through, so
+    // without this guard it would write an empty log entry every time a
+    // native write happens to split mid-character.
+    if (message.length === 0) {
+      if (typeof cb === 'function') cb();
+      return true;
+    }
 
     // Check disk space before writing
     if (!hasSufficientDiskSpace()) {
@@ -294,7 +319,7 @@ export async function captureStdio<T>(
 
   // Patch stdout.write
   (process.stdout.write as any) = (chunk: string | Uint8Array, encodingOrCb?: any, callback?: any) => {
-    const message = typeof chunk === 'string' ? chunk : decoder.decode(chunk);
+    const message = typeof chunk === 'string' ? chunk : stdoutDecoder.decode(chunk, { stream: true });
     
     // Native log patterns or plain text that we want to divert from TUI
     const isNative = isNativeLog(message);
@@ -359,15 +384,27 @@ export async function captureStdio<T>(
     if (!descriptor || (descriptor.writable || descriptor.set)) {
       fs.writeSync = (fd: number, chunk: any, ...args: any[]) => {
         if (fd === 1 || fd === 2) {
-          const message = typeof chunk === 'string' ? chunk : decoder.decode(chunk);
-          
+          const fdDecoder = fd === 1 ? fd1SyncDecoder : fd2SyncDecoder;
+          const message = typeof chunk === 'string' ? chunk : fdDecoder.decode(chunk, { stream: true });
+
+          // FD 2 diverts unconditionally below (fd === 2 short-circuits
+          // shouldDivert), so unlike FD 1 — whose divert conditions already
+          // require non-empty content and naturally fall through to a
+          // passthrough write otherwise — an empty message here (a chunk that
+          // landed entirely inside a multi-byte character, buffered inside
+          // fdDecoder for the completing chunk) must be skipped explicitly to
+          // avoid writing an empty log entry on every mid-character split.
+          if (fd === 2 && message.length === 0) {
+            return (typeof chunk === 'string' ? Buffer.from(chunk).length : (chunk as any).length);
+          }
+
           const isNative = isNativeLog(message);
           const boxDrawing = isBoxDrawing(message);
           const complexTui = isComplexTui(message);
           const hasAnsi = message.includes('\x1b[');
 
-          const shouldDivert = fd === 2 || 
-            (isNative && !boxDrawing && !complexTui) || 
+          const shouldDivert = fd === 2 ||
+            (isNative && !boxDrawing && !complexTui) ||
             (!hasAnsi && !boxDrawing && message.trim().length > 0);
 
           if (shouldDivert) {

@@ -209,12 +209,25 @@ export class Chunker {
       // pair's high half is guaranteed already present in the chunk just
       // pushed, so skipping the low half here loses nothing, it just narrows
       // this chunk's overlap by one code unit instead of widening it.
+      //
+      // The push-forward bound is `<= end`, not `< end`: landing exactly on
+      // `end` (start === end, zero overlap for this transition) is a
+      // perfectly safe position — `end` is always a valid index up to
+      // text.length, and the NEXT chunk's own bounds are recomputed fresh
+      // from `start` at the top of the loop, independent of this `end`. A
+      // strict `<` excluded that boundary case, so at tight targetSize/
+      // overlap ratios (e.g. targetSize:2, overlap:1, straddling a surrogate
+      // pair) BOTH escapes could be simultaneously blocked — the pull-back
+      // correctly refused (it would violate forward-progress) and the
+      // push-forward wrongly refused too (start+1 landed exactly on `end`) —
+      // leaving `start` unmoved on the lone low surrogate, corrupting the
+      // next chunk's opening character.
       if (start > 0) {
         const code = text.charCodeAt(start);
         if (code >= 0xdc00 && code <= 0xdfff) {
           if (start - 1 > iterationStart) {
             start -= 1;
-          } else if (start + 1 < end) {
+          } else if (start + 1 <= end) {
             start += 1;
           }
         }

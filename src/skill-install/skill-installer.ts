@@ -374,15 +374,50 @@ export function installSkill(toolIds: string[], opts: InstallOptions = {}): Inst
               continue;
             }
             fs.unlinkSync(absSkillPath);
-            fs.symlinkSync(source, absSkillPath, process.platform === 'win32' ? 'junction' : 'dir');
-            upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'symlink', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
-            results.push({ tool: id, path: absSkillPath, type: 'symlink', status: 'installed', message: 're-pointed stale symlink to current source' });
+            try {
+              fs.symlinkSync(source, absSkillPath, process.platform === 'win32' ? 'junction' : 'dir');
+              upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'symlink', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
+              results.push({ tool: id, path: absSkillPath, type: 'symlink', status: 'installed', message: 're-pointed stale symlink to current source' });
+            } catch (relinkErr: any) {
+              // The old link is already gone at this point (unlinkSync above
+              // succeeded) — letting this escape to the outer catch below
+              // silently fell through to reporting 'already-installed' for a
+              // path that no longer existed on disk at all. Windows junctions
+              // cannot cross volumes, so a package relocated to a different
+              // drive by an update hits exactly this. Mirror the fresh-install
+              // path's fallback: try a copy rather than leaving the skill
+              // MISSING while claiming success.
+              try {
+                copyDir(source, absSkillPath);
+                upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'copy', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
+                results.push({ tool: id, path: absSkillPath, type: 'copy', status: 'installed', message: `symlink re-point unavailable (${relinkErr?.code ?? relinkErr?.message}); copied instead` });
+              } catch (copyErr: any) {
+                results.push({ tool: id, path: absSkillPath, type: 'symlink', status: 'error', message: `symlink re-point failed (${relinkErr?.code ?? relinkErr?.message}) and the copy fallback also failed: ${copyErr?.message ?? String(copyErr)}` });
+              }
+            }
             continue;
           }
         }
-      } catch { /* fall through to already-installed below */ }
+      } catch { /* fall through to already-installed below — lstat/readlink failed (e.g. a TOCTOU race) */ }
       results.push({ tool: id, path: absSkillPath, type, status: 'already-installed' });
-      upsertEntry(manifest, { tool: id, path: absSkillPath, type: isSymlinkPresent(absSkillPath) ? 'symlink' : 'copy', source, createdAt: now, ...(skillVersion ? { version: skillVersion } : {}) });
+      {
+        const isSymlinkNow = isSymlinkPresent(absSkillPath);
+        // A symlink always reflects the live package, so re-stamping the
+        // current version here is accurate. An owned COPY's on-disk content
+        // is NOT touched by this branch — stamping it with the current
+        // version anyway would falsely mark it "up to date," permanently
+        // defeating reconcileSkillInstalls's staleness refresh (which
+        // compares e.version against the current version) on every future
+        // run, since this branch runs on every ordinary re-install/re-check.
+        // Preserve whatever version (if any) was already recorded instead,
+        // so an actually-stale copy still reads as stale until it is really
+        // refreshed.
+        const existingEntry = manifest.entries.find(e => e.path === absSkillPath);
+        const versionField = isSymlinkNow
+          ? (skillVersion ? { version: skillVersion } : {})
+          : (existingEntry?.version ? { version: existingEntry.version } : {});
+        upsertEntry(manifest, { tool: id, path: absSkillPath, type: isSymlinkNow ? 'symlink' : 'copy', source, createdAt: now, ...versionField });
+      }
       continue;
     }
     if (fs.existsSync(absSkillPath) || isSymlinkPresent(absSkillPath)) {

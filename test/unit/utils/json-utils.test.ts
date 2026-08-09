@@ -12,7 +12,6 @@ import {
   extractJsonObject,
   extractJsonArray,
   extractJson,
-  normalizeStringArrayDetailed,
 } from '../../../src/utils/json-utils';
 
 // ---------------------------------------------------------------------------
@@ -329,50 +328,5 @@ describe('extractJson', () => {
     const result = extractJson<typeof plan>(text, 'object');
     expect(result.success).toBe(true);
     expect(result.value?.researchers[0]?.queries).toEqual(['query 1', 'query 2']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// normalizeStringArrayDetailed
-// ---------------------------------------------------------------------------
-
-describe('normalizeStringArrayDetailed', () => {
-  it('trims whitespace from strings', () => {
-    const result = normalizeStringArrayDetailed(['  hello  ', '\tworld\n']);
-    expect(result.strings).toEqual(['hello', 'world']);
-  });
-
-  it('skips empty strings and reports them', () => {
-    const result = normalizeStringArrayDetailed(['good', '', '  ']);
-    expect(result.strings).toEqual(['good']);
-    expect(result.skippedCount).toBe(2);
-  });
-
-  it('extracts the query field from object items', () => {
-    const result = normalizeStringArrayDetailed([{ query: 'find CVEs' }, 'plain']);
-    expect(result.strings).toEqual(['find CVEs', 'plain']);
-    expect(result.extractedCount).toBe(1);
-  });
-
-  it('extracts topic, text, task fields as fallbacks', () => {
-    const items = [
-      { topic: 'security' },
-      { text: 'analyze' },
-      { task: 'search' },
-    ];
-    const result = normalizeStringArrayDetailed(items);
-    expect(result.strings).toEqual(['security', 'analyze', 'search']);
-  });
-
-  it('stringifies objects with no recognized key and warns', () => {
-    const result = normalizeStringArrayDetailed([{ unknown: 'field' }]);
-    expect(result.strings).toHaveLength(1);
-    expect(result.strings[0]!).toContain('unknown');
-    expect(result.warnings.some(w => w.includes('stringified'))).toBe(true);
-  });
-
-  it('converts numbers and booleans to strings', () => {
-    const result = normalizeStringArrayDetailed([42, true, false]);
-    expect(result.strings).toEqual(['42', 'true', 'false']);
   });
 });

@@ -233,17 +233,19 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
   registry.register('StateManager', async () => {
     try {
       const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, { container }, container);
-      const stats = await stateManager.getMetrics();
       const gpuOwner = await stateManager.getGpuOwner();
-      
-      return { 
-          healthy: true, 
-          diagnostic: { 
+
+      // No `sessions` field here: the session-tracking API (addSession/
+      // removeSession/updateHeartbeat) that would ever populate state.sessions
+      // has no production caller anywhere in the codebase — stats.activeSessions
+      // was always 0, permanently, presenting fake data as a live diagnostic.
+      return {
+          healthy: true,
+          diagnostic: {
               status: 'operational',
-              sessions: stats.activeSessions,
               gpuLocked: !!gpuOwner,
               gpuOwner: gpuOwner?.sessionId || 'none'
-          } 
+          }
       };
     } catch (e) {
       return { healthy: false, error: `State manager healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };

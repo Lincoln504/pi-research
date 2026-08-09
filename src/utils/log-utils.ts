@@ -91,9 +91,14 @@ const URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi
 // later one exposed. A cookie string is a ;-and-space separated list of secrets,
 // not a single token — mask the ENTIRE header value to end-of-line.
 const COOKIE_HEADER_PATTERN = /\b(set[_-]?cookie|cookie)\b(["']?\s*[:=]\s*["']?)([^\r\n]+)/gi;
-// key=value / key: "value" pairs whose key names a secret.
+// key=value / key: "value" pairs whose key names a secret. Includes bare
+// `key` (not just `api_key`/`private_key`): several provider query-param
+// APIs (e.g. StackExchange's `?key=<apikey>`) name the credential parameter
+// with no qualifying prefix. Over-redacting an unrelated "key" field (a
+// sort key, a map key) is the accepted trade-off — same one already made for
+// the equally generic bare `session`/`cookie` entries below.
 const SENSITIVE_KV_PATTERN =
-  /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+  /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key|key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
 // Well-known opaque credential formats (OpenAI, GitHub, AWS, Slack, Anthropic).
 const KNOWN_TOKEN_PATTERN =
   /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
@@ -129,21 +134,13 @@ const CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
  * neither sink receives clear-text secrets or unbounded network data.
  */
 export function redactSecrets(message: string): string {
-  // slice() counts UTF-16 code units, so a naive cut at MAX_LOG_MESSAGE_LENGTH
-  // can land between the two halves of a surrogate pair (non-BMP characters —
-  // routine in scraped CJK/emoji content). The console sink then writes a
-  // lone surrogate, silently mangled to U+FFFD on UTF-8 encode; the JSON-file
-  // sink emits an unpaired \uXXXX escape that many strict JSON consumers
-  // reject outright. Same back-off truncateWithMarker (text-utils.ts) already
-  // applies for the same reason.
-  let keep = MAX_LOG_MESSAGE_LENGTH;
-  if (message.length > keep) {
-    const lastKeptUnit = message.charCodeAt(keep - 1);
-    if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
-  }
-  let out = message.length > MAX_LOG_MESSAGE_LENGTH
-    ? `${message.slice(0, keep)}…[truncated ${message.length - keep} chars]`
-    : message;
+  // Redact BEFORE truncating. Every pattern below needs to see a secret in
+  // full to match it (e.g. LONG_HEX_SECRET_PATTERN requires 32+ contiguous
+  // hex chars) — truncating first can cut a secret mid-token, leaving
+  // whatever fragment survives the cut (e.g. the first 20 chars of a 64-hex
+  // browser auth secret) too short for any pattern to recognize, so it was
+  // written out in the clear right before the "…[truncated N chars]" marker.
+  let out = message;
   out = out.replace(ANSI_PATTERN, '');
   out = out.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]@');
   // Redact whole-token formats BEFORE the key/value pass: the KV value class
@@ -161,6 +158,22 @@ export function redactSecrets(message: string): string {
   out = out.replace(KNOWN_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(PROVIDER_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(LONG_HEX_SECRET_PATTERN, '[REDACTED]');
+
+  // slice() counts UTF-16 code units, so a naive cut at MAX_LOG_MESSAGE_LENGTH
+  // can land between the two halves of a surrogate pair (non-BMP characters —
+  // routine in scraped CJK/emoji content). The console sink then writes a
+  // lone surrogate, silently mangled to U+FFFD on UTF-8 encode; the JSON-file
+  // sink emits an unpaired \uXXXX escape that many strict JSON consumers
+  // reject outright. Same back-off truncateWithMarker (text-utils.ts) already
+  // applies for the same reason.
+  let keep = MAX_LOG_MESSAGE_LENGTH;
+  if (out.length > keep) {
+    const lastKeptUnit = out.charCodeAt(keep - 1);
+    if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
+  }
+  if (out.length > MAX_LOG_MESSAGE_LENGTH) {
+    out = `${out.slice(0, keep)}…[truncated ${out.length - keep} chars]`;
+  }
   return out;
 }
 
@@ -189,23 +202,9 @@ const TERMINAL_ESCAPE_PATTERN = new RegExp(
  * otherwise reach the user's terminal verbatim under PI_RESEARCH_CONSOLE_LOG.
  * The console sink keeps its own explicit CR/LF→"" replace (the form CodeQL
  * recognizes as the log-injection sanitizer); this handles everything else,
- * spacing out any leftover C0/DEL byte (BEL, backspace, …) like
- * neutralizeControlChars does.
+ * spacing out any leftover C0/DEL byte (BEL, backspace, …) via
+ * CONTROL_CHARS_PATTERN.
  */
 export function stripTerminalEscapes(message: string): string {
   return message.replace(TERMINAL_ESCAPE_PATTERN, '').replace(CONTROL_CHARS_PATTERN, ' ');
-}
-
-/**
- * Neutralize control characters (newlines, carriage returns, etc.) so that
- * untrusted content cannot forge or corrupt a raw console log line
- * (log-injection defense). Use for sinks that are NOT already structurally
- * escaped — the JSON log file escapes control chars on its own.
- */
-export function neutralizeControlChars(message: string): string {
-  // Strip CR/LF explicitly first. These are the actual log-injection vector
-  // (forged/corrupted log lines) and an explicit line-break replacement is the
-  // form static analysis recognizes as a log-injection sanitizer. The second
-  // pass removes any remaining C0 control chars + DEL.
-  return message.replace(/\r\n|\r|\n/g, ' ').replace(CONTROL_CHARS_PATTERN, ' ');
 }

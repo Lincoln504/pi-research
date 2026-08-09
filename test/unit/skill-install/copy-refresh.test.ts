@@ -161,6 +161,38 @@ describe('reconcileSkillInstalls — copy freshness', () => {
     expect(installedSkillMd()).toContain('NEW');
   });
 
+  it('an ordinary re-install re-run does NOT launder the manifest version for an unrefreshed copy', () => {
+    // installSkill's "already-installed" branch takes no action for an
+    // existing owned COPY (no re-copy happens) — but it used to still stamp
+    // the manifest entry's `version` to the CURRENT package version anyway.
+    // reconcileSkillInstalls' staleness check compares e.version against the
+    // current version, so that false stamp permanently defeated it: the
+    // entry looked "current" forever even though the on-disk copy was never
+    // actually refreshed.
+    writeSource(sourceDir, '1.0.0', 'OLD-CONTRACT');
+    installSkill(['claude'], { home, skillSourceDir: sourceDir, copy: true });
+
+    // Engine upgraded underneath the copy, and something calls installSkill
+    // again ordinarily (e.g. a re-run of `pi skill install`) — NOT a fresh
+    // install, since the copy is already present.
+    writeSource(sourceDir, '1.1.0', 'NEW-CONTRACT');
+    const reinstall = installSkill(['claude'], { home, skillSourceDir: sourceDir, copy: true });
+    expect(reinstall[0]!.status).toBe('already-installed');
+
+    // The on-disk copy must be untouched (this branch takes no copy action)...
+    expect(installedSkillMd()).toContain('OLD-CONTRACT');
+    // ...and the manifest must NOT have been laundered to claim it's current.
+    const manifestPath = path.join(home, '.pi', 'research', 'installed-skills.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const entry = manifest.entries.find((e: any) => e.path.includes('pi-research'));
+    expect(entry.version).not.toBe('1.1.0');
+
+    // The staleness check must still correctly fire and actually refresh it.
+    const result = reconcileSkillInstalls({ home, skillSourceDir: sourceDir });
+    expect(result.refreshed).toHaveLength(1);
+    expect(installedSkillMd()).toContain('NEW-CONTRACT');
+  });
+
   it('honours dryRun for the stale-symlink re-point (plan only, touch nothing)', () => {
     writeSource(sourceDir, '1.0.0');
     installSkill(['claude'], { home, skillSourceDir: sourceDir }); // symlink mode

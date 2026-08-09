@@ -22,6 +22,8 @@ import {
 import {
   formatUsersCompact,
   formatSitesCompact,
+  formatQuestionsCompact,
+  formatAnswersCompact,
 } from './output/compact.ts';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
@@ -415,6 +417,19 @@ function formatCompact(result: unknown): string {
       if ('question_id' in first) {
         return formatCompactQuestions(result as Question[]);
       }
+    }
+  } else if (typeof result === 'object' && result !== null) {
+    if ('question' in result && 'answers' in result) {
+      // command=get's single-question-with-answers shape — mirrors
+      // formatTable's equivalent branch. Without this, format=compact fell
+      // through to the raw JSON.stringify fallback below for this command,
+      // producing an uncurated dump instead of a compact rendering.
+      const r = result as { question: Question; answers: Answer[] };
+      let output = formatQuestionsCompact([r.question]);
+      if (r.answers.length > 0) {
+        output += `\n${formatAnswersCompact(r.answers)}`;
+      }
+      return output;
     }
   }
   return JSON.stringify(result);

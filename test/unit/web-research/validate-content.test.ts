@@ -43,6 +43,25 @@ describe('isBenignScrapeFailure — expected per-URL scrape outcomes', () => {
     expect(isBenignScrapeFailure(new Error('HTTPClient exploded'))).toBe(false);
   });
 
+  it('treats a PDF that exceeds the 100MB size cap as benign, same as a malformed one', () => {
+    // extractPdfToMarkdown's own size guard and the fetch layer's streamed-cap
+    // guard both throw messages starting with 'PDF too large' — this was
+    // missing from the benign set, so a PDF that was simply too large (a
+    // routine, non-actionable outcome, same category as a malformed/
+    // encrypted PDF) got logged as a genuine ERROR and inflated the
+    // diagnostic error-tracker count.
+    expect(isBenignScrapeFailure(new Error('PDF too large (150MB, max 100MB)'))).toBe(true);
+    expect(isBenignScrapeFailure(new Error('PDF too large (streamed 120MB, max 100MB)'))).toBe(true);
+  });
+
+  it('does NOT treat a pdf-oxide-wasm native-module load failure as benign', () => {
+    // Unlike a per-PDF parse failure, a failed native-module load means PDF
+    // extraction is broken for every URL, not just this one — an
+    // infrastructure fault that must still surface at ERROR, not be silently
+    // swept into the same "routine per-PDF outcome" bucket.
+    expect(isBenignScrapeFailure(new Error('PDF extraction unavailable (pdf-oxide-wasm failed to load: Cannot find module)'))).toBe(false);
+  });
+
   it('handles non-Error inputs without throwing', () => {
     expect(isBenignScrapeFailure('Fetch blocked: Cloudflare challenge')).toBe(true);
     expect(isBenignScrapeFailure(undefined)).toBe(false);

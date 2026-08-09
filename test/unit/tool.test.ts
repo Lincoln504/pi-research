@@ -154,8 +154,6 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
   deduplicateUrls: vi.fn(),
   normalizeUrl: vi.fn((u) => u),
   registerResearcherScrapes: vi.fn(),
-  didResearcherScrape: vi.fn(),
-  getResearcherScrapes: vi.fn(() => []),
   buildSessionPoolFooter: vi.fn(() => ''),
 }));
 

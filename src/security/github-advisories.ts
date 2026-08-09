@@ -102,11 +102,20 @@ export async function searchGitHubAdvisories(
 
       const [owner, name] = repoParts;
       // Constrain to GitHub's allowed owner/repo character set before interpolating
-      // into the API path. encodeURIComponent already neutralises traversal, but this
-      // rejects malformed input early instead of issuing a doomed request.
-      const repoNameRe = /^[A-Za-z0-9._-]+$/;
+      // into the API path. encodeURIComponent does NOT neutralise traversal here:
+      // '.' and '-' are unreserved characters it passes through unescaped, so an
+      // owner/name segment of exactly '.' or '..' survives encodeURIComponent
+      // intact and is then collapsed by URL/fetch's own path normalization BEFORE
+      // the request is sent — e.g. owner=".." turns "/repos/../rate_limit/..."
+      // into a request for "/rate_limit/...", escaping the intended
+      // /repos/{owner}/{name}/ scope entirely (verified against the real URL
+      // parser). The negative lookahead rejects a segment that is ENTIRELY dots
+      // (the only shape path normalization treats as a traversal token) while
+      // still allowing legitimate names that merely contain dots (node.js,
+      // socket.io).
+      const repoNameRe = /^(?!\.+$)[A-Za-z0-9._-]+$/;
       if (!repoNameRe.test(owner!) || !repoNameRe.test(name!)) {
-        throw new Error(`Invalid repo format: "${options.repo}". Owner and name may only contain letters, digits, '.', '_' and '-'.`);
+        throw new Error(`Invalid repo format: "${options.repo}". Owner and name may only contain letters, digits, '.', '_' and '-', and cannot be all dots.`);
       }
       const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(name!)}/security-advisories?per_page=${perPage}`;
 

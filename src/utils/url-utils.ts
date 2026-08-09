@@ -6,6 +6,7 @@
  */
 
 import { logger } from '../logger.ts';
+import { redactSecrets } from './log-utils.ts';
 
 /**
  * Strips trailing punctuation an LLM commonly appends to a URL in prose
@@ -130,7 +131,12 @@ export function normalizeUrl(url: string): string {
     // Fallback for invalid URLs: aggressive best-effort normalization.
     // LLM hallucinations often produce broken URLs — log a warning so we can
     // trace them, then do our best to clean them for dedup purposes.
-    logger.debug(`[url-utils] normalizing unparseable URL (${url.slice(0, 200)}): ${_err instanceof Error ? _err.message : String(_err)}`);
+    // Redact BEFORE truncating: `url` can still carry userinfo credentials
+    // (https://user:pass@host/...) even when unparseable, and cutting at 200
+    // chars first can slice a credential mid-token before redactSecrets'
+    // patterns ever see the whole thing — same class of bug as the truncate-
+    // before-redact fix in log-utils.ts's redactSecrets itself.
+    logger.debug(`[url-utils] normalizing unparseable URL (${redactSecrets(url).slice(0, 200)}): ${_err instanceof Error ? _err.message : String(_err)}`);
     
     let cleaned = url.trim()
       // Strip leading/trailing markdown and punctuation often added by LLMs.

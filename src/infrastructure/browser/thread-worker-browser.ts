@@ -30,6 +30,12 @@ let activeTaskCount = 0;
 // A reset that resetBrowser() deferred because sibling tasks were still
 // active, to be applied once the last one finishes.
 let resetPending = false;
+// The browser instance resetPending was requested against, captured at defer
+// time. An intervening resetBrowser() call from a SIBLING task can take the
+// immediate path (doResetBrowser() + a fresh initBrowser() relaunch) while
+// this flag is still pending — see taskFinished() below for why the flag
+// alone isn't enough to know whether it's still safe to apply.
+let resetPendingForBrowser: any = null;
 
 /**
  * Set the worker ID for logging purposes
@@ -48,7 +54,19 @@ export function taskFinished(): void {
   activeTaskCount = Math.max(0, activeTaskCount - 1);
   if (activeTaskCount === 0 && resetPending) {
     resetPending = false;
-    doResetBrowser();
+    const capturedBrowser = resetPendingForBrowser;
+    resetPendingForBrowser = null;
+    // A sibling task's OWN crash can call resetBrowser() while this flag is
+    // still pending; if that call sees activeTaskCount <= 1 it takes the
+    // IMMEDIATE path (doResetBrowser() below), which tears the browser down
+    // and lets the next task's initBrowser() relaunch a brand-new, unrelated
+    // instance — all without ever touching this flag. Applying a stale
+    // deferred reset unconditionally would then tear down that later,
+    // healthy instance instead of being the no-op it should be. Only apply
+    // it if the browser is still the exact instance it was requested against.
+    if (browser === capturedBrowser) {
+      doResetBrowser();
+    }
   }
 }
 
@@ -301,6 +319,7 @@ function doResetBrowser(): void {
 export function resetBrowser(): void {
   if (activeTaskCount > 1) {
     resetPending = true;
+    resetPendingForBrowser = browser;
     return;
   }
   doResetBrowser();

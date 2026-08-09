@@ -9,6 +9,7 @@ import type { Config } from '../../config.ts';
 import type { SearchResult } from '../../web-research/types.ts';
 import type { BrowserTask } from '../../types/index.ts';
 import { logger } from '../../logger.ts';
+import { redactSecrets } from '../../utils/log-utils.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
 import { getBrowserCircuitBreaker, browserCircuitBreaker, isTransientSocketError, isPoolShutdownError, isTaskTimeoutError, isCloudflareBlockError } from './browser-error-utils.ts';
 import { getScheduler as _getScheduler, forceSchedulerRestart as _forceSchedulerRestart } from './scheduler-factory.ts';
@@ -41,6 +42,21 @@ const RESTART_COOLDOWN_MS = 10000;
 const LEADER_HANDOVER_RETRIES = 3;
 /** Backoff between handover attempts — long enough for an election to complete. */
 const HANDOVER_BACKOFF_MS = 1200;
+
+/**
+ * A short, log-line-sized summary of an error — redacted BEFORE truncating.
+ * A raw error.message can echo the failing URL verbatim (Playwright/undici
+ * navigation errors routinely do), and a URL can carry userinfo credentials
+ * (https://user:pass@host/...). Truncating first — the old `.substring(0,
+ * 100)` at each call site below — can cut a credential mid-token, leaving a
+ * short unredacted fragment in the log: redactSecrets' patterns need to see
+ * the whole token to recognize it. Same class of bug as the truncate-before-
+ * redact fix in log-utils.ts itself; redact the full message first here too.
+ */
+export function briefErrorMessage(error: unknown): string {
+    const msg = error instanceof Error ? error.message : String(error);
+    return redactSecrets(msg).substring(0, 100);
+}
 
 /**
  * Recover from a leader handover before retrying.
@@ -225,7 +241,7 @@ export async function runBrowserTask<T>(
                 taskType: type,
                 errorType: 'leader_handover',
             });
-            logger.warn(`[BrowserManager] Leader handover during ${type} task (handover attempts left: ${handoverRetries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Leader handover during ${type} task (handover attempts left: ${handoverRetries}): ${briefErrorMessage(error)}...`);
             await recoverFromLeaderHandover(container);
             await new Promise((resolve) => setTimeout(resolve, HANDOVER_BACKOFF_MS + Math.floor(Math.random() * 400)));
             return runBrowserTask<T>(taskOrUrl, type, config, signal, retries, container, handoverRetries - 1);
@@ -238,7 +254,7 @@ export async function runBrowserTask<T>(
                 taskType: type,
                 errorType: 'transient_socket_error',
             });
-            logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${briefErrorMessage(error)}...`);
 
             if (isPoolShutdownError(error)) {
                 // Handover budget already spent — fall back to a plain drain wait.
@@ -280,7 +296,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
                 operation: 'healthcheck',
                 errorType: 'transient_socket_error',
             });
-            logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${briefErrorMessage(error)}...`);
 
             if (isPoolShutdownError(error)) {
                 // Same stale-handle trap as the task paths: waiting alone leaves the
@@ -329,7 +345,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 query,
                 errorType: 'leader_handover',
             });
-            logger.warn(`[BrowserManager] Leader handover during search (handover attempts left: ${handoverRetries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Leader handover during search (handover attempts left: ${handoverRetries}): ${briefErrorMessage(error)}...`);
             await recoverFromLeaderHandover(container);
             await new Promise((resolve) => setTimeout(resolve, HANDOVER_BACKOFF_MS + Math.floor(Math.random() * 400)));
             return runWorkerSearch(query, config, signal, retries, sessionId, container, handoverRetries - 1);
@@ -342,7 +358,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 query,
                 errorType: 'transient_socket_error',
             });
-            logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${briefErrorMessage(error)}...`);
 
             if (isPoolShutdownError(error)) {
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));

@@ -102,6 +102,38 @@ describe('GitHub Advisories Client', () => {
       expect(result.advisories[1]!.affectedPackages).toContain('pkg3');
     });
 
+    it('rejects a repo owner/name segment of exactly ".." instead of letting it reach the network', async () => {
+      // '.' and '-' are unreserved characters — encodeURIComponent passes them
+      // through unescaped — so a bare ".." owner segment used to survive
+      // encoding intact. URL/fetch's own path normalization then collapses
+      // "/repos/../rate_limit/..." down to "/rate_limit/...", escaping the
+      // intended /repos/{owner}/{name}/ scope and hitting an arbitrary GitHub
+      // API endpoint with this tool's credentials. Must be rejected before
+      // any request is made.
+      const result = await searchGitHubAdvisories([], { repo: '../rate_limit' });
+
+      expect(result.error).toContain('Invalid repo format');
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('rejects a repo name segment of exactly "." the same way', async () => {
+      const result = await searchGitHubAdvisories([], { repo: 'owner/.' });
+
+      expect(result.error).toContain('Invalid repo format');
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('still accepts a legitimate owner/repo containing dots (e.g. "socket.io")', async () => {
+      vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => [] } as Response);
+
+      const result = await searchGitHubAdvisories([], { repo: 'socket.io/socket.io' });
+
+      expect(result.error).toBeUndefined();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const requestedUrl = String(vi.mocked(fetch).mock.calls[0]![0]);
+      expect(requestedUrl).toContain('/repos/socket.io/socket.io/security-advisories');
+    });
+
     it('should handle errors in repo search', async () => {
       vi.useFakeTimers();
       // 403 Rate Limit — retryWithBackoff will attempt maxRetries+1 = 3 calls total

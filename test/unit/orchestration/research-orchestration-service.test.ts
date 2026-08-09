@@ -229,12 +229,12 @@ describe('ResearchOrchestrationService', () => {
         getStore: vi.fn().mockResolvedValue({
             rebuildFtsIndex: vi.fn().mockResolvedValue(undefined),
         }),
+        getWriterQueue: vi.fn().mockResolvedValue(mockWriter),
     };
 
     beforeEach(() => {
       vi.mocked(getService).mockImplementation(async (name) => {
         if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) return mockSynthesisService as any;
-        if (name === ServiceNames.WRITER_QUEUE) return mockWriter as any;
         if (name === ServiceNames.KNOWLEDGE_STORE) return mockKnowledgeStoreService as any;
         return null;
       });
@@ -280,12 +280,12 @@ describe('ResearchOrchestrationService', () => {
         getStore: vi.fn().mockResolvedValue({
           rebuildFtsIndex: vi.fn().mockResolvedValue(undefined),
         }),
+        getWriterQueue: vi.fn().mockResolvedValue(localMockWriter),
       };
-      
+
       vi.mocked(getService).mockImplementation(async (name: any) => {
         if (name === ServiceNames.KNOWLEDGE_STORE) return localMockKS as any;
         if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) return mockSynthesisService as any;
-        if (name === ServiceNames.WRITER_QUEUE) return localMockWriter as any;
         return null;
       });
 

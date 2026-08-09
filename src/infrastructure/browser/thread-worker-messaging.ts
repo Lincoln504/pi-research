@@ -16,35 +16,43 @@ import { MAX_HTML_SIZE, MAX_PDF_SIZE } from '../../web-research/scraper-types.ts
  */
 let pageCreationLock = Promise.resolve();
 
-async function createPageSafe(context: any): Promise<any> {
+/** Exported for unit testing of the page-creation mutex's timeout behavior. */
+export async function createPageSafe(context: any): Promise<any> {
   let release!: () => void;
   const nextLock = new Promise<void>(resolve => { release = resolve; });
   const currentLock = pageCreationLock;
   pageCreationLock = currentLock.then(() => nextLock);
 
   await currentLock;
+  const pagePromise = context.newPage();
+  // Release the mutex only once newPage() itself has actually settled — NOT when
+  // the timeout race below settles. Releasing in an outer `finally` (the old
+  // shape) fired as soon as the 60s timeout won the race, while newPage() was
+  // still pending in the background — so the NEXT queued caller started its OWN
+  // newPage() concurrently with this still-unsettled one, exactly the concurrent-
+  // newPage() scenario this lock exists to prevent (see the comment above), and
+  // it happens precisely when the browser is already under the stress that
+  // causes 60s+ page-creation stalls in the first place. Attached before the
+  // race starts so it's independent of which branch below returns/throws.
+  pagePromise.then(release, release);
+  pagePromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background page creation rejection: ${err.message}`));
+
+  let timeoutId: NodeJS.Timeout | undefined;
   try {
-    const pagePromise = context.newPage();
-    pagePromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background page creation rejection: ${err.message}`));
-    let timeoutId: NodeJS.Timeout | undefined;
-    try {
-      const result = await Promise.race([
-        pagePromise,
-        new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 60000ms')), 60000);
-        })
-      ]);
-      if (timeoutId) clearTimeout(timeoutId);
-      return result;
-    } catch (err) {
-      if (timeoutId) clearTimeout(timeoutId);
-      // The timeout (or another error) won the race. If newPage() later resolves,
-      // close that orphaned page so it doesn't accumulate in the long-lived context.
-      pagePromise.then((p: any) => { try { p?.close?.(); } catch { /* already gone */ } }).catch(() => {});
-      throw err;
-    }
-  } finally {
-    release();
+    const result = await Promise.race([
+      pagePromise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 60000ms')), 60000);
+      })
+    ]);
+    if (timeoutId) clearTimeout(timeoutId);
+    return result;
+  } catch (err) {
+    if (timeoutId) clearTimeout(timeoutId);
+    // The timeout (or another error) won the race. If newPage() later resolves,
+    // close that orphaned page so it doesn't accumulate in the long-lived context.
+    pagePromise.then((p: any) => { try { p?.close?.(); } catch { /* already gone */ } }).catch(() => {});
+    throw err;
   }
 }
 
