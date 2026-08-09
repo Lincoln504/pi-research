@@ -61,7 +61,7 @@ ask in natural language and the tool picks the right one:
 ### Requirements / limitations
 
 - Node.js >= 22.19.0
-- An LLM with a 100k+ context window (bring your own key)
+- An LLM with a 100k+ context window (bring your own key or use a local model)
 - Internet access
 - A residential IP address — search, scraping, and YouTube transcripts all rely on a residential connection. A datacenter/VPS/cloud IP gets bot-blocked by the providers these features depend on.
 - The pi runtime the engine builds on — `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui`. The pi extension uses the host's copies; the standalone CLI / agent skill install them as dependencies.
