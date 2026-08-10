@@ -186,7 +186,17 @@ describe('LogRotation', () => {
 
     touchOwnerOnly(target, 0o600);
 
-    expect(fs.statSync(target).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(target, 'utf8')).toBe('content');
+    // Both assertions read through ONE already-open fd rather than two
+    // separate path-based calls (stat-then-read), which is itself the TOCTOU
+    // shape CodeQL's file-system-race query flags — fstat/read on a held fd
+    // can't be redirected by a swap between the two calls the way two
+    // separate path lookups could.
+    const fd = fs.openSync(target, 'r');
+    try {
+      expect(fs.fstatSync(fd).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(fd, 'utf8')).toBe('content');
+    } finally {
+      fs.closeSync(fd);
+    }
   });
 });
