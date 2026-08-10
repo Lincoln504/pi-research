@@ -43,7 +43,7 @@ ask in natural language and the tool picks the right one:
 
 ### Use cases
 
-- Plug-and-play (no API key needed) research tool for your [pi](https://github.com/earendil-works/pi).
+- Plug-and-play (no API key needed) research tool for your [Pi](https://github.com/earendil-works/pi) Coding Agent.
 - Research from Claude Code, Codex, or another coding agent, with a cheaper lightweight or local model driving the research so it doesn't spend your main agent's budget.
 - Populating a dataset or building an index of knowledge sources from the web.
 - Holding research in the knowledge store with a configurable scope — project-specific or globally user-scoped, set per directory from the `/research-config` TUI.
