@@ -647,10 +647,38 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
         // Re-point to the current package source (handles update/reinstall).
         try {
           fs.unlinkSync(e.path);
+        } catch { keep.push(e); continue; /* old link untouched; retry next startup */ }
+        try {
           fs.symlinkSync(source, e.path, process.platform === 'win32' ? 'junction' : 'dir');
           keep.push({ ...e, type: 'symlink', source });
           result.repointed.push(e.path);
-        } catch { keep.push(e); /* leave entry; retry next startup */ }
+        } catch {
+          // The old link is already gone at this point (unlinkSync above
+          // succeeded). Mirror installSkill()'s fallback: try a copy rather than
+          // leaving the skill MISSING on disk while the manifest still claims
+          // it's installed (e.g. a Windows cross-volume junction failure).
+          // Stage into a dot-prefixed temp dir and rename into place, same as
+          // the copy-refresh path above — copying directly into e.path left a
+          // partial, SKILL.md-less directory permanently orphaned on disk
+          // (unrecognized by isOwnedCopy) when copyDir failed partway (disk
+          // full, interrupted process).
+          const dir = path.dirname(e.path);
+          const base = path.basename(e.path);
+          const suffix = crypto.randomBytes(4).toString('hex');
+          const fresh = path.join(dir, `.${base}.new-${suffix}`);
+          try {
+            copyDir(source, fresh);
+            fs.renameSync(fresh, e.path);
+            keep.push({ ...e, type: 'copy', source });
+            result.repointed.push(e.path);
+          } catch {
+            try { fs.rmSync(fresh, { recursive: true, force: true }); } catch { /* best effort */ }
+            // Both the re-point and the copy fallback failed — the skill really
+            // is gone from disk now. Drop the entry instead of leaving the
+            // manifest claiming a missing skill is still installed.
+            result.pruned.push(e.path);
+          }
+        }
       } else if (!targetLive) {
         // Dangling with no resolvable source (package fully removed): remove the
         // dead link and drop the entry so the agent's skills dir stays clean.

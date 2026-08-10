@@ -10,6 +10,25 @@ export interface RotationLogger {
   log(...args: unknown[]): void;
 }
 
+// Numeric equivalent of the 'a' flag string (O_WRONLY|O_APPEND|O_CREAT), with
+// O_NOFOLLOW added when the platform defines it (not available on Windows) so
+// the open refuses to follow a symlink an attacker with write access to the
+// log directory could plant at this path in the window between the preceding
+// unlink/rename and this reopen — defense-in-depth on top of an already-narrow
+// threat model (it requires local write access to this directory to begin with).
+const APPEND_CREATE_NOFOLLOW_FLAGS =
+  fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT |
+  (typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0);
+
+/** Best-effort (re)create `filePath` with `mode`, refusing to follow a symlink
+ * planted at the path. Failures are swallowed by design — see call sites.
+ * Exported for unit testing of the symlink-refusal behavior. */
+export function touchOwnerOnly(filePath: string, mode: number): void {
+  try {
+    fs.closeSync(fs.openSync(filePath, APPEND_CREATE_NOFOLLOW_FLAGS, mode));
+  } catch { /* best-effort — the next append recreates the file */ }
+}
+
 export class LogRotation {
   private readonly MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB max file size
   private readonly MAX_LOG_FILES = 10; // Keep last 10 archived logs
@@ -30,9 +49,7 @@ export class LogRotation {
         // Same rationale as the post-rotation recreate in rotateLogFile: the
         // unlink discarded the 0o600 file, and a umask-default recreate by the
         // next append would drop the owner-only posture.
-        try {
-          fs.closeSync(fs.openSync(logFile, 'a', 0o600));
-        } catch { /* best-effort — the next append recreates the file */ }
+        touchOwnerOnly(logFile, 0o600);
         // And, as there, re-stamp the mode: a concurrent append landing between
         // the unlink and the open makes the creation-time 0o600 a no-op.
         try {
@@ -94,9 +111,7 @@ export class LogRotation {
       // world-traversable tmpdir, silently dropping the owner-only posture Logger
       // establishes at construction. Mode applies only at creation, so this is
       // harmless where a file already exists or mode semantics differ (win32).
-      try {
-        fs.closeSync(fs.openSync(logFile, 'a', 0o600));
-      } catch { /* best-effort — the next append recreates the file */ }
+      touchOwnerOnly(logFile, 0o600);
       // The mode above applies only if THIS open created the file. Several
       // processes append to this consolidated log, so a concurrent async append
       // can recreate it at umask perms between the rename and the open, turning

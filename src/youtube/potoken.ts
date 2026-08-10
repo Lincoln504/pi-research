@@ -42,6 +42,7 @@
  */
 
 import { logger } from '../logger.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 
 /**
@@ -76,6 +77,15 @@ function describeError(error: unknown): string {
 // Module-level mutex: serialize all globalThis mutation across concurrent callers.
 let mintChain: Promise<unknown> = Promise.resolve();
 
+// How long the mutex waits for a straggling doMint() before force-releasing
+// the chain for the next caller. doMint() awaits non-fetch operations with no
+// abort signal (interpreter eval, BotGuard VM execution against a
+// hostile/malformed attestation script) that could in principle hang forever;
+// without this bound, a single wedged call would permanently break YouTube
+// transcript fetching for the rest of the process. Mirrors the hard-release
+// timer on the browser page-creation mutex in thread-worker-messaging.ts.
+const MINT_HARD_RELEASE_MS = 5 * 60 * 1000;
+
 /**
  * Mint a session-bound token (for `identifiers[0]`, the visitorData) plus one
  * content-bound token per remaining identifier (the video IDs), all from a
@@ -90,8 +100,22 @@ export async function mintPoTokens(
 ): Promise<Map<string, string>> {
   // Chain on the mutex so only one bridged section runs at a time.
   const run = mintChain.then(() => doMint(identifiers, opts), () => doMint(identifiers, opts));
-  // Keep the chain alive regardless of this call's success/failure.
-  mintChain = run.then(() => undefined, () => undefined);
+  // Keep the chain alive regardless of this call's success/failure, but bound
+  // how long the NEXT caller waits on it: if `run` never settles, force the
+  // chain open after the hard timeout rather than wedging every future
+  // mintPoTokens() call behind it forever. The abandoned `run` may still
+  // mutate globalThis in the background after this — an accepted trade-off
+  // in the pathological case, same as the sibling browser-worker fix.
+  const settled = run.then(() => undefined, () => undefined);
+  let hardTimer: NodeJS.Timeout;
+  const hardRelease = new Promise<void>(resolve => {
+    hardTimer = setTimeout(() => {
+      logger.warn('[youtube] potoken mint mutex force-released — doMint() did not settle within the hard timeout');
+      resolve();
+    }, MINT_HARD_RELEASE_MS);
+    safeUnref(hardTimer);
+  });
+  mintChain = Promise.race([settled, hardRelease]).finally(() => clearTimeout(hardTimer));
   return run;
 }
 

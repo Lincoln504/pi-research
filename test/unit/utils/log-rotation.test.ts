@@ -45,6 +45,7 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 let LogRotation: (typeof import('../../../src/utils/log-rotation.ts'))['LogRotation'];
+let touchOwnerOnly: (typeof import('../../../src/utils/log-rotation.ts'))['touchOwnerOnly'];
 
 beforeAll(async () => {
   // The unit-test setup file loads src/utils/metrics.ts → logger.ts →
@@ -53,7 +54,7 @@ beforeAll(async () => {
   // the rename interception above would never fire. Re-evaluating the module
   // after resetModules resolves its node:fs import through the mock registry.
   vi.resetModules();
-  ({ LogRotation } = await import('../../../src/utils/log-rotation.ts'));
+  ({ LogRotation, touchOwnerOnly } = await import('../../../src/utils/log-rotation.ts'));
 });
 
 // One byte over the class's 10MB cap so a rotation check fires.
@@ -153,5 +154,22 @@ describe('LogRotation', () => {
     if (process.platform !== 'win32') {
       expect(fs.statSync(logFile).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it('touchOwnerOnly refuses to follow a symlink planted at the target path', () => {
+    // O_NOFOLLOW is not enforced on Windows — the hardening is POSIX-only.
+    if (process.platform === 'win32') return;
+    const real = path.join(dir, 'someone-elses-file.txt');
+    fs.writeFileSync(real, 'do-not-touch', { mode: 0o644 });
+    const linkPath = path.join(dir, 'log.txt');
+    fs.symlinkSync(real, linkPath);
+
+    touchOwnerOnly(linkPath, 0o600);
+
+    // A naive open('a') would have followed the link and re-stamped 0600 on
+    // someone else's file. The symlink itself must be left exactly as it was.
+    expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(real, 'utf8')).toBe('do-not-touch');
+    expect(fs.statSync(real).mode & 0o777).toBe(0o644);
   });
 });

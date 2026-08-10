@@ -237,7 +237,7 @@ export function mapOsvItemToVulnerability(item: OsvVulnerability): Vulnerability
       for (const cwe of item.database_specific.cwe) {
         if (typeof cwe === 'string') {
           cwes.push(cwe);
-        } else if (typeof cwe === 'object' && typeof (cwe as { id?: string }).id === 'string') {
+        } else if (typeof cwe === 'object' && cwe !== null && typeof (cwe as { id?: string }).id === 'string') {
           cwes.push((cwe as { id: string }).id);
         }
       }

@@ -16,6 +16,11 @@ import { MAX_HTML_SIZE, MAX_PDF_SIZE } from '../../web-research/scraper-types.ts
  */
 let pageCreationLock = Promise.resolve();
 
+/** How long createPageSafe() waits for a straggling newPage() before force-releasing
+ * the mutex. Must stay well above the 60s soft timeout below — it exists only to
+ * bound the pathological case where newPage() never settles at all (see comment below). */
+const PAGE_CREATION_HARD_RELEASE_MS = 5 * 60 * 1000;
+
 /** Exported for unit testing of the page-creation mutex's timeout behavior. */
 export async function createPageSafe(context: any): Promise<any> {
   let release!: () => void;
@@ -25,16 +30,32 @@ export async function createPageSafe(context: any): Promise<any> {
 
   await currentLock;
   const pagePromise = context.newPage();
-  // Release the mutex only once newPage() itself has actually settled — NOT when
-  // the timeout race below settles. Releasing in an outer `finally` (the old
-  // shape) fired as soon as the 60s timeout won the race, while newPage() was
-  // still pending in the background — so the NEXT queued caller started its OWN
+  // Release the mutex once newPage() itself has actually settled — NOT when the
+  // timeout race below settles. Releasing in an outer `finally` (the old shape)
+  // fired as soon as the 60s timeout won the race, while newPage() was still
+  // pending in the background — so the NEXT queued caller started its OWN
   // newPage() concurrently with this still-unsettled one, exactly the concurrent-
   // newPage() scenario this lock exists to prevent (see the comment above), and
   // it happens precisely when the browser is already under the stress that
   // causes 60s+ page-creation stalls in the first place. Attached before the
   // race starts so it's independent of which branch below returns/throws.
-  pagePromise.then(release, release);
+  //
+  // A hard release timer bounds the case where newPage() never settles at all
+  // (rather than just being slow) — without it, a single wedged newPage() call
+  // would hold this lock forever and livelock every future createPageSafe() call
+  // on this worker thread.
+  let hardReleased = false;
+  const releaseOnce = (): void => {
+    if (hardReleased) return;
+    hardReleased = true;
+    clearTimeout(hardReleaseTimer);
+    release();
+  };
+  const hardReleaseTimer = setTimeout(() => {
+    logToDebugFile('WARN', '[ThreadWorker] page-creation mutex force-released — newPage() did not settle within the hard timeout');
+    releaseOnce();
+  }, PAGE_CREATION_HARD_RELEASE_MS);
+  pagePromise.then(releaseOnce, releaseOnce);
   pagePromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background page creation rejection: ${err.message}`));
 
   let timeoutId: NodeJS.Timeout | undefined;
@@ -61,6 +82,22 @@ export async function createPageSafe(context: any): Promise<any> {
  */
 export function setWorkerId(id: string): void {
   workerId = id;
+}
+
+/**
+ * Parse a millisecond timeout from an env var. Uses Number() rather than
+ * parseInt() so trailing garbage is REJECTED rather than silently truncated —
+ * parseInt('1m', 10) === 1, which turned a plausible duration-shorthand typo
+ * into a near-instant timeout instead of falling back to the default.
+ */
+function parseTimeoutMs(envVar: string | undefined, def: number): number {
+  if (envVar === undefined || envVar.trim() === '') return def;
+  const n = Number(envVar.trim());
+  if (!Number.isFinite(n) || n < 0) {
+    logToDebugFile('WARN', `[ThreadWorker] Invalid timeout value "${envVar}", using default: ${def}ms`);
+    return def;
+  }
+  return n;
 }
 
 /**
@@ -205,7 +242,7 @@ export async function executeSearchTask(
   query: string
 ): Promise<{ results: any[]; jitter: number }> {
   const page = await createPageSafe(_context);
-  const SEARCH_TIMEOUT = parseInt(process.env['PI_RESEARCH_SEARCH_TIMEOUT_MS'] || '45000', 10);
+  const SEARCH_TIMEOUT = parseTimeoutMs(process.env['PI_RESEARCH_SEARCH_TIMEOUT_MS'], 45000);
   page.setDefaultTimeout(SEARCH_TIMEOUT);
   page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
 
@@ -322,7 +359,7 @@ export async function executeScrapeTask(
   signal?: AbortSignal
 ): Promise<{ contentType: string; html?: string; bufferB64?: string; jitter: number }> {
   const page = await createPageSafe(_context);
-  const SCRAPE_TIMEOUT = parseInt(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] || '15000', 10);
+  const SCRAPE_TIMEOUT = parseTimeoutMs(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'], 15000);
   page.setDefaultTimeout(SCRAPE_TIMEOUT);
   page.setDefaultNavigationTimeout(SCRAPE_TIMEOUT);
 
@@ -666,7 +703,7 @@ export async function executeHealthCheck(
 ): Promise<{ success: boolean; navMs: number }> {
   // Nav timeout: read from env (passed through getBrowserEnv), floor at 10s.
   // The outer BrowserTaskScheduler.runHealthCheck() has its own 45s hard deadline.
-  const configuredMs = parseInt(process.env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'] || '0', 10);
+  const configuredMs = parseTimeoutMs(process.env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'], 0);
   const HEALTH_TIMEOUT = configuredMs > 0 ? Math.max(10000, configuredMs) : 10000;
 
   if (initMs > 3000) {

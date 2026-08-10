@@ -24,6 +24,7 @@ import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IResearchOrchestration, IResearchSynthesisService } from '../core/service-interfaces.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.ts';
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
+import { redactSecrets } from '../utils/log-utils.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { validateInitialLinks, MAX_INITIAL_LINKS, MAX_INITIAL_LINK_CHARS } from '../utils/url-utils.ts';
@@ -507,14 +508,14 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
             return {
                 content: [{
                     type: 'text',
-                    text: `[SYSTEM MESSAGE]: The research operation was halted gracefully because an API rate limit (HTTP 429) was reached. Please inform the user that the operation was stopped due to provider rate limits and they should wait a moment before trying again.\n\nDetails: ${String(error)}`
+                    text: `[SYSTEM MESSAGE]: The research operation was halted gracefully because an API rate limit (HTTP 429) was reached. Please inform the user that the operation was stopped due to provider rate limits and they should wait a moment before trying again.\n\nDetails: ${redactSecrets(String(error))}`
                 }],
                 details: {}
             };
         }
 
         logger.error('[research] run failed', error);
-        return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
+        return { content: [{ type: 'text', text: `Research failed: ${redactSecrets(String(error))}` }], details: {} };
       } finally {
         // Guarantees panel teardown even when the run fails before the inner
         // research loop is reached (e.g. health-check failure), where the inner

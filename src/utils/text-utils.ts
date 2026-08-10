@@ -188,8 +188,12 @@ export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const seconds = ms / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.round(seconds % 60);
+  // Round the total first, then derive minutes/seconds from that integer —
+  // rounding remainingSeconds independently of minutes let e.g. 59.6s round up
+  // to a nonsensical "Xm 60s" instead of rolling over to the next minute.
+  const totalSeconds = Math.round(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
   if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;

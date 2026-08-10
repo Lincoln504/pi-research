@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractText, ensureAssistantResponse, parseCitations, stripThinkingTags, truncateWithMarker } from '../../../src/utils/text-utils';
+import { extractText, ensureAssistantResponse, parseCitations, stripThinkingTags, truncateWithMarker, formatDuration } from '../../../src/utils/text-utils';
 import { stripTrailingLlmPunctuation } from '../../../src/utils/url-utils';
 
 describe('text-utils', () => {
@@ -434,6 +434,30 @@ describe('text-utils', () => {
       expect(parseInt(m![2]!, 10)).toBe(10_000);
       const body = out.slice(0, out.indexOf('\n\n[content truncated'));
       expect(body.length).toBe(shown);
+    });
+  });
+
+  describe('formatDuration', () => {
+    it('rolls over into the next minute instead of rendering "Xm 60s"', () => {
+      // 119,601ms = 1m 59.601s. Rounding remainingSeconds independently of
+      // minutes used to produce '1m 60s' — an invalid duration display.
+      expect(formatDuration(119_601)).toBe('2m 0s');
+    });
+
+    it('formats sub-minute durations with one decimal', () => {
+      expect(formatDuration(12_300)).toBe('12.3s');
+    });
+
+    it('formats whole minutes and seconds', () => {
+      expect(formatDuration(83_000)).toBe('1m 23s');
+    });
+
+    it('formats hours and minutes, never seconds', () => {
+      expect(formatDuration(2 * 3_600_000 + 15 * 60_000)).toBe('2h 15m');
+    });
+
+    it('formats sub-second durations in ms', () => {
+      expect(formatDuration(500)).toBe('500ms');
     });
   });
 });

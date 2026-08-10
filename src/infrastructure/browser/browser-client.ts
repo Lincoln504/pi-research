@@ -12,6 +12,7 @@ import type { SearchResult } from '../../web-research/types.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
+import { redactSecrets } from '../../utils/log-utils.ts';
 import { Utf8Body } from '../../utils/http-body.ts';
 import { getClientAgent } from './client-agent.ts';
 import type { NodeError } from '../../types/index.ts';
@@ -200,8 +201,10 @@ export class BrowserClient implements IScheduler {
                             resolve(parsed);
                         }
                     } catch (_e) {
-                        // FIX (#23): Truncate response body in error to prevent data leakage
-                        const raw = collected.toString();
+                        // FIX (#23): Truncate response body in error to prevent data leakage.
+                        // Redact BEFORE truncating — slicing first can cut a secret-shaped
+                        // token mid-way, leaving a fragment too short to be recognized.
+                        const raw = redactSecrets(collected.toString());
                         const preview = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
                         const error = new Error(`Failed to parse response (status ${res.statusCode}): ${preview}`);
                         errorTracker.trackError(error, {

@@ -20,6 +20,7 @@
 import { withTimeout, retryWithBackoff, createTimeoutSignal } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
+import { redactSecrets } from '../utils/log-utils.ts';
 import { metrics } from '../utils/metrics.ts';
 import { readTextCapped } from '../utils/http-body.ts';
 import { mintPoTokens } from './potoken.ts';
@@ -355,8 +356,10 @@ function parseJson3(body: string): string {
     // Log the real cause: an unparseable body is NOT necessarily an empty
     // bot-protection response (the caller's default diagnosis) — it can be an HTML
     // interstitial or a response-shape change. A short snippet disambiguates without
-    // dumping a huge/again-sensitive body.
-    logger.debug(`[youtube] timedtext body was not valid json3 (first 120 chars): ${body.slice(0, 120)}`);
+    // dumping a huge/again-sensitive body. Redact BEFORE truncating to 120 chars —
+    // slicing first can cut a secret-shaped token mid-way, leaving a fragment too
+    // short for redactSecrets' whole-token patterns to recognize.
+    logger.debug(`[youtube] timedtext body was not valid json3 (first 120 chars): ${redactSecrets(body).slice(0, 120)}`);
     return '';
   }
   const events = (parsed as { events?: unknown[] }).events;

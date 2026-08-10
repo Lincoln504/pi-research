@@ -5,7 +5,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateQuery,
-  sanitizeQuery,
   validateAndSanitizeQuery,
 } from '../../../src/utils/input-validation';
 import { MIN_QUERY_LENGTH, MAX_QUERY_LENGTH } from '../../../src/constants';

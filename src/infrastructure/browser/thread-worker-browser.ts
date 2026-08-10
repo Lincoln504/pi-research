@@ -193,6 +193,35 @@ export async function initBrowser(): Promise<void> {
               colorDepth: 24,
               pixelRatio: 1,
             },
+            // Mute all audio output at the engine level. The general scrape
+            // path drives a REAL Firefox (Camoufox), and a researcher can be
+            // pointed at a youtube.com watch page through the ordinary
+            // `scrape` tool (as opposed to the dedicated `youtube_transcript`
+            // tool, which never touches the browser) — YouTube watch pages
+            // autoplay video with sound, so without an explicit mute the
+            // process plays audible audio through the host's sound device.
+            //
+            // media.volume_scale forces the browser's effective output
+            // volume to 0 regardless of per-tab mute/autoplay state or any
+            // page script re-enabling audio — the most reliable, engine-level
+            // mute available for headless Firefox/Camoufox (the same pref
+            // Selenium/Playwright Firefox test grids use to silence CI runs).
+            // media.autoplay.default=5 additionally blocks autoplay outright
+            // (belt-and-suspenders; some sites route around the volume scale
+            // via Web Audio gain nodes). Neither pref affects rendering — the
+            // page still loads and paints normally, only the audio output
+            // device is silenced.
+            //
+            // Set on every platform/headless-mode combination, not just
+            // Linux: this was only *observed* on Linux (true headless and
+            // Xvfb-backed 'virtual' mode both retain a real PulseAudio/
+            // PipeWire/ALSA sink for the Firefox process to play through),
+            // but headless Firefox on macOS/Windows is not guaranteed to be
+            // silent either, so the mute is applied unconditionally.
+            firefox_user_prefs: {
+              'media.volume_scale': '0.0',
+              'media.autoplay.default': 5,
+            },
           });
           // Guard with a hard timeout. We catch the launchPromise rejection so it
           // doesn't surface as an UnhandledPromiseRejection if it rejects after the

@@ -13,6 +13,15 @@ import { getMaxGatheringCalls } from '../constants.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { SecuritySearchParams } from '../security/types.ts';
 
+const MAX_DESCRIPTION_CHARS = 300;
+
+/** Truncates an advisory description for the markdown summary line. */
+function truncateDescription(description: string): string {
+  return description.length > MAX_DESCRIPTION_CHARS
+    ? `${description.substring(0, MAX_DESCRIPTION_CHARS)}...`
+    : description;
+}
+
 export function createSecuritySearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
@@ -229,7 +238,7 @@ export function createSecuritySearchTool(options: {
               }
             }
             const description = vuln.description;
-            markdown += `- **Description:** ${description.length > 300 ? `${description.substring(0, 300)}...` : description}\n`;
+            markdown += `- **Description:** ${truncateDescription(description)}\n`;
             if (vuln.knownExploited === true) {
               markdown += '- **[Actively Exploited]**\n';
             }
@@ -270,7 +279,7 @@ export function createSecuritySearchTool(options: {
               markdown += `- **Product:** ${vuln.product}\n`;
             }
             const description = vuln.description;
-            markdown += `- **Description:** ${description.length > 300 ? `${description.substring(0, 300)}...` : description}\n`;
+            markdown += `- **Description:** ${truncateDescription(description)}\n`;
             if (vuln.dueDate !== undefined) {
               markdown += `- **Due Date:** ${vuln.dueDate}\n`;
             }
@@ -310,7 +319,7 @@ export function createSecuritySearchTool(options: {
             }
             markdown += `- **Summary:** ${adv.summary}\n`;
             const description = adv.description ?? '';
-            markdown += `- **Description:** ${description.length > 300 ? `${description.substring(0, 300)}...` : description}\n`;
+            markdown += `- **Description:** ${truncateDescription(description)}\n`;
             if (adv.published) {
               markdown += `- **Published:** ${adv.published}\n`;
             }
@@ -344,7 +353,7 @@ export function createSecuritySearchTool(options: {
             markdown += `### ${vuln.id}\n`;
             markdown += `- **Severity:** ${vuln.severity}\n`;
             const description = vuln.description;
-            markdown += `- **Description:** ${description.length > 300 ? `${description.substring(0, 300)}...` : description}\n`;
+            markdown += `- **Description:** ${truncateDescription(description)}\n`;
             if (vuln.affectedProducts && vuln.affectedProducts.length > 0) {
               markdown += `- **Affected:** ${vuln.affectedProducts.join(', ')}\n`;
             }

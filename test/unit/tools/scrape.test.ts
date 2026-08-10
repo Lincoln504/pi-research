@@ -82,7 +82,7 @@ describe('tools/scrape', () => {
       cached: 0,
       fresh: 1,
     });
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, mockConfig, 'standalone', expect.any(Function), expect.anything());
   });
 
   it('should handle multiple URLs', async () => {
@@ -94,7 +94,7 @@ describe('tools/scrape', () => {
     expect(details.total).toBe(2);
     expect(details.successful).toBe(2);
     expect(details.fresh).toBe(2);
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, mockConfig, 'standalone', expect.any(Function), expect.anything());
   });
 
   it('should return error for invalid parameters', async () => {
@@ -138,7 +138,7 @@ describe('tools/scrape', () => {
     const tool = createScrapeTool(mockOptions);
     await tool.execute('call-1', { urls: ['https://example.com/1'], maxConcurrency: 5 }, undefined, undefined, {} as any);
 
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, mockConfig, 'standalone', expect.any(Function), expect.anything());
   });
 
   describe('per-document content cap (context-overflow guard)', () => {
@@ -331,7 +331,7 @@ describe('tools/scrape — Session URL Pool footer', () => {
     const text = (result.content[0] as any).text;
 
     // Freshly fetched, with the eviction called out — never a silent skip
-    expect(scrape).toHaveBeenCalledWith(['https://already-scraped.com/page'], expect.anything(), undefined, undefined, researchId, expect.any(Function), expect.anything());
+    expect(scrape).toHaveBeenCalledWith(['https://already-scraped.com/page'], expect.anything(), undefined, mockConfig, researchId, expect.any(Function), expect.anything());
     expect(text).toContain('URL Scrape Results');
     expect(text).toContain('Session Cache Evicted');
     expect(text).not.toContain('retrieved from session memory');
@@ -575,7 +575,7 @@ describe('tools/scrape — session-memory note counts only surviving cache entri
     // The evicted duplicate is named explicitly and queued for a fresh fetch
     expect(text).toContain('Session Cache Evicted');
     expect(text).toContain('https://evicted.com/b');
-    expect(scrape).toHaveBeenCalledWith(['https://evicted.com/b'], expect.anything(), undefined, undefined, researchId, expect.any(Function), expect.anything());
+    expect(scrape).toHaveBeenCalledWith(['https://evicted.com/b'], expect.anything(), undefined, mockConfig, researchId, expect.any(Function), expect.anything());
     // Both URLs produce content sections: one from session memory, one fresh
     expect(text).toContain('Source: Session Memory');
     expect((result.details as any).successful).toBe(2);

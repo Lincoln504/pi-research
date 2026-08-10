@@ -91,3 +91,8 @@ and the stealth-browser stack. v1.0.0 is the first stable release since. Channel
 
 MIT. Bundled third-party licenses are listed in
 [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md).
+
+### Package identity
+
+This project is always `@lincoln504/pi-research` on npm. The unscoped `pi-research`
+package is unrelated and deprecated.

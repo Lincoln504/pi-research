@@ -133,6 +133,16 @@ const CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
  * Applied to every message before it reaches the log file or the console, so
  * neither sink receives clear-text secrets or unbounded network data.
  */
+// How much raw input the regex chain below is allowed to scan before a final
+// truncation to MAX_LOG_MESSAGE_LENGTH. A multiple of MAX_LOG_MESSAGE_LENGTH,
+// not 1:1, because most patterns below SHRINK text (a 64-char secret becomes
+// "[REDACTED]"), so more than `keep` raw characters can be needed to fully
+// populate the final truncated output. Nothing past this point can ever
+// survive into the visible output regardless, so skipping it is free — this
+// is what bounds redactSecrets() to O(MAX_LOG_MESSAGE_LENGTH) instead of
+// O(input length) on multi-megabyte scraped payloads.
+const REDACT_SCAN_LENGTH = MAX_LOG_MESSAGE_LENGTH * 4;
+
 export function redactSecrets(message: string): string {
   // Redact BEFORE truncating. Every pattern below needs to see a secret in
   // full to match it (e.g. LONG_HEX_SECRET_PATTERN requires 32+ contiguous
@@ -140,7 +150,8 @@ export function redactSecrets(message: string): string {
   // whatever fragment survives the cut (e.g. the first 20 chars of a 64-hex
   // browser auth secret) too short for any pattern to recognize, so it was
   // written out in the clear right before the "…[truncated N chars]" marker.
-  let out = message;
+  const rawLength = message.length;
+  let out = rawLength > REDACT_SCAN_LENGTH ? message.slice(0, REDACT_SCAN_LENGTH) : message;
   out = out.replace(ANSI_PATTERN, '');
   out = out.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]@');
   // Redact whole-token formats BEFORE the key/value pass: the KV value class
@@ -172,7 +183,7 @@ export function redactSecrets(message: string): string {
     if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
   }
   if (out.length > MAX_LOG_MESSAGE_LENGTH) {
-    out = `${out.slice(0, keep)}…[truncated ${out.length - keep} chars]`;
+    out = `${out.slice(0, keep)}…[truncated ${rawLength - keep} chars]`;
   }
   return out;
 }

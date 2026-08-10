@@ -24,6 +24,7 @@ import {
   MAX_SCRAPE_CONTENT_CHARS_PER_DOC,
 } from '../constants.ts';
 import { truncateWithMarker } from '../utils/text-utils.ts';
+import { redactSecrets } from '../utils/log-utils.ts';
 import { type Config, getConfig } from '../config.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -261,16 +262,17 @@ export function createScrapeTool(options: {
       const concurrency = p.maxConcurrency || defaultConcurrency;
       
       try {
-        const results = await scrape(urlsToFetch, concurrency, signal, options.config, getGlobalState().researchId, (result) => {
+        const results = await scrape(urlsToFetch, concurrency, signal, config, getGlobalState().researchId, (result) => {
           options.onUrlScrapeResult?.(result.url, result.success);
         }, container);
         freshResults = Array.isArray(results) ? results : [];
       } catch (error) {
-          logger.error(`[scrape tool] Scrape failed: ${error instanceof Error ? error.message : String(error)}`);
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error(`[scrape tool] Scrape failed: ${message}`);
           metrics.increment('tool_scrape_calls_total', 1, { status: 'error' });
           return {
-            content: [{ type: 'text', text: `# Scrape Failed\n\n${error instanceof Error ? error.message : String(error)}` }],
-            details: { error: String(error) },
+            content: [{ type: 'text', text: `# Scrape Failed\n\n${redactSecrets(message)}` }],
+            details: { error: redactSecrets(String(error)) },
           };
       }
 
