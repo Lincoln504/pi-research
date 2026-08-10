@@ -172,4 +172,21 @@ describe('LogRotation', () => {
     expect(fs.readFileSync(real, 'utf8')).toBe('do-not-touch');
     expect(fs.statSync(real).mode & 0o777).toBe(0o644);
   });
+
+  it('touchOwnerOnly stamps mode via fchmod on an existing file, not a path-based chmod that could follow a symlink', () => {
+    // mode passed to openSync only applies when O_CREAT actually creates the
+    // file, so a pre-existing file needs an explicit chmod. Pre-fix this ran
+    // as a separate fs.chmodSync(filePath, ...) call after the O_NOFOLLOW
+    // open — safe against the open, but the chmod itself still dereferenced a
+    // symlink planted at the path in between. fchmodSync on the already-open,
+    // already-NOFOLLOW-verified fd cannot be redirected that way.
+    if (process.platform === 'win32') return;
+    const target = path.join(dir, 'existing.log');
+    fs.writeFileSync(target, 'content', { mode: 0o644 });
+
+    touchOwnerOnly(target, 0o600);
+
+    expect(fs.statSync(target).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(target, 'utf8')).toBe('content');
+  });
 });

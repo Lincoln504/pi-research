@@ -121,4 +121,52 @@ describe('youtube/potoken', () => {
     expect(maxConcurrent).toBe(1);
     vi.unstubAllGlobals();
   });
+
+  it('rejects a new mint while a hard-release-freed doMint() is still bridging globalThis, then allows one again once it settles', async () => {
+    // Regression: the 5-minute hard-release timer force-frees the mint mutex
+    // even when doMint() is merely slow (not permanently hung). Pre-fix, the
+    // very next mintPoTokens() call would start its OWN doMint() — bridging
+    // globalThis a second time while the first bridge is still installed —
+    // and its unbridge() would restore the WRONG (already-bridged)
+    // descriptors, permanently corrupting globalThis for the process. The fix
+    // marks the mutex "wedged" instead: further mints fail fast (no second
+    // bridge) until the stuck call actually settles and unbridges for real.
+    vi.useFakeTimers();
+    try {
+      const hadWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+      let resolveChallenge!: (v: unknown) => void;
+      const hangingChallenge = new Promise((resolve) => { resolveChallenge = resolve; });
+      challengeCreate.mockImplementationOnce(() => hangingChallenge);
+
+      const firstMint = mintPoTokens(['VISITOR']);
+      firstMint.catch(() => {});
+      await vi.advanceTimersByTimeAsync(0);
+
+      // globalThis is bridged (bridge() runs before the first await inside
+      // doMint()) and stays that way while the challenge never resolves.
+      expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).not.toEqual(hadWindow);
+
+      // Cross the 5-minute hard-release bound.
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+      await expect(mintPoTokens(['OTHER'])).rejects.toThrow(/wedged/i);
+      expect(challengeCreate).toHaveBeenCalledTimes(1);
+      // Still bridged to the FIRST call's descriptors — untouched by the
+      // rejected second attempt.
+      expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).not.toEqual(hadWindow);
+
+      // Once the stuck call actually settles, unbridge() restores the true
+      // originals and the mutex is no longer wedged.
+      resolveChallenge(okChallenge);
+      await vi.advanceTimersByTimeAsync(0);
+      await firstMint;
+      expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).toEqual(hadWindow);
+
+      const result = await mintPoTokens(['THIRD']);
+      expect(result.get('THIRD')).toBe('tok-THIRD');
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
 });

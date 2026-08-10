@@ -69,4 +69,45 @@ describe('createPageSafe — mutex release timing', () => {
     const secondPage = await createPageSafe(contextB);
     expect(secondPage).toEqual({ id: 'page-b' });
   });
+
+  it('rejects further calls on the SAME context while a hard-release-freed newPage() is still pending, then allows them again once it settles', async () => {
+    // Regression: the 5-minute hard-release timer force-frees the mutex even
+    // when newPage() is merely slow (not permanently hung). Pre-fix, the very
+    // next queued caller would start its OWN newPage() on the SAME context
+    // while the first was still in flight — the exact concurrent-newPage()
+    // condition this lock exists to prevent. The fix marks the context
+    // "wedged" instead: further calls on that context fail fast (no second
+    // newPage() call) until the stuck call actually settles.
+    let resolveFirstPage!: (page: unknown) => void;
+    const firstPagePromise = new Promise((resolve) => { resolveFirstPage = resolve; });
+    const contextA = { newPage: vi.fn(() => firstPagePromise) };
+
+    const firstCall = createPageSafe(contextA);
+    firstCall.catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Past the 60s soft timeout, firstCall's own race rejects, but the
+    // underlying contextA.newPage() call is still unsettled in the background.
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(firstCall).rejects.toThrow('Browser page creation timed out after 60000ms');
+
+    // Cross the 5-minute hard-release bound.
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 60_000);
+
+    // A queued call on the SAME context must be rejected fast, without ever
+    // calling newPage() a second time.
+    await expect(createPageSafe(contextA)).rejects.toThrow(/wedged/i);
+    expect(contextA.newPage).toHaveBeenCalledTimes(1);
+
+    // A call on a DIFFERENT context is unaffected — the wedge is scoped to contextA.
+    const contextB = { newPage: vi.fn(async () => ({ id: 'page-b' })) };
+    await expect(createPageSafe(contextB)).resolves.toEqual({ id: 'page-b' });
+
+    // Once the stuck call actually settles, contextA is no longer wedged.
+    resolveFirstPage({ id: 'page-a-late' });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(createPageSafe(contextA)).resolves.toEqual({ id: 'page-a-late' });
+    expect(contextA.newPage).toHaveBeenCalledTimes(2);
+  });
 });

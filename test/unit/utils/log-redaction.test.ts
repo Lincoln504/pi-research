@@ -147,6 +147,45 @@ describe('redactSecrets', () => {
     expect(out).not.toContain('a'.repeat(keptHexChars));
     expect(out).toContain('[REDACTED]');
   });
+
+  it('does not leak a fragment of a secret that straddles the REDACT_SCAN_LENGTH boundary', () => {
+    // REDACT_SCAN_LENGTH = MAX_LOG_MESSAGE_LENGTH * 4 = 40_000 (log-utils.ts, not
+    // exported): the pre-redaction slice boundary. A straddling secret only
+    // surfaces in the VISIBLE output if enough content before that cut is
+    // itself secret-dense and shrinks a lot under redaction (the real-world
+    // case: many repeated tokens) — plain filler leaves the leaked fragment
+    // past the final MAX_LOG_MESSAGE_LENGTH=10_000 keep, discarded either way,
+    // which would make this test pass regardless of the bug. Build the filler
+    // from repeated long-hex tokens (203 raw chars -> ~13 redacted chars each,
+    // ~15x shrink) so the redacted filler lands well under 10_000, pulling the
+    // straddling secret's post-redaction position into the visible window.
+    const prefix = 'PI_BROWSER_AUTH_SECRET=';
+    const secret = 'a'.repeat(64);
+    const keptHexChars = 10; // how many hex chars of the secret land BEFORE the 40_000 cut
+    const targetFillerLen = 40_000 - prefix.length - keptHexChars;
+    const unit = `K=${'f'.repeat(200)} `;
+    const unitCount = Math.floor(targetFillerLen / unit.length);
+    const filler = unit.repeat(unitCount) + 'z'.repeat(targetFillerLen - unit.length * unitCount);
+    const message = filler + prefix + secret + ' trailing';
+
+    const out = redactSecrets(message);
+
+    expect(out).not.toContain('a'.repeat(keptHexChars));
+  });
+
+  it('does not print a negative truncated-chars count when redaction expands a short message', () => {
+    // SENSITIVE_KV_PATTERN expands each match ("key=1" -> "key=[REDACTED]", +9
+    // chars). Enough repetitions of a short match can expand `out` past
+    // MAX_LOG_MESSAGE_LENGTH (10_000) even though the raw message stayed under
+    // it — pre-fix, the truncation count (rawLength - keep) went negative.
+    const message = 'key=1 '.repeat(1000); // 6_000 raw chars ("key=1 " -> "key=[REDACTED] " expands to ~15_000)
+    expect(message.length).toBeLessThan(10_000);
+
+    const out = redactSecrets(message);
+
+    expect(out).toContain('truncated');
+    expect(out).not.toMatch(/truncated -\d+ chars/);
+  });
 });
 
 describe('stripTerminalEscapes', () => {

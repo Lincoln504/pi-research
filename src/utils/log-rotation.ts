@@ -21,12 +21,27 @@ const APPEND_CREATE_NOFOLLOW_FLAGS =
   (typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0);
 
 /** Best-effort (re)create `filePath` with `mode`, refusing to follow a symlink
- * planted at the path. Failures are swallowed by design — see call sites.
+ * planted at the path, and unconditionally stamp `mode` on it. Uses fchmodSync
+ * on the already-open (and O_NOFOLLOW-verified) descriptor rather than
+ * fs.chmodSync(filePath, ...) — chmodSync operates on the path and follows
+ * symlinks, which would silently re-open the exact hole O_NOFOLLOW closes if
+ * a symlink appears at this path between the open above and a path-based
+ * chmod. mode is only applied by open() when O_CREAT actually creates the
+ * file, so callers relying on the file always ending up at `mode` (even when
+ * a concurrent writer already recreated it) still need this explicit stamp.
+ * Failures are swallowed by design — see call sites.
  * Exported for unit testing of the symlink-refusal behavior. */
 export function touchOwnerOnly(filePath: string, mode: number): void {
+  let fd: number | undefined;
   try {
-    fs.closeSync(fs.openSync(filePath, APPEND_CREATE_NOFOLLOW_FLAGS, mode));
+    fd = fs.openSync(filePath, APPEND_CREATE_NOFOLLOW_FLAGS, mode);
+    fs.fchmodSync(fd, mode);
   } catch { /* best-effort — the next append recreates the file */ }
+  finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* best-effort */ }
+    }
+  }
 }
 
 export class LogRotation {
@@ -48,13 +63,11 @@ export class LogRotation {
         fs.unlinkSync(logFile);
         // Same rationale as the post-rotation recreate in rotateLogFile: the
         // unlink discarded the 0o600 file, and a umask-default recreate by the
-        // next append would drop the owner-only posture.
+        // next append would drop the owner-only posture. touchOwnerOnly stamps
+        // the mode unconditionally (via fchmod on its own fd), covering the
+        // case where a concurrent append already recreated the file at umask
+        // perms between the unlink and this call.
         touchOwnerOnly(logFile, 0o600);
-        // And, as there, re-stamp the mode: a concurrent append landing between
-        // the unlink and the open makes the creation-time 0o600 a no-op.
-        try {
-          fs.chmodSync(logFile, 0o600);
-        } catch { /* best-effort */ }
       }
 
       const files = fs.readdirSync(logDir);
@@ -109,18 +122,12 @@ export class LogRotation {
       // Rotation moved the 0o600 file aside; without an explicit recreate the next
       // append materializes it at the umask default (typically 0644) in a
       // world-traversable tmpdir, silently dropping the owner-only posture Logger
-      // establishes at construction. Mode applies only at creation, so this is
-      // harmless where a file already exists or mode semantics differ (win32).
-      touchOwnerOnly(logFile, 0o600);
-      // The mode above applies only if THIS open created the file. Several
-      // processes append to this consolidated log, so a concurrent async append
-      // can recreate it at umask perms between the rename and the open, turning
-      // the 0o600 into a no-op — stamp the mode unconditionally to close that
-      // window for good. ENOENT (nothing recreated it and the open failed) is
+      // establishes at construction. touchOwnerOnly stamps the mode
+      // unconditionally (via fchmod on its own fd) regardless of whether this
+      // open created the file or a concurrent append already recreated it
+      // between the rename and this call — ENOENT (open itself failed) is
       // tolerable: best-effort posture, same as the recreate itself.
-      try {
-        fs.chmodSync(logFile, 0o600);
-      } catch { /* best-effort */ }
+      touchOwnerOnly(logFile, 0o600);
 
 
       // Clean up old archives

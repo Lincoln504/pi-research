@@ -8,6 +8,7 @@ let workerId: string = '';
 
 import { appendFileSync } from 'node:fs';
 import { redactSecrets } from '../../utils/log-utils.ts';
+import { safeUnref } from '../../utils/safe-unref.ts';
 import { MAX_HTML_SIZE, MAX_PDF_SIZE } from '../../web-research/scraper-types.ts';
 
 /**
@@ -21,6 +22,13 @@ let pageCreationLock = Promise.resolve();
  * bound the pathological case where newPage() never settles at all (see comment below). */
 const PAGE_CREATION_HARD_RELEASE_MS = 5 * 60 * 1000;
 
+/** Set when a hard-release fires while its newPage() call is still pending —
+ * identifies the context that call was creating a page on. A concurrent
+ * newPage() on that SAME context is exactly what pageCreationLock exists to
+ * prevent, so any call for this context is rejected fast (without ever
+ * calling newPage()) until the stuck call actually settles and clears this. */
+let wedgedContext: any = null;
+
 /** Exported for unit testing of the page-creation mutex's timeout behavior. */
 export async function createPageSafe(context: any): Promise<any> {
   let release!: () => void;
@@ -29,6 +37,13 @@ export async function createPageSafe(context: any): Promise<any> {
   pageCreationLock = currentLock.then(() => nextLock);
 
   await currentLock;
+  if (context === wedgedContext) {
+    // Release immediately so the queue keeps flowing for OTHER contexts (or
+    // this one, once the stuck call clears wedgedContext) instead of stalling
+    // every future caller behind the still-pending call.
+    release();
+    throw new Error('Browser context is wedged from a prior page-creation call that never settled; a new browser context is required.');
+  }
   const pagePromise = context.newPage();
   // Release the mutex once newPage() itself has actually settled — NOT when the
   // timeout race below settles. Releasing in an outer `finally` (the old shape)
@@ -43,7 +58,9 @@ export async function createPageSafe(context: any): Promise<any> {
   // A hard release timer bounds the case where newPage() never settles at all
   // (rather than just being slow) — without it, a single wedged newPage() call
   // would hold this lock forever and livelock every future createPageSafe() call
-  // on this worker thread.
+  // on this worker thread. It marks the context wedged rather than letting the
+  // next caller straight through: a merely-slow (not hung) newPage() would
+  // otherwise still be in flight when a new one starts on the same context.
   let hardReleased = false;
   const releaseOnce = (): void => {
     if (hardReleased) return;
@@ -53,9 +70,14 @@ export async function createPageSafe(context: any): Promise<any> {
   };
   const hardReleaseTimer = setTimeout(() => {
     logToDebugFile('WARN', '[ThreadWorker] page-creation mutex force-released — newPage() did not settle within the hard timeout');
+    wedgedContext = context;
     releaseOnce();
   }, PAGE_CREATION_HARD_RELEASE_MS);
-  pagePromise.then(releaseOnce, releaseOnce);
+  safeUnref(hardReleaseTimer);
+  pagePromise.then(
+    () => { if (wedgedContext === context) wedgedContext = null; releaseOnce(); },
+    () => { if (wedgedContext === context) wedgedContext = null; releaseOnce(); },
+  );
   pagePromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background page creation rejection: ${err.message}`));
 
   let timeoutId: NodeJS.Timeout | undefined;

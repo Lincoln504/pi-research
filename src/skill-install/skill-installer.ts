@@ -631,6 +631,22 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
       continue;
     }
 
+    // Sweep any `.{base}.new-*` staging leftover from a previous crashed
+    // symlink-repoint attempt at this path, unconditionally — a process kill
+    // between copyDir succeeding and the final renameSync below can leave one
+    // behind, and this branch is not guaranteed to run again for the same
+    // entry (a crash also often leaves isSymlinkPresent() false, pruning the
+    // entry on the very next line before it would otherwise get a chance to).
+    const dir = path.dirname(e.path);
+    const base = path.basename(e.path);
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith(`.${base}.new-`)) {
+          fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+        }
+      }
+    } catch { /* hygiene only */ }
+
     // Link the user deleted by hand — nothing on disk; drop the stale entry.
     if (!isSymlinkPresent(e.path)) { result.pruned.push(e.path); continue; }
 
@@ -662,8 +678,6 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
           // partial, SKILL.md-less directory permanently orphaned on disk
           // (unrecognized by isOwnedCopy) when copyDir failed partway (disk
           // full, interrupted process).
-          const dir = path.dirname(e.path);
-          const base = path.basename(e.path);
           const suffix = crypto.randomBytes(4).toString('hex');
           const fresh = path.join(dir, `.${base}.new-${suffix}`);
           try {

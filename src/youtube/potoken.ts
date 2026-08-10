@@ -77,6 +77,13 @@ function describeError(error: unknown): string {
 // Module-level mutex: serialize all globalThis mutation across concurrent callers.
 let mintChain: Promise<unknown> = Promise.resolve();
 
+// Set when a hard-release fires while its doMint() is still bridging globals —
+// globalThis is a single process-global resource, so unlike a per-context lock
+// ANY new bridge while one is still installed is unsafe, not just one from the
+// same caller. Blocks new mints until the stuck call's own doMint() actually
+// settles (success or failure) and unbridges for real.
+let wedged = false;
+
 // How long the mutex waits for a straggling doMint() before force-releasing
 // the chain for the next caller. doMint() awaits non-fetch operations with no
 // abort signal (interpreter eval, BotGuard VM execution against a
@@ -98,19 +105,34 @@ export async function mintPoTokens(
   identifiers: string[],
   opts: MintOptions = {},
 ): Promise<Map<string, string>> {
+  if (wedged) {
+    throw new Error('PoToken minter is wedged by a prior mint that never settled; refusing to start a new mint until it resolves.');
+  }
   // Chain on the mutex so only one bridged section runs at a time.
   const run = mintChain.then(() => doMint(identifiers, opts), () => doMint(identifiers, opts));
   // Keep the chain alive regardless of this call's success/failure, but bound
   // how long the NEXT caller waits on it: if `run` never settles, force the
   // chain open after the hard timeout rather than wedging every future
-  // mintPoTokens() call behind it forever. The abandoned `run` may still
-  // mutate globalThis in the background after this — an accepted trade-off
-  // in the pathological case, same as the sibling browser-worker fix.
+  // mintPoTokens() call behind it forever. Marking `wedged` (rather than
+  // letting the next caller straight through to its own doMint()) prevents
+  // two calls from bridging globalThis at once — the abandoned `run` may
+  // still be mid-bridge in the background, and a second bridge/unbridge pair
+  // racing it would restore the WRONG saved descriptors, permanently
+  // corrupting globalThis.window/document/navigator for the process.
+  //
+  // Derived from `settled` (which never rejects) rather than attaching
+  // directly to `run` — `run.finally(...)` would return a new, unconsumed
+  // promise that adopts `run`'s rejection, becoming an unhandled rejection
+  // whenever doMint() throws.
   const settled = run.then(() => undefined, () => undefined);
+  // Once doMint() actually settles (success or failure), its own `finally`
+  // always runs unbridge() for real — safe for a new mint to bridge again.
+  settled.then(() => { wedged = false; });
   let hardTimer: NodeJS.Timeout;
   const hardRelease = new Promise<void>(resolve => {
     hardTimer = setTimeout(() => {
       logger.warn('[youtube] potoken mint mutex force-released — doMint() did not settle within the hard timeout');
+      wedged = true;
       resolve();
     }, MINT_HARD_RELEASE_MS);
     safeUnref(hardTimer);

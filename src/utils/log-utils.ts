@@ -143,6 +143,15 @@ const CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
 // O(input length) on multi-megabyte scraped payloads.
 const REDACT_SCAN_LENGTH = MAX_LOG_MESSAGE_LENGTH * 4;
 
+// Characters that can appear inside an unbroken secret token (hex, base64url,
+// JWT segments, API keys). Used to push the REDACT_SCAN_LENGTH cut point past
+// the end of whatever token it would otherwise land in the middle of.
+const TOKEN_CHAR_PATTERN = /[A-Za-z0-9_\-./+=]/;
+// Hard cap on how far the boundary can be pushed past REDACT_SCAN_LENGTH —
+// bounds the extra work to a fixed amount even against an adversarial run of
+// token-like characters.
+const REDACT_SCAN_EXTENSION_MAX = 2048;
+
 export function redactSecrets(message: string): string {
   // Redact BEFORE truncating. Every pattern below needs to see a secret in
   // full to match it (e.g. LONG_HEX_SECRET_PATTERN requires 32+ contiguous
@@ -151,7 +160,17 @@ export function redactSecrets(message: string): string {
   // browser auth secret) too short for any pattern to recognize, so it was
   // written out in the clear right before the "…[truncated N chars]" marker.
   const rawLength = message.length;
-  let out = rawLength > REDACT_SCAN_LENGTH ? message.slice(0, REDACT_SCAN_LENGTH) : message;
+  // The REDACT_SCAN_LENGTH cut below is itself a truncation, subject to the
+  // exact same mid-token risk — extend it forward past any run of token
+  // characters straddling the cut point so it never slices a secret in half.
+  let scanEnd = REDACT_SCAN_LENGTH;
+  if (rawLength > scanEnd) {
+    const extensionLimit = Math.min(rawLength, scanEnd + REDACT_SCAN_EXTENSION_MAX);
+    while (scanEnd < extensionLimit && TOKEN_CHAR_PATTERN.test(message.charAt(scanEnd))) {
+      scanEnd += 1;
+    }
+  }
+  let out = rawLength > scanEnd ? message.slice(0, scanEnd) : message;
   out = out.replace(ANSI_PATTERN, '');
   out = out.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]@');
   // Redact whole-token formats BEFORE the key/value pass: the KV value class
@@ -183,7 +202,12 @@ export function redactSecrets(message: string): string {
     if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
   }
   if (out.length > MAX_LOG_MESSAGE_LENGTH) {
-    out = `${out.slice(0, keep)}…[truncated ${rawLength - keep} chars]`;
+    // rawLength can be SMALLER than out.length when redaction net-expands text
+    // (e.g. "key=1" → "key=[REDACTED]"), which would make `rawLength - keep`
+    // negative. out.length is always > keep in this branch, so the max() is
+    // never negative; it still prefers the larger rawLength when the
+    // REDACT_SCAN_LENGTH cut discarded raw content redaction then shrank.
+    out = `${out.slice(0, keep)}…[truncated ${Math.max(rawLength, out.length) - keep} chars]`;
   }
   return out;
 }

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-08-10
+
+An independent fresh-eyes review of the entire 1.3.4→1.3.5 diff — the previous
+release's own fixes had only ever been reviewed by their author. It found seven
+further defects, several in the exact hard-release-timer and redaction-boundary
+patterns 1.3.5 introduced. Every fix below is covered by a regression test
+confirmed (via a local revert-and-rerun) to fail against the pre-fix code.
+
+### Fixed
+
+- **The page-creation and PoToken-mint hard-release timers (new in 1.3.5) could still let two calls race.** Both mutexes force-release after a 5-minute bound so a truly wedged call can't livelock the queue forever — but the bound has no way to tell "permanently hung" apart from "just very slow." A call that resolves a moment after the hard release fires was already let straight through to the next queued caller, who then ran its own `newPage()`/`doMint()` concurrently with the still-in-flight first one: the exact race each mutex exists to prevent (Playwright/Firefox deadlock on concurrent `newPage()`; corrupted `globalThis.window`/`document`/`navigator` from two overlapping bridge/unbridge pairs). Both now mark the wedged resource (the browser context; the whole PoToken minter, since `globalThis` is process-global) and reject further calls against it fast — no second `newPage()`/`doMint()` call — until the original stuck call actually settles.
+- **`redactSecrets()`'s own cost-bounding pre-slice (new in 1.3.5) could itself cut a secret in half.** The 4×`MAX_LOG_MESSAGE_LENGTH` pre-slice added to bound redaction's cost on huge inputs runs before any pattern sees the text — the same class of mid-token truncation the truncate-before-redact fix (1.3.4) closed at the *final* boundary, just reopened at this new earlier one. A secret straddling that cut, in a message dense enough with other redactable content that the cut point's post-redaction position falls inside the final visible window, leaked its un-redacted fragment. The slice boundary now extends forward past any run of token-shaped characters (bounded to 2KB extra) so it never lands mid-secret.
+- **`fs.chmodSync` right after the new `O_NOFOLLOW`-hardened `touchOwnerOnly()` (1.3.5) still followed symlinks.** The O_NOFOLLOW open correctly refused to write through a symlink planted at the log path, but the very next line re-stamped the file's mode with a plain, path-based `chmodSync` — which happily dereferences a symlink and silently chmods whatever it points at, undoing the hardening one line later. `touchOwnerOnly()` now stamps the mode itself via `fchmodSync` on the same already-open, already-verified file descriptor, and the separate path-based chmod calls are gone.
+- **The truncation-count in a redacted log message could go negative.** 1.3.5 switched the reported "truncated N chars" count to the pre-redaction raw length so it would reflect content discarded by the earlier cost-bounding slice — but several redaction patterns *expand* text (`key=1` → `key=[REDACTED]`), so a short, redaction-dense message could end up with a post-redaction length exceeding the raw length, making the subtraction negative and printing the literal `…[truncated -1 chars]`. Now takes the larger of the raw and post-redaction lengths.
+- **`reconcileSkillInstalls()`'s new (1.3.5) symlink-repoint copy fallback never swept its own staging leftovers.** The fallback stages a fresh copy into a dot-prefixed temp dir before an atomic rename into place; a process killed between the copy succeeding and the rename could leave that temp dir behind. The sibling copy-refresh branch already sweeps its own leftovers before every attempt — this branch didn't, and since a crash also frequently makes the manifest entry look deleted (pruning it before the branch runs again), repeated failures could accumulate orphaned staging directories with nothing ever revisiting them. Now sweeps unconditionally on every visit to a symlink entry, independent of whether that entry survives.
+- **The page-creation mutex's hard-release timer (1.3.5) was never unref'd**, unlike the identical PoToken-mint timer in the same release. A bare `setTimeout` keeps the event loop alive for up to 5 minutes; any shutdown path that doesn't route through the cluster worker's forced `process.exit(0)` would hang waiting on it instead of exiting promptly. Now unref'd like its sibling.
+
 ## [1.3.5] - 2026-08-10
 
 Two rounds of workflow-backed code review on the clean 1.3.4 tree (high-effort,
