@@ -24,7 +24,7 @@
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
-**Free, unlimited web search &amp; scraping — no monthly quota, no subscription.** You pay only for the LLM tokens you use, and it can build a searchable knowledge store locally.
+**Free, unlimited web search &amp; scraping — no monthly quota, no subscription.** You pay only for the LLM tokens you use.
 
 ### How it works
 
