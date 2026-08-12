@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-08-11
+
+Discovery and packaging metadata only — no engine changes.
+
+### Changed
+
+- **README rewritten for concision and effectiveness.** The pitch ("free, unlimited web search & deep research for coding agents — no API key, no quota") now leads the page, install moved up to directly under the badges, each claim is stated once, and detail that only matters after adoption moved to `docs/`. 88 → 78 lines.
+- **npm description and keywords rewritten.** The description is now benefit-led and survives catalog truncation; keywords gained `pi-coding-agent`, `web-research`, `deep-research`, `knowledge-store`, `duckduckgo`, and `skills`, and dropped `security` and `stack-exchange`.
+
 ## [1.3.6] - 2026-08-10
 
 An independent fresh-eyes review of the entire 1.3.4→1.3.5 diff — the previous
