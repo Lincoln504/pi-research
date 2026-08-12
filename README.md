@@ -31,11 +31,20 @@ Search and scraping run locally through a stealth browser with no search provide
 
 ### Install
 
+As a [pi](https://github.com/earendil-works/pi) extension:
+
 ```bash
 pi install npm:@lincoln504/pi-research
 ```
 
-In [pi](https://github.com/earendil-works/pi) it works out of the box on your session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md), CLI, or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install pulls the stealth browser engine, which takes a few minutes.
+Standalone, as an [agent skill](docs/AGENT-SKILL.md) for Claude Code, Codex, and OpenClaw:
+
+```bash
+npm install -g @lincoln504/pi-research
+pi-research skill install
+```
+
+In pi it works out of the box on your session's model and pi's configuration. Standalone use (agent skill, CLI, or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install pulls the stealth browser engine, which takes a few minutes.
 
 ### How it works
 
