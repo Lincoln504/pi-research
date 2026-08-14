@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-08-13
+
+Presentation and dependency maintenance only. No engine changes.
+
+### Changed
+
+- **README refined.** New tagline ("Free unlimited web search & knowledge store for coding agents"), MIT license and GitHub repository badges added with all four badges stacked vertically, both install paths (pi extension and standalone agent skill) shown up top, and a punctuation pass removing em dashes and surplus commas and semicolons from README and the npm description. The punctuation pass now also covers the intro paragraphs of the docs/ pages.
+- **npm description compacted.** The no-search-API-key and no-quotas clause is covered by "free unlimited" and is gone.
+- **docs/ARCHITECTURE.md** typebox pin rationale updated to cite the current pi host version (0.84.1, which still pins typebox 1.3.7).
+- **In-range dependency refresh.** esbuild 0.28.2, undici 8.10.0, eslint 10.8.1, typescript-eslint 8.67.0. Deliberate exact pins (playwright-core 1.60.0, camoufox-js 0.10.x, lancedb 0.29.0, apache-arrow 21.1.0, transformers 4.2.0) unchanged per their documented rationale.
+
+### Security
+
+- Production audit gate re-verified. The single allowlisted advisory (GHSA-f88m-g3jw-g9cj, sharp via transformers, unreachable image path) still has no upstream fix; no new advisories.
+
 ## [1.3.7] - 2026-08-11
 
 Discovery and packaging metadata only — no engine changes.

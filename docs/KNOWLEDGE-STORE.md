@@ -1,7 +1,7 @@
 ## Knowledge Store
 
-The knowledge store is a local vector database of past research findings. It is used
-in two distinct ways, and it is an optional cache — research works without it:
+The knowledge store is a local vector database of past research findings. It is an
+optional cache (research works without it) and is used in two distinct ways:
 
 - **Knowledge-first answering (advisory).** The `research_knowledge_search` tool
   answers a repeat or overlapping question directly from stored results. The agent is

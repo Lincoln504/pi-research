@@ -1,7 +1,7 @@
 ## Configuration
 
-Every front-end (the pi extension, the standalone CLI / agent skill — the surface
-OpenClaw and other skills-aware hosts run — and the SDK) shares one configuration
+Every front-end (the pi extension, the standalone CLI / agent skill that OpenClaw
+and other skills-aware hosts run, and the SDK) shares one configuration
 model. This document covers the
 settings exposed in the `/research-config` TUI first, then the complete
 environment-variable reference, and finally how the configuration layers resolve.

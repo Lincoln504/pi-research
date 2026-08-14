@@ -3,8 +3,8 @@
 pi-research is a pi TUI extension for multi-agent web research. It runs inside the pi
 process, registers its tools and commands, and manages its own browser worker pool,
 service registry, and local knowledge store. One engine backs every front-end: besides
-the pi extension it is exposed as a standalone CLI, a portable agent skill — the same
-skill any skills-aware host runs, including OpenClaw — and a programmatic SDK
+the pi extension it is exposed as a standalone CLI, a portable agent skill (the same
+skill any skills-aware host runs, including OpenClaw) and a programmatic SDK
 (`src/sdk.ts`).
 
 ```
@@ -318,7 +318,7 @@ other). This sits above `@lancedb/lancedb` 0.29's declared Arrow peer ceiling
 whenever `@lancedb/lancedb` is upgraded.
 
 Pinned validation library — `typebox` is pinned to the exact version the pi host packages
-depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` 0.83.0 pin `1.3.7`). Every
+depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` 0.84.1 pin `1.3.7`). Every
 tool's parameter schema is built with TypeBox here and handed across the boundary to pi's
 tool system, so the two must agree on `Value.Check`/`Convert` semantics. A floating `^1.1.38`
 range let a fresh consumer install resolve pi-research to a newer TypeBox than pi's, shipping
