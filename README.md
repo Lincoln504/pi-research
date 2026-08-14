@@ -31,7 +31,7 @@ Search and scraping run locally through a stealth browser with no search provide
 
 ### Install
 
-As a [pi](https://github.com/earendil-works/pi) extension:
+As a [Pi Coding Agent](https://github.com/earendil-works/pi) extension:
 
 ```bash
 pi install npm:@lincoln504/pi-research
