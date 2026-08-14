@@ -56,7 +56,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 ### Use cases
 
-- Researching for your [Pi](https://github.com/earendil-works/pi) Coding Agent. Plug and play with no API key needed.
+- Researching for your pi. Plug and play with no API key needed.
 - Researching from Claude Code, Codex, OpenClaw, or another coding agent while a cheaper or local model drives the run so it doesn't spend your main agent's budget.
 - Keeping a persistent and searchable knowledge store of findings, scoped globally or per project.
 - Building agent systems that find and read web content or populating a dataset of web sources.
