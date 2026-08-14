@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/banner.jpg" alt="pi-research: free unlimited web search and knowledge store for coding agents" width="100%" />
+  <img src="https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/banner.jpg" alt="pi-research: free unlimited web search and knowledge store for agents" width="100%" />
 </p>
 
 <p align="center">
-  <strong>Free unlimited web search &amp; knowledge store for coding agents</strong>
+  <strong>Free unlimited web search &amp; knowledge store for agents</strong>
 </p>
 
 <p align="center">
