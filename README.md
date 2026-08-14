@@ -44,7 +44,7 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-In pi it works out of the box on your session's model and pi's configuration. Standalone use (agent skill, CLI, or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install pulls the stealth browser engine, which takes a few minutes.
+In pi it works out of the box on your session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install pulls the stealth browser engine, which takes a few minutes.
 
 ### How it works
 
