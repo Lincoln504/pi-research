@@ -84,41 +84,73 @@ const MAX_LOG_MESSAGE_LENGTH = 10_000;
 // separately for the console). Matching the ESC control byte is the point here.
 // eslint-disable-next-line no-control-regex
 const ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
-// Credentials embedded in a URL userinfo component: scheme://user:pass@host
-const URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
+// Credentials embedded in a URL userinfo component: scheme://user:pass@host.
+//
+// The scheme is length-bounded, and that bound is load-bearing rather than
+// cosmetic. With an unbounded `[a-z0-9+.-]*`, every position inside a long
+// alphanumeric run greedily consumes the rest of the input and then backtracks
+// one character at a time looking for `://` — quadratic in the input length. On
+// the 40_000-character window redactSecrets scans that measured ~1.4 SECONDS of
+// blocked event loop per call, on a function that runs for every single log
+// message, over content that is largely untrusted (scraped pages, provider error
+// bodies): a page carrying one long unbroken token was enough to trigger it. A
+// bounded scheme makes each start position O(32) instead of O(n) — same matches
+// (a longer run simply starts matching nearer the `://`), ~215x faster measured.
+// RFC 3986 schemes are short; no registered scheme approaches 32 characters.
+const URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]{0,31}:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
+// Left/right boundaries for secret key names and opaque token formats. `\b`
+// is WRONG here: `_` is a word character, so `\b` finds no boundary between the
+// prefix and the secret in the single most common credential shape there is —
+// an env var like PI_RESEARCH_API_KEY=…, OPENAI_API_KEY=…, DB_PASSWORD=…. Every
+// such line was written to the log in the clear while the unprefixed `api_key=`
+// was masked. Treat `_` (and any other non-alphanumeric) as a boundary, so a
+// prefixed name matches while a name merely CONTAINING the word does not
+// ("monkey=1" must not read as "key=1").
+const B_LEFT = '(?<![A-Za-z0-9])';
+const B_RIGHT = '(?![A-Za-z0-9])';
 // Cookie / Set-Cookie headers. The KV value class below stops at whitespace, so
 // "Cookie: lang=en; SID=secret123" would mask only the first pair and leave every
 // later one exposed. A cookie string is a ;-and-space separated list of secrets,
 // not a single token — mask the ENTIRE header value to end-of-line.
-const COOKIE_HEADER_PATTERN = /\b(set[_-]?cookie|cookie)\b(["']?\s*[:=]\s*["']?)([^\r\n]+)/gi;
+const COOKIE_HEADER_PATTERN = new RegExp(
+  `${B_LEFT}(set[_-]?cookie|cookie)${B_RIGHT}(["']?\\s*[:=]\\s*["']?)([^\\r\\n]+)`,
+  'gi',
+);
 // key=value / key: "value" pairs whose key names a secret. Includes bare
 // `key` (not just `api_key`/`private_key`): several provider query-param
 // APIs (e.g. StackExchange's `?key=<apikey>`) name the credential parameter
 // with no qualifying prefix. Over-redacting an unrelated "key" field (a
 // sort key, a map key) is the accepted trade-off — same one already made for
 // the equally generic bare `session`/`cookie` entries below.
-const SENSITIVE_KV_PATTERN =
-  /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key|key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+const SENSITIVE_KV_PATTERN = new RegExp(
+  `${B_LEFT}(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key|key)${B_RIGHT}` +
+    `(["']?\\s*[:=]\\s*["']?)([^\\s"',&)]+)`,
+  'gi',
+);
 // Well-known opaque credential formats (OpenAI, GitHub, AWS, Slack, Anthropic).
-const KNOWN_TOKEN_PATTERN =
-  /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+const KNOWN_TOKEN_PATTERN = new RegExp(
+  `${B_LEFT}(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})${B_RIGHT}`,
+  'g',
+);
 // JSON Web Tokens — header.payload.signature, each a base64url segment.
-const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+const JWT_PATTERN = new RegExp(`${B_LEFT}eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`, 'g');
 // HTTP Basic credentials: "Basic <base64>".
-const BASIC_AUTH_PATTERN = /\bBasic\s+[A-Za-z0-9+/]{16,}={0,2}/gi;
+const BASIC_AUTH_PATTERN = new RegExp(`${B_LEFT}Basic\\s+[A-Za-z0-9+/]{16,}={0,2}`, 'gi');
 // HTTP Bearer credentials: "Bearer <token>". The token is often opaque — many
 // providers (e.g. GLM/zhipuai) use dotted keys that are NOT JWTs and carry no
 // known prefix, so KNOWN_TOKEN_PATTERN/JWT_PATTERN miss them and the KV pass
 // only masks the word "Bearer" (its value class stops at the space). Match the
 // scheme and redact the whole RFC 6750 b64token that follows, whatever its shape.
-const BEARER_AUTH_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
+const BEARER_AUTH_PATTERN = new RegExp(`${B_LEFT}Bearer\\s+[A-Za-z0-9._~+/-]+=*`, 'gi');
 // Provider keys not covered by KNOWN_TOKEN_PATTERN: Google API/OAuth, Stripe.
-const PROVIDER_TOKEN_PATTERN =
-  /\b(AIza[0-9A-Za-z_-]{35}|ya29\.[0-9A-Za-z_-]{20,}|[sp]k_(?:live|test)_[0-9A-Za-z]{16,})\b/g;
+const PROVIDER_TOKEN_PATTERN = new RegExp(
+  `${B_LEFT}(AIza[0-9A-Za-z_-]{35}|ya29\\.[0-9A-Za-z_-]{20,}|[sp]k_(?:live|test)_[0-9A-Za-z]{16,})${B_RIGHT}`,
+  'g',
+);
 // Long opaque hex secrets (>=32 hex chars), e.g. the 64-hex browser auth secret
 // or MD5/SHA-style tokens. Diagnostic logs may over-redact content hashes of
 // this length; that trade-off favors not persisting credentials clear-text.
-const LONG_HEX_SECRET_PATTERN = /\b[0-9a-fA-F]{32,}\b/g;
+const LONG_HEX_SECRET_PATTERN = new RegExp(`${B_LEFT}[0-9a-fA-F]{32,}${B_RIGHT}`, 'g');
 // All C0 control characters plus DEL — newlines/carriage returns are the log/
 // terminal-injection vector when written to a raw console line. Matching these
 // control bytes is exactly the intent.

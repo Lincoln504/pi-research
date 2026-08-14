@@ -159,6 +159,7 @@ Diagnostics & platform
 | `PLAYWRIGHT_BROWSERS_PATH` | _(user cache)_ | Standard Playwright variable, honoured here too: overrides where the camoufox binary is stored and looked up, and is passed through to browser workers. |
 | `XDG_CACHE_HOME` | `~/.cache` | Standard XDG variable. When set, every `~/.cache/pi-research/...` path below is rooted at `$XDG_CACHE_HOME/pi-research/...` instead. |
 | `PLAYWRIGHT_INSTALL_DEPS` | _(unset)_ | Linux only. Set `true` during `npm install` to also install system libraries via `npx playwright install-deps` (same as `npm run install:system-deps`). |
+| `PI_RESEARCH_STRICT_SETUP` | _(unset)_ | Read by the bundled `scripts/setup.cjs` during `npm install`. Set `1`/`true` to make a failed browser download fail the install instead of deferring it to first use. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
 
 Testing only — never enable in production
@@ -168,7 +169,7 @@ Testing only — never enable in production
 | `PI_RESEARCH_MOCK_SEARCH` | Return fabricated search results instead of real web data. |
 | `PI_RESEARCH_MOCK_SCRAPE` | Return fabricated scrape results instead of real page content. |
 | `PI_RESEARCH_FORCE_READY` | Bypass readiness checks and run even when critical services failed to initialize. **pi extension only** — the CLI, agent skill and SDK do not consult it. |
-| `PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE` | Permit scraping loopback/private/internal addresses, bypassing SSRF protection. |
+| `PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE` | Permit scraping **loopback** addresses (`127.0.0.0/8`, `::1`, `*.localhost`, `::ffff:127.x`) so integration tests can drive the real browser and scrape pipeline against a local server. Deliberately scoped to loopback only: link-local `169.254.0.0/16` (cloud metadata) and RFC1918 LAN ranges stay blocked even with this set, at request time and at connect time. |
 
 ### How configuration is layered
 

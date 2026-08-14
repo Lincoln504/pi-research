@@ -100,8 +100,80 @@ describe('redactSecrets', () => {
     expect(redactSecrets('private_key=zzz999secret')).not.toContain('zzz999secret');
   });
 
+  it('masks a secret key name carrying an underscore-joined prefix', () => {
+    // `\b` is not a boundary between `_` and a letter (both are word chars), so
+    // the prefixed env-var form — the single most common way a credential is
+    // written down — matched none of the key-name alternatives and was logged
+    // in the clear, while the bare `api_key=` next to it was masked.
+    for (const line of [
+      'PI_RESEARCH_API_KEY=abc123def456ghi789',
+      'OPENAI_API_KEY=notaskkeyjustopaque123',
+      'ZHIPUAI_API_KEY=3f8a2b.QwErTyUiOpAsDf',
+      'DB_PASSWORD=hunter2hunter2',
+      'user_password=hunter2',
+      'MY_SECRET=hunter2hunter2',
+      '{"PI_RESEARCH_API_KEY":"abc.def123456"}',
+    ]) {
+      const value = line.split(/[=:]/).slice(1).join('=');
+      const out = redactSecrets(line);
+      expect(out, line).toContain('[REDACTED]');
+      expect(out, line).not.toContain(value.replace(/["}]/g, ''));
+    }
+  });
+
+  it('masks a non-hex value assigned to a prefixed *_SECRET name', () => {
+    // The pre-existing PI_BROWSER_AUTH_SECRET coverage passes only because a
+    // 64-char run of 'a' is also valid hex — LONG_HEX_SECRET_PATTERN caught it,
+    // not the key name. A value that is not hex exercises the key-name path.
+    const secret = 'zqx-not-hex-at-all-9911';
+    const out = redactSecrets(`PI_BROWSER_AUTH_SECRET=${secret}`);
+    expect(out).not.toContain(secret);
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('does not treat a key name merely CONTAINING a secret word as sensitive', () => {
+    // The boundary is relaxed to "not alphanumeric", not dropped: only a real
+    // separator (`_`, `-`, start of string) may precede the name.
+    expect(redactSecrets('monkey=1')).toContain('monkey=1');
+    expect(redactSecrets('keyboard=qwerty')).toContain('keyboard=qwerty');
+    expect(redactSecrets('passwordless=true')).toContain('passwordless=true');
+  });
+
   it('does not redact short hex strings like run IDs', () => {
     expect(redactSecrets('run-deadbeef started')).toContain('run-deadbeef');
+  });
+
+  it('stays fast on a long unbroken token (URL-scheme backtracking)', () => {
+    // URL_CREDENTIALS_PATTERN's scheme part used an unbounded `[a-z0-9+.-]*`, so
+    // every start position inside a long alphanumeric run consumed to the end and
+    // backtracked one character at a time looking for `://` — quadratic. Across
+    // the 40_000-character window redactSecrets scans, that measured ~1.4 SECONDS
+    // of blocked event loop, on a function called for EVERY log message and fed
+    // largely untrusted content (scraped pages, provider error bodies). One long
+    // unbroken token on a page was the whole trigger.
+    //
+    // The threshold is deliberately loose (a slow shared CI runner must not flake
+    // it) while still being ~100x below the pre-fix cost, so a reintroduced
+    // unbounded quantifier cannot slip through.
+    const hostile = 'a1b2c3d4'.repeat(5_000); // 40_000 chars, no whitespace
+    const start = performance.now();
+    redactSecrets(hostile);
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it('still masks URL userinfo credentials after the scheme bound', () => {
+    for (const [input, secret] of [
+      ['https://alice:s3cr3t@example.com/path', 's3cr3t'],
+      ['ftp://u:p4ssw0rd@host/x', 'p4ssw0rd'],
+      ['redis+sentinel://user:pw123@h:6379', 'pw123'],
+      ['HTTPS://Alice:SecretVal@Example.com', 'SecretVal'],
+    ] as const) {
+      const out = redactSecrets(input);
+      expect(out, input).not.toContain(secret);
+      expect(out, input).toContain('[REDACTED]@');
+    }
+    // A colon in a path is not userinfo and must be left alone.
+    expect(redactSecrets('https://example.com/a:b')).toContain('https://example.com/a:b');
   });
 
   it('bounds oversized messages', () => {

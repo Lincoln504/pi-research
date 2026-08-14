@@ -379,6 +379,18 @@ function isPrivateIpv6(ip: string): boolean {
   // metadata service) — block the whole prefix regardless of what it wraps,
   // same rationale as the 6to4/Teredo ranges just above.
   if (normalized.startsWith('64:ff9b:')) return true;
+  // IPv4-COMPATIBLE ::/96 (RFC 4291 §2.5.5.1, deprecated) — the sibling of the
+  // ::ffff:0:0/96 mapped range decoded above, and the last IPv4-in-IPv6 form
+  // left open. `http://[::127.0.0.1]/` normalizes to `[::7f00:1]`, which matches
+  // none of the checks above: not `::1`, no `fc`/`fd`/`fe8x` prefix, no `::ffff:`
+  // prefix for extractMappedIpv4 to decode, and not one of the tunnel prefixes.
+  // Whether it reaches the embedded IPv4 depends on the OS, an intervening
+  // proxy, and NAT64 translation — the same "depends on the path" property that
+  // made 6to4/Teredo/NAT64 whole-range blocks the right call, so block the whole
+  // /96 rather than decode it. Deprecated with no legitimate scrape target.
+  // Matched structurally (top 96 bits zero => at most two groups after `::`),
+  // which is why it cannot swallow `::ffff:7f00:1` (three groups, ffff set).
+  if (/^::(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{1,4}(?::[0-9a-f]{1,4})?)$/.test(normalized)) return true;
   // All-zeros (unspecified address)
   if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
   return false;

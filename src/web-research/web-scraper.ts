@@ -250,13 +250,18 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     const MAX_REDIRECTS = 10;
     let currentUrl = url;
     let response!: Response;
+    // One UA for the whole redirect chain. Picked per hop, a request could
+    // present as Chrome on Windows and then as Firefox on macOS while following
+    // a single Location chain — a browser never does that, so the rotation meant
+    // to blend in was instead handing out a distinctive signal.
+    const userAgent = getRandomUserAgent();
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       response = await fetch(currentUrl, {
         signal: controller.signal,
         redirect: 'manual',
         headers: {
-          'User-Agent': getRandomUserAgent(),
+          'User-Agent': userAgent,
           'Accept': 'text/html,application/xhtml+xml,application/pdf,*/*;q=0.8',
         },
         // RequestInit's standard type omits undici's `dispatcher`; cast to attach it.

@@ -67,6 +67,27 @@ describe('validateUrlForSSRF — IPv6 literal bypasses are blocked', () => {
     await expect(validateUrlForSSRF('http://[64:ff9b::a9fe:a9fe]/')).rejects.toThrow();
   });
 
+  it('blocks the deprecated IPv4-compatible ::/96 range (http://[::127.0.0.1]/)', async () => {
+    // The sibling of ::ffff:0:0/96 and the last IPv4-in-IPv6 form that was still
+    // accepted: Node normalizes [::127.0.0.1] to [::7f00:1], which matches no
+    // loopback/ULA/link-local prefix, carries no ::ffff: prefix to decode, and is
+    // none of the 6to4/Teredo/NAT64 tunnel ranges. Whether it reaches 127.0.0.1
+    // depends on the OS and any intervening proxy or NAT64 gateway.
+    await expect(validateUrlForSSRF('http://[::127.0.0.1]/')).rejects.toThrow();
+    await expect(validateUrlForSSRF('http://[::7f00:1]/')).rejects.toThrow();
+    await expect(validateUrlForSSRF('http://[::169.254.169.254]/')).rejects.toThrow();
+    // …and stays blocked even under the loopback test affordance, which is
+    // scoped to ::1 and mapped ::ffff:127.x only.
+    process.env[FLAG] = 'true';
+    await expect(validateUrlForSSRF('http://[::127.0.0.1]/')).rejects.toThrow();
+  });
+
+  it('the ::/96 block does not swallow the mapped ::ffff:0:0/96 range', async () => {
+    // ::ffff:8.8.8.8 has three groups after the compression point (ffff set), so
+    // it is outside ::/96 and must still resolve on its embedded-IPv4 verdict.
+    await expect(validateUrlForSSRF('http://[::ffff:8.8.8.8]/')).resolves.toBeUndefined();
+  });
+
   it('does NOT over-block real public IPv6 (Google DNS 2001:4860:4860::8888)', async () => {
     await expect(validateUrlForSSRF('http://[2001:4860:4860::8888]/')).resolves.toBeUndefined();
   });

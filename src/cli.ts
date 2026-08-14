@@ -1360,7 +1360,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       if (a === '--depth') {
         const v = rest[++i];
-        const n = v === undefined ? NaN : parseInt(v, 10);
+        // Match the WHOLE token, not parseInt's leading-prefix scan: parseInt
+        // reads '2x' as 2 and '2.9' as 2, so a typo silently ran a different
+        // depth — the one knob that decides how long a run takes and what it
+        // costs — while the error text promised "an integer 0–3".
+        const n = v !== undefined && /^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;
         if (isNaN(n) || n < 0 || n > 3) throw new UsageError('--depth must be an integer 0–3.');
         depth = n;
       } else if (a === '--model') {

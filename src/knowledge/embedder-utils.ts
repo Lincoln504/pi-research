@@ -254,16 +254,26 @@ export async function initializeDawnWebGPU(): Promise<boolean> {
   if (dawnInitialized) return true;
 
   try {
-    // @ts-ignore — optional dependency
-    const { create, globals } = await import('webgpu');
-    Object.assign(globalThis, globals);
-    // Use Object.defineProperty — Node.js defines navigator as a configurable getter
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { gpu: create([]) },
-      writable: true,
-      configurable: true,
+    // Dawn writes its limit-clamping notices ("maxDynamicUniformBuffersPer-
+    // PipelineLayout artificially reduced from 1000000 to 16 …") straight to
+    // FD 2 from native code the moment create() spins up an instance, so they
+    // land on the user's terminal — and, for the agent skill, in the stderr an
+    // agent is told to read for ERRORS. loadPipelineWithTimeout already runs the
+    // pipeline construction inside this same FD-level capture for exactly this
+    // reason; the adapter probe below is the other native entry point and was
+    // missing it, which is why a plain `knowledge` run still printed them.
+    const adapter = await logger.runCapturingStderr(async () => {
+      // @ts-ignore — optional dependency
+      const { create, globals } = await import('webgpu');
+      Object.assign(globalThis, globals);
+      // Use Object.defineProperty — Node.js defines navigator as a configurable getter
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { gpu: create([]) },
+        writable: true,
+        configurable: true,
+      });
+      return await (globalThis as any).navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     });
-    const adapter = await (globalThis as any).navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
 
     if (!adapter) {
       logger.warn('[embedder] No WebGPU adapter available — using CPU.');

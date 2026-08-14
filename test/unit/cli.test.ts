@@ -350,6 +350,18 @@ describe('parseArgs — research', () => {
     ).toThrow(UsageError);
   });
 
+  it('--depth rejects a value that only STARTS with a valid integer', () => {
+    // parseInt scans a leading prefix: '2x' read as 2 and '2.9' as 2, so a typo
+    // silently ran a different depth than the one typed while the error text
+    // claimed only "an integer 0–3" was accepted.
+    for (const bad of ['2x', '2.9', '0.5', '1e1', '+2', '-1', '3abc', '']) {
+      expect(() =>
+        parseArgs(['node', 'cli.mjs', 'research', 'topic', '--depth', bad]),
+        `--depth ${JSON.stringify(bad)}`,
+      ).toThrow(UsageError);
+    }
+  });
+
   it('--model provider/id', () => {
     const r = parseArgs(['node', 'cli.mjs', 'research', 'topic', '--model', 'openai/gpt-4o']);
     expect(r.research?.model).toBe('openai/gpt-4o');

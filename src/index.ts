@@ -91,12 +91,14 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.80.8).
-  // 0.80.8 is the floor because pi 0.80.8 introduced ModelRuntime and removed
+  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.84.0).
+  // The floor is 0.84.0 because setRuntimeApiKey() lost its `allowNetwork` option there
+  // and only 0.84.0+ hardcodes the equivalent guard internally (see pi-version.ts). The
+  // APIs it rests on arrived in 0.80.8, which introduced ModelRuntime and removed
   // AuthStorage/ModelRegistry.create(); buildModelRegistry (model-registry-factory.ts)
   // unconditionally calls ModelRuntime.create(), and createAgentSession() is invoked
   // without the removed `modelRegistry` option (researcher.ts), relying on the
-  // 0.80.8+ host auto-building its ModelRuntime. This in-host check is the real
+  // host auto-building its ModelRuntime. This in-host check is the real
   // enforcement point: when running as an extension the host's version is NOT
   // constrained by npm's resolution of our own package.json range.
   // Two thresholds, not one — see src/core/pi-version.ts. Below the floor the APIs

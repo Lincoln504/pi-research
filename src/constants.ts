@@ -8,10 +8,6 @@ import { getConfig, type Config } from './config.ts';
 
 // ==================== Time Constants ====================
 
-/** Delay between API requests in milliseconds */
-export const REQUEST_DELAY_MS_NVD = 6000;
-export const REQUEST_DELAY_MS_OTHER = 1000;
-
 /** Duration (ms) for a green (success) flash on a researcher column */
 export const FLASH_GREEN_DURATION_MS = 400;
 

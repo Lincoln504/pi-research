@@ -5,11 +5,16 @@ on:
     tags:
       - 'v*.*.*'
 
-# TODO(hardening, low): add a `concurrency: release` group so two tags pushed in
-# quick succession can't run publish jobs in parallel. Damage today is bounded
-# (npm rejects duplicate versions; each publish gates on its own SHA's CI), but a
-# serializing group is the conventional guard against interleaved publishes.
-#
+# Serialize releases: two tags pushed in quick succession queue instead of running
+# their publish jobs in parallel. cancel-in-progress is deliberately false — a
+# release already past `require-ci-green` may be mid-`npm publish`, and cancelling
+# there is strictly worse than making the newer tag wait. Damage without this was
+# bounded (npm rejects a duplicate version; each publish gates on its own SHA's CI),
+# so this is the conventional guard rather than a fix for an observed failure.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 # TODO(hardening, low): pin third-/first-party actions (actions/checkout,
 # actions/setup-node, actions/upload-artifact) by full commit SHA instead of
 # mutable major tags. This workflow holds `id-token: write` and publishes to npm,
