@@ -34,6 +34,10 @@ export interface JsonRepairOptions {
   maxTokens?: number;
   /** Thinking level for the repair pass (default 'off' — repair emits JSON, not reasoning). */
   thinkingLevel?: ModelThinkingLevel;
+  /** Research session id, forwarded to the provider as its prompt-cache / session-affinity
+   *  key (see llm-utils.buildSafeOptions). Keeps the repair pass on the same upstream
+   *  replica as the call it is repairing. */
+  sessionId?: string;
   /** Usage sink invoked once per billed LLM attempt with the raw usage object from
    *  the response. Lets callers attribute the repair pass's tokens/cost to the run
    *  (metrics + observer) exactly as they do for the primary call. Every attempt that
@@ -70,7 +74,7 @@ export async function repairJsonWithLlm<T = any>(
   auth: { apiKey: string; headers?: Record<string, string | null> },
   options: JsonRepairOptions
 ): Promise<T | null> {
-  const { model, context, schema, serviceName = 'RepairService', signal, maxTokens = 16384, thinkingLevel = 'off' } = options;
+  const { model, context, schema, serviceName = 'RepairService', signal, maxTokens = 16384, thinkingLevel = 'off', sessionId } = options;
   
   logger.warn(`[${serviceName}] JSON parse failed; attempting agentic salvage`);
 
@@ -118,7 +122,8 @@ Return ONLY the valid JSON object. No prose before or after.`;
           ],
         }, buildSafeOptions(model, {
           ...auth,
-          signal
+          signal,
+          ...(sessionId ? { sessionId } : {}),
         }, maxTokens, thinkingLevel)),
         llmTimeout, `agentic-repair-${serviceName}`,
       );

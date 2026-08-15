@@ -78,6 +78,21 @@ function makeCompleteResponse(text: string, stopReason: StopReason = 'stop', err
   };
 }
 
+/**
+ * Text of the user message from the most recent completeSimple call.
+ *
+ * The evaluator's run-varying context (round number, agenda, executed queries, steering,
+ * round-phase guidance) is deliberately carried in the USER message rather than the
+ * system prompt, so the system prompt stays byte-identical across rounds and the prompt
+ * cache can hold it. Assertions about that context therefore read from here.
+ */
+function lastEvaluatorUserMessage(): string {
+  const ctx = vi.mocked(completeSimple).mock.calls.at(-1)![1] as {
+    messages: Array<{ content: Array<{ type: string; text: string }> }>;
+  };
+  return ctx.messages.map(m => m.content.map(c => c.text ?? '').join('')).join('\n');
+}
+
 /** A minimal valid JSON plan string for a delegate action. */
 function validDelegatePlanJson(numResearchers = 1) {
   const researchers = Array.from({ length: numResearchers }, (_, i) => ({
@@ -580,21 +595,23 @@ describe('PlanningService', () => {
       const currentRound = 4; // only reachable because steering extended the budget past 3
 
       it('falls back to the base complexity-table maxRounds when no option is supplied (backward compat)', async () => {
-        vi.mocked(loadPrompt).mockReturnValueOnce('eval {{root_query}}\n{{round_phase_guidance}}');
+        vi.mocked(loadPrompt).mockReturnValueOnce('eval');
         vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('ok')));
 
         await service.updatePlanForRound({ ...BASE_OPTIONS, complexity: 3, round: currentRound });
 
-        const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
-        const ctx = call[1] as { systemPrompt: string };
+        // Round number and round-phase guidance live in the RUN CONTEXT block at the tail
+        // of the USER message, not in the system prompt — the system prompt is kept
+        // round-invariant so the prompt cache can hold it across rounds.
+        const userText = lastEvaluatorUserMessage();
         // No maxRounds passed → old behavior: base value (3), impossible "Round 4 of 3"
         // text, and a ratio (4/3 > 0.8) that selects the LATE phase branch.
-        expect(ctx.systemPrompt).toContain(`Round ${currentRound} of ${baseMaxRounds}`);
-        expect(ctx.systemPrompt).toContain('Round Phase: LATE');
+        expect(userText).toContain(`Round ${currentRound} of ${baseMaxRounds}`);
+        expect(userText).toContain('Round Phase: LATE');
       });
 
       it('uses the caller-supplied maxRounds for round-phase guidance when provided', async () => {
-        vi.mocked(loadPrompt).mockReturnValueOnce('eval {{root_query}}\n{{round_phase_guidance}}');
+        vi.mocked(loadPrompt).mockReturnValueOnce('eval');
         vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('ok')));
 
         await service.updatePlanForRound({
@@ -604,13 +621,12 @@ describe('PlanningService', () => {
           maxRounds: steeringExtendedMaxRounds,
         });
 
-        const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
-        const ctx = call[1] as { systemPrompt: string };
+        const userText = lastEvaluatorUserMessage();
         // With the real, steering-extended budget (5) supplied, the ratio (4/5 = 0.8)
         // lands in MIDDLE instead of LATE, and the display shows the true "of 5".
-        expect(ctx.systemPrompt).toContain(`Round ${currentRound} of ${steeringExtendedMaxRounds}`);
-        expect(ctx.systemPrompt).toContain('Round Phase: MIDDLE');
-        expect(ctx.systemPrompt).not.toContain('Round Phase: LATE');
+        expect(userText).toContain(`Round ${currentRound} of ${steeringExtendedMaxRounds}`);
+        expect(userText).toContain('Round Phase: MIDDLE');
+        expect(userText).not.toContain('Round Phase: LATE');
       });
     });
 
@@ -806,6 +822,92 @@ describe('PlanningService', () => {
         const ctx = vi.mocked(completeSimple).mock.calls.at(-1)![1] as { systemPrompt: string };
         expect(ctx.systemPrompt.match(PLACEHOLDER) ?? [], `complexity ${complexity}`).toEqual([]);
       }
+    });
+  });
+
+  /**
+   * Prompt-cache structure.
+   *
+   * Every provider caches on an exact prefix of the serialized request, so what a
+   * multi-round run can reuse is decided entirely by WHERE the round-varying text sits.
+   * These two invariants are the whole mechanism, and both are silent when broken —
+   * nothing errors, the run just pays full input price on every round. The failure mode
+   * is a one-line prompt edit (a round number moved back into the system prompt, a new
+   * section prepended to the findings) so it needs a test, not a comment.
+   */
+  describe('prompt-cache structure — the evaluator request keeps a stable prefix', () => {
+    const PROMPT_DIR = path.join(
+      path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts',
+    );
+    const LEAD_IN = 'Findings from the research team follow.';
+    const SEP = '\n\n---\n\n';
+
+    let svc: PlanningService;
+    beforeEach(async () => {
+      svc = new PlanningService();
+      await svc.initialize();
+      vi.mocked(loadPrompt).mockReturnValue(
+        readFileSync(path.join(PROMPT_DIR, 'system-lead-evaluator.md'), 'utf-8'),
+      );
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('ok')));
+    });
+
+    const evaluate = async (round: number, reports: Map<string, string>) => {
+      await svc.updatePlanForRound({
+        sessionId: 'cache-session',
+        reports,
+        round,
+        maxRounds: 3,
+        query: 'test query',
+        complexity: 2 as const,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+      } as any);
+      const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
+      return {
+        systemPrompt: (call[1] as { systemPrompt: string }).systemPrompt,
+        userMessage: lastEvaluatorUserMessage(),
+      };
+    };
+
+    // Reports carry real CITED LINKS blocks so the GLOBAL SOURCE LIST is actually
+    // populated — and, crucially, GROWS between the rounds. An empty source list would
+    // make its placement unobservable and quietly neuter the prefix assertion below.
+    const R1 = 'Round one finding [1].\n\nCITED LINKS\n[1] https://alpha.example.com — Alpha';
+    const R2 = 'Round two finding [1].\n\nCITED LINKS\n[1] https://beta.example.com — Beta';
+    const round1Reports = new Map([['1.1', R1]]);
+    const round2Reports = new Map([['1.1', R1], ['2.1', R2]]);
+
+    it('renders a byte-identical system prompt in round 1 and round 3', async () => {
+      const first = await evaluate(1, round1Reports);
+      const later = await evaluate(3, round2Reports);
+      // Differing round, differing report set, differing query history — none of it may
+      // reach the system prompt, or the cached prefix ends at byte zero.
+      expect(later.systemPrompt).toBe(first.systemPrompt);
+    });
+
+    it('carries the round-varying context in the user message instead', async () => {
+      const { userMessage } = await evaluate(2, round2Reports);
+      expect(userMessage).toContain('## RUN CONTEXT');
+      expect(userMessage).toContain('Round 2 of 3');
+      // ...and after the findings, not before them.
+      expect(userMessage.indexOf('## RUN CONTEXT')).toBeGreaterThan(userMessage.indexOf('Round one finding'));
+    });
+
+    it('keeps round 1 findings a verbatim prefix of the round 2 message', async () => {
+      const first = await evaluate(1, round1Reports);
+      const second = await evaluate(2, round2Reports);
+
+      // The lead-in plus the round-1 findings block: everything up to and including the
+      // second separator-delimited section. The global source list grows by a line per
+      // new URL and so must sit AFTER this, not before it.
+      const sections = first.userMessage.split(SEP);
+      expect(sections[0]).toBe(LEAD_IN);
+      const stablePrefix = sections.slice(0, 2).join(SEP);
+      expect(stablePrefix).toContain('Round one finding');
+      expect(stablePrefix).not.toContain('GLOBAL SOURCE LIST');
+      expect(second.userMessage.startsWith(stablePrefix)).toBe(true);
     });
   });
 });

@@ -12,7 +12,7 @@
  */
 
 import type { Model } from '@earendil-works/pi-ai';
-import { extractUsage } from '../types/llm.ts';
+import { extractUsage, type TokenUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { metrics } from './metrics.ts';
 
@@ -51,6 +51,29 @@ function warnIfUnpriced(model: Model<any>, tokens: number, cost: number): void {
   );
 }
 
+/**
+ * Record the prompt-cache split alongside the plain token counter.
+ *
+ * `llm_tokens_total` folds cached and uncached input into one number, so a run whose
+ * prefix cache never hits is indistinguishable from one that hits on every call — the
+ * cost line moves, but nothing says why. These two counters are the only signal that
+ * prompt caching is working at all, and they are what a caching regression shows up in:
+ * a prompt edit that pushes volatile text ahead of stable text drives `cache_read` to
+ * zero while `cache_write` keeps climbing.
+ *
+ * Zero-valued counters are still emitted (when the provider reported the field at all)
+ * so "cache is off" and "provider does not report caching" stay distinguishable: the
+ * first shows the counter at 0, the second omits it.
+ */
+function recordCacheTokens(parsed: Partial<TokenUsage>, labels: Record<string, string>): void {
+  if (typeof parsed.cacheRead === 'number') {
+    metrics.increment('llm_cache_read_tokens_total', parsed.cacheRead, labels);
+  }
+  if (typeof parsed.cacheWrite === 'number') {
+    metrics.increment('llm_cache_write_tokens_total', parsed.cacheWrite, labels);
+  }
+}
+
 /** Structural subset of the run observer — just the token sinks. Kept structural (rather
  *  than importing ResearchObserver from core/) so this foundation-layer helper does not
  *  depend on an upper layer; the full ResearchObserver satisfies it. */
@@ -83,13 +106,14 @@ export function recordLlmUsage(
   opts: RecordUsageOptions
 ): { tokens: number; cost: number } {
   if (!rawUsage) return { tokens: 0, cost: 0 };
-  const { tokens, cost } = extractUsage(model, rawUsage);
+  const { tokens, cost, parsed } = extractUsage(model, rawUsage);
   warnIfUnpriced(model, tokens, cost);
   if (tokens > 0 || cost > 0) {
     const labels: Record<string, string> = { component: opts.component };
     if (opts.complexity !== undefined) labels['complexity'] = String(opts.complexity);
     metrics.increment('llm_tokens_total', tokens, labels);
     metrics.increment('llm_cost_total', cost, labels);
+    recordCacheTokens(parsed, labels);
     opts.observer?.onTokensConsumed?.(tokens, cost);
     // Phase-scoped events: coordinator/evaluator call sites label their usage
     // 'coordinator'/'evaluator' (see planning-service.ts); route those to the

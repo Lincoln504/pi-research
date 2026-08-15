@@ -22,6 +22,13 @@ import { logger } from '../../logger.ts';
  *   thinking block only consumes the output-token budget (often truncating before the
  *   text block is emitted) for at most a marginal quality gain that does not justify the cost.
  *
+ * Callers should also pass the research `sessionId` in `options`. pi-ai forwards it as the
+ * provider's prompt-cache / session-affinity key — OpenAI's `prompt_cache_key`, OpenRouter's
+ * `x-session-id` — which keeps a run's calls on the replica that warmed their cache. Without
+ * it OpenRouter falls back to hashing the first system and user messages, which every round
+ * of a research run mutates, so it re-routes and re-warms. Providers that do not implement
+ * session affinity ignore the field, so passing it is unconditionally safe.
+ *
  * @param model - The model being called
  * @param options - Caller-provided options (an explicit `reasoning` here wins)
  * @param defaultCap - Default maxTokens cap (clamped to model.maxTokens)

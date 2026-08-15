@@ -109,10 +109,23 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
           if (usage && typeof usage.tokens === 'number') return usage.tokens;
         }
         
-        // Fallback to cumulative session usage
+        // Fallback to cumulative session usage. Cache-read and cache-write tokens are
+        // part of the prompt and occupy the context window exactly like uncached input;
+        // the providers simply bill them differently. pi-ai reports them as SEPARATE
+        // fields with `input` already net of both (openai-completions computes
+        // `input = prompt_tokens - cacheRead - cacheWrite`), so summing input+output
+        // alone under-reports the real context by the entire cached prefix. On a
+        // provider where caching works that is most of the prompt, which would leave
+        // the tool layer's context gate (it divides this by contextWindowSize) reading
+        // near-empty on a session that is nearly full.
         if (typeof (sessionRef.session as any).getUsage === 'function') {
           const usage = (sessionRef.session as any).getUsage();
-          return (usage.input || 0) + (usage.output || 0);
+          return (
+            (usage.input || 0) +
+            (usage.output || 0) +
+            (usage.cacheRead || 0) +
+            (usage.cacheWrite || 0)
+          );
         }
         
         return 0;

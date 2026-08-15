@@ -314,7 +314,8 @@ export class PlanningService implements IPlanningService {
             }, buildSafeOptions(model, {
               apiKey: authResult.apiKey || '',
               headers: authResult.headers,
-              signal
+              signal,
+              sessionId,
             }, config.PLANNING_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
             llmTimeout, 'coordinator-generatePlan',
           );
@@ -350,6 +351,7 @@ export class PlanningService implements IPlanningService {
                 context: `Research planning for: ${query}`,
                 serviceName: 'PlanningService',
                 signal,
+                sessionId,
                 maxTokens: config.PLANNING_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
                 onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'coordinator', complexity, observer }),
@@ -464,18 +466,30 @@ export class PlanningService implements IPlanningService {
       ? `\n## Previously Executed Queries\n${previousQueries.map(q => `- ${q}`).join('\n')}\n`
       : '';
 
+    // The evaluator system prompt is deliberately ROUND-INVARIANT: it interpolates only
+    // values that are fixed for the whole run (complexity, team size, query budget, the
+    // disabled-tool list). Everything that changes between rounds — root query, round
+    // number, agenda, executed queries, steering, round-phase guidance — is appended to
+    // the END of the user message instead (see runContext below).
+    //
+    // The reason is prompt caching. Every provider caches on an exact prefix of the
+    // serialized request, and the system prompt is the front of that prefix: a single
+    // round-varying byte in it invalidates the entire request, including the findings
+    // blob, which on a multi-round run is by far the largest thing we send. Anthropic-
+    // style caching makes this sharper still — pi-ai places one cache_control breakpoint
+    // at the end of the system prompt, so a system prompt that changes each round means
+    // that breakpoint is written and never read (paying the 1.25x write multiplier for
+    // nothing), and because invalidation is hierarchical (tools -> system -> messages)
+    // the message-level breakpoint cannot hit either.
+    //
+    // Keeping it invariant means round 2+ re-reads one cache entry that is also shared
+    // by every other run at the same complexity, and lets the findings prefix below do
+    // the same. Measured with llm_cache_read_tokens_total (see utils/llm-usage.ts).
     const systemPrompt = injectCurrentDate(promptTemplate, 'evaluator');
     const populatedPrompt = this.populatePrompt(systemPrompt, {
-      root_query: query,
-      round_number: round,
-      max_rounds: maxRounds,
       complexity_label: complexity === 1 ? 'Level 1 (Normal)' : complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)',
-      initial_agenda_section: initialAgendaSection,
-      previous_queries_section: previousQueriesSection,
-      additional_considerations: steeringSection,
       disabled_tools_section: disabledToolsSection,
       complexity_guidance: complexityGuidance,
-      round_phase_guidance: roundPhaseGuidance,
       max_team_size: maxTeamSize,
       query_budget: queryBudget,
       youtube_query_every_n: config.YOUTUBE_QUERY_EVERY_N,
@@ -492,16 +506,41 @@ export class PlanningService implements IPlanningService {
       ? 'GLOBAL SOURCE LIST (use these exact [N] numbers for every inline citation):\n' +
         globalCitations
           .map((c) => `[${c.id}] ${c.url}${c.source ? ` [Source: ${c.source}]` : ''}${c.description ? ` — ${c.description}` : ''}`)
-          .join('\n') +
-        '\n\n---\n\n'
+          .join('\n')
       : '';
-    const findings = globalSourceList + Array.from(normalizedReports.entries())
+    const findings = Array.from(normalizedReports.entries())
         .map(([id, report]) => `### Researcher ${id}\n${report}`)
         .join('\n\n');
 
-    const userMessage = mustSynthesize 
-        ? `Research budget exhausted. Synthesize final report now based on findings:\n\n${findings}`
-        : `Evaluate the following findings and decide next steps (delegate more researchers or synthesize final report):\n\n${findings}`;
+    // Run-varying context, appended AFTER the findings. `reports` is cumulative and
+    // iterated in insertion order, and normalizeCitations assigns global ids by first
+    // appearance in that same order, so a report written in round 1 is byte-identical
+    // in the round-2 and round-3 messages — the findings block is a genuine stable
+    // prefix that later rounds re-read from cache instead of re-paying for. Anything
+    // placed before it would destroy that: the global source list used to sit at the
+    // front and grew by a line per new URL, which moved every byte after it and made
+    // the whole message uncacheable from the first round onward.
+    const runContext = [
+      `## RUN CONTEXT`,
+      `- **ROOT QUERY**: ${query}`,
+      `- **Current round**: ${round} / ${maxRounds}`,
+      initialAgendaSection.trim(),
+      previousQueriesSection.trim(),
+      roundPhaseGuidance.trim(),
+      steeringSection.trim(),
+    ].filter(Boolean).join('\n\n');
+
+    const directive = mustSynthesize
+        ? `Research budget exhausted. Synthesize the final report now, based on the findings above.`
+        : `Evaluate the findings above and decide next steps (delegate more researchers or synthesize the final report).`;
+
+    const userMessage = [
+      'Findings from the research team follow.',
+      findings,
+      globalSourceList,
+      runContext,
+      directive,
+    ].filter(Boolean).join('\n\n---\n\n');
 
     try {
       const authResult = await safeGetApiKeyAndHeaders(modelRegistry, model);
@@ -529,7 +568,8 @@ export class PlanningService implements IPlanningService {
             }, buildSafeOptions(model, {
               apiKey: authResult.apiKey || '',
               headers: authResult.headers,
-              signal
+              signal,
+              sessionId,
             }, config.SYNTHESIS_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
             llmTimeout, 'evaluator-updatePlanForRound',
           );
@@ -565,6 +605,7 @@ export class PlanningService implements IPlanningService {
                 context: `Research evaluation for: ${query} (Round ${round})`,
                 serviceName: 'PlanningService',
                 signal,
+                sessionId,
                 maxTokens: config.SYNTHESIS_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
                 onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'evaluator', complexity, observer }),

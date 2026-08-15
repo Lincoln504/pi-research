@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+An investigation into prompt caching: how pi and each provider implement it, whether
+pi-research's own prompts are shaped so it can work, and what it was actually doing.
+Instrumented first, then fixed against the measurements.
+
+### Added
+
+- **Prompt-cache accounting.** `llm_cache_read_tokens_total` and `llm_cache_write_tokens_total` are now recorded next to `llm_tokens_total`, per component, wherever a billed call is booked. `llm_tokens_total` folds cached and uncached input into one figure, so a run whose cache never hit was indistinguishable from one that hit on every call — the cost moved, but nothing said why, and no prompt change could be evaluated. Zero is still emitted when the provider reported the field, so "caching is off" and "provider does not report caching" stay distinguishable. Measured on a live depth-1 run through OpenRouter: researchers drew 12,960 cache-read tokens of 26,900 total, while the coordinator drew 96 — which is what exposed the next item.
+- **A prompt-caching section in [CONFIGURATION.md](CONFIGURATION.md)**, covering which provider APIs pi marks up automatically, the case it does not detect (a provider that needs explicit `cache_control` reached over an OpenAI-compatible endpoint — Qwen through OpenRouter, or any gateway fronting Claude — which caches nothing at all, silently and with no error), the `compat` block that fixes it, and how to verify the result from the counters above.
+
+### Changed
+
+- **The evaluator's request is now laid out so a prompt cache can hold it.** Providers cache on an exact prefix, and the evaluator was arranging its request so that essentially none of it qualified: the system prompt opened with the root query, round number, agenda, executed-query history and round-phase guidance, so a single round-varying byte sat near the front of every request and invalidated everything behind it — including the findings blob, which on a multi-round run is by far the largest thing sent. The global source list made it worse: it was prepended to the findings and grew by a line per new URL, moving every byte after it. The system prompt now interpolates only run-fixed values (complexity, team size, query budget, disabled tools) and is byte-identical across rounds; the run-varying context moves to a `RUN CONTEXT` block after the findings, and the source list sits between them. Because reports accumulate in insertion order and citations are numbered by first appearance, a report written in round 1 is byte-identical in the round-2 and round-3 messages — so later rounds re-read it instead of re-paying for it. On Anthropic-style caching the old layout was worse than a miss: pi-ai places one breakpoint at the end of the system prompt, so a system prompt that changed each round paid the 1.25x write multiplier for an entry that could never be read, and because invalidation runs tools → system → messages, the message-level breakpoint could not hit either. Two mutation-verified tests hold the layout in place.
+- **The coordinator, evaluator and their JSON-repair passes now send the research session id** as the provider's prompt-cache / session-affinity key. pi-ai forwards it as OpenAI's `prompt_cache_key` and OpenRouter's `x-session-id`; without it OpenRouter falls back to hashing the first system and user messages, which every round of a research run mutates, so it re-routes between rounds and re-warms from cold. Providers that do not implement session affinity ignore the field.
+
+### Fixed
+
+- **A researcher's context-usage fallback under-reported the context by the entire cached prefix.** When a session exposes no `getContextUsage()`, the fallback summed `input + output` from cumulative session usage. pi-ai reports cache-read and cache-write tokens as separate fields with `input` already net of both, but those tokens are part of the prompt and occupy the context window exactly like uncached input — the provider merely bills them differently. On a provider where caching works that is most of the prompt (48% of researcher tokens in the measured run), so the tool layer's context gate, which divides this figure by the context window, read near-empty on a session that was nearly full.
+
+### Changed (metadata)
+
+- **The npm description now matches the repository's About text** — "Web research for your agents with smart and safe tooling + knowledge store". The two had been left deliberately divergent; unifying them also fixes what pi.dev displays, since the gallery renders the npm description. Takes effect on the next publish. The npm `keywords` list is unchanged and already correct.
+
 ## [1.3.12] - 2026-08-15
 
 A six-way independent audit of the whole tree (core/orchestration/LLM,

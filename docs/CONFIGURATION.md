@@ -239,6 +239,72 @@ just export the variable for that process.
 > `/research-config` TUI (which writes it), export variables in your shell, or use a
 > loader such as direnv. `.env.example` is a reference, not an active config file.
 
+### Prompt caching
+
+A research run re-sends a large, mostly-unchanged prompt many times: a researcher
+re-sends its whole conversation (including every scraped page) on each tool turn, and
+the evaluator re-sends the accumulated findings on each round. Every provider will
+serve that repetition from a prompt cache at a fraction of the input price — but only
+for an **exact prefix** of the request, and only if nothing that varies sits in front
+of it.
+
+What pi-research does about it. The coordinator, evaluator and researcher prompts are
+laid out stable-part-first: the evaluator's system prompt interpolates only values that
+are fixed for the whole run (complexity, team size, query budget, disabled tools), and
+everything that changes between rounds — root query, round number, agenda, executed
+queries, steering, round-phase guidance — is appended after the findings as a `RUN
+CONTEXT` block. That is what makes round 2 and round 3 re-read round 1's findings from
+cache instead of paying for them again. Two unit tests hold the layout in place; if you
+edit `src/prompts/system-lead-evaluator.md`, keep run-varying text out of it.
+
+What your provider does about it depends on which API pi talks to, and pi decides that
+from the provider's `api` field in `~/.pi/agent/models.json`:
+
+| Provider API | Behaviour |
+|--------------|-----------|
+| `anthropic-messages` | pi inserts `cache_control` breakpoints automatically — on the system prompt, the last tool definition, and the last user/assistant/tool-result block. Nothing to configure. |
+| `openai-completions` / `openai-responses` | pi sends **no** markers and relies on the provider caching repeated prefixes by itself. That is correct for OpenAI, DeepSeek, Gemini and GLM, which all cache implicitly. |
+
+The gap is providers that need explicit markers but are reached over an OpenAI-compatible
+endpoint. pi auto-detects only one such case — OpenRouter routing to an `anthropic/*`
+model. Anything else in that category (Qwen through OpenRouter, or any gateway fronting
+Claude) caches **nothing at all**, silently and with no error. Fix it per provider with
+a `compat` block:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "api": "openai-completions",
+      "compat": {
+        "cacheControlFormat": "anthropic",
+        "sessionAffinityFormat": "openrouter",
+        "sendSessionAffinityHeaders": true
+      }
+    }
+  }
+}
+```
+
+`cacheControlFormat: "anthropic"` forces the markers on. It is safe to set for a whole
+provider: models that do not use markers ignore the extra field. The two session-affinity
+keys ask OpenRouter to keep a conversation on the replica that warmed its cache; without
+them OpenRouter falls back to hashing the first messages, which an agentic loop mutates.
+
+`PI_CACHE_RETENTION=long` (a pi variable, not a pi-research one) requests 1-hour
+retention where the provider supports it. It raises the cache-write multiplier from
+1.25x to 2x, so it pays off only when a run's gaps between calls exceed the default
+5-minute window.
+
+Verifying it works. Set `PI_RESEARCH_DEBUG=true` and read the run log: every LLM call
+records `llm_cache_read_tokens_total` and `llm_cache_write_tokens_total` alongside
+`llm_tokens_total`, labelled by component (`coordinator` / `evaluator` / `researcher`).
+Cache reads that stay at zero on a multi-turn researcher mean the prefix is not being
+matched — usually a provider with a minimum cacheable prefix (commonly 1024–4096 tokens)
+that short prompts never reach, or an explicit-marker provider missing the `compat` block
+above. A counter that is absent rather than zero means the provider does not report
+caching at all.
+
 ### Where files live
 
 All pi-research state lives under its own namespace, `~/.pi/research/`:
