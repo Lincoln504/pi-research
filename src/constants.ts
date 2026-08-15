@@ -185,22 +185,17 @@ export const DEFAULT_EXCLUDED_TOOLS: readonly string[] = ['grep'];
 /**
  * Resolve the effective researcher exclusion list.
  *
- * An EMPTY array is "no preference", not "exclude nothing". The two front-ends
- * express no-preference differently — the pi extension always builds an array
- * (`[...new Set([...])]`, often empty) while the CLI omits the key entirely — so a
- * plain truthiness test made the same user input mean opposite things: grep was
- * available in the extension and excluded on the CLI, regardless of depth.
- *
- * `configDisabled` (PI_RESEARCH_DISABLED_TOOLS) is strictly ADDITIVE. Folding it in
- * as a replacement meant disabling any unrelated tool silently ENABLED grep, so a
- * subtract-only setting could grant a capability.
+ * EVERY input is strictly ADDITIVE on top of DEFAULT_EXCLUDED_TOOLS. Both
+ * subtract-only surfaces — `--exclude-tools` / `excludeTools` and
+ * PI_RESEARCH_DISABLED_TOOLS (`configDisabled`) — are documented as "disable
+ * tools", so neither may GRANT a capability as a side effect. Each has held the
+ * replacement semantics at some point, with the same consequence both times:
+ * excluding any unrelated tool silently enabled local-filesystem grep for web
+ * researchers.
  */
 export function resolveExcludedTools(
   callerExclusions: readonly string[] | undefined,
   configDisabled: readonly string[] = [],
 ): string[] {
-  const base = callerExclusions && callerExclusions.length > 0
-    ? callerExclusions
-    : DEFAULT_EXCLUDED_TOOLS;
-  return [...new Set([...base, ...configDisabled])];
+  return [...new Set([...DEFAULT_EXCLUDED_TOOLS, ...(callerExclusions ?? []), ...configDisabled])];
 }

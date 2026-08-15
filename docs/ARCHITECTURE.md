@@ -115,12 +115,14 @@ agent to invoke:
 In deep research `search` is excluded — the coordinator runs the search burst and hands
 out URLs directly.
 
-`grep` is excluded by default at **every** depth and on every front-end (CLI, SDK, agent
-skill, pi extension): this is web research, and a capable model otherwise spends turns
-searching the local filesystem. Passing an explicit `excludeTools` list — `--exclude-tools`
-on the CLI, the `excludeTools` tool parameter in the extension — REPLACES that default, so
-naming other tools re-enables `grep`. `PI_RESEARCH_DISABLED_TOOLS` is separate and strictly
-additive: it can only ever remove capabilities (see [CONFIGURATION.md](CONFIGURATION.md)).
+`grep` is excluded at **every** depth and on every front-end (CLI, SDK, agent skill,
+pi extension): this is web research, and a capable model otherwise spends turns
+searching the local filesystem. Both exclusion surfaces — the `excludeTools` list
+(`--exclude-tools` on the CLI, the `excludeTools` tool parameter in the extension) and
+`PI_RESEARCH_DISABLED_TOOLS` — are strictly additive on top of that default: they can
+only ever remove capabilities (see [CONFIGURATION.md](CONFIGURATION.md)). Before 1.3.10
+a non-empty `excludeTools` list replaced the default, so naming any other tool silently
+re-enabled `grep`.
 
 Researchers cannot write files, run shell commands, or reach the network outside these
 tools.

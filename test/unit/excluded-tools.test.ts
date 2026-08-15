@@ -6,11 +6,14 @@ describe('resolveExcludedTools', () => {
     expect(resolveExcludedTools(undefined)).toEqual([...DEFAULT_EXCLUDED_TOOLS]);
     expect(resolveExcludedTools([])).toEqual([...DEFAULT_EXCLUDED_TOOLS]);
   });
-  it('lets an explicit caller list replace the default', () => {
-    expect(resolveExcludedTools(['stackexchange'])).toEqual(['stackexchange']);
+  it('keeps the caller list (--exclude-tools) strictly additive', () => {
+    // The regression: `--exclude-tools stackexchange` used to REPLACE the default
+    // exclusions, silently granting researchers local-filesystem grep.
+    expect(resolveExcludedTools(['stackexchange'])).toContain('grep');
+    expect(resolveExcludedTools(['stackexchange'])).toContain('stackexchange');
   });
   it('keeps PI_RESEARCH_DISABLED_TOOLS strictly additive', () => {
-    // The regression: disabling an unrelated tool used to ENABLE grep.
+    // Same bug class on the config surface: disabling an unrelated tool used to ENABLE grep.
     expect(resolveExcludedTools(undefined, ['stackexchange'])).toContain('grep');
     expect(resolveExcludedTools(undefined, ['stackexchange'])).toContain('stackexchange');
   });
