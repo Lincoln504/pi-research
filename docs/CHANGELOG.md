@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.10] - 2026-08-14
+
+The post-release verification round for 1.3.9 kept digging and found that the
+fetch scrape path — the fast primary transport in front of the stealth browser —
+had been dead in production on every supported Node version, hidden completely by
+the browser fallback. Three more researcher-session defects surfaced from the same
+investigation, two of them demonstrated live against a real provider. Every fix
+carries a regression test verified to fail against the pre-fix code, and the fetch
+fix carries the first test of that layer that uses a real socket instead of a
+mocked `fetch`.
+
+### Fixed
+
+- **Every fetch scrape failed instantly; the whole path silently ran on the browser fallback.** `getSsrfSafeDispatcher()` built an `Agent` from the undici 8.x this package depends on and handed it to Node's **global** `fetch()` — which is backed by the undici compiled *into* the runtime (6.x on Node 22, 7.x on Node 25). Cross-major dispatchers are rejected outright (`UND_ERR_INVALID_ARG: invalid onRequestStart method`), so every fetch attempt threw before a single packet left the machine, burned one retry, and fell back to the stealth browser: ~3.4 s per page against the ~0.9 s the fetch path delivers, the browser pool saturated with work it never needed — and the connect-time SSRF DNS pin, the entire reason the dispatcher exists, never engaged once (request-time validation still applied throughout, so this was defence-in-depth loss, not an open hole). Nothing caught it because every test of the layer stubs the global `fetch`, and the fallback kept scrapes succeeding. The replacement, `getSsrfSafeFetcher()`, returns the Agent *paired with undici's own `fetch`*, making the invalid combination unrepresentable, and a new test drives the real fetch path against a real loopback socket with the browser layer disabled — it fails against the pre-fix code with the exact production error. Measured on live runs: 0 fetch / 5 browser successes before, 4 fetch / 0 browser after.
+- **Researchers sent the model's full ~230k catalog ceiling as `max_tokens` — and OpenRouter 402'd every call on a low balance.** The researcher session inherited the model's catalog `maxTokens` as its per-request output cap. Providers that budget-check `max_tokens` up front rejected the call before running it: observed live as `402: You requested up to 231037 tokens, but can only afford 24467` on every researcher, failing entire runs whose real cost was cents. Researcher output per call — tool calls plus a cited report — is nowhere near that. New `PI_RESEARCH_RESEARCHER_MAX_TOKENS` knob (default 16384, range 1024–131072), clamped to the model's real ceiling, applied in the shared session factory so deep and quick sub-agents are both covered.
+- **`--exclude-tools` silently granted researchers local-filesystem `grep`.** A non-empty exclusion list *replaced* the default exclusions instead of adding to them, so `--exclude-tools stackexchange` enabled a capability as a side effect of a flag documented as "disable internal tools". The same defect was fixed for `PI_RESEARCH_DISABLED_TOOLS` in 1.3.0 with the rationale "a subtract-only setting must never grant a capability"; the caller-facing surface kept the replacement semantics until now. Both surfaces are strictly additive over the default exclusions. (Behavioral change: there is no longer any way to hand researchers `grep`, which ARCHITECTURE.md previously documented as a quirk of the replacement rule.)
+- **A misconfigured $0 price table was silent on depth-0 runs.** Both researcher `message_end` accounting sites hand-copied the extract→increment→emit block instead of calling `recordLlmUsage`, so `warnIfUnpriced` — added in 1.1.2 precisely because a hand-written `models.json` entry silently discards pi's pricing — never ran for researcher usage. Depth-1+ runs still warned via the coordinator; depth-0 runs have no coordinator and reported `$0.0000` with no diagnostic at all. Metrics labels and observer events are byte-identical; the deep path keeps its `safeObserve` isolation.
+
+### Verified
+
+- Full suites green after the changes: 191 unit files / 2457 tests, integration 53+8 skipped and 103, lint, both type-checks, dependency rules.
+- Live production runs on OpenRouter at depths 0, 1, and 2: reports with citations, fetch-path scrapes at ~0.6–1.5 s/page with zero browser fallbacks and zero undici errors, non-zero cost accounting, knowledge store round-trip (same-day scrapes retrieved and grounded).
+- The stderr FD-2 capture deliberately still skips pipes/sockets: when a parent process is reading stderr (pi host, MCP, CI), stealing FD 2 would hide fatal diagnostics to suppress cosmetic Dawn noise. Reviewed and kept as designed.
+
 ## [1.3.9] - 2026-08-14
 
 A whole-tree audit sweep. Six defects, each found by looking at what the code
