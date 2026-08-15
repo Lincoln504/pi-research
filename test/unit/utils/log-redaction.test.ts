@@ -161,18 +161,39 @@ describe('redactSecrets', () => {
     expect(performance.now() - start).toBeLessThan(500);
   });
 
-  it('stays fast on a dense run of JWT prefixes (segment backtracking)', () => {
-    // Same quadratic shape as the URL case above, on the sibling pattern that
-    // the original fix did not reach. JWT segments exclude `.`, so an unbounded
+  it('scales LINEARLY, not quadratically, on a dense run of JWT prefixes', () => {
+    // Same quadratic shape as the URL case above, on the sibling pattern the
+    // original fix did not reach. JWT segments exclude `.`, so an unbounded
     // `[A-Za-z0-9_-]+` consumes to the end of a dotless base64url run and then
     // backtracks one character at a time — and because `_` counts as a non-
     // alphanumeric left boundary, the same run offers a fresh start position
-    // every few characters. Measured 393ms pre-fix, 41ms after, on identical
-    // input. Threshold loose enough for a slow CI runner, ~2x below pre-fix.
-    const hostile = '_eyJ'.repeat(10_512); // ~42_000 chars, fills the scan window
-    const start = performance.now();
-    redactSecrets(hostile);
-    expect(performance.now() - start).toBeLessThan(200);
+    // every few characters. Measured 393ms per log message pre-fix, 41ms after.
+    //
+    // Asserted as a SCALING RATIO rather than a wall-clock budget, deliberately.
+    // An absolute threshold cannot separate the two here: this suite runs 193
+    // files in parallel, which inflated a 41ms pass to 288ms, while the pre-fix
+    // cost on an idle machine is ~393ms — the ranges overlap, so any fixed
+    // number either flakes under load or stops catching the regression. Doubling
+    // the input is immune to that: both measurements inflate together, so the
+    // ratio holds. Bounded segments make the work linear in the number of start
+    // positions (~2x), an unbounded quantifier makes it quadratic (~4x).
+    // Measured: 1.87x fixed vs 4.01x unbounded on the raw pattern, 2.06x fixed
+    // through redactSecrets. 3.0 sits between them with margin on both sides.
+    const dense = (chars: number) => '_eyJ'.repeat(chars / 4);
+    const small = dense(8_000);
+    const big = dense(16_000);   // both under REDACT_SCAN_LENGTH, so neither is truncated
+    const time = (s: string) => {
+      const t0 = performance.now();
+      redactSecrets(s);
+      return performance.now() - t0;
+    };
+    // Median of several passes: one scheduling hiccup must not decide the result.
+    const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
+    const smallMs: number[] = [];
+    const bigMs: number[] = [];
+    for (let i = 0; i < 7; i++) { smallMs.push(time(small)); bigMs.push(time(big)); }
+    const ratio = median(bigMs) / Math.max(median(smallMs), 0.001);
+    expect(ratio, `doubling the input multiplied the cost by ${ratio.toFixed(2)}x`).toBeLessThan(3);
   });
 
   it('still masks JWTs of every realistic segment size after the bound', () => {
