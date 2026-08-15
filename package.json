@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "description": "Free unlimited web search and deep research for the Pi coding agent. Local knowledge store. Also works from Claude Code, Codex, and OpenClaw.",
   "type": "module",
   "private": false,
