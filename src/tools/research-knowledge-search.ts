@@ -115,6 +115,17 @@ export function formatQueriesBlock(queries: string[]): string {
 const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
 
 /**
+ * How many knowledge searches are currently showing the widget.
+ *
+ * The widget ID is a single global slot and `setWidget` replaces rather than
+ * stacks, but this tool is `executionMode: 'parallel'` and can also be driven
+ * concurrently by the `/knowledge-store` slash command. Without a refcount the
+ * first call to finish tears the widget down while a sibling is still running,
+ * leaving an in-flight search with no indicator. Only the last one out removes it.
+ */
+let knowledgeWidgetRefCount = 0;
+
+/**
  * System string returned when the answer is NOT found in the research
  * knowledge store. The exact phrasing is critical — the main pi agent
  * reads this as a signal to pivot to live web research.
@@ -140,6 +151,7 @@ export const RESEARCH_KNOWLEDGE_MAYBE_STRING =
  */
 function showKnowledgeSearchWidget(ctx: ExtensionContext): void {
   if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+  knowledgeWidgetRefCount++;
   try {
     const panelFactory = createKnowledgeSearchPanel();
     ctx.ui.setWidget(KNOWLEDGE_WIDGET_ID, panelFactory as any, { placement: 'aboveEditor' });
@@ -149,10 +161,15 @@ function showKnowledgeSearchWidget(ctx: ExtensionContext): void {
 }
 
 /**
- * Remove the knowledge search TUI widget.
+ * Remove the knowledge search TUI widget once the last concurrent search is done.
  */
 function hideKnowledgeSearchWidget(ctx: ExtensionContext): void {
   if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+  // show() incremented under the identical guard, so the counter stays balanced.
+  // Clamp anyway: a stray hide must never drive it negative and wedge the
+  // widget on-screen for the rest of the session.
+  knowledgeWidgetRefCount = Math.max(0, knowledgeWidgetRefCount - 1);
+  if (knowledgeWidgetRefCount > 0) return;
   try {
     ctx.ui.setWidget(KNOWLEDGE_WIDGET_ID, undefined as any, { placement: 'aboveEditor' });
   } catch (err) {

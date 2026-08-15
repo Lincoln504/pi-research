@@ -133,7 +133,22 @@ const KNOWN_TOKEN_PATTERN = new RegExp(
   'g',
 );
 // JSON Web Tokens — header.payload.signature, each a base64url segment.
-const JWT_PATTERN = new RegExp(`${B_LEFT}eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`, 'g');
+//
+// The segment lengths are bounded for the same load-bearing reason the URL
+// scheme above is, and this pattern was missed when that one was fixed. `.` is
+// NOT in the segment class, so on a run of base64url characters containing no
+// dot, `[A-Za-z0-9_-]+` consumes to the end of the run and then backtracks one
+// character at a time looking for one — and `_`/`-` count as non-alphanumeric,
+// so B_LEFT admits a fresh start position every few characters inside that same
+// run. `_eyJ` repeated across the 40_000-character scan window measured 393ms of
+// blocked event loop per log message; bounding the segments brings the identical
+// input to 41ms (~10x) with no loss of coverage. The bounds are far above any
+// real token: a 1024-char header covers even an x5c certificate chain, and 8192
+// covers payloads no bearer credential approaches.
+const JWT_PATTERN = new RegExp(
+  `${B_LEFT}eyJ[A-Za-z0-9_-]{1,1024}\\.[A-Za-z0-9_-]{1,8192}\\.[A-Za-z0-9_-]{1,4096}`,
+  'g',
+);
 // HTTP Basic credentials: "Basic <base64>".
 const BASIC_AUTH_PATTERN = new RegExp(`${B_LEFT}Basic\\s+[A-Za-z0-9+/]{16,}={0,2}`, 'gi');
 // HTTP Bearer credentials: "Bearer <token>". The token is often opaque — many

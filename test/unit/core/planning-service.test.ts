@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PlanningService, isRetriableLlmError, salvageReportText } from '../../../src/core/planning-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 
@@ -736,6 +739,73 @@ describe('PlanningService', () => {
     it('preserves genuine prose (a model that answered in text instead of JSON)', () => {
       const prose = 'This is a legitimate research report written as prose, well over the fifty character floor.';
       expect(salvageReportText(prose)).toBe(prose);
+    });
+  });
+
+  /**
+   * The REAL prompt files, rendered through the real substitution path.
+   *
+   * Every other test in this file feeds loadPrompt a short stub, so a
+   * `{{placeholder}}` added to src/prompts/*.md and never wired into the
+   * populatePrompt() call map is invisible: nothing throws, and the literal
+   * braces are simply sent to the model as instructions it cannot act on. Only
+   * one such placeholder was covered before, by name. Reading the shipped files
+   * means the assertion cannot drift from what actually ships.
+   */
+  describe('shipped prompt templates render with no placeholder left behind', () => {
+    const PROMPT_DIR = path.join(
+      path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts',
+    );
+    const readPrompt = (name: string) => readFileSync(path.join(PROMPT_DIR, name), 'utf-8');
+    const PLACEHOLDER = /\{\{[a-z_0-9]+\}\}/gi;
+
+    let svc: PlanningService;
+    beforeEach(async () => {
+      svc = new PlanningService();
+      await svc.initialize();
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
+    });
+
+    it('system-coordinator.md leaves none', async () => {
+      const real = readPrompt('system-coordinator.md');
+      expect(real.match(PLACEHOLDER)?.length ?? 0).toBeGreaterThan(0); // the file really is a template
+      vi.mocked(loadPrompt).mockReturnValue(real);
+
+      await svc.generatePlan({
+        sessionId: 'test-session',
+        query: 'test query',
+        complexity: 1 as const,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+      } as any);
+
+      const ctx = vi.mocked(completeSimple).mock.calls.at(-1)![1] as { systemPrompt: string };
+      expect(ctx.systemPrompt.match(PLACEHOLDER) ?? []).toEqual([]);
+    });
+
+    it('system-lead-evaluator.md leaves none, at every complexity level', async () => {
+      const real = readPrompt('system-lead-evaluator.md');
+      expect(real.match(PLACEHOLDER)?.length ?? 0).toBeGreaterThan(0);
+      vi.mocked(loadPrompt).mockReturnValue(real);
+
+      // The evaluator template branches on complexity (guidance, round phase and
+      // team/query budgets differ), so one level passing proves little.
+      for (const complexity of [1, 2, 3] as const) {
+        await svc.updatePlanForRound({
+          sessionId: 'test-session',
+          reports: new Map([['1.1', 'Report text about the topic.']]),
+          round: 1,
+          query: 'test query',
+          complexity,
+          model: STUB_MODEL,
+          modelRegistry: MOCK_MODEL_REGISTRY,
+          cwd: '/test/cwd',
+        } as any);
+
+        const ctx = vi.mocked(completeSimple).mock.calls.at(-1)![1] as { systemPrompt: string };
+        expect(ctx.systemPrompt.match(PLACEHOLDER) ?? [], `complexity ${complexity}`).toEqual([]);
+      }
     });
   });
 });

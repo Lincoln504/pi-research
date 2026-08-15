@@ -32,14 +32,32 @@ function getWindowsCamoufoxDir(): string {
 }
 
 /**
+ * The custom camoufox location, if the user set one.
+ *
+ * CAMOUFOX_INSTALL_DIR takes precedence because it is camoufox-js's OWN
+ * variable and the only one that actually moves the install: camoufox-js
+ * ≥0.12.0 resolves INSTALL_DIR from it, and every earlier version hardcoded
+ * `userCacheDir("camoufox")` with no override at all. PLAYWRIGHT_BROWSERS_PATH
+ * is kept as a documented alias, but on its own it only ever moved where we
+ * LOOK — camoufox went on installing to the default cache, so setting it made
+ * the browser permanently "not found" right after a successful download. Both
+ * are now exported to camoufox-js (getBrowserEnv, scripts/setup.cjs) so the
+ * install location and the lookup location cannot disagree.
+ */
+function getCustomCamoufoxDir(): string | undefined {
+    return process.env['CAMOUFOX_INSTALL_DIR'] || process.env['PLAYWRIGHT_BROWSERS_PATH'] || undefined;
+}
+
+/**
  * Get the camoufox binary cache directory.
- * Uses PLAYWRIGHT_BROWSERS_PATH if set, otherwise the standard user cache location
+ * Uses the custom location above if set, otherwise the standard user cache location
  * that camoufox uses by default (~/.cache/camoufox on Linux).
  * We do NOT override HOME — that trick was unreliable and caused install/runtime mismatches.
  */
 export function getBrowserCacheDir(): string {
-    if (process.env['PLAYWRIGHT_BROWSERS_PATH']) {
-        return process.env['PLAYWRIGHT_BROWSERS_PATH'];
+    const custom = getCustomCamoufoxDir();
+    if (custom) {
+        return custom;
     }
     // Mirror getCamoufoxBinaryPath() so both functions agree on the cache location
     const osPlatform = platform();
@@ -109,11 +127,17 @@ export function getBrowserProfileDir(config?: Config): string {
  */
 export function getBrowserEnv(config?: Config): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
-    const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
+    const customPath = getCustomCamoufoxDir();
     if (customPath) {
         env['PLAYWRIGHT_BROWSERS_PATH'] = customPath;
+        // The one that camoufox-js actually reads. Without it the worker's
+        // camoufox launches from the DEFAULT cache while everything on this side
+        // resolves the custom path — the install/runtime mismatch this file's
+        // header warns about, just arriving through a different door.
+        env['CAMOUFOX_INSTALL_DIR'] = customPath;
     } else {
         delete env['PLAYWRIGHT_BROWSERS_PATH'];
+        delete env['CAMOUFOX_INSTALL_DIR'];
     }
     // Tell thread-workers where to write their lifecycle/error log. Precedence:
     //   1. A user-set PI_RESEARCH_LOG_FILE (already copied from process.env above) wins —
@@ -164,7 +188,7 @@ export function ensureBrowserCacheDir(): string {
  * Matches camoufox-js's own resolution logic.
  */
 export function getCamoufoxBinaryPath(): string {
-    const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
+    const customPath = getCustomCamoufoxDir();
     if (customPath) {
         return customPath;
     }

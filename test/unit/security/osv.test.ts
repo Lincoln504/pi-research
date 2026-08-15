@@ -268,6 +268,30 @@ describe('OSV Client', () => {
       expect(result.error).toContain('string error');
       expect(result.vulnerabilities).toHaveLength(0);
     });
+
+    it('returns the newest advisories first so truncation keeps what matters', async () => {
+      // OSV lists a package's vulnerabilities in ID order — effectively
+      // alphabetical — so slicing to maxResults dropped whichever advisories
+      // happened to sort late, with recency playing no part. A 2026 critical
+      // could be discarded in favour of a 2018 one purely on GHSA id.
+      vi.mocked(fetch).mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          vulns: [
+            { id: 'GHSA-aaaa-1111-2222', published: '2018-07-26T00:00:00Z', summary: 'old' },
+            { id: 'GHSA-cccc-5555-6666', summary: 'undated' },
+            { id: 'GHSA-bbbb-3333-4444', published: '2026-04-01T00:00:00Z', summary: 'new' },
+          ],
+        }),
+      } as Response));
+
+      const result = await searchOSV(['lodash'], { ecosystem: 'npm' });
+      expect(result.vulnerabilities.map(v => v.id)).toEqual([
+        'GHSA-bbbb-3333-4444',
+        'GHSA-aaaa-1111-2222',
+        'GHSA-cccc-5555-6666',
+      ]);
+    });
   });
 
 });

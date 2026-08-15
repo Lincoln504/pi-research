@@ -136,9 +136,19 @@ async function isRegisteredLeaderAlive(container: ServiceContainer): Promise<boo
     return result;
 }
 
-/** Test seam: drop the coalesced liveness probe. */
-export function _resetLeaderLivenessProbeForTests(): void {
+/**
+ * Test seam: drop BOTH module-level globals that survive between tests — the
+ * coalesced liveness probe (1s window) and the restart cooldown (10s window).
+ *
+ * Both are far longer than a test file's runtime, so a test that reaches
+ * restartSchedulerWithHerdGuard leaves state that silently short-circuits the
+ * next one: isRegisteredLeaderAliveUncached / forceSchedulerRestart simply are
+ * not re-invoked. Today nothing observes that only because the one test that
+ * reaches this path happens to run last — ordering, not a guarantee.
+ */
+export function _resetTaskExecutionGlobalsForTests(): void {
     leaderLivenessProbe = null;
+    lastRestartTime = 0;
 }
 
 /**

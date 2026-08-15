@@ -44,7 +44,7 @@ import { runHealthCheck } from './healthcheck/index.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { scrapeSingle } from './web-research/web-scraper.ts';
 import { validateInitialLinks } from './utils/url-utils.ts';
-import { validateUrlForSSRF } from './web-research/scraper-utils.ts';
+import { validateUrlForSSRF, disposeSsrfSafeFetcher } from './web-research/scraper-utils.ts';
 import type { ScrapeResult } from './core/interfaces/scheduler-interfaces.ts';
 import { randomUUID } from 'node:crypto';
 import type { ResearchDepth } from './types/index.ts';
@@ -951,6 +951,15 @@ async function _doShutdown(): Promise<void> {
     metrics.clearSession();
   } catch (err) {
     logger.error('[SDK] Error clearing session state:', err);
+    errors.push(err instanceof Error ? err : new Error(String(err)));
+  }
+
+  // Release the module-level undici Agent's keep-alive sockets. Nothing else
+  // owns it, so a long-lived host would otherwise hold them past teardown.
+  try {
+    await disposeSsrfSafeFetcher();
+  } catch (err) {
+    logger.error('[SDK] Error disposing SSRF fetcher:', err);
     errors.push(err instanceof Error ? err : new Error(String(err)));
   }
 

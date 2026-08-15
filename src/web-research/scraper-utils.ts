@@ -277,10 +277,18 @@ export interface SsrfSafeFetcher {
   dispatcher: unknown;
 }
 
-// Cached after first construction. `undefined` = not yet attempted, `null` =
-// undici unavailable (fall back to the global fetch with request-time
-// validation only).
-let cachedSsrfFetcher: SsrfSafeFetcher | null | undefined = undefined;
+// Cached after first construction. `undefined` = not yet attempted; the promise
+// resolves to `null` when undici is unavailable (fall back to the global fetch
+// with request-time validation only).
+//
+// The PROMISE is cached, not the resolved value. Caching the value left a window
+// between the `undefined` check and the assignment — an `await import('undici')`
+// wide — during which every concurrent first caller built its OWN Agent. Only the
+// last assignment survived in the cache, so the others were handed live Agents
+// that nothing tracked: they opened keep-alive sockets and no shutdown path could
+// ever close them, which is precisely the leak disposeSsrfSafeFetcher exists to
+// prevent. Scrapes run concurrently by design, so the very first burst hit this.
+let cachedSsrfFetcher: Promise<SsrfSafeFetcher | null> | undefined = undefined;
 
 /**
  * Build (once) an undici Agent whose connector resolves via ssrfSafeLookup, so
@@ -304,19 +312,52 @@ let cachedSsrfFetcher: SsrfSafeFetcher | null | undefined = undefined;
  * Returns null if undici can't be loaded; callers then use the global fetch with
  * no dispatcher (request-time validation still applies).
  */
-export async function getSsrfSafeFetcher(): Promise<SsrfSafeFetcher | null> {
-  if (cachedSsrfFetcher !== undefined) return cachedSsrfFetcher;
-  try {
-    const { Agent, fetch: undiciFetch } = await import('undici');
-    cachedSsrfFetcher = {
-      fetch: undiciFetch as unknown as SsrfSafeFetcher['fetch'],
-      dispatcher: new Agent({ connect: { lookup: ssrfSafeLookup } }),
-    };
-  } catch (e) {
-    logger.warn(`[Scrapers] undici unavailable; connect-time SSRF pinning disabled (request-time validation still active): ${e instanceof Error ? e.message : String(e)}`);
-    cachedSsrfFetcher = null;
-  }
+export function getSsrfSafeFetcher(): Promise<SsrfSafeFetcher | null> {
+  // Assigned before the first await, so concurrent callers all join this one
+  // construction rather than each starting their own.
+  cachedSsrfFetcher ??= (async () => {
+    try {
+      const { Agent, fetch: undiciFetch } = await import('undici');
+      return {
+        fetch: undiciFetch as unknown as SsrfSafeFetcher['fetch'],
+        dispatcher: new Agent({ connect: { lookup: ssrfSafeLookup } }),
+      };
+    } catch (e) {
+      logger.warn(`[Scrapers] undici unavailable; connect-time SSRF pinning disabled (request-time validation still active): ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  })();
   return cachedSsrfFetcher;
+}
+
+/**
+ * Close the cached SSRF Agent and drop the cache.
+ *
+ * The Agent is a process-lifetime singleton holding keep-alive sockets to every
+ * host scraped so far. The CLI hard-exits so it never notices, but an embedding
+ * host (the pi extension) keeps the process alive across SDK
+ * init/shutdown cycles, where those sockets would linger past a teardown that
+ * claims to have released everything.
+ *
+ * Clearing the cache is not optional: the SDK can be re-initialized in the same
+ * process, and a closed Agent left in the cache would fail every subsequent
+ * scrape. Resetting to `undefined` (not `null`) makes the next call rebuild it.
+ */
+export async function disposeSsrfSafeFetcher(): Promise<void> {
+  const pending = cachedSsrfFetcher;
+  cachedSsrfFetcher = undefined;
+  if (pending === undefined) return;
+  // Await the in-flight construction rather than skipping it: a dispose racing
+  // the first getSsrfSafeFetcher() would otherwise leave the Agent it is still
+  // building unreferenced and unclosed.
+  const cached = await pending.catch(() => null);
+  const closable = cached?.dispatcher as { close?: () => Promise<void> } | undefined;
+  if (!closable?.close) return;
+  try {
+    await closable.close();
+  } catch (e) {
+    logger.debug(`[Scrapers] Error closing SSRF dispatcher: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /**

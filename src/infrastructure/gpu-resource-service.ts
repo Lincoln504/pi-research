@@ -27,7 +27,21 @@ export class GPUResourceService implements IGPUResourceService {
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   private processLifecycle: IProcessLifecycle | null = null;
-  private gpuLockStaleThresholdMs: number = 1000 * 60 * 5; // 5 minutes default
+  /**
+   * Backstop for a holder that is alive but wedged. Step 3 already reclaims from
+   * *dead* owners via PID+startTime liveness, so this only ever fires against a
+   * process we just proved is running — which makes it a lock STEAL, and the
+   * threshold must therefore exceed the longest legitimate hold.
+   *
+   * It previously did not: at 5 minutes it exactly equalled the default
+   * EMBEDDING_MODEL_INIT_TIMEOUT_MS (300000, schema max 600000), and the
+   * embedder holds this lock across the whole model download + pipeline load.
+   * A first-time HuggingFace fetch running near its own permitted budget would
+   * have the GPU lock taken out from under it, admitting exactly the concurrent
+   * WebGPU/Dawn init this lock exists to prevent. Keep this strictly above that
+   * schema maximum.
+   */
+  private gpuLockStaleThresholdMs: number = 1000 * 60 * 15; // 15 min > EMBEDDING_MODEL_INIT_TIMEOUT_MS max (10 min)
 
   constructor(options?: GPUResourceServiceOptions) {
     if (options) {

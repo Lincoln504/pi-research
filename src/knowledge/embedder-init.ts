@@ -295,7 +295,23 @@ export async function loadModelOnCPU(
         interOpNumThreads: 1,
       },
     });
-    return await withTimeout(pipelinePromise, initializationTimeoutMs, 'CPU fallback model load timed out');
+    // Same late-arrival disposal as loadPipelineWithTimeout: withTimeout races
+    // but cannot cancel, so on timeout the CPU load keeps running and its
+    // eventual ONNX session would leak. This path runs *after* a WebGPU
+    // failure — i.e. on a host already under memory pressure — and can be
+    // re-entered per retry, so each orphaned session compounds.
+    let timedOut = true;
+    try {
+      const p = await withTimeout(pipelinePromise, initializationTimeoutMs, 'CPU fallback model load timed out');
+      timedOut = false;
+      return p;
+    } finally {
+      if (timedOut) {
+        pipelinePromise
+          .then((late) => (late as unknown as { dispose?: () => Promise<void> }).dispose?.())
+          .catch(() => { /* load failed after the timeout — nothing to dispose */ });
+      }
+    }
   });
   
   return loadedPipeline;

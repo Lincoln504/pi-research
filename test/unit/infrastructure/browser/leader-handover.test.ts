@@ -44,7 +44,7 @@ vi.mock('../../../../src/core/service-registry.ts', () => ({
   getService: vi.fn(async () => { throw new Error('no service'); }),
 }));
 
-import { runWorkerSearch, runBrowserTask } from '../../../../src/infrastructure/browser/task-execution-service.ts';
+import { runWorkerSearch, runBrowserTask, _resetTaskExecutionGlobalsForTests } from '../../../../src/infrastructure/browser/task-execution-service.ts';
 
 const POOL_DOWN = 'Worker pool is shutting down';
 
@@ -66,6 +66,9 @@ function schedulerFailingTimes(failures: number, result: unknown) {
 describe('leader handover recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The liveness-probe cache (1s) and restart cooldown (10s) both outlive a
+    // test, so without this the suite is order-dependent.
+    _resetTaskExecutionGlobalsForTests();
     forceSchedulerRestartMock.mockResolvedValue(undefined);
   });
 

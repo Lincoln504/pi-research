@@ -553,6 +553,48 @@ describe('reportError — exit-code classification', () => {
       expect(await reportError(new Error('Invalid API key provided'), 'research', true)).toBe(143);
     });
 
+    it('reports a cancellation as cancelled, not as the component that noticed the abort', async () => {
+      // A Ctrl-C unwinding through the planner surfaces internally as
+      // "Coordinator failed: Request was aborted". The plain-text branch already
+      // refuses to say "failed" for a deliberate stop, but the --json `error`
+      // carried that raw wording — and SKILL.md instructs agents to relay these
+      // messages, so the user was told a component broke when they had simply
+      // stopped the run. The diagnostic wording must survive, under `cause`.
+      _markCancellationForTests();
+      const out: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+        out.push(String(chunk));
+        return true;
+      });
+      try {
+        await reportError(new Error('Coordinator failed: Request was aborted'), 'research', true);
+      } finally {
+        spy.mockRestore();
+      }
+      const payload = JSON.parse(out.join(''));
+      expect(payload.error).toBe('pi-research research cancelled.');
+      expect(payload.error).not.toMatch(/failed/i);
+      expect(payload.cause).toBe('Coordinator failed: Request was aborted');
+      expect(payload).toMatchObject({ ok: false, cancelled: true, exitCode: EXIT.CANCELLED });
+    });
+
+    it('leaves a NON-cancellation error message untouched (no cause field)', async () => {
+      const out: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+        out.push(String(chunk));
+        return true;
+      });
+      try {
+        await reportError(new Error('Worker pool is shutting down'), 'research', true);
+      } finally {
+        spy.mockRestore();
+      }
+      const payload = JSON.parse(out.join(''));
+      expect(payload.error).toBe('Worker pool is shutting down');
+      expect(payload.cause).toBeUndefined();
+      expect(payload.cancelled).toBeUndefined();
+    });
+
     it('never marks a cancelled capacity error retryable', async () => {
       // Ctrl-C landing in the same window a queue-wait expires: the payload must
       // not carry retryable:true alongside cancelled:true, or a consumer re-runs

@@ -10,8 +10,8 @@
  * the real value latches before the test can point it at a fixture dir.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -24,6 +24,29 @@ vi.mock('../../src/utils/host-config.ts', () => ({
 import { bridgeConfigEnv, ConfigFileError } from '../../src/cli.ts';
 
 describe('bridgeConfigEnv precedence', () => {
+  // getGlobalConfigDir() resolves through os.homedir(), which reads HOME on
+  // POSIX and USERPROFILE on Windows. Point those at a temp dir so these
+  // fixtures never touch the real home — a hard kill (OOM, CI cancel) before
+  // the per-test finally blocks would otherwise strand a directory there with
+  // nothing to sweep it up.
+  let fakeHome: string;
+  const savedHome = process.env['HOME'];
+  const savedUserProfile = process.env['USERPROFILE'];
+
+  beforeAll(() => {
+    fakeHome = mkdtempSync(path.join(os.tmpdir(), 'pi-research-bridgetest-'));
+    process.env['HOME'] = fakeHome;
+    process.env['USERPROFILE'] = fakeHome;
+  });
+
+  afterAll(() => {
+    if (savedHome === undefined) delete process.env['HOME'];
+    else process.env['HOME'] = savedHome;
+    if (savedUserProfile === undefined) delete process.env['USERPROFILE'];
+    else process.env['USERPROFILE'] = savedUserProfile;
+    rmSync(fakeHome, { recursive: true, force: true });
+  });
+
   it('cli.env overlay overrides config.env base; base still fills unshadowed keys', () => {
     const researchDir = path.join(os.homedir(), FIXTURE_DIR_NAME, 'research');
     const savedModel = process.env['PI_RESEARCH_MODEL'];

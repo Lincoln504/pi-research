@@ -161,6 +161,33 @@ describe('redactSecrets', () => {
     expect(performance.now() - start).toBeLessThan(500);
   });
 
+  it('stays fast on a dense run of JWT prefixes (segment backtracking)', () => {
+    // Same quadratic shape as the URL case above, on the sibling pattern that
+    // the original fix did not reach. JWT segments exclude `.`, so an unbounded
+    // `[A-Za-z0-9_-]+` consumes to the end of a dotless base64url run and then
+    // backtracks one character at a time — and because `_` counts as a non-
+    // alphanumeric left boundary, the same run offers a fresh start position
+    // every few characters. Measured 393ms pre-fix, 41ms after, on identical
+    // input. Threshold loose enough for a slow CI runner, ~2x below pre-fix.
+    const hostile = '_eyJ'.repeat(10_512); // ~42_000 chars, fills the scan window
+    const start = performance.now();
+    redactSecrets(hostile);
+    expect(performance.now() - start).toBeLessThan(200);
+  });
+
+  it('still masks JWTs of every realistic segment size after the bound', () => {
+    for (const jwt of [
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+      // Oversized header (an x5c certificate chain) and payload — both well
+      // inside the bounds, so bounding must not have created a blind spot.
+      `eyJ${'a'.repeat(900)}.${'b'.repeat(7000)}.${'c'.repeat(400)}`,
+    ]) {
+      const out = redactSecrets(`Authorization: Bearer ${jwt}`);
+      expect(out).not.toContain(jwt);
+      expect(out).toContain('[REDACTED]');
+    }
+  });
+
   it('still masks URL userinfo credentials after the scheme bound', () => {
     for (const [input, secret] of [
       ['https://alice:s3cr3t@example.com/path', 's3cr3t'],

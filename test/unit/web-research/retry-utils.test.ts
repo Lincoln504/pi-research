@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { 
   isTransientError, 
   retryWithBackoff, 
@@ -210,6 +210,12 @@ describe('retry-utils', () => {
   describe('withTimeout', () => {
     beforeEach(() => {
       vi.useFakeTimers();
+    });
+
+    // This is the last block in the file; without an explicit restore the fake
+    // clock is still installed when the file ends.
+    afterEach(() => {
+      vi.useRealTimers();
     });
 
     it('resolves if promise completes before timeout', async () => {

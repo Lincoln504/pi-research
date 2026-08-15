@@ -45,6 +45,7 @@ import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFil
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { buildModelRegistry, safeGetAvailable } from './core/llm/model-registry-factory.ts';
 import { RESEARCH_TOOL_NAMES } from './constants.ts';
+import { isBrowserAvailable } from './infrastructure/browser/config.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -770,6 +771,18 @@ async function cmdStatus(json?: boolean): Promise<number> {
   const det = await detectCredentials();
   const paths = resolvedConfigPaths();
   const cfg = getConfig(process.cwd(), 'cli');
+  // The stealth browser is installed by this package's `postinstall`
+  // (scripts/setup.cjs), which npm 11.19+ BLOCKS BY DEFAULT — it now warns
+  // "packages have install scripts not yet covered by allowScripts" and carries
+  // on, so the browser is simply absent on an otherwise successful install.
+  // Every other native artifact survives that (onnxruntime, sharp, esbuild and
+  // webgpu all ship prebuilt platform packages), which is exactly what makes
+  // this one worth reporting: nothing else fails, and without this the first
+  // symptom is a scrape falling back mid-run. A missing browser degrades
+  // capability rather than breaking the tool — the fetch path still serves most
+  // pages — so it is reported alongside `ready` rather than folded into it.
+  // isBrowserAvailable() is a resolve + existsSync; it never launches anything.
+  const browserInstalled = isBrowserAvailable();
   const summary = {
     package: '@lincoln504/pi-research',
     version: PKG_VERSION,
@@ -782,6 +795,14 @@ async function cmdStatus(json?: boolean): Promise<number> {
       model: det.model ?? null,
       modelFrom: det.modelFrom,
       problem: det.problem ?? null,
+    },
+    browser: {
+      installed: browserInstalled,
+      // Same remedy the health check prints, so both surfaces name one command.
+      fix: browserInstalled ? null : 'npx camoufox-js fetch',
+      note: browserInstalled
+        ? null
+        : 'Stealth browser not installed — scraping falls back to plain fetch, which some sites block. npm 11.19+ blocks install scripts by default, which skips this package\'s postinstall.',
     },
     knowledgeStoreMode: cfg.KNOWLEDGE_STORE_MODE,
     defaultDepth: cfg.DEFAULT_RESEARCH_DEPTH,
@@ -796,6 +817,10 @@ async function cmdStatus(json?: boolean): Promise<number> {
   toStdout(`pi-research ${PKG_VERSION}\n`);
   toStdout(`ready: ${summary.ready ? 'yes' : 'no'}\n\n`);
   toStdout(configBlock(det, summary.ready ? undefined : '— fix the problem above, then re-run.') + '\n');
+  if (!summary.browser.installed) {
+    toStdout(`\nstealth browser: NOT INSTALLED — run: ${summary.browser.fix}\n`);
+    toStdout(`  ${summary.browser.note}\n`);
+  }
   toStdout(`\nknowledge store mode: ${cfg.KNOWLEDGE_STORE_MODE}   (default depth: ${cfg.DEFAULT_RESEARCH_DEPTH})\n`);
   return EXIT.OK;
 }
@@ -1064,7 +1089,17 @@ export async function reportError(err: unknown, what: string, json?: boolean): P
   // --json: emit a structured error on stdout so a machine consumer never has to
   // special-case plain-text stderr. Mirrors the { ok: true, ... } success shape.
   if (json) {
-    const payload: Record<string, unknown> = { ok: false, error: msg, exitCode };
+    // A cancellation reports itself as a cancellation, not as whatever component
+    // happened to notice the abort first. The internal message is genuinely
+    // misleading here — a Ctrl-C unwinding through the planner surfaces as
+    // "Coordinator failed: Request was aborted", so a consumer relaying `error`
+    // verbatim (which SKILL.md instructs agents to do) tells the user a component
+    // broke when they simply stopped the run. The plain-text branch below already
+    // refuses to say "failed" for a cancel; JSON said it anyway. The original
+    // wording is preserved under `cause` so nothing diagnostic is lost.
+    const payload: Record<string, unknown> = isCancellation
+      ? { ok: false, error: `pi-research ${what} cancelled.`, cause: msg, exitCode }
+      : { ok: false, error: msg, exitCode };
     // Machine-readable "this will succeed later" flag, so a consumer can back off
     // and retry without string-matching the human message. Gated on cancellation:
     // a Ctrl-C landing in the same window a queue-wait expires must never emit

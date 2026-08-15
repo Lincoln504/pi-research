@@ -16,13 +16,16 @@ vi.mock('node:os', async (importOriginal) => {
 import { getBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getCamoufoxBinaryPath, resolveHeadlessMode } from '../../../src/infrastructure/browser/config.ts';
 
 describe('browser-config', () => {
-    const ENV_KEYS = ['PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME', 'LOCALAPPDATA'] as const;
+    const ENV_KEYS = ['PLAYWRIGHT_BROWSERS_PATH', 'CAMOUFOX_INSTALL_DIR', 'XDG_CACHE_HOME', 'LOCALAPPDATA'] as const;
     const savedEnv: Record<string, string | undefined> = {};
 
     beforeEach(() => {
         osMock.current = 'linux';
         for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
         delete process.env['PLAYWRIGHT_BROWSERS_PATH'];
+        // Must be cleared too: it now participates in path resolution, so an
+        // ambient value would silently steer every assertion below.
+        delete process.env['CAMOUFOX_INSTALL_DIR'];
         delete process.env['XDG_CACHE_HOME'];
     });
 
@@ -83,6 +86,32 @@ describe('browser-config', () => {
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/custom/browser-cache';
             const env = getBrowserEnv();
             expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBe('/custom/browser-cache');
+        });
+
+        it('exports CAMOUFOX_INSTALL_DIR alongside it — the variable camoufox-js actually reads', () => {
+            // PLAYWRIGHT_BROWSERS_PATH moved only where WE look. camoufox-js
+            // <0.12.0 hardcoded userCacheDir("camoufox") and honoured nothing, so
+            // setting it downloaded to the default cache and then reported the
+            // browser missing from the custom path forever. 0.12.0 added
+            // CAMOUFOX_INSTALL_DIR, so the worker must be told in the variable it
+            // obeys or install and launch resolve to different directories.
+            process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/custom/browser-cache';
+            const env = getBrowserEnv();
+            expect(env['CAMOUFOX_INSTALL_DIR']).toBe('/custom/browser-cache');
+        });
+
+        it('CAMOUFOX_INSTALL_DIR alone drives both variables and the resolved paths', () => {
+            process.env['CAMOUFOX_INSTALL_DIR'] = '/opt/cfx';
+            const env = getBrowserEnv();
+            expect(env['CAMOUFOX_INSTALL_DIR']).toBe('/opt/cfx');
+            expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBe('/opt/cfx');
+            expect(getBrowserCacheDir()).toBe('/opt/cfx');
+            expect(getCamoufoxBinaryPath()).toBe('/opt/cfx');
+        });
+
+        it('omits CAMOUFOX_INSTALL_DIR when no custom location is set', () => {
+            const env = getBrowserEnv();
+            expect(env['CAMOUFOX_INSTALL_DIR']).toBeUndefined();
         });
 
         it('preserves HOME and USERPROFILE unchanged', () => {

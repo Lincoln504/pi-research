@@ -197,13 +197,34 @@ const dirName = rawDirName && !rawDirName.includes('/') && !rawDirName.includes(
  * several tools' state by name); a substring match would treat that shared
  * folder as exclusively ours and wholesale-delete it. Only the exact default
  * layout is something WE constructed and can therefore prove is ours.
+ *
+ * Segment-adjacency is NOT that proof either, and used to be what this did:
+ * it tested whether `<dirName>/research` appeared ANYWHERE in the path, with no
+ * constraint on what followed. That also matched:
+ *   - the research ROOT itself (`~/.pi/research`) — which holds config.env and
+ *     knowledge_db/, the two things this script's header promises to preserve;
+ *   - any unrelated directory beneath it (`/mnt/backup/.pi/research/mystate`);
+ *   - traversal forms (`~/.pi/research/../../..`) that resolve far outside our
+ *     tree entirely.
+ *
+ * The real proof is the full default *shape*: the runtime only ever builds
+ * `<root>/<dirName>/research/state`. Requiring those three trailing segments on
+ * the RESOLVED path keeps a relocated-but-default layout reclaimable while
+ * refusing the research root, sibling directories, and traversal escapes.
  */
+const DEFAULT_STATE_TAIL = [dirName, 'research', 'state'];
+
 function isPiResearchNamespaced(p) {
-  const segs = p.split(/[\\/]+/).filter(Boolean);
-  for (let i = 0; i < segs.length - 1; i++) {
-    if (segs[i] === dirName && segs[i + 1] === 'research') return true;
-  }
-  return false;
+  // Resolve first so `..` cannot smuggle the tail past this check.
+  const resolved = path.resolve(p);
+  // Windows and macOS default to case-insensitive filesystems, so a path
+  // differing only in case still names the directory we built.
+  const fold = (s) =>
+    process.platform === 'win32' || process.platform === 'darwin' ? s.toLowerCase() : s;
+  const segs = resolved.split(/[\\/]+/).filter(Boolean);
+  if (segs.length < DEFAULT_STATE_TAIL.length) return false;
+  const tail = segs.slice(-DEFAULT_STATE_TAIL.length);
+  return DEFAULT_STATE_TAIL.every((want, i) => fold(tail[i]) === fold(want));
 }
 
 /**

@@ -47,8 +47,23 @@ function resolveCamoufoxBin() {
   return null;
 }
 
+/**
+ * The custom camoufox location, if the user set one. Mirrors
+ * getCustomCamoufoxDir() in src/infrastructure/browser/config.ts — the two must
+ * agree or install and lookup land in different directories.
+ *
+ * CAMOUFOX_INSTALL_DIR first: it is camoufox-js's own variable and the only one
+ * that actually relocates the install (camoufox-js <0.12.0 hardcoded
+ * userCacheDir("camoufox") and honoured nothing). PLAYWRIGHT_BROWSERS_PATH is
+ * kept as the documented alias, and is exported BELOW as CAMOUFOX_INSTALL_DIR so
+ * setting it finally moves the download too instead of only moving where we look.
+ */
+function customCamoufoxDir() {
+  return process.env.CAMOUFOX_INSTALL_DIR || process.env.PLAYWRIGHT_BROWSERS_PATH || null;
+}
+
 function camoufoxCachePath() {
-  const customPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const customPath = customCamoufoxDir();
   if (customPath) return customPath;
 
   if (isWindows) {
@@ -68,6 +83,13 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
   console.log('pi-research: skipping browser download (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
 } else {
   const env = { ...process.env };
+  // Make the fetch honour the custom location. Without this the download always
+  // went to camoufox's default cache while camoufoxCachePath() reported the
+  // custom one: the "already installed" probe never matched, every install
+  // re-fetched, and at runtime the browser was reported missing despite having
+  // downloaded successfully.
+  const customDir = customCamoufoxDir();
+  if (customDir) env.CAMOUFOX_INSTALL_DIR = customDir;
 
   const installDeps = process.argv.includes('--system-deps') || process.env.PLAYWRIGHT_INSTALL_DEPS === 'true';
   if (installDeps && isLinux) {

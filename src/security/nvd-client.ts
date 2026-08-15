@@ -22,7 +22,6 @@ import type {
 } from './nvd-types.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
-import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 import { readJsonCapped, BodyTooLargeError, MAX_BULK_JSON_BODY_BYTES } from '../utils/http-body.ts';
 import {
@@ -77,7 +76,15 @@ class NVDRateLimiter {
           signal?.removeEventListener('abort', onAbort);
           resolve();
         }, waitTime);
-        safeUnref(timeoutId);
+        // NOT unref'd. This timer IS the operation, not a watchdog racing one:
+        // nothing else will ever settle this promise, so unref'ing it let Node
+        // consider the process idle while an NVD search was mid-spacing. With no
+        // other ref'd handle the search simply never resumed — the awaited
+        // promise stayed unsettled and the caller got no result and no error.
+        // Every other unref in this codebase guards a timeout against real I/O
+        // that holds the loop open by itself; this one had nothing behind it.
+        // Bounded (≤6s, or ≤600ms with NVD_API_KEY) and abortable below, so
+        // keeping it ref'd cannot delay shutdown beyond one spacing interval.
         const onAbort = () => {
           clearTimeout(timeoutId as unknown as ReturnType<typeof setTimeout>);
           reject(Object.assign(new Error('NVD search aborted'), { name: 'AbortError' }));
@@ -392,6 +399,8 @@ async function fetchPaginated(
   const signal = options?.signal;
   let startIndex = 0;
   let totalPagesFetched = 0;
+  // Whether the one-time jump to the newest window (below) has been performed.
+  let seekedToNewest = false;
 
   while (totalPagesFetched < maxPages && allVulnerabilities.length < maxResults) {
     if (signal?.aborted) break; // stop paginating promptly on cancel
@@ -433,10 +442,30 @@ async function fetchPaginated(
     }
     metrics.increment('nvd_cache_hits_total', 1);
 
+    const responseData = data as Record<string, unknown> | undefined;
+    const reportedTotal = typeof responseData?.['totalResults'] === 'number'
+      ? responseData['totalResults'] as number
+      : undefined;
+
+    // NVD 2.0 returns keyword matches OLDEST FIRST and offers no sort parameter
+    // (`sortBy` is a 404), so paging from index 0 and stopping at maxResults kept
+    // precisely the least useful window: a `security_search` for "openssl"
+    // returned CVE-1999-0428 through 2004 out of 566 matches and could never
+    // reach the ones published this month. Seek once to the tail instead, so the
+    // rows we keep are the most recent. Only fires when the match set is larger
+    // than what we return — a query whose results all fit is already complete, so
+    // the common (and every mocked) case still costs exactly one request.
+    if (!seekedToNewest && startIndex === 0 && reportedTotal !== undefined && reportedTotal > maxResults) {
+      seekedToNewest = true;
+      startIndex = reportedTotal - maxResults;
+      allVulnerabilities.length = 0; // the oldest window we just read is not what we want
+      totalPagesFetched++;
+      continue;
+    }
+
     allVulnerabilities.push(...admitted);
 
-    const responseData = data as Record<string, unknown> | undefined;
-    if (responseData?.['totalResults'] !== undefined && typeof responseData['totalResults'] === 'number' && startIndex + pageSize >= responseData['totalResults']) {
+    if (reportedTotal !== undefined && startIndex + pageSize >= reportedTotal) {
       break;
     }
 
@@ -446,6 +475,18 @@ async function fetchPaginated(
 
   metrics.increment('nvd_pagination_requests_total', totalPagesFetched);
   metrics.observe('nvd_pagination_pages_fetched', totalPagesFetched);
+
+  // Newest first within the window. NVD's own order is ascending, so without
+  // this the caller's slice() would again favour the older end of whatever we
+  // gathered. Undated entries sort last rather than jumping to the front.
+  allVulnerabilities.sort((a, b) => {
+    const ta = a.published ? Date.parse(a.published) : NaN;
+    const tb = b.published ? Date.parse(b.published) : NaN;
+    if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+    if (Number.isNaN(ta)) return 1;
+    if (Number.isNaN(tb)) return -1;
+    return tb - ta;
+  });
 
   return allVulnerabilities.slice(0, maxResults);
 }

@@ -301,24 +301,47 @@ Worker pool over direct browser — browser processes are isolated in workers so
 in one cannot affect the orchestrator or other sessions.
 
 Pinned browser stack — `playwright-core` and `impit` are pinned to exact versions and
-`camoufox-js` to its `0.10.x` line (`^0.10.2`, which excludes the `0.11.x` alpha); the
-three are coupled and upgraded together, because each floating range broke fresh consumer
-installs that our lockfile masked. camoufox-js `0.10.2` fetches Firefox
-135/beta.24, the newest camoufox with binaries for every supported OS (later builds
-dropped Windows). playwright-core `1.60.0` is the newest the FF135 Juggler protocol
-accepts (1.61 rejects it and fails every launch). impit `0.13.0` avoids the
-`only-allow pnpm` preinstall guard that impit 0.13.1/0.14.0 shipped, which fails
-`npm install -g`; a direct-dependency pin is required because npm `overrides` do not
-propagate to consumers. Will upgrade all three together when camoufox ships stable
-cross-platform binaries. Rationale in full:
+`camoufox-js` to its `0.12.x` line; the three are coupled and upgraded together, because
+each floating range broke fresh consumer installs that our lockfile masked.
+playwright-core stays at `1.60.0`: camoufox-js `0.12.0` now declares
+`peerDependencies: { "playwright-core": "<1.61.0" }` itself, so what used to be a
+hand-maintained pin is enforced upstream (1.61+ rejects camoufox's Juggler and fails
+every launch). impit is pinned exactly because npm `overrides` do not propagate to
+consumers — note the original reason for holding `0.13.0`, the `only-allow pnpm`
+preinstall guard that broke `npm install -g`, applied only to 0.13.1/0.14.0 and was
+dropped again in 0.14.1. Rationale in full:
 `src/infrastructure/browser/thread-worker-browser.ts`.
+
+The browser BINARY, by contrast, is not pinned and cannot be. `camoufox-js fetch` takes
+no version argument: it walks the `daijro/camoufox` GitHub releases newest-first and takes
+the first non-prerelease release carrying an asset for this OS/arch. So the binary a
+consumer gets is whatever camoufox published most recently at install time, regardless of
+which camoufox-js version is installed — the npm pins do not freeze it, and a future
+camoufox release could break launches for fresh installs with no change on our side.
+Windows assets were in fact missing from `v146-hardware` through `v152.0.2-alpha` and
+returned in `v152.0.4-beta.26` (2026-07-16). Current newest is `v152.0.4-beta.28`
+(Firefox 152); it launches and drives cleanly under playwright-core `1.60.0`, verified
+directly, as does the older `v135.0.1-beta.24` an existing cache may still hold. Re-verify
+a real launch when bumping this stack — the unit and integration suites mock the browser
+and cannot catch a Juggler mismatch.
 
 Pinned data stack — `apache-arrow` is a direct dependency at `21.1.0`, and `overrides`
 forces the whole tree to that single version so LanceDB and Arrow share one Arrow instance
 (mismatched Arrow copies do not interoperate — arrays built by one are rejected by the
-other). This sits above `@lancedb/lancedb` 0.29's declared Arrow peer ceiling
-(`>=15.0.0 <=18.1.0`); it is verified working, but the override should be re-validated
-whenever `@lancedb/lancedb` is upgraded.
+other). This sits above `@lancedb/lancedb` 0.37's declared Arrow peer ceiling
+(`>=15.0.0 <=18.1.0`) — npm will not even resolve the pairing without the override — and
+it is verified working, but it should be re-validated whenever `@lancedb/lancedb` is
+upgraded.
+
+`21.1.0` is exact for a measured reason, not caution. Bumping the PATCH-looking minor to
+`21.2.0` breaks the store outright: LanceDB's Rust-side Arrow reader cannot parse the
+schema that Arrow 21.2 writes, failing every table open with
+`Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer:
+RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` — 56 unit and 36
+integration tests, every one that touches a real table. Do not treat this range as
+caret-safe. Note also that every `@lancedb/lancedb` release through 0.37 declares the same
+`<=18.1.0` Arrow ceiling, so upgrading LanceDB does not resolve the override; it only
+changes which pairing needs re-validating.
 
 Pinned validation library — `typebox` is pinned to the exact version the pi host packages
 depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` 0.84.2 pin `1.3.7`). Every

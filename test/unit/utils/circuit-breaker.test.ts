@@ -7,6 +7,9 @@ describe('CircuitBreaker', () => {
   });
 
   afterEach(() => {
+    // restoreAllMocks does NOT uninstall fake timers — do it explicitly so the
+    // clock can't stay faked past this file.
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 

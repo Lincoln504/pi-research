@@ -119,14 +119,58 @@ describe('cleanup.cjs — PI_RESEARCH_STATE_DIR containment', () => {
     }
   });
 
-  it('an override matching the exact default <dirName>/research layout is still removed wholesale', () => {
-    // Provably ours: this is the same layout the runtime would construct with
-    // no override at all, just rooted under a different HOME-equivalent.
-    const namespaced = path.join(HOME, 'opt', '.pi', 'research');
+  it('an override matching the full default <dirName>/research/state layout is still removed wholesale', () => {
+    // Provably ours: the exact shape the runtime constructs with no override at
+    // all, just rooted under a different HOME-equivalent.
+    const namespaced = path.join(HOME, 'opt', '.pi', 'research', 'state');
     plantStateEntries(namespaced);
     const r = runCleanup({ PI_RESEARCH_STATE_DIR: namespaced });
     expect(r.status).toBe(0);
     expect(fs.existsSync(namespaced)).toBe(false);
+  });
+
+  it('an override pointing at the research ROOT keeps the dir — config.env and knowledge_db survive', () => {
+    // Dropping the documented `/state` suffix is an easy one-directory-off
+    // mistake, and the runtime honours it literally: state files land beside
+    // config.env and knowledge_db/. Wholesale-rm'ing that is silent, permanent
+    // loss of the user's settings and knowledge store, so this override only
+    // ever gets the targeted sweep.
+    const researchRoot = path.join(HOME, 'opt', '.pi', 'research');
+    plantStateEntries(researchRoot);
+    fs.writeFileSync(path.join(researchRoot, 'config.env'), 'PI_RESEARCH_MODEL=x/y\n', 'utf-8');
+    fs.mkdirSync(path.join(researchRoot, 'knowledge_db'), { recursive: true });
+    fs.writeFileSync(path.join(researchRoot, 'knowledge_db', 'data.lance'), '', 'utf-8');
+
+    const r = runCleanup({ PI_RESEARCH_STATE_DIR: researchRoot });
+    expect(r.status).toBe(0);
+
+    // User data survives…
+    expect(fs.readFileSync(path.join(researchRoot, 'config.env'), 'utf-8')).toContain('PI_RESEARCH_MODEL');
+    expect(fs.existsSync(path.join(researchRoot, 'knowledge_db', 'data.lance'))).toBe(true);
+    // …while the pi-research-owned state entries are still swept.
+    expect(fs.existsSync(path.join(researchRoot, 'research-state.json'))).toBe(false);
+    expect(fs.existsSync(path.join(researchRoot, '.locks'))).toBe(false);
+  });
+
+  it('a traversal override that escapes our tree never gets the wholesale path', () => {
+    // `<default state dir>/../../..` resolves to a parent far outside anything
+    // we built; the pre-fix segment scan matched it on the unresolved string.
+    const outside = path.join(HOME, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'keep.txt'), 'user data', 'utf-8');
+    // The traversal must actually resolve: `..` is walked by the OS, so without
+    // these intermediates the rm would no-op on ENOENT and the test would pass
+    // regardless of the guard.
+    fs.mkdirSync(path.join(outside, '.pi', 'research', 'state'), { recursive: true });
+    // Built by concatenation, NOT path.join: join() would normalize the `..`
+    // away here in the test and the script would never see the traversal form
+    // this is meant to exercise.
+    const traversal = [outside, '.pi', 'research', 'state', '..', '..', '..'].join(path.sep);
+
+    const r = runCleanup({ PI_RESEARCH_STATE_DIR: traversal });
+    expect(r.status).toBe(0);
+    expect(fs.existsSync(outside)).toBe(true);
+    expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8')).toBe('user data');
   });
 
   it('the default ~/.pi/research/state tree is still removed wholesale', () => {

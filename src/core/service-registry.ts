@@ -178,10 +178,26 @@ export class ServiceContainer {
     options: ServiceContainerOptions = {}
   ): Promise<void> {
     const mergedOptions = { ...this.defaultOptions, ...options, allowOverwrite: true };
-    
+
     // Dispose existing service if present
-    if (this.services.has(name)) {
-      const registration = this.services.get(name)!;
+    const registration = this.services.get(name);
+    if (registration) {
+      // Join an already-in-flight clear()/replace()/disposeAll() on this
+      // registration before touching its instance — the same guard those paths
+      // use on each other. Without it, a concurrent teardown and this call both
+      // dispose the SAME instance, and register() below then swaps the whole
+      // registration object out from under the in-flight one, orphaning any
+      // instance it constructs.
+      // while(), not if(): a newer disposal can begin while we are awaiting this
+      // one, exactly as get() documents for the same field.
+      while (registration.disposalPromise) {
+        await registration.disposalPromise.catch(() => { /* disposal errors are logged by clear()/replace() */ });
+      }
+      // Settle an in-flight initialization too, so we never discard a service
+      // that is still being built — mirrors replace().
+      if (registration.initializationPromise) {
+        await registration.initializationPromise.catch(() => { /* failed init cleaned up after itself */ });
+      }
       if (registration.instance && registration.instance.dispose) {
         try {
           await registration.instance.dispose();

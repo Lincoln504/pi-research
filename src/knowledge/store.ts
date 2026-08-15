@@ -30,11 +30,15 @@ import { normalizeWorkspacePath } from '../utils/text-utils.ts';
 
 /**
  * Detect a LanceDB concurrent-write conflict — the class of error worth retrying
- * with backoff. LanceDB 0.29 surfaces these as "Commit conflict for version N",
+ * with backoff. LanceDB surfaces these as "Commit conflict for version N",
  * "Retryable commit conflict for version N" and "Too many concurrent writes,
- * please retry later:" (strings confirmed in the 0.29.0 native binary). The three
- * legacy strings ("Version mismatch" / "Lock error" / "Commit error") no longer
- * appear in 0.29 but are kept as a safety net for other/older Lance versions.
+ * please retry later:" — all three re-confirmed present in the 0.37.1 native
+ * binary (`@lancedb/lancedb-<platform>`, NOT the `@lancedb/lancedb` JS package;
+ * grepping the latter finds nothing and looks like a regression), as they were
+ * in 0.29.0. The three legacy strings ("Version mismatch" / "Lock error" /
+ * "Commit error") appear in neither and are kept as a safety net for other/older
+ * Lance versions. Re-check these against the native binary on every upgrade: a
+ * changed message silently turns a retryable conflict into a hard failure.
  */
 export function isLanceCommitConflict(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -1065,7 +1069,9 @@ export class KnowledgeStore implements IKnowledgeStore {
       // no lock, so rows committed DURING the rebuild were absorbed into the
       // baseline as already-indexed and stayed out of the BM25 leg until an
       // unrelated later commit. Each createIndex commits exactly one version
-      // (measured on lancedb 0.29, fresh and replace alike); anything beyond
+      // (measured on lancedb 0.29 and re-measured on 0.37.1 — vector index, FTS
+      // index and a `replace: true` rebuild each advance version() by exactly
+      // 1); anything beyond
       // version+2 means a concurrent commit rebased beneath our index commits, so
       // fall back to the conservative pre-rebuild baseline — the next cleanup
       // sees version > baseline and rebuilds over the missed rows.

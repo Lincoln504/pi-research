@@ -230,7 +230,19 @@ export async function searchOSV(
       }
     }
 
-    vulnerabilities.push(...Array.from(uniqueVulns.values()));
+    // Newest first, so the slice(0, maxResults) below keeps the advisories most
+    // likely to matter. OSV returns a package's vulnerabilities in ID order,
+    // which is effectively alphabetical — truncating that dropped whichever
+    // advisories happened to sort late, recency playing no part. Undated entries
+    // sort last rather than displacing dated ones.
+    vulnerabilities.push(...Array.from(uniqueVulns.values()).sort((a, b) => {
+      const ta = a.published ? Date.parse(a.published) : NaN;
+      const tb = b.published ? Date.parse(b.published) : NaN;
+      if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+      if (Number.isNaN(ta)) return 1;
+      if (Number.isNaN(tb)) return -1;
+      return tb - ta;
+    }));
 
     if (failures.length > 0 && failures.length === terms.length) {
       throw new Error(`All OSV lookups failed: ${failures.join('; ')}`);

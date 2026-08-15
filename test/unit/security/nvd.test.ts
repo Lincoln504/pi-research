@@ -300,4 +300,107 @@ describe('NVD Client', () => {
       expect(result.error).toBeUndefined(); // supplemental failure is not a term failure
     });
   });
+
+  describe('result recency', () => {
+    /** A dated CVE record in NVD's response shape. */
+    const dated = (id: string, published: string) => ({
+      cve: {
+        id,
+        published,
+        descriptions: [{ value: `desc ${id}` }],
+        metrics: { cvssMetricV31: [{ cvssData: { baseScore: 7.5, baseSeverity: 'HIGH' } }] },
+      },
+    });
+
+    it('seeks to the newest window when the match set exceeds maxResults', async () => {
+      // NVD 2.0 returns keyword matches OLDEST first and rejects `sortBy` with a
+      // 404, so paging from index 0 and stopping at maxResults kept exactly the
+      // wrong end: a real `security_search` for "openssl" returned CVE-1999-0428
+      // through 2004 out of 566 matches and could not reach the ones published
+      // that same week. The client must jump to the tail instead.
+      const TOTAL = 566;
+      vi.mocked(fetch).mockImplementation(async (url) => {
+        const startIndex = Number(new URL(String(url)).searchParams.get('startIndex'));
+        const id = startIndex === 0 ? 'CVE-1999-OLDEST' : 'CVE-2026-NEWEST';
+        const published = startIndex === 0 ? '1999-03-22T00:00:00.000' : '2026-08-13T00:00:00.000';
+        return { ok: true, json: async () => ({ totalResults: TOTAL, vulnerabilities: [dated(id, published)] }) } as Response;
+      });
+
+      const p = searchNVD(['openssl'], { maxResults: 20 });
+      await vi.runAllTimersAsync();
+      const result = await p;
+
+      const offsets = vi.mocked(fetch).mock.calls
+        .map(c => Number(new URL(String(c[0])).searchParams.get('startIndex')));
+      expect(offsets).toContain(TOTAL - 20);
+      expect(result.vulnerabilities.map(v => v.id)).toEqual(['CVE-2026-NEWEST']);
+      expect(result.vulnerabilities.map(v => v.id)).not.toContain('CVE-1999-OLDEST');
+    });
+
+    it('costs no extra request when every match already fits', async () => {
+      // The seek must only fire for match sets larger than what we return —
+      // a query whose results all fit is already complete.
+      vi.mocked(fetch).mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ totalResults: 2, vulnerabilities: [dated('CVE-2024-1', '2024-01-01T00:00:00.000')] }),
+      } as Response));
+
+      const p = searchNVD(['term'], { maxResults: 20 });
+      await vi.runAllTimersAsync();
+      await p;
+      expect(vi.mocked(fetch).mock.calls.length).toBe(1);
+    });
+
+    it('orders the returned window newest first, undated entries last', async () => {
+      vi.mocked(fetch).mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          totalResults: 3,
+          vulnerabilities: [
+            dated('CVE-OLD', '2001-01-01T00:00:00.000'),
+            { cve: { id: 'CVE-UNDATED', descriptions: [{ value: 'x' }], metrics: {} } },
+            dated('CVE-NEW', '2026-08-13T00:00:00.000'),
+          ],
+        }),
+      } as Response));
+
+      const p = searchNVD(['term'], { maxResults: 20 });
+      await vi.runAllTimersAsync();
+      const result = await p;
+      expect(result.vulnerabilities.map(v => v.id)).toEqual(['CVE-NEW', 'CVE-OLD', 'CVE-UNDATED']);
+    });
+
+    it('keeps the rate-limiter spacing timer ref\'d — it IS the operation', async () => {
+      // The spacing timer is the only thing that settles the acquire() promise:
+      // nothing else is pending behind it. Unref'ing it let Node treat the
+      // process as idle mid-search, and with no other ref'd handle the awaited
+      // promise never settled — the caller got neither a result nor an error.
+      // Asserted directly because the failure is invisible under a test runner,
+      // which always holds the loop open by itself.
+      const unrefed: unknown[] = [];
+      const realSetTimeout = globalThis.setTimeout;
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: any, ms: any, ...rest: any[]) => {
+        const t: any = (realSetTimeout as any)(fn, ms, ...rest);
+        if (t && typeof t.unref === 'function') {
+          const realUnref = t.unref.bind(t);
+          t.unref = () => { unrefed.push(t); return realUnref(); };
+        }
+        return t;
+      }) as any);
+
+      try {
+        vi.mocked(fetch).mockImplementation(async () => ({
+          ok: true,
+          json: async () => ({ totalResults: 1, vulnerabilities: [dated('CVE-2024-9', '2024-05-05T00:00:00.000')] }),
+        } as Response));
+        // Two terms: the second acquire() must wait out the spacing interval.
+        const p = searchNVD(['a', 'b'], { maxResults: 20 });
+        await vi.runAllTimersAsync();
+        await p;
+        expect(unrefed).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });

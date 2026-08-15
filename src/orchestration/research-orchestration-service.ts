@@ -14,7 +14,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
-import { RESEARCHER_LAUNCH_DELAY_MS, resolveExcludedTools } from '../constants.ts';
+import { RESEARCHER_LAUNCH_DELAY_MS, RESEARCH_TOOL_NAMES, resolveExcludedTools } from '../constants.ts';
 import { search } from '../web-research/search.ts';
 import { parseCitations } from '../utils/text-utils.ts';
 import { logger, resetLogger } from '../logger.ts';
@@ -98,6 +98,27 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const configDisabledTools = researchConfig.DISABLED_TOOLS
       ? researchConfig.DISABLED_TOOLS.split(',').map((s) => s.trim()).filter(Boolean)
       : [];
+    // Unknown names are a SILENT no-op downstream (the merge is a blind Set union),
+    // so a typo leaves the tool enabled for a whole billed run while the user
+    // believes it is off. `--exclude-tools` fails fast on this in the CLI parser;
+    // its two siblings — the SDK's `excludeTools` option and
+    // PI_RESEARCH_DISABLED_TOOLS — reach the same union with no check at all, and
+    // RESEARCH_TOOL_NAMES already documents itself as the vocabulary all THREE
+    // accept. Warn rather than throw here: this chokepoint is mid-run and serves a
+    // library API and an ambient env var, where aborting a legitimate request over
+    // one unrecognized name is the wrong trade — the CLI keeps its fail-fast.
+    for (const [surface, names] of [
+      ['excludeTools', excludeTools ?? []],
+      ['PI_RESEARCH_DISABLED_TOOLS', configDisabledTools],
+    ] as const) {
+      const unknown = names.filter((t) => !RESEARCH_TOOL_NAMES.includes(t));
+      if (unknown.length > 0) {
+        logger.warn(
+          `[ResearchOrchestrationService] ${surface}: ignoring unknown tool name${unknown.length === 1 ? '' : 's'} ` +
+          `${unknown.map((t) => `"${t}"`).join(', ')} — these exclude nothing. Valid names: ${RESEARCH_TOOL_NAMES.join(', ')}.`
+        );
+      }
+    }
     const mergedExcludeTools = resolveExcludedTools(excludeTools, configDisabledTools);
 
     // Resolve model using centralized priority logic

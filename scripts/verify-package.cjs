@@ -85,6 +85,43 @@ function fail(msg) {
   process.exitCode = 1;
 }
 
+/**
+ * dist/prompts must be a byte-exact copy of src/prompts.
+ *
+ * The count check above only proves files EXIST. But dist/prompts is what the
+ * bundled CLI and the agent-skill engine actually load (loadPrompt resolves
+ * next to the bundle), so a stale copy means the shipped product runs on
+ * different instructions than the source tree says it does — with every gate
+ * green, because the file count is unchanged. Editing a prompt without
+ * rebuilding produces exactly that, and it is invisible: the CLI keeps serving
+ * the old text. A truncated or partially-written copy fails here too.
+ *
+ * Compared on disk in the working tree (not the tarball) because that is where
+ * the drift happens; `prepublishOnly` rebuilds before packing, so a publish is
+ * only ever as fresh as this check makes the tree.
+ */
+function verifyPromptsInSync() {
+  const srcDir = path.join(ROOT, 'src', 'prompts');
+  const distDir = path.join(ROOT, 'dist', 'prompts');
+  if (!fs.existsSync(srcDir) || !fs.existsSync(distDir)) return; // nothing built yet
+  const srcFiles = fs.readdirSync(srcDir).filter((f) => f.endsWith('.md')).sort();
+  const distFiles = fs.readdirSync(distDir).filter((f) => f.endsWith('.md')).sort();
+  for (const f of srcFiles) {
+    if (!distFiles.includes(f)) {
+      fail(`dist/prompts is missing ${f} — run \`npm run build\` (the bundled CLI loads dist/prompts, not src/prompts).`);
+      continue;
+    }
+    const a = fs.readFileSync(path.join(srcDir, f));
+    const b = fs.readFileSync(path.join(distDir, f));
+    if (!a.equals(b)) {
+      fail(`dist/prompts/${f} is STALE (differs from src/prompts/${f}) — run \`npm run build\`. The shipped CLI would run the old prompt.`);
+    }
+  }
+  for (const f of distFiles) {
+    if (!srcFiles.includes(f)) fail(`dist/prompts/${f} has no counterpart in src/prompts — remove it or rebuild.`);
+  }
+}
+
 function exportsTargets() {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const out = [];
@@ -160,6 +197,8 @@ function verifyManifest() {
     const n = files.filter((p) => p.startsWith(`${dir}/`) && p.endsWith('.md')).length;
     if (n < min) fail(`${dir}: expected >=${min} .md prompt files, found ${n}`);
   }
+
+  verifyPromptsInSync();
 
   for (const f of files) {
     for (const { re, what } of FORBIDDEN) {
