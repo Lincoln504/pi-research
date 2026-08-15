@@ -25,6 +25,14 @@ let uaCounter = 0;
 vi.mock('../../../src/web-research/scraper-utils.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/web-research/scraper-utils.ts')>()),
   getRandomUserAgent: () => `TestAgent/${++uaCounter}`,
+  // The scrape layer calls undici's fetch, not the global one (see
+  // getSsrfSafeFetcher). Defer to the stub this test installs so the assertion
+  // is about UA stability across hops, not about the transport.
+  getSsrfSafeFetcher: async () => ({
+    fetch: (url: string, init: Record<string, unknown>) =>
+      (globalThis.fetch as unknown as (u: string, i: unknown) => Promise<Response>)(url, init),
+    dispatcher: {},
+  }),
 }));
 
 const { scrapeSingle } = await import('../../../src/web-research/web-scraper.ts');

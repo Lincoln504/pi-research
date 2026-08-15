@@ -250,27 +250,53 @@ export function ssrfSafeLookup(
   });
 }
 
-// undici Agent used as the per-request dispatcher for scrape fetches. Cached
-// after first construction. `undefined` = not yet attempted, `null` = undici
-// unavailable (fall back to plain fetch with request-time validation only).
-let cachedSsrfDispatcher: unknown | null | undefined = undefined;
+/** A fetch-shaped callable plus the dispatcher it must be invoked with. */
+export interface SsrfSafeFetcher {
+  /** undici's own fetch — NOT the global one. See getSsrfSafeFetcher. */
+  fetch: (url: string, init: Record<string, unknown>) => Promise<Response>;
+  dispatcher: unknown;
+}
+
+// Cached after first construction. `undefined` = not yet attempted, `null` =
+// undici unavailable (fall back to the global fetch with request-time
+// validation only).
+let cachedSsrfFetcher: SsrfSafeFetcher | null | undefined = undefined;
 
 /**
  * Build (once) an undici Agent whose connector resolves via ssrfSafeLookup, so
  * every scrape fetch — including each manually-followed redirect hop — connects
- * only to a validated public address. Returns null if undici can't be loaded;
- * callers then fall back to plain fetch (request-time validation still applies).
+ * only to a validated public address, PAIRED with the fetch implementation that
+ * can actually accept it.
+ *
+ * The pairing is the whole point. A dispatcher is only honoured by the undici
+ * that created it: Node's global `fetch` is backed by the undici BUILT INTO the
+ * runtime (6.21.0 on Node 22, 7.24.4 on Node 25), while this package depends on
+ * undici 8.x. Handing a v8 `Agent` to the global fetch throws
+ * `UND_ERR_INVALID_ARG: invalid onRequestStart method` on every request, on
+ * every supported Node — which is exactly what it did: the entire fetch scrape
+ * path failed instantly, every URL was retried once and then fell back to the
+ * stealth browser (~4.5s per page against ~250ms), and the connect-time SSRF pin
+ * this dispatcher exists for never engaged even once. The browser fallback made
+ * it invisible: scrapes still succeeded, just 15-20x slower.
+ *
+ * Returning the two together makes the invalid combination unrepresentable —
+ * a caller cannot end up holding a dispatcher without the fetch that honours it.
+ * Returns null if undici can't be loaded; callers then use the global fetch with
+ * no dispatcher (request-time validation still applies).
  */
-export async function getSsrfSafeDispatcher(): Promise<unknown | null> {
-  if (cachedSsrfDispatcher !== undefined) return cachedSsrfDispatcher as unknown | null;
+export async function getSsrfSafeFetcher(): Promise<SsrfSafeFetcher | null> {
+  if (cachedSsrfFetcher !== undefined) return cachedSsrfFetcher;
   try {
-    const { Agent } = await import('undici');
-    cachedSsrfDispatcher = new Agent({ connect: { lookup: ssrfSafeLookup } });
+    const { Agent, fetch: undiciFetch } = await import('undici');
+    cachedSsrfFetcher = {
+      fetch: undiciFetch as unknown as SsrfSafeFetcher['fetch'],
+      dispatcher: new Agent({ connect: { lookup: ssrfSafeLookup } }),
+    };
   } catch (e) {
     logger.warn(`[Scrapers] undici unavailable; connect-time SSRF pinning disabled (request-time validation still active): ${e instanceof Error ? e.message : String(e)}`);
-    cachedSsrfDispatcher = null;
+    cachedSsrfFetcher = null;
   }
-  return cachedSsrfDispatcher as unknown | null;
+  return cachedSsrfFetcher;
 }
 
 /**

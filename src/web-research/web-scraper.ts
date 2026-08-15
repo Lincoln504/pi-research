@@ -23,7 +23,7 @@ import {
 import {
   FETCH_LAYER_TIMEOUT,
 } from './types.ts';
-import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, formatErrorWithCause, isBenignScrapeFailure, } from './scraper-utils.ts';
+import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeFetcher, formatErrorWithCause, isBenignScrapeFailure, } from './scraper-utils.ts';
 import { isTransientError, abortableDelay } from './retry-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { readBodyCapped, BodyTooLargeError } from '../utils/http-body.ts';
@@ -226,7 +226,12 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   // closing the DNS-rebinding TOCTOU gap between validateUrlForSSRF (request
   // time) and fetch's own re-resolution (connect time). Null when undici is
   // unavailable — request-time validation above still applies.
-  const dispatcher = await getSsrfSafeDispatcher();
+  //
+  // The fetch implementation comes WITH the dispatcher and must be used with it:
+  // a dispatcher is only honoured by the undici that built it, and the global
+  // fetch is backed by Node's bundled undici, not ours. See getSsrfSafeFetcher.
+  const fetcher = await getSsrfSafeFetcher();
+  const doFetch = fetcher?.fetch ?? ((u: string, init: Record<string, unknown>) => fetch(u, init as RequestInit));
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_LAYER_TIMEOUT);
@@ -257,16 +262,16 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     const userAgent = getRandomUserAgent();
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      response = await fetch(currentUrl, {
+      response = await doFetch(currentUrl, {
         signal: controller.signal,
         redirect: 'manual',
         headers: {
           'User-Agent': userAgent,
           'Accept': 'text/html,application/xhtml+xml,application/pdf,*/*;q=0.8',
         },
-        // RequestInit's standard type omits undici's `dispatcher`; cast to attach it.
-        ...(dispatcher ? { dispatcher } : {}),
-      } as RequestInit);
+        // Only ever attached alongside the fetch that honours it (see above).
+        ...(fetcher ? { dispatcher: fetcher.dispatcher } : {}),
+      });
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');

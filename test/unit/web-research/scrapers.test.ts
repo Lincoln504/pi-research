@@ -74,6 +74,19 @@ vi.mock('../../../src/web-research/scraper-utils.ts', async (importOriginal) => 
   return {
     ...original,
     validateUrlForSSRF: vi.fn().mockResolvedValue(undefined),
+    // The scrape layer deliberately calls UNDICI's fetch, not the global one — a
+    // dispatcher is only honoured by the undici that built it (see
+    // getSsrfSafeFetcher). The cases below drive the layer's logic (retry, size
+    // caps, cancellation, PDF detection) through vi.stubGlobal('fetch', …), so
+    // resolve the implementation lazily to whatever global fetch is stubbed at
+    // call time. The REAL undici path is covered against a real socket in
+    // scrape-fetch-dispatcher.test.ts — mocking it here is what let a total
+    // failure of that path go unnoticed in the first place.
+    getSsrfSafeFetcher: vi.fn().mockResolvedValue({
+      fetch: (url: string, init: Record<string, unknown>) =>
+        (globalThis.fetch as unknown as (u: string, i: unknown) => Promise<Response>)(url, init),
+      dispatcher: {},
+    }),
   };
 });
 
