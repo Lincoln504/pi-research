@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { ssrfSafeLookup } from '../../../src/web-research/scraper-utils.ts';
+import { ssrfSafeLookup, isSsrfBlockError } from '../../../src/web-research/scraper-utils.ts';
 
 const FLAG = 'PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE';
 
@@ -80,5 +80,37 @@ describe('ssrfSafeLookup — connect-time SSRF gate', () => {
     const resolveErr = Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' });
     const { err } = await lookupResult(resolveErr);
     expect((err as any)?.code).toBe('ENOTFOUND');
+  });
+});
+
+describe('isSsrfBlockError — classifying blocks wherever they surface', () => {
+  it('matches the request-time validator message directly', () => {
+    expect(isSsrfBlockError(new Error('URL host is not allowed: private address'))).toBe(true);
+  });
+
+  it('finds the connect-time ESSRFBLOCKED down an undici cause chain', () => {
+    // undici never surfaces the connector error directly — fetch throws
+    // "TypeError: fetch failed" with the real error as (possibly nested) cause.
+    // Pre-fix, this was filed as a generic fetch error instead of ssrf_blocked.
+    const inner = Object.assign(
+      new Error('SSRF blocked: evil.example resolved only to private/reserved addresses at connect time'),
+      { code: 'ESSRFBLOCKED' },
+    );
+    const wrapped = new TypeError('fetch failed');
+    (wrapped as { cause?: unknown }).cause = inner;
+    expect(isSsrfBlockError(wrapped)).toBe(true);
+
+    const doubleWrapped = new TypeError('fetch failed');
+    (doubleWrapped as { cause?: unknown }).cause = new Error('connect error');
+    ((doubleWrapped as { cause?: unknown }).cause as { cause?: unknown }).cause = inner;
+    expect(isSsrfBlockError(doubleWrapped)).toBe(true);
+  });
+
+  it('rejects ordinary network errors, including cyclic cause chains', () => {
+    expect(isSsrfBlockError(new Error('ECONNREFUSED'))).toBe(false);
+    expect(isSsrfBlockError('not an error')).toBe(false);
+    const cyclic = new TypeError('fetch failed');
+    (cyclic as { cause?: unknown }).cause = cyclic;
+    expect(isSsrfBlockError(cyclic)).toBe(false); // bounded walk terminates
   });
 });

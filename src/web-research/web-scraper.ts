@@ -23,7 +23,7 @@ import {
 import {
   FETCH_LAYER_TIMEOUT,
 } from './types.ts';
-import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeFetcher, formatErrorWithCause, isBenignScrapeFailure, } from './scraper-utils.ts';
+import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeFetcher, formatErrorWithCause, isBenignScrapeFailure, isSsrfBlockError, } from './scraper-utils.ts';
 import { isTransientError, abortableDelay } from './retry-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { readBodyCapped, BodyTooLargeError } from '../utils/http-body.ts';
@@ -208,7 +208,7 @@ function decodeHtmlBody(bytes: Uint8Array, contentTypeHeader: string): string {
  * counts are precisely what production incidents are diagnosed from.
  */
 function trackFetchLayerFailure(url: string, error: unknown): void {
-  const isSsrf = error instanceof Error && error.message.includes('not allowed');
+  const isSsrf = isSsrfBlockError(error);
   errorTracker.trackError(error instanceof Error ? error : String(error), {
     component: 'scrapers',
     operation: 'fetch',
@@ -385,7 +385,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     // call in a retry, and tracking per attempt would record one failure twice —
     // inflating exactly the error counts these numbers are read to diagnose.
     // scrapeSingle calls trackFetchLayerFailure once with the final error.
-    if (error instanceof Error && error.message.includes('not allowed')) {
+    if (isSsrfBlockError(error)) {
       metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'ssrf_blocked' });
       metrics.observe('scrape_latency_ms', Date.now() - fetchStart, { layer: 'fetch', status: 'ssrf_blocked' });
       throw error;

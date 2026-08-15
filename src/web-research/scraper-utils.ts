@@ -250,6 +250,26 @@ export function ssrfSafeLookup(
   });
 }
 
+/**
+ * True when the error is one of our SSRF blocks — request-time validation
+ * (message contains "not allowed") or the connect-time DNS pin (`ESSRFBLOCKED`).
+ *
+ * The connect-time error never surfaces directly: undici wraps it in
+ * `TypeError: fetch failed` with the real error down the `cause` chain, so a
+ * message check on the outer error alone files a connect-time block as a generic
+ * fetch error. Walk the chain (bounded — causes can be cyclic) instead.
+ */
+export function isSsrfBlockError(error: unknown): boolean {
+  let e: unknown = error;
+  for (let depth = 0; depth < 5 && e instanceof Error; depth++) {
+    if ((e as NodeJS.ErrnoException).code === 'ESSRFBLOCKED' || e.message.includes('not allowed')) {
+      return true;
+    }
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 /** A fetch-shaped callable plus the dispatcher it must be invoked with. */
 export interface SsrfSafeFetcher {
   /** undici's own fetch — NOT the global one. See getSsrfSafeFetcher. */

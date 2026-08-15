@@ -66,6 +66,14 @@ vi.mock('../../../src/web-research/scraper-utils.ts', async (importOriginal) => 
   return {
     ...original,
     validateUrlForSSRF: vi.fn().mockResolvedValue(undefined),
+    // The scrape layer calls undici's fetch, not the global one (see
+    // getSsrfSafeFetcher) — defer to the globalThis.fetch stub this test installs,
+    // or the real undici fetch would make a LIVE network request to some-site.org.
+    getSsrfSafeFetcher: async () => ({
+      fetch: (url: string, init: Record<string, unknown>) =>
+        (globalThis.fetch as unknown as (u: string, i: unknown) => Promise<Response>)(url, init),
+      dispatcher: {},
+    }),
   };
 });
 
