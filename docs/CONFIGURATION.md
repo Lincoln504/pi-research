@@ -305,6 +305,11 @@ that short prompts never reach, or an explicit-marker provider missing the `comp
 above. A counter that is absent rather than zero means the provider does not report
 caching at all.
 
+Cache **writes** are the weaker signal of the two. Several providers report reads and
+omit writes entirely — OpenRouter and Z.ai's Anthropic-compatible endpoint both return
+non-zero `cache_read` alongside a flat zero `cache_write` — so a zero there is normal and
+says nothing about whether caching is working. Judge it by the read counter.
+
 ### Where files live
 
 All pi-research state lives under its own namespace, `~/.pi/research/`:
