@@ -187,9 +187,12 @@ export const DEFAULT_EXCLUDED_TOOLS: readonly string[] = ['grep'];
  * `--exclude-tools` / `excludeTools` / PI_RESEARCH_DISABLED_TOOLS accept.
  * Kept here (next to DEFAULT_EXCLUDED_TOOLS) so validation and the exclusion
  * machinery cannot drift; the DISABLED_TOOLS doc in config.ts names the same set.
+ * `read` is a researcher tool too (local file reads) — excluding it is a
+ * legitimate hardening move, and omitting it from this list broke exactly that
+ * on the CLI when validation was introduced.
  */
 export const RESEARCH_TOOL_NAMES: readonly string[] = [
-  'search', 'scrape', 'security_search', 'stackexchange', 'youtube_transcript', 'grep',
+  'search', 'scrape', 'security_search', 'stackexchange', 'youtube_transcript', 'grep', 'read',
 ];
 
 /**

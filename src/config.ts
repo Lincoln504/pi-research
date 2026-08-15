@@ -158,7 +158,8 @@ export const ConfigSchema = Type.Object({
   /**
    * Comma-separated list of research tools to DISABLE for every researcher in a run
    * (e.g. "scrape", or "youtube_transcript,stackexchange"). Valid tool names:
-   * search, scrape, security_search, stackexchange, youtube_transcript, grep.
+   * search, scrape, security_search, stackexchange, youtube_transcript, grep, read
+   * (RESEARCH_TOOL_NAMES in constants.ts is the canonical list).
    * Disable-only: the list is merged into the per-run excludeTools stream, so disabled
    * tools are both removed from each researcher's toolset AND named in the
    * coordinator/evaluator "DISABLED TOOLS" prompt section. Env-only

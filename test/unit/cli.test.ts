@@ -385,6 +385,13 @@ describe('parseArgs — research', () => {
     expect(r.research?.excludeTools).toEqual(['security_search', 'stackexchange']);
   });
 
+  it('--exclude-tools accepts read (hardening exclusion that predates validation)', () => {
+    // Regression-of-the-fix: the first validator omitted `read`, breaking a
+    // capability the CLI had always had — removing researchers' local-file reads.
+    const r = parseArgs(['node', 'cli.mjs', 'research', 'topic', '--exclude-tools', 'read,grep']);
+    expect(r.research?.excludeTools).toEqual(['read', 'grep']);
+  });
+
   it('--exclude-tools rejects unknown tool names', () => {
     // Regression: the downstream merge is a blind Set union, so a typo — this
     // test's own previous fixture used "security" for a tool actually named

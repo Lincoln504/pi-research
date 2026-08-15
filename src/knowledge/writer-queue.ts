@@ -206,10 +206,27 @@ export class WriterQueue implements IWriterQueue {
         // that as freshness. Without this touch, a stable page's timestamp never
         // moved: the serve-age gate treated it as permanently stale (live scrape
         // every run) and TTL eviction eventually deleted a revalidated entry.
-        await this.options.store.touchByUrlAndType?.(normalizedUrl, incomingType, newestTs, Date.now())
-          .catch((err) => {
+        //
+        // Re-check the newest generation first: a CONCURRENT process may have
+        // ingested changed content for this url+type since our dedup read, and
+        // stamping our (now-old) generation with a later timestamp would make the
+        // stale rows outrank the genuinely newer ones. The touch predicate is
+        // pinned to `timestamp = newestTs`, so the residual window is only the
+        // gap between this re-read and the update — self-healing on the next
+        // real scrape either way.
+        if (this.options.store.touchByUrlAndType) {
+          try {
+            const recheck = (await this.options.store.findByUrl(normalizedUrl))
+              .filter(c => c.metadata['ingestionType'] === incomingType);
+            const stillNewest = recheck.length > 0
+              && Math.max(...recheck.map(d => Number(d.timestamp) || 0)) === newestTs;
+            if (stillNewest) {
+              await this.options.store.touchByUrlAndType(normalizedUrl, incomingType, newestTs, Date.now());
+            }
+          } catch (err) {
             logger.warn(`[writer-queue] Timestamp refresh for unchanged ${normalizedUrl} (${incomingType}) failed:`, err);
-          });
+          }
+        }
         logger.log(`[writer-queue] Skipping ${normalizedUrl} (${incomingType}) — content unchanged.`);
         return;
       }
