@@ -1214,7 +1214,9 @@ function parseEnvNumber(env: Record<string, string | undefined>, key: string, de
 }
 
 function parseEnvBool(env: Record<string, string | undefined>, key: string, def: boolean): boolean {
-  const v = env[key];
+  // Trim like parseEnvNumber does: file values arrive trimmed via parseDotEnv, but a
+  // real env var `PI_RESEARCH_X='true '` otherwise silently read false.
+  const v = env[key]?.trim();
   if (v === undefined || v === '') return def;
   // Strict by design: only the literal 'true' (any case) is truthy; every other value is false.
   // This is intentional and asserted in config.test.ts ('1'/'yes' → false) — do not loosen it.
@@ -1237,7 +1239,7 @@ function parseEnvEnum<T extends string>(
   allowed: readonly T[],
   def: T,
 ): T {
-  const raw = env[key];
+  const raw = env[key]?.trim();
   if (raw === undefined || raw === '') return def;
   if ((allowed as readonly string[]).includes(raw)) return raw as T;
   logger.warn(`[config] Invalid ${key}="${raw}" (expected one of: ${allowed.join(', ')}). Using default "${def}".`);

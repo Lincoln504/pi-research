@@ -11,7 +11,7 @@
 
 import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks, rewriteCitationMarkers, type GlobalCitation } from '../utils/citation-utils.ts';
-import { lastCitedLinksHeaderIndex } from '../utils/text-utils.ts';
+import { lastCitedLinksHeaderIndex, lastCitedLinksHeader } from '../utils/text-utils.ts';
 import { getScrapedLinks, isTranscribedLink, normalizeUrl } from '../utils/shared-links.ts';
 import { stripTrailingLlmPunctuation } from '../utils/url-utils.ts';
 import { logger } from '../logger.ts';
@@ -321,7 +321,9 @@ export class ResearchSynthesisService implements IService {
           if (globalId !== undefined) localToGlobal.set(localKey, globalId);
           else droppedNumbers.add(localKey);
         });
-        let body = synthesis.slice(0, citedHeaderIdx).trimEnd();
+        // lineStart (not the 'C' offset): slicing at textStart left the tolerated
+        // `##`/`**`/`>` marker dangling as a stray line at the end of the body.
+        let body = synthesis.slice(0, lastCitedLinksHeader(synthesis).lineStart).trimEnd();
         if (localToGlobal.size > 0 || droppedNumbers.size > 0) {
           body = rewriteCitationMarkers(body, localToGlobal, (n) => droppedNumbers.has(n));
         }

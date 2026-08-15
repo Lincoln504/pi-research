@@ -3,6 +3,21 @@ import { normalizeCitations, formatCitedLinks } from '../../../src/utils/citatio
 
 describe('citation-utils', () => {
   describe('normalizeCitations', () => {
+    it('removes the tolerated markdown marker together with the CITED LINKS header', () => {
+      // Regression: the header detector tolerates `##`/`**`/`>` prefixes, but the
+      // removal sliced at the 'C' — leaving a stray `##` (or `**`) dangling as the
+      // last line of the kept body whenever the model wrote `## CITED LINKS`.
+      for (const header of ['## CITED LINKS', '**CITED LINKS**', '> CITED LINKS']) {
+        const report = `Finding [1].\n\n${header}\n[1] https://a.example/x — desc`;
+        const { normalizedReports } = normalizeCitations(new Map([['r1', report]]));
+        const out = normalizedReports.get('r1')!;
+        expect(out).not.toContain('CITED LINKS');
+        expect(out.trimEnd().endsWith('##')).toBe(false);
+        expect(out.trimEnd().endsWith('**')).toBe(false);
+        expect(out.trimEnd().endsWith('>')).toBe(false);
+      }
+    });
+
     it('should normalize citations across multiple reports and deduplicate URLs', () => {
       const reports = new Map([
         ['res1', 'Findings in report 1 [1].\n\nCITED LINKS\n[1] https://example.com — Source A'],

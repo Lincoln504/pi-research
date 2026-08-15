@@ -28,7 +28,7 @@ import { redactSecrets } from '../utils/log-utils.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { validateInitialLinks, MAX_INITIAL_LINKS, MAX_INITIAL_LINK_CHARS } from '../utils/url-utils.ts';
-import { startResearchSession, registerSessionAbort, clearSteeringMessages, getPiActivePanels } from '../orchestration/session-state.ts';
+import { startResearchSession, endResearchSession, registerSessionAbort, clearSteeringMessages, getPiActivePanels } from '../orchestration/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
@@ -339,6 +339,13 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
             registerSessionAbort(piSessionId, sessionResearchId, internalAbort);
 
             cleanup = async () => {
+              // Free what startResearchSession/registerSessionAbort created — the
+              // failures/failureReasons entries and the AbortController live in the
+              // module-level piSessions map keyed by the STABLE pi session id, so
+              // without this every headless run leaked them for the process
+              // lifetime (the TUI branch frees them via createCleanupFunction, the
+              // SDK in its own finally; this branch freed only steering).
+              endResearchSession(piSessionId, sessionResearchId);
               clearSteeringMessages(piSessionId);
             };
             

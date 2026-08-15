@@ -44,6 +44,7 @@ import { exportResearchReport, appendExportMessage } from './utils/research-expo
 import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath, getStateDir, saveConfig, resetConfig, describeKnowledgeStoreMode, isProjectScopedKey, parseDotEnv } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { buildModelRegistry, safeGetAvailable } from './core/llm/model-registry-factory.ts';
+import { RESEARCH_TOOL_NAMES } from './constants.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -234,7 +235,8 @@ export class ConfigFileError extends Error {}
  * the real environment, so real shell exports always win.
  */
 export function bridgeConfigEnv(explicitConfigPath?: string): { path: string; loaded: boolean } {
-  const basePath = explicitConfigPath ?? getGlobalEnvFilePath();
+  const globalBasePath = getGlobalEnvFilePath();
+  const basePath = explicitConfigPath ?? globalBasePath;
   const cliOverlayPath = getInterfaceEnvFilePath('cli');
   let loaded = false;
   // Merge base then overlay into one map FIRST (overlay wins), and only then
@@ -252,13 +254,18 @@ export function bridgeConfigEnv(explicitConfigPath?: string): { path: string; lo
   // the user passed on this exact invocation is the most specific intent, and the
   // ambient cli.env overlay silently overriding it re-created the very failure
   // this bridge exists to fix (a key set in `--config ci.env` simply not applying).
+  // The GLOBAL base always stays underneath: this bridge exists for env-only keys
+  // (PI_RESEARCH_API_KEY & co.) that getConfig never carries, so dropping the base
+  // here silently dropped credentials stored only in config.env — `--config extra.env`
+  // exit-78'd on a correctly configured machine while the help text promised
+  // "base config.env keys it does not set still apply".
   const layers = explicitConfigPath !== undefined
-    ? [cliOverlayPath, basePath]
-    : [basePath, cliOverlayPath];
+    ? [globalBasePath, cliOverlayPath, explicitConfigPath]
+    : [globalBasePath, cliOverlayPath];
   for (const filePath of layers) {
     // Only the EXPLICIT --config file fails loudly (see ConfigFileError above);
     // the ambient layers keep their missing/unreadable tolerance unchanged.
-    const isExplicit = explicitConfigPath !== undefined && filePath === basePath;
+    const isExplicit = explicitConfigPath !== undefined && filePath === explicitConfigPath;
     try {
       if (!fs.existsSync(filePath)) {
         if (isExplicit) throw new ConfigFileError(`--config file not found: ${filePath}`);
@@ -495,11 +502,20 @@ async function detectCredentials(explicitModel?: string): Promise<CredentialDete
     modelFrom,
     piAuthPresent,
     piModelsPresent,
-    problem:
-      'No model or API key is configured for pi-research. Provide credentials via environment ' +
-      'variables (PI_RESEARCH_API_KEY + PI_RESEARCH_PROVIDER + PI_RESEARCH_MODEL) or, if you use ' +
-      "pi, via pi's configuration (a provider entry in ~/.pi/agent/auth.json, or a per-provider " +
-      'apiKey in ~/.pi/agent/models.json).',
+    // A model configured with no usable key is a different (and misleading to
+    // conflate) gap than nothing configured at all: SKILL.md tells agents to relay
+    // this text verbatim, so "No model … is configured" pointed users who HAD set
+    // PI_RESEARCH_MODEL at the wrong knob.
+    problem: model
+      ? `A model is configured (${model}) but no API key is available for ` +
+        `${provider ? `provider "${provider}"` : 'its provider'}. Provide one via the ` +
+        'PI_RESEARCH_API_KEY environment variable (with PI_RESEARCH_PROVIDER), or, if you use pi, ' +
+        "via pi's configuration (a provider entry in ~/.pi/agent/auth.json, or a per-provider " +
+        'apiKey in ~/.pi/agent/models.json).'
+      : 'No model or API key is configured for pi-research. Provide credentials via environment ' +
+        'variables (PI_RESEARCH_API_KEY + PI_RESEARCH_PROVIDER + PI_RESEARCH_MODEL) or, if you use ' +
+        "pi, via pi's configuration (a provider entry in ~/.pi/agent/auth.json, or a per-provider " +
+        'apiKey in ~/.pi/agent/models.json).',
   };
 }
 
@@ -604,6 +620,14 @@ export async function cmdResearch(args: ResearchArgs): Promise<number> {
       ...(args.initialLinks ? { initialLinks: args.initialLinks } : {}),
     }, abortController.signal);
 
+    // Snapshot the run diagnostics NOW, before any further await: on a cancelled
+    // run, onSignal's fire-and-forget safeShutdown runs concurrently with this
+    // tail and resets these SDK globals — reading them at JSON-emit time made
+    // `researchers`/`trackedErrors` silently vanish from a cancelled-but-
+    // successful payload depending on who won the race.
+    const outcome = getLastResearcherOutcome();
+    const errorReport = getLastErrorReport();
+
     // Optionally persist the report to a file (opt-in via
     // PI_RESEARCH_REPORT_EXPORT_ENABLED). The SDK is a pure library and does not
     // write files; the CLI front-end does, mirroring the pi tool path.
@@ -636,8 +660,7 @@ export async function cmdResearch(args: ResearchArgs): Promise<number> {
       // (ISSUES-ANALYSIS-2026-07-09.md, Symptom 4): a caller reading only stdout/JSON
       // had no way to distinguish "thin report, little material out there" from "thin
       // report because most researchers died mid-run" without opening the log file.
-      const outcome = getLastResearcherOutcome();
-      const errorReport = getLastErrorReport();
+      // (outcome/errorReport were snapshotted right after the run resolved — see above.)
       toStdout(pretty({
         ok: true,
         depth,
@@ -719,11 +742,20 @@ export async function cmdKnowledge(queries: string[], json?: boolean): Promise<n
     await safeShutdown();
   }
 
+  // Same latch as cmdResearch's post-run check: the abort signal's checks inside
+  // searchKnowledge are point-in-time, so a Ctrl-C landing after the last one lets
+  // the search resolve normally — without this, an interrupted run raced onSignal's
+  // flushAndExit and could report ok:true / exit 0. The rationale comment above
+  // named exactly this failure; only the throwing half was previously handled.
+  if (cancellationRequested) {
+    exit = cancellationSignal ? exitCodeForSignal(cancellationSignal) : EXIT.CANCELLED;
+  }
+
   if (json) {
     // `ok: true` makes `ok` a reliable success/failure discriminant across every
     // knowledge JSON variant (disabled-store above, reportError's ok:false below,
     // and this success shape) — additive only, every existing field is unchanged.
-    toStdout(pretty({ ok: true, ...result }));
+    toStdout(pretty({ ok: true, ...(cancellationRequested ? { cancelled: true } : {}), ...result }));
   } else {
     toStdout((result.text.endsWith('\n') ? result.text : result.text + '\n'));
   }
@@ -1158,6 +1190,7 @@ COMMANDS
     --dry-run | --json           Plan only; JSON output.
 
   help, --help, -h               Show this help.
+  --version, -v                  Print the pi-research version.
 
 CONFIGURE
   Credentials are resolved in this order (first match wins):
@@ -1372,6 +1405,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
       } else if (a === '--exclude-tools') {
         const v = takeOptionValue(rest, ++i, '--exclude-tools');
         excludeTools = v.split(',').map((s) => s.trim()).filter(Boolean);
+        // Unknown names fail fast: the merge downstream is a blind Set union, so a
+        // typo ("securty_search") silently excluded nothing while the user believed
+        // the tool was off for the whole (billed) run.
+        const unknown = excludeTools.filter((t) => !RESEARCH_TOOL_NAMES.includes(t));
+        if (unknown.length > 0) {
+          throw new UsageError(
+            `--exclude-tools: unknown tool name${unknown.length === 1 ? '' : 's'} ` +
+            `${unknown.map((t) => `"${t}"`).join(', ')}. Valid names: ${RESEARCH_TOOL_NAMES.join(', ')}.`);
+        }
         if (excludeTools.length === 0) excludeTools = undefined;
       } else if (a === '--initial-links') {
         // Consume until the next flag or end. Validate each entry: these are templated
@@ -1392,6 +1434,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
           }
           j++;
         }
+        // Every other value-taking flag fails fast on a missing value; a bare
+        // `--initial-links` (immediately followed by another flag or end of args)
+        // silently proceeding with zero links was the one exception.
+        if (j === i + 1) throw new UsageError('--initial-links requires at least one URL.');
         i = j - 1;
       } else if (a === '--config') {
         configPath = takeOptionValue(rest, ++i, '--config');

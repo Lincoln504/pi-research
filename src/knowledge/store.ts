@@ -290,6 +290,15 @@ export class KnowledgeStore implements IKnowledgeStore {
           logger.warn('[store] Failed to read table schema:', schemaErr);
         }
       } else {
+        // Same warm-up as the migration branch above: createTable() throws
+        // "embedder dimension unknown" on a never-initialized embedder. This
+        // branch (no existing table — fresh dbDir or first-ever run) hit exactly
+        // that when the embedding factory handed back its model-mismatch local
+        // fallback, which is constructed but never initialize()d: every one of
+        // the caller's init retries burned against the same cached instance.
+        if (this.options.embedder.getDimension() === null) {
+          await this.withEmbedderReconnect(embedder => embedder.embedMany([' ']));
+        }
         this.table = await this.createTable();
       }
 
@@ -787,6 +796,49 @@ export class KnowledgeStore implements IKnowledgeStore {
     }
   }
 
+  /**
+   * Refresh the timestamp of one CURRENT generation for url+type — the
+   * revalidation "touch" for the writer-queue's content-unchanged skip. Without
+   * it a stable page kept its original timestamp forever: with
+   * KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS set, the serve-age gate then treated the
+   * entry as permanently stale (a live re-scrape on every run, for exactly the
+   * content that never changes), and TTL eviction eventually deleted an entry
+   * that had been re-verified byte-identical possibly hours earlier.
+   */
+  async touchByUrlAndType(url: string, ingestionType: string, generationTs: number, newTs: number): Promise<void> {
+    return this.trackOperation('touchByUrlAndType', undefined, async () => {
+      let retryCount = 0;
+      const MAX_RETRIES = 5;
+      const BASE_DELAY = 100;
+      const scopeFilter = this.getScopeFilter();
+      while (retryCount <= MAX_RETRIES) {
+        const table = await this.getFreshTable();
+        try {
+          const escapedUrl = url.replace(/'/g, "''");
+          const escapedType = ingestionType.replace(/'/g, "''");
+          // valuesSql with integer-coerced literals: timestamp is an Int64 column,
+          // and both inputs are integer-coerced so the SQL can never carry
+          // anything but digits.
+          await table.update({
+            where: `url = '${escapedUrl}' AND ingestion_type = '${escapedType}' AND timestamp = ${Math.floor(generationTs)} AND (${scopeFilter})`,
+            valuesSql: { timestamp: String(Math.floor(newTs)) },
+          });
+          logger.log(`[store] Refreshed timestamp for unchanged ${ingestionType} chunks of ${url}`);
+          return;
+        } catch (err) {
+          if (isLanceCommitConflict(err)) {
+            retryCount++;
+            if (retryCount > MAX_RETRIES) throw err;
+            const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw err;
+        }
+      }
+    });
+  }
+
   async findDocumentsByUrl(url: string): Promise<StoreDocument[]> {
     // Coordinate with close(): findByUrl runs via the writer-queue in the post-run
     // background window (link-description storage), exactly when a Ctrl+C-driven
@@ -1179,7 +1231,18 @@ export class KnowledgeStore implements IKnowledgeStore {
           backupDirs.map(async name => ({ name, ts: await this.backupDirTimestamp(name) }))
         );
         ranked.sort((a, b) => a.ts - b.ts);
-        for (const { name } of ranked.slice(0, -1)) {
+        // Retain older backups until they age past the store's own TTL, not just
+        // the single newest one. Two sessions configured with DIFFERENT embedding
+        // models alternate migrations against the shared table (each open sees
+        // "wrong model" → backup → fresh table), and keep-only-newest deleted the
+        // only surviving copy of the first model's data after just two
+        // alternations — silent, permanent loss. A backup older than ttlDays holds
+        // only rows eviction would have deleted anyway, so time-based retention
+        // matches the store's own data-retention contract.
+        const ttlDays = this.options.ttlDays ?? 30;
+        const backupCutoff = Math.trunc(Date.now() - (ttlDays * 24 * 60 * 60 * 1000));
+        for (const { name, ts } of ranked.slice(0, -1)) {
+          if (ts >= backupCutoff) continue;
           const fullPath = path.join(this.options.dbDir, name);
           logger.info(`[store] Removing superseded backup directory: ${name}`);
           await fsPromises.rm(fullPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

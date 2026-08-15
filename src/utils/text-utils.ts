@@ -253,17 +253,31 @@ function isPlausibleCitationUrl(url: string): boolean {
  * against the `CITED LINKS\n...` block that formatCitedLinks() emits.
  */
 export function lastCitedLinksHeaderIndex(text: string): number {
+  return lastCitedLinksHeader(text).textStart;
+}
+
+/**
+ * Both offsets of the last CITED LINKS header: `textStart` points at the 'C'
+ * (what parseCitations slices FROM), `lineStart` points at the start of the
+ * header line BEFORE any `#`/`>`/`**` markers (what body-replacement slices TO).
+ * Slicing the body at textStart left the tolerated markdown marker dangling at
+ * the end of the body — the rebuilt report then carried a stray `##` or `**`
+ * line whenever the model wrote `## CITED LINKS` instead of the plain form.
+ */
+export function lastCitedLinksHeader(text: string): { lineStart: number; textStart: number } {
   // Case-insensitive but LINE-LEADING: a mid-prose "...the cited links below..." has
   // non-whitespace before it on the line, so it cannot match — only a header at the
   // start of a line (after optional markdown markers) does.
   const re = /(^|\n)([ \t]*(?:#{1,6}[ \t]*|>[ \t]*|\*\*)?)CITED LINKS\b/gi;
-  let last = -1;
+  let lineStart = -1;
+  let textStart = -1;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
+    lineStart = m.index + m[1]!.length;
     // Offset of the 'C' in CITED LINKS = match start + leading newline + markers.
-    last = m.index + m[1]!.length + m[2]!.length;
+    textStart = m.index + m[1]!.length + m[2]!.length;
   }
-  return last;
+  return { lineStart, textStart };
 }
 
 /**

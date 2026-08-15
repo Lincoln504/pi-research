@@ -18,6 +18,9 @@ interface WriterQueueOptions {
     findByUrl: (url: string) => Promise<StoreDocument[]>;
     deleteByUrlAndType: (url: string, type: string, olderThan?: number) => Promise<void>;
     addDocuments: (docs: StoreDocument[]) => Promise<void>;
+    /** Revalidation touch for the content-unchanged skip (see that path). Optional
+     *  so lightweight test doubles need not implement it. */
+    touchByUrlAndType?: (url: string, type: string, generationTs: number, newTs: number) => Promise<void>;
   };
   chunker: Chunker | null;
 }
@@ -199,6 +202,14 @@ export class WriterQueue implements IWriterQueue {
             metrics.increment('knowledge_ingest_stale_prune_failed_total', 1);
           });
         }
+        // The content was just re-fetched and verified byte-identical — record
+        // that as freshness. Without this touch, a stable page's timestamp never
+        // moved: the serve-age gate treated it as permanently stale (live scrape
+        // every run) and TTL eviction eventually deleted a revalidated entry.
+        await this.options.store.touchByUrlAndType?.(normalizedUrl, incomingType, newestTs, Date.now())
+          .catch((err) => {
+            logger.warn(`[writer-queue] Timestamp refresh for unchanged ${normalizedUrl} (${incomingType}) failed:`, err);
+          });
         logger.log(`[writer-queue] Skipping ${normalizedUrl} (${incomingType}) — content unchanged.`);
         return;
       }

@@ -129,6 +129,19 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       });
       logger.info(`[ResearchOrchestrationService] Acquired research run slot ${runSlot.slotIndex} (cap ${semaphore.getMaxSlots()}).`);
     } catch (err) {
+      const isTerminal =
+        err instanceof ResearchRunCapacityError || (err instanceof Error && err.name === 'AbortError');
+      if (isTerminal) {
+        // The queue notice above may already have announced this run to the
+        // observer (onRunQueued); rethrowing with no terminal event breaks the
+        // "exactly one of onComplete/onError" contract both orchestrators keep —
+        // an observer-driven consumer saw run_queued and then silence. No
+        // orchestrator exists yet, so this cannot double-fire. Observer throws
+        // stay isolated, as everywhere else.
+        try {
+          (observer as { onError?: (e: Error) => void } | undefined)?.onError?.(err as Error);
+        } catch { /* observer isolation */ }
+      }
       if (err instanceof ResearchRunCapacityError) throw err; // capacity exhausted → fail fast
       // A cancel while queueing for a slot must stay cancelled. Fail-open here would
       // start the very run the user just aborted.

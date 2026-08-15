@@ -9,6 +9,7 @@ const mockStore = {
   findByUrl: vi.fn().mockResolvedValue([]),
   deleteByUrl: vi.fn().mockResolvedValue(undefined),
   deleteByUrlAndType: vi.fn().mockResolvedValue(undefined),
+  touchByUrlAndType: vi.fn().mockResolvedValue(undefined),
   isStoreClosed: vi.fn().mockReturnValue(false),
 } as any;
 
@@ -21,6 +22,7 @@ describe('WriterQueue', () => {
     mockStore.findByUrl.mockResolvedValue([]);
     mockStore.deleteByUrl.mockResolvedValue(undefined);
     mockStore.deleteByUrlAndType.mockResolvedValue(undefined);
+    mockStore.touchByUrlAndType.mockResolvedValue(undefined);
     mockStore.isStoreClosed.mockReturnValue(false);
     queue = new WriterQueue({ store: mockStore, chunker: null });
   });
@@ -82,6 +84,29 @@ describe('WriterQueue', () => {
     await queue.drain();
 
     expect(mockStore.addDocuments).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the timestamp of the current generation on the unchanged-content skip', async () => {
+    // Regression: the skip left the original timestamp forever, so with
+    // KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS set a STABLE page became permanently
+    // stale (a live re-scrape every run for exactly the content that never
+    // changes) and TTL eviction eventually deleted an entry that had just been
+    // re-verified byte-identical.
+    const hash = createHash('sha256').update('description').update('').digest('hex');
+    const generationTs = Date.now() - 1_000_000;
+    mockStore.findByUrl.mockResolvedValue([{
+      url: 'https://test.com',
+      text: 'description',
+      metadata: { contentHash: hash, ingestionType: 'synthesis-description' },
+      timestamp: generationTs,
+    }]);
+
+    queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
+    await queue.drain();
+
+    expect(mockStore.addDocuments).not.toHaveBeenCalled();
+    expect(mockStore.touchByUrlAndType).toHaveBeenCalledWith(
+      'https://test.com', 'synthesis-description', generationTs, expect.any(Number));
   });
 
   it('dedups against the NEWEST generation, not whichever row the store returns first', async () => {

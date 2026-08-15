@@ -12,7 +12,7 @@ pi CLI
 └── pi-research extension (src/index.ts)
     ├── Registered Tools   research, health, research_knowledge_search (always registered; reports why when the store is disabled)
     ├── Commands           /research, /research-config, /knowledge-store
-    ├── Events             input (mid-run steering), session_shutdown (cleanup)
+    ├── Events             input (mid-run steering), session_shutdown (cleanup), session_before_compact / session_compact, before_agent_start, after_provider_response
     └── Layers
         ├── Orchestration   quick/deep research coordination
         ├── Agent Tools     search, scrape, youtube_transcript, security_search, stackexchange, grep, read
@@ -106,10 +106,10 @@ agent to invoke:
 |------|-------|------|---------|
 | `search` | ✓ | — | DuckDuckGo Lite via the stealth browser |
 | `scrape` | ✓ | ✓ | Batch page fetch → Markdown via the stealth browser (up to 6 URLs per call) |
-| `youtube_transcript` | ✓ | ✓ | YouTube captions via youtubei.js + BotGuard PoToken (≤3 videos, one call per researcher) |
+| `youtube_transcript` | ✓ | ✓ | YouTube captions via youtubei.js + BotGuard PoToken (≤3 videos by default, configurable 1–5; one call per researcher) |
 | `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
 | `stackexchange` | ✓ | ✓ | Stack Exchange network |
-| `grep` | — | — | Local ripgrep (from pi-coding-agent) — off by default, see below |
+| `grep` | — | — | Local ripgrep (from pi-coding-agent) — always excluded, see below |
 | `read` | ✓ | ✓ | Local file reads (from pi-coding-agent) |
 
 In deep research `search` is excluded — the coordinator runs the search burst and hands
@@ -290,11 +290,12 @@ src/
 ### Key design decisions
 
 Read-only researchers — researcher agents are limited to the tool set above. They cannot
-write files, spawn processes, or make arbitrary network calls. They *can* read and grep
-files: `read` and `grep` are registered unconditionally and the researcher exclusion list
-(`bash`, `write`, `edit`, `repl`, `git`, `terminal`) does not cover them. The `cwd` passed
-to those tools is a resolution base, not a jail — an absolute path resolves to itself — so
-the boundary is "no mutation", not "only this directory".
+write files, spawn processes, or make arbitrary network calls. They *can* read files:
+`read` is registered and the researcher exclusion list (`bash`, `write`, `edit`, `repl`,
+`git`, `terminal`) does not cover it. Local `grep` is registered but always excluded (see
+the tool table above). The `cwd` passed to `read` is a resolution base, not a jail — an
+absolute path resolves to itself — so the boundary is "no mutation", not "only this
+directory".
 
 Worker pool over direct browser — browser processes are isolated in workers so a crash
 in one cannot affect the orchestrator or other sessions.

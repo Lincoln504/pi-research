@@ -380,9 +380,26 @@ describe('parseArgs — research', () => {
       'research',
       'topic',
       '--exclude-tools',
-      'security,stackexchange',
+      'security_search,stackexchange',
     ]);
-    expect(r.research?.excludeTools).toEqual(['security', 'stackexchange']);
+    expect(r.research?.excludeTools).toEqual(['security_search', 'stackexchange']);
+  });
+
+  it('--exclude-tools rejects unknown tool names', () => {
+    // Regression: the downstream merge is a blind Set union, so a typo — this
+    // test's own previous fixture used "security" for a tool actually named
+    // "security_search" — silently excluded nothing for the whole billed run.
+    expect(() =>
+      parseArgs(['node', 'cli.mjs', 'research', 'topic', '--exclude-tools', 'securty_search']),
+    ).toThrow(/unknown tool name "securty_search"/);
+  });
+
+  it('--initial-links with no URLs → UsageError', () => {
+    // Regression: a bare --initial-links silently proceeded with zero links,
+    // unlike every other value-taking flag.
+    expect(() =>
+      parseArgs(['node', 'cli.mjs', 'research', 'topic', '--initial-links', '--json']),
+    ).toThrow(/--initial-links requires at least one URL/);
   });
 
   it('--initial-links stops at next flag', () => {
@@ -1216,7 +1233,11 @@ describe('CLI subprocess — pi key detection by content', () => {
       const out = status(home);
       expect(out.ready).toBe(false);
       expect(out.credentials.source).toBe('none');
-      expect(out.credentials.problem).toMatch(/No model or API key/i);
+      // The fixture env DOES configure a model (PI_RESEARCH_MODEL), so the
+      // precise gap is "model set, key missing" — the message must name that,
+      // not the conflated "No model or API key" it previously showed.
+      expect(out.credentials.problem).toMatch(/model is configured .* no API key is available/i);
+      expect(out.credentials.problem).toContain('some-provider');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

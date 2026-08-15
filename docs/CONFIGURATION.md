@@ -69,7 +69,7 @@ Research
 | `PI_RESEARCH_MAX_RESEARCHERS` (TUI) | `3` | 1–5 | Parallel researchers. |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` (TUI) `[project]` | `1` | 1–3 | Depth for `/research` and the CLI when `--depth` is omitted (1=normal, 2=deep, 3=ultra). |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` (TUI) | `2` | 0–99 | Scrape batches per researcher (0 = unlimited). |
-| `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Shared web-gathering calls per researcher (`search` + `security_search` + `stackexchange` + `youtube_transcript`). Local `grep` has its own separate budget. |
+| `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Shared web-gathering calls per researcher (`search` + `security_search` + `stackexchange` + `youtube_transcript`). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
@@ -135,7 +135,7 @@ API keys
 
 | Variable | Description |
 |----------|-------------|
-| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI mode (not needed when pi's configuration supplies the key). On the CLI / agent skill both can also live in `config.env` / `cli.env`. The provider is required alongside the key, or inferred from a `provider/model-id` `PI_RESEARCH_MODEL`. |
+| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI mode (not needed when pi's configuration supplies the key). On the CLI / agent skill both can also live in `config.env` / `cli.env`. The provider is required alongside the key, or inferred from a `provider/model-id` `PI_RESEARCH_MODEL`. Note: provider-native variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are honored only as **real environment variables** — placing one in `config.env` / `cli.env` does nothing (the files bridge only `PI_RESEARCH_*` keys plus `STACKEXCHANGE_API_KEY` / `GITHUB_TOKEN` / `NVD_API_KEY`). |
 | `STACKEXCHANGE_API_KEY` | Raises the Stack Exchange tool's limit from 300/day to 10,000/day. Obtain at <https://stackapps.com/apps/oauth>. |
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
 | `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. Recommended when using severity-filtered security searches: those issue a second (CVSS v2) NVD query to catch v2-only CVEs, which roughly doubles request time against the 6 s/request unauthenticated throttle. |
@@ -158,6 +158,7 @@ Diagnostics & platform
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _(unset)_ | Set `1` during `npm install` to skip the camoufox browser download (fetched lazily on first use instead; standard Playwright convention). |
 | `PLAYWRIGHT_BROWSERS_PATH` | _(user cache)_ | Standard Playwright variable, honoured here too: overrides where the camoufox binary is stored and looked up, and is passed through to browser workers. |
 | `XDG_CACHE_HOME` | `~/.cache` | Standard XDG variable. When set, every `~/.cache/pi-research/...` path below is rooted at `$XDG_CACHE_HOME/pi-research/...` instead. |
+| `PI_RESEARCH_BIN` (alias `PI_RESEARCH_PATH`) | _(auto)_ | Agent-skill launcher only: explicit path to the pi-research engine binary when auto-resolution (PATH → local install → npx) should be bypassed. See [skills/pi-research/references/configuration.md](../skills/pi-research/references/configuration.md). |
 | `PLAYWRIGHT_INSTALL_DEPS` | _(unset)_ | Linux only. Set `true` during `npm install` to also install system libraries via `npx playwright install-deps` (same as `npm run install:system-deps`). |
 | `PI_RESEARCH_STRICT_SETUP` | _(unset)_ | Read by the bundled `scripts/setup.cjs` during `npm install`. Set `1`/`true` to make a failed browser download fail the install instead of deferring it to first use. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |

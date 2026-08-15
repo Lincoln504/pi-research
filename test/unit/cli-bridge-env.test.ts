@@ -124,4 +124,42 @@ describe('bridgeConfigEnv precedence', () => {
       else process.env['PI_RESEARCH_MODEL'] = savedModel;
     }
   });
+
+  it('an explicit --config keeps credentials stored only in the base config.env (regression)', () => {
+    // Regression: with --config, the layer list was [cli.env, namedFile] — the
+    // global base was never read, so PI_RESEARCH_API_KEY/_PROVIDER stored only in
+    // config.env vanished and `research --config extra.env` exit-78'd on a
+    // correctly configured machine, contradicting the help text ("base config.env
+    // keys it does not set still apply").
+    const researchDir = path.join(os.homedir(), FIXTURE_DIR_NAME, 'research');
+    const saved: Record<string, string | undefined> = {
+      PI_RESEARCH_API_KEY: process.env['PI_RESEARCH_API_KEY'],
+      PI_RESEARCH_PROVIDER: process.env['PI_RESEARCH_PROVIDER'],
+      PI_RESEARCH_MODEL: process.env['PI_RESEARCH_MODEL'],
+    };
+    const extraPath = path.join(os.homedir(), FIXTURE_DIR_NAME, 'extra.env');
+    try {
+      mkdirSync(researchDir, { recursive: true });
+      writeFileSync(
+        path.join(researchDir, 'config.env'),
+        'PI_RESEARCH_API_KEY=base-key\nPI_RESEARCH_PROVIDER=base-provider\nPI_RESEARCH_MODEL=base/model\n',
+        'utf-8',
+      );
+      writeFileSync(extraPath, 'PI_RESEARCH_MODEL=named/model\n', 'utf-8');
+      for (const k of Object.keys(saved)) delete process.env[k];
+
+      bridgeConfigEnv(extraPath);
+
+      // The named file wins where it speaks; the base fills everything else.
+      expect(process.env['PI_RESEARCH_MODEL']).toBe('named/model');
+      expect(process.env['PI_RESEARCH_API_KEY']).toBe('base-key');
+      expect(process.env['PI_RESEARCH_PROVIDER']).toBe('base-provider');
+    } finally {
+      rmSync(path.join(os.homedir(), FIXTURE_DIR_NAME), { recursive: true, force: true });
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
 });

@@ -183,6 +183,16 @@ export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 20;
 export const DEFAULT_EXCLUDED_TOOLS: readonly string[] = ['grep'];
 
 /**
+ * The complete set of excludable research tool names — the vocabulary
+ * `--exclude-tools` / `excludeTools` / PI_RESEARCH_DISABLED_TOOLS accept.
+ * Kept here (next to DEFAULT_EXCLUDED_TOOLS) so validation and the exclusion
+ * machinery cannot drift; the DISABLED_TOOLS doc in config.ts names the same set.
+ */
+export const RESEARCH_TOOL_NAMES: readonly string[] = [
+  'search', 'scrape', 'security_search', 'stackexchange', 'youtube_transcript', 'grep',
+];
+
+/**
  * Resolve the effective researcher exclusion list.
  *
  * EVERY input is strictly ADDITIVE on top of DEFAULT_EXCLUDED_TOOLS. Both

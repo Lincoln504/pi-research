@@ -42,7 +42,23 @@ export async function loadPipelineWithTimeout(
         interOpNumThreads: 1,
       },
     });
-    return await withTimeout(pipelinePromise, timeoutMs, errorMessage);
+    // withTimeout races but cannot cancel: on timeout the underlying pipeline()
+    // keeps loading in the background and its eventual ONNX session would leak
+    // (the caller's catch disposes this.pipeline, which was never assigned).
+    // Dispose the late arrival when it eventually resolves — one orphaned native
+    // session per retry adds up on a slow disk.
+    let timedOut = true;
+    try {
+      const p = await withTimeout(pipelinePromise, timeoutMs, errorMessage);
+      timedOut = false;
+      return p;
+    } finally {
+      if (timedOut) {
+        pipelinePromise
+          .then((late) => (late as unknown as { dispose?: () => Promise<void> }).dispose?.())
+          .catch(() => { /* load failed after the timeout — nothing to dispose */ });
+      }
+    }
   });
 
   return { pipeline: loadedPipeline, errorMessage };

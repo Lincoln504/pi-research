@@ -1,4 +1,4 @@
-import { parseCitations, lastCitedLinksHeaderIndex, type Citation } from './text-utils.ts';
+import { parseCitations, lastCitedLinksHeader, type Citation } from './text-utils.ts';
 import { normalizeUrl } from './shared-links.ts';
 
 export interface GlobalCitation extends Citation {
@@ -66,7 +66,9 @@ export function normalizeCitations(reports: ReadonlyMap<string, string>): {
     // line-leading, all-caps header, never an incidental "cited links" mention in
     // prose (an unanchored split there would drop real findings before the
     // evaluator ever sees them).
-    const headerIdx = lastCitedLinksHeaderIndex(report);
+    // lineStart (not textStart): slicing at the 'C' left the tolerated `##`/`**`/`>`
+    // marker dangling at the end of the kept body.
+    const headerIdx = lastCitedLinksHeader(report).lineStart;
     let content = headerIdx >= 0 ? report.slice(0, headerIdx) : report;
 
     // Renumber local [N] markers to their global ids, and DELETE the ones that could
