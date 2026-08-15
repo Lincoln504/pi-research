@@ -85,17 +85,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
 
   logger.info(`[Researcher] Using model for researcher ${researcherId}: ${modelToUse.provider}/${modelToUse.id}`);
 
-  // The session sends model.maxTokens as the per-request max_tokens. Large-context
-  // catalog entries carry ~230k ceilings, and providers that budget-check max_tokens
-  // up front (OpenRouter 402s it against remaining credits) then reject every
-  // researcher call on a low balance even though the real response costs cents.
-  // Clamp the session's copy of the model to RESEARCHER_MAX_TOKENS; Model is plain
-  // catalog data, so a spread clone is safe and the shared registry entry is untouched.
-  const outputCap = config?.RESEARCHER_MAX_TOKENS ?? 16384;
-  const sessionModel = modelToUse.maxTokens > outputCap
-    ? { ...modelToUse, maxTokens: outputCap }
-    : modelToUse;
-
   try {
     const tracker = new ToolUsageTracker(createDefaultToolLimits(config));
 
@@ -149,7 +138,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       tools, // Explicit allowlist (BUG-1 fix)
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager: researcherSettings,
-      model: sessionModel,
+      model: modelToUse,
       // pi 0.80.8 replaced the SDK's `modelRegistry`/`authStorage` session options
       // with the async `modelRuntime`. Pass the runtime backing OUR registry when
       // this run built one (standalone CLI/SDK): it carries any explicit API key
@@ -196,7 +185,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
 
       sessionRef.session = result.session;
 
-      return { session: result.session, resolvedModel: sessionModel };
+      return { session: result.session, resolvedModel: modelToUse };
     } catch (tailError) {
       const session = result?.session;
       if (session && typeof session.abort === 'function') {

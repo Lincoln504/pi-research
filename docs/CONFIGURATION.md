@@ -114,7 +114,6 @@ These are advanced, env-only knobs (not in the TUI).
 | `PI_RESEARCH_LLM_THINKING_LEVEL` | `off` | off · minimal · low · medium · high | Chain-of-thought level for all engine LLM work (coordinator, evaluator, synthesis, JSON-repair, knowledge extraction, and researcher sub-agents). Off by default — these calls emit structured JSON / cited reports, so a thinking block only consumes the output budget and can truncate the answer. Clamped per model by pi. |
 | `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the plan + mid-round evaluator decision. Clamped to the model's real ceiling. |
 | `PI_RESEARCH_SYNTHESIS_MAX_TOKENS` | `32768` | 1024–131072 | Max output tokens for the final synthesized report. Clamped to the model's real ceiling. |
-| `PI_RESEARCH_RESEARCHER_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens per researcher LLM call (deep and quick). Without it the model's full catalog ceiling is sent as `max_tokens`, which OpenRouter budget-checks against remaining credits and rejects on low balances. |
 
 Knowledge store
 

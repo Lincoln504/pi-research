@@ -122,15 +122,6 @@ export const ConfigSchema = Type.Object({
    *  the model's real maxTokens at call time.
    *  Not exposed in TUI — controlled via PI_RESEARCH_SYNTHESIS_MAX_TOKENS env var. */
   SYNTHESIS_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 32768 }),
-  /** Max OUTPUT tokens per researcher LLM call (deep and quick sub-agent sessions).
-   *  Without a cap the session inherits the model's full catalog ceiling as the
-   *  per-request max_tokens — ~230k for large-context models — which providers that
-   *  budget-check max_tokens up front (OpenRouter 402s against remaining credits)
-   *  reject outright on low balances, even though the actual response would cost
-   *  cents. Default 16384: researcher turns are tool calls plus a cited report, far
-   *  below this. Clamped to the model's real ceiling at session build time.
-   *  Not exposed in TUI — controlled via PI_RESEARCH_RESEARCHER_MAX_TOKENS env var. */
-  RESEARCHER_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 16384 }),
   /** LLM Model override for researcher sub-agents and knowledge synthesis.
    *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
    *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
@@ -242,7 +233,6 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_LLM_THINKING_LEVEL',
   'PI_RESEARCH_PLANNING_MAX_TOKENS',
   'PI_RESEARCH_SYNTHESIS_MAX_TOKENS',
-  'PI_RESEARCH_RESEARCHER_MAX_TOKENS',
   'PI_RESEARCH_MIGRATION_STRATEGY',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
@@ -875,7 +865,6 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_LLM_THINKING_LEVEL: config.LLM_THINKING_LEVEL,
     PI_RESEARCH_PLANNING_MAX_TOKENS: String(config.PLANNING_MAX_TOKENS),
     PI_RESEARCH_SYNTHESIS_MAX_TOKENS: String(config.SYNTHESIS_MAX_TOKENS),
-    PI_RESEARCH_RESEARCHER_MAX_TOKENS: String(config.RESEARCHER_MAX_TOKENS),
     PI_RESEARCH_MIGRATION_STRATEGY: config.MIGRATION_STRATEGY,
     PI_RESEARCH_CONSOLE_LOG: String(config.CONSOLE_LOG),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
@@ -1106,7 +1095,6 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     LLM_THINKING_LEVEL: parseEnvEnum(e, 'PI_RESEARCH_LLM_THINKING_LEVEL', ['off', 'minimal', 'low', 'medium', 'high'] as const, DEFAULTS.LLM_THINKING_LEVEL),
     PLANNING_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_PLANNING_MAX_TOKENS', DEFAULTS.PLANNING_MAX_TOKENS, 1024, 131072),
     SYNTHESIS_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_SYNTHESIS_MAX_TOKENS', DEFAULTS.SYNTHESIS_MAX_TOKENS, 1024, 131072),
-    RESEARCHER_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_RESEARCHER_MAX_TOKENS', DEFAULTS.RESEARCHER_MAX_TOKENS, 1024, 131072),
     MIGRATION_STRATEGY: parseEnvEnum(e, 'PI_RESEARCH_MIGRATION_STRATEGY', ['drop', 're-embed', 'backup'] as const, DEFAULTS.MIGRATION_STRATEGY),
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
