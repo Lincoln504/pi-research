@@ -134,24 +134,32 @@ export async function initBrowser(): Promise<void> {
         // (consumers install without our lockfile, so a floating range resolves
         // to a newer, broken version):
         //
-        //   • camoufox-js  ^0.12.0  → the Windows gap that held this at 0.10.x is
-        //     closed: camoufox shipped no Windows asset from v146-hardware through
-        //     v152.0.2-alpha, and restored it in v152.0.4-beta.26 (2026-07-16).
+        //   • camoufox-js  ^0.10.2  → the two ORIGINAL reasons for this pin have
+        //     both lapsed (camoufox restored Windows assets in v152.0.4-beta.26,
+        //     2026-07-16; and impit's `only-allow pnpm` guard existed only in
+        //     0.13.1/0.14.0), but a THIRD, worse one replaced them. 0.12.0
+        //     requires `better-sqlite3 ^13.0.1`, and better-sqlite3 13 DROPPED
+        //     PREBUILT BINARIES: 12.x installs via `prebuild-install || node-gyp
+        //     rebuild`, 13.x has no install script at all, so npm falls back to
+        //     auto-running `node-gyp rebuild` for its binding.gyp and every
+        //     install needs a full C++ toolchain. Measured: `npm ci` fails
+        //     outright on the Windows CI runner ("could not find a version of
+        //     Visual Studio 2017 or newer"), which is most Windows consumers.
+        //     Upgrading again means checking better-sqlite3 first, not camoufox.
         //   • playwright-core  1.60.0 (exact) → playwright-core and the camoufox
         //     binary are one matched Juggler-protocol pair. 1.61 added a
         //     viewport.isMobile field the build REJECTS ("property
         //     viewport.isMobile not described in this scheme"), failing every
-        //     launch below. This is no longer only our own finding: camoufox-js
-        //     0.12.0 declares `peerDependencies: playwright-core "<1.61.0"`, so
-        //     npm now enforces upstream what this pin used to hold by hand.
-        //   • impit  0.14.3 (exact, a direct dep though only camoufox-js uses it)
-        //     → the reason this was held at 0.13.0 was the `preinstall: npx
-        //     only-allow pnpm` guard (an upstream mistake) that hard-fails
-        //     `npm install -g`; it shipped only in 0.13.1/0.14.0 and was dropped
-        //     again in 0.14.1, so the newest line is guard-free. The exact pin
-        //     stays regardless: it is the ONLY way to force a version for
-        //     consumers, since npm `overrides` don't propagate to installers of a
-        //     published package.
+        //     launch below. Corroborated upstream: camoufox-js 0.12.0 declares
+        //     `peerDependencies: playwright-core "<1.61.0"`, the same bound this
+        //     pin has held by hand.
+        //   • impit  0.13.0 (exact, a direct dep though only camoufox-js uses it)
+        //     → camoufox-js 0.10.2 requires `impit ^0.13.0`, and within that range
+        //     0.13.0 is the only version free of the `preinstall: npx only-allow
+        //     pnpm` guard (an upstream mistake in 0.13.1/0.14.0, dropped again in
+        //     0.14.1) that hard-fails `npm install -g`. The exact pin is also the
+        //     ONLY way to force a version for consumers, since npm `overrides`
+        //     don't propagate to installers of a published package.
         //
         // What is NOT pinned: the browser BINARY. `camoufox-js fetch` takes no
         // version argument — it walks the GitHub releases newest-first and takes

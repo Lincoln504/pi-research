@@ -301,16 +301,27 @@ Worker pool over direct browser — browser processes are isolated in workers so
 in one cannot affect the orchestrator or other sessions.
 
 Pinned browser stack — `playwright-core` and `impit` are pinned to exact versions and
-`camoufox-js` to its `0.12.x` line; the three are coupled and upgraded together, because
+`camoufox-js` to its `0.10.x` line; the three are coupled and upgraded together, because
 each floating range broke fresh consumer installs that our lockfile masked.
-playwright-core stays at `1.60.0`: camoufox-js `0.12.0` now declares
-`peerDependencies: { "playwright-core": "<1.61.0" }` itself, so what used to be a
-hand-maintained pin is enforced upstream (1.61+ rejects camoufox's Juggler and fails
-every launch). impit is pinned exactly because npm `overrides` do not propagate to
-consumers — note the original reason for holding `0.13.0`, the `only-allow pnpm`
-preinstall guard that broke `npm install -g`, applied only to 0.13.1/0.14.0 and was
-dropped again in 0.14.1. Rationale in full:
-`src/infrastructure/browser/thread-worker-browser.ts`.
+playwright-core stays at `1.60.0` (1.61+ rejects camoufox's Juggler and fails every
+launch — corroborated upstream, since camoufox-js `0.12.0` declares
+`peerDependencies: { "playwright-core": "<1.61.0" }`, the same bound this pin holds by
+hand). `impit` stays at `0.13.0`: camoufox-js 0.10.2 requires `^0.13.0`, and within that
+range only 0.13.0 lacks the `only-allow pnpm` preinstall guard that breaks
+`npm install -g` (an upstream mistake in 0.13.1/0.14.0, dropped again in 0.14.1). An
+exact pin is required because npm `overrides` do not propagate to consumers. Rationale in
+full: `src/infrastructure/browser/thread-worker-browser.ts`.
+
+The two original blockers have both lapsed — camoufox restored Windows binaries in
+`v152.0.4-beta.26` (2026-07-16) and impit's guard is long gone — but camoufox-js `0.12.0`
+is held back by a third, worse one: it requires `better-sqlite3 ^13.0.1`, and
+better-sqlite3 13 **dropped prebuilt binaries**. 12.x installs via
+`prebuild-install || node-gyp rebuild`; 13.x ships no install script at all, so npm
+auto-runs `node-gyp rebuild` against its `binding.gyp` and every install demands a full
+C++ toolchain. This was measured, not inferred: the upgrade was made, and `npm ci` failed
+outright on the Windows CI runner (`could not find a version of Visual Studio 2017 or
+newer`) — i.e. it would break installation for most Windows users, which is exactly what
+this pin exists to prevent. Check better-sqlite3 before camoufox next time.
 
 The browser BINARY, by contrast, is not pinned and cannot be. `camoufox-js fetch` takes
 no version argument: it walks the `daijro/camoufox` GitHub releases newest-first and takes
@@ -320,10 +331,13 @@ which camoufox-js version is installed — the npm pins do not freeze it, and a 
 camoufox release could break launches for fresh installs with no change on our side.
 Windows assets were in fact missing from `v146-hardware` through `v152.0.2-alpha` and
 returned in `v152.0.4-beta.26` (2026-07-16). Current newest is `v152.0.4-beta.28`
-(Firefox 152); it launches and drives cleanly under playwright-core `1.60.0`, verified
-directly, as does the older `v135.0.1-beta.24` an existing cache may still hold. Re-verify
-a real launch when bumping this stack — the unit and integration suites mock the browser
-and cannot catch a Juggler mismatch.
+(Firefox 152); it launches and drives cleanly under playwright-core `1.60.0` **with
+camoufox-js 0.10.2** (whose `MIN_VERSION` is `beta.19`, so it accepts it), verified
+directly, as does the older `v135.0.1-beta.24` an existing cache may still hold. The
+practical consequence is that browser freshness is independent of the npm pin: a stale
+`camoufox-js` does not mean a stale Firefox. Re-verify a real launch when bumping this
+stack — the unit and integration suites mock the browser and cannot catch a Juggler
+mismatch.
 
 Pinned data stack — `apache-arrow` is a direct dependency at `21.1.0`, and `overrides`
 forces the whole tree to that single version so LanceDB and Arrow share one Arrow instance
