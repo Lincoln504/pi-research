@@ -9,7 +9,7 @@ import type { SystemResearchState } from './deep-research-types.ts';
 import { createResearcherSession } from './researcher.ts';
 import { registerScrapedLinks } from '../utils/shared-links.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
-import { extractUsage } from '../types/llm.ts';
+import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { ServiceNames,
@@ -347,13 +347,15 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
         const rawUsage = msg['usage'] as any;
         if (rawUsage) {
-          const { tokens, cost } = extractUsage(resolvedModel, rawUsage);
-
+          // Observer exceptions must not kill the researcher, so hand recordLlmUsage
+          // a safeObserve-wrapped sink rather than the raw observer.
+          const { tokens, cost } = recordLlmUsage(resolvedModel, rawUsage, {
+            component: 'researcher',
+            complexity,
+            observer: { onTokensConsumed: (t, c) => safeObserve(() => observer?.onTokensConsumed?.(t, c)) },
+          });
           if (tokens > 0 || cost > 0) {
-            metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(complexity) });
-            metrics.increment('llm_cost_total', cost, { component: 'researcher', complexity: String(complexity) });
             safeObserve(() => observer?.onResearcherProgress?.(id, undefined, tokens, cost));
-            safeObserve(() => observer?.onTokensConsumed?.(tokens, cost));
           }
         }
       } else if (event.type === 'tool_execution_start') {

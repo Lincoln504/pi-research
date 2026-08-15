@@ -668,6 +668,37 @@ describe('runResearcher', () => {
       expect(vi.mocked(metrics.increment)).not.toHaveBeenCalledWith('researcher_errors_total', expect.anything(), expect.anything());
     });
 
+    it('routes researcher usage through recordLlmUsage — warnIfUnpriced fires for a $0 model', async () => {
+      // Regression: the message_end usage block hand-copied extract→increment→emit
+      // instead of calling recordLlmUsage, so warnIfUnpriced never ran for
+      // researcher usage. On depth-0 runs (no coordinator) that made a
+      // misconfigured price table silently report $0.0000 with no diagnostic.
+      vi.mocked(metrics.increment).mockClear();
+      const { logger } = await import('../../../src/logger.ts');
+      vi.mocked(logger.warn).mockClear();
+
+      let subscriber: ((event: any) => void) | undefined;
+      mockSubscribe.mockImplementation(((cb: (event: any) => void) => {
+        subscriber = cb;
+        return vi.fn();
+      }) as any);
+      mockPrompt.mockImplementation(async () => {
+        subscriber?.({
+          type: 'message_end',
+          message: { role: 'assistant', usage: { input: 100, output: 50 } },
+        });
+      });
+
+      await runResearcher(makeOptions());
+
+      // The unified path recorded the tokens under the researcher component…
+      expect(vi.mocked(metrics.increment)).toHaveBeenCalledWith(
+        'llm_tokens_total', 150, { component: 'researcher', complexity: '1' });
+      // …and the unpriced-model warning fired (STUB_MODEL has no price table).
+      expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+        expect.stringContaining('price table is all zeros'));
+    });
+
     it('still records a genuine (non-cancelled) failure as an error in metrics', async () => {
       vi.mocked(metrics.increment).mockClear();
       vi.mocked(metrics.observe).mockClear();

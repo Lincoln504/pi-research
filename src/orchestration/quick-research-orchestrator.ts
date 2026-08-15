@@ -13,7 +13,7 @@ import {
 import { type Model } from '@earendil-works/pi-ai';
 import { injectCurrentDate } from '../core/llm/inject-date.ts';
 import { loadPrompt } from '../core/llm/prompts.ts';
-import { extractUsage } from '../types/llm.ts';
+import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
@@ -238,13 +238,13 @@ export class QuickResearchOrchestrator {
 
                 const rawUsage = msg['usage'] as any;
                 if (rawUsage) {
-                    const { tokens, cost } = extractUsage(resolvedModel, rawUsage);
-
+                    const { tokens, cost } = recordLlmUsage(resolvedModel, rawUsage, {
+                        component: 'quick_researcher',
+                        complexity: 0,
+                        observer,
+                    });
                     if (tokens > 0 || cost > 0) {
-                        metrics.increment('llm_tokens_total', tokens, { component: 'quick_researcher', complexity: '0' });
-                        metrics.increment('llm_cost_total', cost, { component: 'quick_researcher', complexity: '0' });
                         observer?.onResearcherProgress?.('quick', undefined, tokens, cost);
-                        observer?.onTokensConsumed?.(tokens, cost);
                     }
                 }
             } else if (event.type === 'tool_execution_start') {
