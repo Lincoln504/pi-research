@@ -455,6 +455,16 @@ async function fetchPaginated(
     // rows we keep are the most recent. Only fires when the match set is larger
     // than what we return — a query whose results all fit is already complete, so
     // the common (and every mocked) case still costs exactly one request.
+    //
+    // Interaction with the `v2` supplemental pass (searchSingleTerm), deliberate:
+    // that pass admits only entries carrying NO v3/v4 metric, and NVD scores
+    // essentially every modern CVE with v3 — so v2-only rows live at the OLD end.
+    // Seeking to the tail therefore makes the supplement return little or nothing
+    // once a match set is large. That is the intended trade, not an oversight: the
+    // supplement was the channel feeding 1999-era advisories into results that are
+    // supposed to describe the current picture. A genuinely legacy product still
+    // works, because its own v2 match set is small enough that no seek fires.
+
     if (!seekedToNewest && startIndex === 0 && reportedTotal !== undefined && reportedTotal > maxResults) {
       seekedToNewest = true;
       startIndex = reportedTotal - maxResults;
