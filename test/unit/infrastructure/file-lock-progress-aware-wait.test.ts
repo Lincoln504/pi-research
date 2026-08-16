@@ -149,3 +149,39 @@ describe('lock acquisition waits on progress, not on the clock', () => {
     await holder.releaseLock();
   }, 20_000);
 });
+
+/**
+ * A pid is not the only liveness evidence a lock carries.
+ *
+ * Treating every unidentifiable lock as fully alive was an overcorrection: a file
+ * torn by a SIGKILL between open(...,'wx') and write() is unidentifiable by
+ * construction, and holding it for the live-owner threshold made knowledge-store
+ * init fail where it used to reclaim and proceed. Where a heartbeat runs, a
+ * motionless file is evidence of abandonment on its own.
+ */
+describe('an unidentifiable lock is judged by whether a heartbeat can judge it', () => {
+  const call = (svc: any, ageMs: number) => svc._shouldReclaim(null, null, ageMs);
+
+  it('uses a heartbeat-derived window when this lock class heartbeats', async () => {
+    const { svc } = await makeLock({ lockStaleThreshold: 15_000, liveOwnerStaleThreshold: 120_000 });
+    // Heartbeat every 30s → reclaimable at 60s, not at the 120s live-owner threshold
+    // and not at the 15s crash-cleanup one.
+    await expect(call(svc, 40_000)).resolves.toBe(false);
+    await expect(call(svc, 70_000)).resolves.toBe(true);
+  });
+
+  it('never reclaims inside one heartbeat interval, so a late tick cannot lose the lock', async () => {
+    const { svc } = await makeLock({ lockStaleThreshold: 1_000, liveOwnerStaleThreshold: 120_000 });
+    // A tiny stale threshold must not drag the window below the refresh cadence.
+    await expect(call(svc, 30_000)).resolves.toBe(false);
+    await expect(call(svc, 61_000)).resolves.toBe(true);
+  });
+
+  it('falls back to the absolute ceiling when no heartbeat runs', async () => {
+    // The run semaphore's never-steal opt-out disables the heartbeat entirely, so its
+    // slot files never move and age carries no information at all.
+    const { svc } = await makeLock({ lockStaleThreshold: 15_000, liveOwnerStaleThreshold: Number.MAX_SAFE_INTEGER });
+    await expect(call(svc, 9 * 60_000)).resolves.toBe(false);
+    await expect(call(svc, 11 * 60_000)).resolves.toBe(true);
+  });
+});

@@ -193,6 +193,9 @@ export class BrowserTaskScheduler implements IScheduler {
                 // Decay (not reset) so a slow worker crash-loop can still accumulate to
                 // the auto-recovery threshold instead of being zeroed on every tick.
                 poolManager.decayConsecutiveErrors();
+                // Sampled on the leadership tick rather than per task: this is a
+                // distribution property, not a per-task one, and it should read zero.
+                poolManager.recordDispatchHealth();
             } catch (err) {
                 logger.warn('[Scheduler] Leadership check error:', err);
             } finally {

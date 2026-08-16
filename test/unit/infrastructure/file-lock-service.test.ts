@@ -116,16 +116,17 @@ describe('FileLockService', () => {
   // ---------------------------------------------------------------------------
 
   describe('stale lock recovery', () => {
-    it('acquireLock() replaces an unidentifiable lock only once it is as stale as a live owner would have to be', async () => {
+    it('acquireLock() replaces an unidentifiable lock once it has gone motionless past two heartbeat intervals', async () => {
       // A lock whose content carries no pid (legacy format, truncation, a torn
-      // read of one being written). We cannot prove its owner is dead, so it gets
-      // the live-owner threshold — NOT the crash-cleanup one. It used to take the
-      // short threshold, which reclaimed on no evidence at all while
-      // _isOwnerAlive(null) simultaneously reported the owner as alive.
+      // read of one being written). Its owner cannot be named — but this lock class
+      // runs a heartbeat, and a live holder refreshes the mtime, so a file that has
+      // ALSO stopped moving is evidence of abandonment that needs no pid.
+      // Two intervals, not one: at exactly one, a late tick could lose the lock.
       const foreignUuid = crypto.randomUUID();
       await fs.writeFile(lockFilePath, foreignUuid, 'utf-8');
 
-      const staleTime = new Date(Date.now() - 130_000); // > the 120s default
+      // Default liveOwnerStaleThreshold 120s → heartbeat every 30s → threshold 60s.
+      const staleTime = new Date(Date.now() - 130_000);
       await fs.utimes(lockFilePath, staleTime, staleTime);
 
       service = new FileLockService({
@@ -145,9 +146,11 @@ describe('FileLockService', () => {
       await service.releaseLock();
     });
 
-    it('leaves an unidentifiable lock alone while it is younger than that', async () => {
+    it('leaves an unidentifiable lock alone while its holder could still be refreshing it', async () => {
       await fs.writeFile(lockFilePath, crypto.randomUUID(), 'utf-8');
-      const staleTime = new Date(Date.now() - 40_000); // past the 15s short threshold
+      // Past the 15s crash-cleanup threshold, but inside the 60s window in which a
+      // live holder's heartbeat could still account for the file's age.
+      const staleTime = new Date(Date.now() - 40_000);
       await fs.utimes(lockFilePath, staleTime, staleTime);
 
       service = new FileLockService({

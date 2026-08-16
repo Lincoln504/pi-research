@@ -174,23 +174,29 @@ export class FileLockService implements IService {
    *                               holding during a (possibly slow) critical section.
    *                               Stealing it would let two writers run the same
    *                               read-modify-write and lose an update.
-   *   - Unidentifiable (no pid) → as patient as a live owner, but never longer
-   *                               than UNIDENTIFIED_MAX_STALE_MS.
+   *   - Unidentifiable (no pid) → judged by whether this lock has a HEARTBEAT to
+   *                               judge it by; see below.
    *
-   * That last case used to take the SHORT threshold, which put it on the
-   * crash-cleanup schedule on the strength of no evidence at all — while
+   * The unidentifiable case used to take the short threshold outright, which put it
+   * on the crash-cleanup schedule on the strength of no evidence at all — while
    * `_isOwnerAlive(null)` returns true, so the two halves openly disagreed. The
-   * forensic cost was the worse half: the reclaim log then read
-   * "Cleaning up stale lock file (90s old, owner alive: true)", a sentence that
-   * describes stealing a lock from a living process, which is the one thing this
-   * class exists not to do.
+   * forensic cost was the worse half: the reclaim log read
+   * "Cleaning up stale lock file (90s old, owner alive: true)", a sentence
+   * describing the one thing this class exists not to do.
    *
-   * Both halves now agree that unknown means alive. The ceiling exists because the
-   * other direction leaks: the run semaphore opts out of live-owner reclaim
-   * entirely (MAX_SAFE_INTEGER) so a minutes-long run is never evicted from its
-   * slot, and without a bound an unreadable slot file would hold that slot for the
-   * life of the machine. Ten minutes is far past any legitimate write window and
-   * far short of anything a user would wait out.
+   * Treating it as fully alive instead was an overcorrection, and it broke a real
+   * recovery: a lock file torn by a SIGKILL between `open(...,'wx')` and `write()`
+   * is unidentifiable by construction, and holding it for the live-owner threshold
+   * made knowledge-store init FAIL where it used to reclaim and proceed.
+   *
+   * The resolution is that a pid is not the only liveness evidence available. A
+   * lock class with a heartbeat has its mtime refreshed by its holder, so an
+   * unreadable lock that has ALSO gone motionless past the stale threshold is very
+   * likely abandoned — the heartbeat is exactly the proof that does not need a pid.
+   * Where there is no heartbeat (the run semaphore opts out of live-owner reclaim,
+   * so its slot files never move) age proves nothing, and only the ten-minute
+   * ceiling keeps an unreadable slot file from holding a run slot for the life of
+   * the machine.
    */
   private async _shouldReclaim(
     pid: number | null,
@@ -199,8 +205,27 @@ export class FileLockService implements IService {
     memo?: Map<string, boolean>,
   ): Promise<boolean> {
     if (!(await this._resolveOwnerAlive(pid, startTime, memo))) return true;
-    if (pid === null) return lockAge > Math.min(this.liveOwnerStaleThreshold, UNIDENTIFIED_MAX_STALE_MS);
+    if (pid === null) return lockAge > this._unidentifiedStaleThreshold();
     return lockAge > this.liveOwnerStaleThreshold;
+  }
+
+  /**
+   * How long an unidentifiable lock is left alone before it may be reclaimed.
+   *
+   * With a heartbeat running for this lock class, a motionless file is evidence of
+   * abandonment even though its owner cannot be named, so the ordinary stale
+   * threshold applies. Without one — `_startHeartbeat` skips the effectively
+   * infinite opt-out — age carries no information and only the absolute ceiling
+   * prevents an unreadable file from holding the lock forever.
+   */
+  private _unidentifiedStaleThreshold(): number {
+    const heartbeatInterval = Math.max(HEARTBEAT_MIN_INTERVAL_MS, Math.ceil(this.liveOwnerStaleThreshold / 4));
+    const heartbeatRuns = heartbeatInterval <= MAX_TIMER_DELAY_MS;
+    // Never shorter than a heartbeat interval plus a tick, or a live holder could be
+    // reclaimed in the gap between two refreshes.
+    return heartbeatRuns
+      ? Math.max(this.lockStaleThreshold, heartbeatInterval * 2)
+      : UNIDENTIFIED_MAX_STALE_MS;
   }
 
   /**

@@ -35,6 +35,12 @@ export class WorkerPoolManager implements IService {
     private pool: any | null = null;
     private poolInitializationPromise: Promise<any> | null = null;
     private currentWorkerCount: number | null = null;
+    /** Per-worker task concurrency the LIVE pool was built with. Baked into
+     *  poolifier's tasksQueueOptions at construction and not changeable after, so a
+     *  change has to recreate the pool — the upper PriorityTaskQueue recomputes its
+     *  own capacity from the same two values on every task, and the two disagreeing
+     *  is what lets a task be queued on a worker that the queue believes is free. */
+    private currentWorkerConcurrency: number | null = null;
     private consecutiveErrors: number = 0;
     private isShuttingDown: boolean = false;
     // Monotonic shutdown generation. Each shutdown() bumps it, so an in-flight
@@ -95,7 +101,8 @@ export class WorkerPoolManager implements IService {
 
         // If pool exists, worker count matches, and we are not shutting down,
         // return the existing pool immediately.
-        if (this.pool && this.currentWorkerCount === maxWorkers) {
+        const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
+        if (this.pool && this.currentWorkerCount === maxWorkers && this.currentWorkerConcurrency === workerConcurrency) {
             return this.pool;
         }
 
@@ -110,14 +117,15 @@ export class WorkerPoolManager implements IService {
         const myGeneration = this.generation;
         this.poolInitializationPromise = (async () => {
             try {
-                if (this.pool && this.currentWorkerCount !== maxWorkers) {
-                    logger.log(`[WorkerPoolManager] Worker count changed from ${this.currentWorkerCount} to ${maxWorkers}, recreating pool...`);
+                if (this.pool && (this.currentWorkerCount !== maxWorkers || this.currentWorkerConcurrency !== workerConcurrency)) {
+                    logger.log(`[WorkerPoolManager] Pool shape changed (workers ${this.currentWorkerCount} -> ${maxWorkers}, concurrency ${this.currentWorkerConcurrency} -> ${workerConcurrency}), recreating pool...`);
                     this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
                     await this.pool.destroy();
                     this.pool = null;
                 }
 
                 this.currentWorkerCount = maxWorkers;
+                this.currentWorkerConcurrency = workerConcurrency;
 
                 // Install the master-side IPC guard BEFORE any worker is forked, so a
                 // `write EPIPE` on a closing worker channel (poolifier dispatch racing a
@@ -161,7 +169,6 @@ export class WorkerPoolManager implements IService {
                 void cleanupOrphanedCamoufoxProcesses()
                     .catch((e) => logger.debug('[WorkerPoolManager] Startup orphan sweep failed:', e));
 
-                const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
 
                 // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
                 // local imports. Using a pre-compiled JS file eliminates any TypeScript loading
@@ -235,7 +242,38 @@ export class WorkerPoolManager implements IService {
                             }
                         }
                     },
-                    workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
+                    // LEAST_USED picks the node minimising executing + queued. ROUND_ROBIN
+                    // is a bare modular cursor whose only filter is a one-time `ready` flag
+                    // — it cannot see load at all, and poolifier only consults per-node
+                    // capacity AFTER the strategy has chosen. A task handed to a busy node
+                    // is queued ON that node and never re-routed, so one degraded worker
+                    // takes a share of every burst down with it: on 2026-08-15 a worker
+                    // whose browser launch hung was still handed roughly one turn in six,
+                    // and the run lost exactly the three queries that landed on it while
+                    // five workers sat idle and the shared queue was empty.
+                    //
+                    // The guarantee this buys is structural, not statistical: the
+                    // PriorityTaskQueue above caps in-flight work at exactly
+                    // WORKER_THREADS x WORKER_CONCURRENCY, which is the pool's total
+                    // capacity, so at every dispatch there is always a node with a free
+                    // slot and an empty queue. A strategy that reads load always finds it.
+                    // (Which is also why the concurrency check above must recreate the
+                    // pool — if the two layers' capacities diverge, the guarantee goes.)
+                    //
+                    // It removes a second failure with it. Nothing is ever queued on a
+                    // node, so poolifier's task stealing never fires — and stealing is
+                    // what triggers its own accounting defect, where a stolen task's
+                    // completion decrements the ORIGINAL node's executing count instead of
+                    // the one that ran it. That frees a slot on a worker still working,
+                    // which then legitimately accepts a second task: 1,425 genuinely
+                    // overlapping task pairs across 37 days at concurrency 1.
+                    //
+                    // LEAST_BUSY was the other candidate and is worse here: it minimises
+                    // accumulated run+wait time, which turns on per-task performance
+                    // measurement for every task and still lets a busy fast worker outrank
+                    // an idle slow one. LEAST_USED overrides no statistics requirements,
+                    // so it costs nothing extra.
+                    workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
                     enableTasksQueue: true,
                     tasksQueueOptions: {
                         concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
@@ -316,6 +354,31 @@ export class WorkerPoolManager implements IService {
     }
 
     /**
+     * Record how the pool is actually distributing work.
+     *
+     * The head-of-line failure this pool used to have was invisible to every metric
+     * and every log line: tasks parked on one node while other nodes idled, and the
+     * only trace was a PriorityTaskQueue reporting free slots and an empty backlog
+     * while queries timed out. poolifier computes all of it on `pool.info` and
+     * nothing read it.
+     *
+     * `browser_pool_parked_tasks` is the number that should stay at zero: a task
+     * queued on a worker node while some other node is idle. Non-zero means the
+     * choice strategy handed work to a busy node when a free one existed — which is
+     * also the precondition for poolifier's task stealing, and therefore for its
+     * stolen-task accounting defect. `stolenTasks` is recorded for the same reason.
+     */
+    recordDispatchHealth(): void {
+        const info = (this.pool as unknown as { info?: Record<string, number> } | null)?.info;
+        if (!info) return;
+        const queued = info['queuedTasks'] ?? 0;
+        const idle = info['idleWorkerNodes'] ?? 0;
+        metrics.setGauge('browser_pool_parked_tasks', idle > 0 ? queued : 0);
+        metrics.setGauge('browser_pool_queued_tasks', queued);
+        metrics.setGauge('browser_pool_stolen_tasks', info['stolenTasks'] ?? 0);
+    }
+
+    /**
      * Schedule an out-of-band pool reset. Called from poolifier event handlers
      * where destroying the pool synchronously would deadlock. Waits 1 s so the
      * current event-handler call-stack unwinds before the pool is destroyed.
@@ -334,6 +397,7 @@ export class WorkerPoolManager implements IService {
         // is still being destroyed. Instead, use a flag to signal reset is in progress.
         this._resetInProgress = true;
         this.currentWorkerCount = null;
+        this.currentWorkerConcurrency = null;
         this.consecutiveErrors = 0;
         // Pin the generation this reset belongs to. shutdown() bumps generation, so if a
         // shutdown (and a subsequent re-init) happens while this timer is pending, the
@@ -427,6 +491,7 @@ export class WorkerPoolManager implements IService {
 
         this.poolInitializationPromise = null;
         this.currentWorkerCount = null;
+        this.currentWorkerConcurrency = null;
         this.consecutiveErrors = 0;
         // Clear any in-flight auto-recovery flag too: if a schedulePoolReset() timer
         // was pending when shutdown ran, leaving this true makes the next ensurePool()
