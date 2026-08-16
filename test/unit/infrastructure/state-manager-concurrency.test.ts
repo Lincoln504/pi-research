@@ -126,8 +126,11 @@ describe('StateManager Concurrency and Lock Resilience', () => {
     const lockFilePath = manager.getLockFilePath();
     await fs.mkdir(path.dirname(lockFilePath), { recursive: true });
     
-    // Manually create a stale lock (older than 30s)
-    const staleTime = Date.now() - 40000;
+    // A lock file whose content names no owner. We cannot prove its holder died, so
+    // it is reclaimed on the live-owner schedule (default 120s) rather than the
+    // crash-cleanup one — see FileLockService._shouldReclaim. It used to be taken at
+    // 15s on the strength of no evidence at all.
+    const staleTime = Date.now() - 130_000;
     await fs.writeFile(lockFilePath, 'stale');
     await fs.utimes(lockFilePath, staleTime / 1000, staleTime / 1000);
 

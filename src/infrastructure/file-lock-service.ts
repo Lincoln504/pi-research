@@ -44,6 +44,32 @@ const TRASH_SWEEP_AGE_MS = 10 * 60_000;
  */
 const HEARTBEAT_MIN_INTERVAL_MS = 2_000;
 
+/**
+ * Ceiling on how long a lock whose owner cannot be identified is left alone.
+ *
+ * Such a lock is treated as live (we could not prove otherwise), but "treated as
+ * live" must not mean "immortal" — see _shouldReclaim for why the never-steal
+ * opt-out would otherwise strand a run slot permanently.
+ */
+const UNIDENTIFIED_MAX_STALE_MS = 10 * 60_000;
+
+/**
+ * Absolute ceiling on one acquireLock() wait, however healthy the holder looks.
+ *
+ * `lockTimeout` bounds a STALL — time in which the lock did not change hands and
+ * its holder did not refresh it. It deliberately does not bound a wait behind a
+ * holder that is visibly working, because that turned ordinary contention into
+ * failed runs: the knowledge-store init lock allowed 20s while the same lock
+ * covers a post-run FTS rebuild plus optimize, so a second run starting during
+ * another's housekeeping failed outright. Twice, on 2026-08-14. Widening the
+ * constant is the fix that does not work — housekeeping has no fixed duration.
+ *
+ * This ceiling is what keeps "wait while progress is happening" from meaning
+ * "wait forever" under sustained contention, where the lock keeps changing hands
+ * and every observation looks like progress while this caller never wins.
+ */
+export const LOCK_ACQUIRE_CEILING_MS = 5 * 60_000;
+
 /** setTimeout/setInterval clamp delays above 2^31-1 to 1ms — treat anything
  *  bigger as "no heartbeat" rather than a busy-loop. */
 const MAX_TIMER_DELAY_MS = 0x7fffffff;
@@ -62,6 +88,13 @@ export interface FileLockOptions {
   lockRetryDelay?: number;
   /** Stale lock threshold in milliseconds (default: 15 seconds) */
   lockStaleThreshold?: number;
+  /**
+   * Absolute ceiling on one acquireLock() wait, however healthy the holder looks
+   * (default: LOCK_ACQUIRE_CEILING_MS). `lockTimeout` bounds a stall; this bounds
+   * the total. Exposed so the bound is reachable in a test — a five-minute
+   * backstop that no test can drive is a five-minute backstop nobody has checked.
+   */
+  acquireCeilingMs?: number;
   /**
    * Stale threshold (ms) applied ONLY when the lock's owner process is provably
    * alive. Much larger than lockStaleThreshold so a live process holding the lock
@@ -95,6 +128,7 @@ export class FileLockService implements IService {
   private readonly lockRetryDelay: number;
   private readonly lockStaleThreshold: number;
   private readonly liveOwnerStaleThreshold: number;
+  private readonly acquireCeilingMs: number;
   private readonly processLifecycle: IProcessLifecycle | null;
 
   // Lock tracking
@@ -128,18 +162,35 @@ export class FileLockService implements IService {
     this.lockStaleThreshold = options.lockStaleThreshold ?? 15000;
     this.liveOwnerStaleThreshold =
       options.liveOwnerStaleThreshold ?? Math.max(120000, this.lockStaleThreshold * 4);
+    this.acquireCeilingMs = options.acquireCeilingMs ?? LOCK_ACQUIRE_CEILING_MS;
     this.processLifecycle = options.processLifecycle ?? null;
   }
 
   /**
    * Decide whether a contended lock may be reclaimed.
-   *   - Dead owner            → reclaim immediately (crash cleanup).
-   *   - Legacy lock (no pid)  → reclaim once aged past the normal stale threshold.
-   *   - Provably-alive owner  → reclaim ONLY after liveOwnerStaleThreshold, so we
-   *                             never steal a lock a live process is actively
-   *                             holding during a (possibly slow) critical section.
-   *                             Stealing it would let two writers run the same
-   *                             read-modify-write and lose an update.
+   *   - Dead owner              → reclaim immediately (crash cleanup).
+   *   - Provably-alive owner    → reclaim ONLY after liveOwnerStaleThreshold, so we
+   *                               never steal a lock a live process is actively
+   *                               holding during a (possibly slow) critical section.
+   *                               Stealing it would let two writers run the same
+   *                               read-modify-write and lose an update.
+   *   - Unidentifiable (no pid) → as patient as a live owner, but never longer
+   *                               than UNIDENTIFIED_MAX_STALE_MS.
+   *
+   * That last case used to take the SHORT threshold, which put it on the
+   * crash-cleanup schedule on the strength of no evidence at all — while
+   * `_isOwnerAlive(null)` returns true, so the two halves openly disagreed. The
+   * forensic cost was the worse half: the reclaim log then read
+   * "Cleaning up stale lock file (90s old, owner alive: true)", a sentence that
+   * describes stealing a lock from a living process, which is the one thing this
+   * class exists not to do.
+   *
+   * Both halves now agree that unknown means alive. The ceiling exists because the
+   * other direction leaks: the run semaphore opts out of live-owner reclaim
+   * entirely (MAX_SAFE_INTEGER) so a minutes-long run is never evicted from its
+   * slot, and without a bound an unreadable slot file would hold that slot for the
+   * life of the machine. Ten minutes is far past any legitimate write window and
+   * far short of anything a user would wait out.
    */
   private async _shouldReclaim(
     pid: number | null,
@@ -148,7 +199,7 @@ export class FileLockService implements IService {
     memo?: Map<string, boolean>,
   ): Promise<boolean> {
     if (!(await this._resolveOwnerAlive(pid, startTime, memo))) return true;
-    if (pid === null) return lockAge > this.lockStaleThreshold;
+    if (pid === null) return lockAge > Math.min(this.liveOwnerStaleThreshold, UNIDENTIFIED_MAX_STALE_MS);
     return lockAge > this.liveOwnerStaleThreshold;
   }
 
@@ -370,8 +421,16 @@ export class FileLockService implements IService {
       const ownerAlive = await this._resolveOwnerAlive(parsed?.pid ?? null, parsed?.startTime ?? null, memo);
 
       if (await this._shouldReclaim(parsed?.pid ?? null, parsed?.startTime ?? null, lockAge, memo)) {
+        // Name the lock and say what was actually known about its owner. The old
+        // line printed "owner alive: true" for a lock with no readable pid —
+        // because unknown owners report as alive — so the reclaim read as a steal
+        // from a living process, and it named no path, in a log every concurrent
+        // process shares.
+        const owner = parsed?.pid == null
+          ? 'owner unidentifiable (unreadable lock content)'
+          : `owner pid ${parsed.pid} ${ownerAlive ? 'alive but silent' : 'gone'}`;
         logger.log(
-          `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old, owner alive: ${ownerAlive})`
+          `[FileLockService] Reclaiming ${this.lockName} — untouched for ${Math.round(lockAge / 1000)}s, ${owner}`
         );
         // The liveness lookups above can take long enough for another process to
         // reclaim the stale lock and write its own fresh one at this path. A bare
@@ -391,7 +450,7 @@ export class FileLockService implements IService {
             return;
           }
           await fs.unlink(trashPath).catch(() => { /* leaked copy; the sweep above collects it */ });
-          logger.log('[FileLockService] Stale lock removed');
+          logger.log(`[FileLockService] Reclaimed ${this.lockName}`);
         } catch {
           // A failure AFTER the rename means the verify never ran — restore
           // rather than leave the (possibly live) lock destroyed in the trash.
@@ -469,14 +528,39 @@ export class FileLockService implements IService {
     this.resolveTurn = myResolve;
 
     const startTime = Date.now();
+    // Last moment the contended lock demonstrably moved: it changed hands, or its
+    // holder refreshed the mtime its heartbeat maintains. `lockTimeout` is measured
+    // from here rather than from startTime, so waiting behind work in progress is
+    // free and only a genuinely motionless lock times out.
+    let lastProgressAt = startTime;
+    let lastSeenUuid: string | null = null;
+    let lastSeenMtime = 0;
     let contentionCount = 0;
     // One entry per distinct (pid,startTime) owner seen during THIS acquireLock()
     // call, so a live contended owner waited out across many ~100ms retry ticks is
     // liveness-checked once, not once per tick (no ps/powershell storm on non-Linux).
     const contendedOwnerAliveMemo = new Map<string, boolean>();
 
+    // `lockRetries` was sized to expire at roughly the same moment as the old
+    // elapsed-time timeout (200 x 100ms = 20s), so leaving it alone would cap the
+    // progress-aware wait right back at the bound it replaces. A try-take
+    // (lockTimeout 0) keeps its configured count exactly: the run semaphore sizes
+    // it to complete a dead-owner reclaim and reacquire, and must still fail fast.
+    const maxAttempts = this.lockTimeout === 0
+      ? this.lockRetries
+      : this.lockRetries + Math.ceil(this.acquireCeilingMs / Math.max(1, this.lockRetryDelay));
+
     try {
-      for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
+      for (let _attempt = 0; _attempt < maxAttempts; _attempt++) {
+        // Bound EVERY iteration, not just the ones that reach the timeout check
+        // below: the reclaim branches `continue` without sleeping, so a lock that
+        // kept changing hands could otherwise spin here indefinitely.
+        if (this.lockTimeout > 0 && Date.now() - startTime >= this.acquireCeilingMs) {
+          metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
+          throw new Error(
+            `Failed to acquire lock at ${this.lockFilePath}: gave up after ${Date.now() - startTime}ms of contention (ceiling ${this.acquireCeilingMs}ms)`,
+          );
+        }
         // cleanup() can retire the instance while we are contending here — its
         // drain polls only the HELD handle, so a caller mid-retry (holding
         // nothing yet) is invisible to it and would otherwise win the lock and
@@ -556,6 +640,15 @@ export class FileLockService implements IService {
                 const stats = await fs.stat(this.lockFilePath);
                 const lockAge = Date.now() - stats.mtimeMs;
 
+                // Progress: a different owner than last time, or the same owner's
+                // heartbeat freshening the file. Either way the system is moving and
+                // this wait is queueing, not hanging.
+                if (lastSeenUuid !== null && (lockUuid !== lastSeenUuid || stats.mtimeMs > lastSeenMtime)) {
+                    lastProgressAt = Date.now();
+                }
+                lastSeenUuid = lockUuid;
+                lastSeenMtime = stats.mtimeMs;
+
                 if (lockUuid === this.lockUuid) {
                   // This is our own lock — a previous attempt was interrupted. Reclaim.
                   try { await fs.unlink(this.lockFilePath); } catch { /* ignore */ }
@@ -613,12 +706,18 @@ export class FileLockService implements IService {
                 // Fall through to the timeout check + backoff below.
               }
 
-              if (Date.now() - startTime >= this.lockTimeout) {
-                const duration = Date.now() - startTime;
-                metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
+              const stalledFor = Date.now() - lastProgressAt;
+              const waitedFor = Date.now() - startTime;
+              if (stalledFor >= this.lockTimeout || waitedFor >= this.acquireCeilingMs) {
+                metrics.observe('state_lock_acquire_duration_ms', waitedFor, { status: 'timeout' });
                 metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
+                // Say which bound was hit. "Timeout after 20000ms" on a lock whose
+                // holder was working the whole time sent readers looking for a
+                // deadlock that was never there.
                 throw new Error(
-                  `Failed to acquire lock at ${this.lockFilePath}: timeout after ${this.lockTimeout}ms`,
+                  waitedFor >= this.acquireCeilingMs
+                    ? `Failed to acquire lock at ${this.lockFilePath}: gave up after ${waitedFor}ms of contention (ceiling ${this.acquireCeilingMs}ms)`
+                    : `Failed to acquire lock at ${this.lockFilePath}: timeout after ${this.lockTimeout}ms with no sign of progress from its holder`,
                   { cause: error },
                 );
               }

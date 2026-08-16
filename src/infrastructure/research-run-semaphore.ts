@@ -184,7 +184,7 @@ export class ResearchRunSemaphore implements IService {
       lockTimeout: 0, // fail immediately on a live-contended slot (try-take)
       lockRetries: 24, // enough iterations to complete a dead-owner reclaim + reacquire
       lockRetryDelay: 50,
-      lockStaleThreshold: 15000, // legacy (no-pid) locks: reclaim once 15s old
+      lockStaleThreshold: 15000, // derivation base only; no-pid locks now follow the live-owner rule under its 10-minute ceiling
       // A live process holding a run slot for the entire (minutes-long) run is the
       // NORMAL case, not a stall. Never steal from a live owner — doing so would
       // admit an (N+1)th concurrent run, the exact condition this guard prevents.

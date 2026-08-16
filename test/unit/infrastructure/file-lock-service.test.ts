@@ -116,13 +116,16 @@ describe('FileLockService', () => {
   // ---------------------------------------------------------------------------
 
   describe('stale lock recovery', () => {
-    it('acquireLock() succeeds and replaces a stale lock file (mtime 40 s ago)', async () => {
-      // Write a lock file with a foreign UUID
+    it('acquireLock() replaces an unidentifiable lock only once it is as stale as a live owner would have to be', async () => {
+      // A lock whose content carries no pid (legacy format, truncation, a torn
+      // read of one being written). We cannot prove its owner is dead, so it gets
+      // the live-owner threshold — NOT the crash-cleanup one. It used to take the
+      // short threshold, which reclaimed on no evidence at all while
+      // _isOwnerAlive(null) simultaneously reported the owner as alive.
       const foreignUuid = crypto.randomUUID();
       await fs.writeFile(lockFilePath, foreignUuid, 'utf-8');
 
-      // Back-date the mtime by 40 seconds
-      const staleTime = new Date(Date.now() - 40_000);
+      const staleTime = new Date(Date.now() - 130_000); // > the 120s default
       await fs.utimes(lockFilePath, staleTime, staleTime);
 
       service = new FileLockService({
@@ -132,15 +135,53 @@ describe('FileLockService', () => {
       });
       await service.initialize();
 
-      // Should succeed without timing out
       await expect(service.acquireLock()).resolves.toBeUndefined();
 
-      // New content must contain our service's UUID, not the foreign one
       const content = await fs.readFile(lockFilePath, 'utf-8');
       const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
       expect(parsed.uuid).toBe(service.getLockUuid());
       expect(parsed.uuid).not.toBe(foreignUuid);
 
+      await service.releaseLock();
+    });
+
+    it('leaves an unidentifiable lock alone while it is younger than that', async () => {
+      await fs.writeFile(lockFilePath, crypto.randomUUID(), 'utf-8');
+      const staleTime = new Date(Date.now() - 40_000); // past the 15s short threshold
+      await fs.utimes(lockFilePath, staleTime, staleTime);
+
+      service = new FileLockService({
+        lockFilePath,
+        lockTimeout: 200,
+        lockRetryDelay: 10,
+      });
+      await service.initialize();
+
+      // Under the old rule this reclaimed at 40s. Reclaiming here would mean
+      // evicting a possibly-live holder because its content could not be parsed.
+      await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
+      await service.dispose();
+      service = null as any;
+    });
+
+    it('still reclaims an unidentifiable lock under the never-steal opt-out, so a run slot cannot leak forever', async () => {
+      // research-run-semaphore sets liveOwnerStaleThreshold to MAX_SAFE_INTEGER so a
+      // minutes-long run is never evicted from its slot. Without a ceiling on the
+      // unidentifiable case, one unreadable slot file would hold that slot for the
+      // life of the machine.
+      await fs.writeFile(lockFilePath, crypto.randomUUID(), 'utf-8');
+      const staleTime = new Date(Date.now() - 11 * 60_000); // > the 10-minute ceiling
+      await fs.utimes(lockFilePath, staleTime, staleTime);
+
+      service = new FileLockService({
+        lockFilePath,
+        lockTimeout: 5000,
+        lockRetryDelay: 1,
+        liveOwnerStaleThreshold: Number.MAX_SAFE_INTEGER,
+      });
+      await service.initialize();
+
+      await expect(service.acquireLock()).resolves.toBeUndefined();
       await service.releaseLock();
     });
   });

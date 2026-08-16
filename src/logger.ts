@@ -258,6 +258,14 @@ export class Logger implements ILogger {
     const entry = {
       timestamp,
       level,
+      // Every process writes to the SAME log file — up to three concurrent research
+      // runs plus the elected browser-pool leader — and until this field existed
+      // there was nothing to tell their lines apart. Reconstructing a lock
+      // contention from the log then meant inferring process boundaries from
+      // timing, which is guesswork: two runs a second apart interleave into what
+      // reads like one process contradicting itself. Twelve bytes a line buys
+      // attributable forensics.
+      pid: process.pid,
       ...getLogContext(),
       message,
       ...(firstError
