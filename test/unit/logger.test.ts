@@ -75,6 +75,38 @@ describe('logger', () => {
       expect(entry.message).toContain('context test');
     });
 
+    it('stamps every record with the writing process id', () => {
+      // One log file, many processes: up to three concurrent research runs plus the
+      // elected browser-pool leader. Without this, their lines interleave into
+      // something that reads like a single process contradicting itself, and any
+      // forensic reconstruction is inference from timing.
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+
+      logger.warn('first');
+      logger.error('second');
+
+      const lines = readFileSync(TEST_LOG_PATH, 'utf-8').trim().split('\n');
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        expect(JSON.parse(line!).pid).toBe(process.pid);
+      }
+    });
+
+    it('lets scoped context override nothing it should not — pid survives a context scope', () => {
+      // getLogContext() is spread AFTER pid, so a context key named `pid` would
+      // silently replace the process identity with something else.
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+
+      runWithLogContext({ sessionId: 'session-2', pid: 999_999 } as any, () => {
+        logger.warn('scoped');
+      });
+
+      const [line] = readFileSync(TEST_LOG_PATH, 'utf-8').trim().split('\n');
+      const entry = JSON.parse(line!);
+      expect(entry.pid).toBe(process.pid);
+      expect(entry.sessionId).toBe('session-2'); // the rest of the context still lands
+    });
+
     it('should not mutate console methods when logging', () => {
       const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       const originalConsole = {

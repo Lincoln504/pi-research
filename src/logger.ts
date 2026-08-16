@@ -258,6 +258,7 @@ export class Logger implements ILogger {
     const entry = {
       timestamp,
       level,
+      ...getLogContext(),
       // Every process writes to the SAME log file — up to three concurrent research
       // runs plus the elected browser-pool leader — and until this field existed
       // there was nothing to tell their lines apart. Reconstructing a lock
@@ -265,8 +266,10 @@ export class Logger implements ILogger {
       // timing, which is guesswork: two runs a second apart interleave into what
       // reads like one process contradicting itself. Twelve bytes a line buys
       // attributable forensics.
+      //
+      // After the context spread, not before: which process wrote a line is not
+      // something a scoped context gets to claim otherwise.
       pid: process.pid,
-      ...getLogContext(),
       message,
       ...(firstError
         ? { errorMessage: redactSecrets(firstError.message), errorStack: redactSecrets(firstError.stack ?? '') }
