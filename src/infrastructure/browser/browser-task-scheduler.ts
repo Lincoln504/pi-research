@@ -235,12 +235,27 @@ export class BrowserTaskScheduler implements IScheduler {
         const cfg = config || getConfig();
         const timeoutMs = cfg.SEARCH_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
 
+        // The deadline measures EXECUTION, not queue wait: the timer is armed by
+        // `startDeadline()` from inside the enqueued callback, i.e. once the queue has
+        // actually dispatched this task to a worker.
+        //
+        // It used to be armed here, before enqueuing, so a saturated queue burned a task's
+        // entire budget waiting for a slot and it aborted having done no work at all. That
+        // made the number of tasks a burst could complete `capacity x (budget / latency)`
+        // rather than the number submitted — measured on a live run, 78 of 100 searches
+        // aborted at the deadline without ever running. A queue is supposed to absorb
+        // volume by making work wait, not by killing whatever it could not reach in time.
+        // Waiting is now bounded by the caller's signal and the run-level timeouts; a task
+        // that does get dispatched always gets its full budget.
         let timeoutId: NodeJS.Timeout | undefined;
+        let startDeadline: () => void = () => {};
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-                reject(new Error(`Search task timed out after ${timeoutMs}ms (including queue wait). query="${query}"`));
-            }, timeoutMs);
-            if (timeoutId.unref) timeoutId.unref();
+            startDeadline = () => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error(`Search task timed out after ${timeoutMs}ms. query="${query}"`));
+                }, timeoutMs);
+                if (timeoutId.unref) timeoutId.unref();
+            };
         });
 
         logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
@@ -258,6 +273,7 @@ export class BrowserTaskScheduler implements IScheduler {
             // This ensures that even if the queue is saturated, we won't hang forever.
             result = await Promise.race([
                 queue.enqueue('search', async () => {
+                    startDeadline();
                     // The shared timeoutPromise is deliberately NOT raced in here (its timer
                     // dies with the outer race); the backstop below carries its own timer, so
                     // a QUEUED task can never be dispatched against a disarmed guard, and a
@@ -338,12 +354,16 @@ export class BrowserTaskScheduler implements IScheduler {
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = cfg.SCRAPE_TIMEOUT_MS + (isMocking ? 5000 : cfg.BROWSER_TASK_TIMEOUT_MS);
 
+        // Armed on dispatch, not on enqueue — see runSearch for why.
         let timeoutId: NodeJS.Timeout | undefined;
+        let startDeadline: () => void = () => {};
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-                reject(new Error(`Scrape task timed out after ${timeoutMs}ms (including queue wait). url="${url}"`));
-            }, timeoutMs);
-            if (timeoutId.unref) timeoutId.unref();
+            startDeadline = () => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error(`Scrape task timed out after ${timeoutMs}ms. url="${url}"`));
+                }, timeoutMs);
+                if (timeoutId.unref) timeoutId.unref();
+            };
         });
 
         let result: any;
@@ -355,6 +375,7 @@ export class BrowserTaskScheduler implements IScheduler {
             const queue = this.getPriorityQueue(config);
             result = await Promise.race([
                 queue.enqueue('scrape', async () => {
+                    startDeadline();
                     return await executePoolTaskWithDeathBackstop(
                         () => pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                         timeoutMs,
