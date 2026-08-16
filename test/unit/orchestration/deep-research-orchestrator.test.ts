@@ -702,21 +702,123 @@ describe('DeepResearchOrchestrator', () => {
     expect(updateCalls.length).toBe(3);
   });
 
+  it('does not announce, observe or health-check the capped round, which never researches', async () => {
+    // The loop used to increment the round, log "Round 2/2", fire onRoundStart, run a
+    // full infrastructure health check, and only THEN test the cap and break — so every
+    // capped run announced a round in which no researcher was ever dispatched. 92 of 93
+    // capped runs in the retained logs did exactly that, one of them spending 105
+    // seconds on the phantom round's health check. onRoundStart also arms the TUI's
+    // deferred panel clear, which is consumed by a researcher start that never comes.
+    const onRoundStart = vi.fn();
+    // clearAllMocks() clears call history but NOT mockReturnValue overrides, and an
+    // earlier test in this file leaves consumeQueuedMessages returning steering
+    // messages — which would silently extend the round budget and make round 2 a real
+    // research round. Reset them here, the same hazard the beforeEach documents for the
+    // failed-researcher mocks.
+    const steering = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(steering.consumeQueuedMessages).mockReturnValue([]);
+    vi.mocked(steering.getSteeringMessages).mockReturnValue([]);
+    // Complexity 1 → MAX_ROUNDS_LEVEL_1 = 2 iterations, so round 2 IS the cap.
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'delegate',
+      researchers: [{ id: '1', role: 'r', focus: 'f', queries: ['q'] }],
+    });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Final' });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onRoundStart } });
+    await orchestrator.run();
+
+    expect(MAX_ROUNDS_LEVEL_1).toBe(2);
+    expect(onRoundStart).toHaveBeenCalledWith(1);
+    expect(onRoundStart).not.toHaveBeenCalledWith(2);
+    // The health check is the expensive half — it is what cost 105s on the measured run.
+    const healthRounds = vi.mocked(mockOrchestrationService.checkHealth).mock.calls.map(c => c[0]);
+    expect(healthRounds).not.toContain(2);
+  });
+
+  it('still runs the capped round when steering extends the budget into it', async () => {
+    // The cap check sits after steering consumption for this reason: a message consumed
+    // at the top of the final iteration raises maxRounds and legitimately turns it into
+    // a real research round. Leaving earlier would silently drop that.
+    const onRoundStart = vi.fn();
+    const steering2 = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(steering2.consumeQueuedMessages).mockReturnValue([]);
+    vi.mocked(steering2.getSteeringMessages).mockReturnValue([]);
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'delegate',
+      researchers: [{ id: '1', role: 'r', focus: 'f', queries: ['q'] }],
+    });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Final' });
+
+    // complexity 2 → 3 iterations, so round 2 is a genuine research round.
+    const orchestrator = new DeepResearchOrchestrator({
+      ...options,
+      complexity: 2 as const,
+      observer: { onRoundStart },
+    });
+    await orchestrator.run();
+
+    expect(onRoundStart).toHaveBeenCalledWith(2);
+  });
+
+  it('a steering message consumed at the top of the capped round turns it into a real one', async () => {
+    // This is why the cap check sits AFTER steering consumption rather than at the top
+    // of the loop. Moving it earlier is a tempting simplification and it silently drops
+    // the user's last-moment steering: the budget would be read before the message that
+    // extends it. Complexity 1 gives 2 iterations, so round 2 is the cap — until a
+    // message consumed at its start raises the budget to 3.
+    const onRoundStart = vi.fn();
+    const steering4 = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(steering4.consumeQueuedMessages).mockReturnValue([]);
+    // getSteeringMessages is read twice per round (before consume, then after). Rounds
+    // 1 and 2's "before" reads plus round 1's "after" read see nothing; round 2's
+    // "after" read sees a newly consumed message, which is what buys the extra round.
+    let reads = 0;
+    vi.mocked(steering4.getSteeringMessages).mockImplementation(() => {
+      reads++;
+      return reads >= 4 ? ([{ text: 'go deeper', status: 'active' }] as any) : [];
+    });
+
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'delegate',
+      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
+      allQueries: ['q1'],
+    });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Steered' });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onRoundStart } });
+    await orchestrator.run();
+
+    expect(onRoundStart).toHaveBeenCalledWith(2);
+    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
+  });
+
   it('should report round progress to observer', async () => {
     const onRoundStart = vi.fn();
     const onSearchProgress = vi.fn();
+    // Reset the leaked steering overrides (see the capped-round test): this assertion
+    // used to depend on them. With complexity 1 the budget is 2 iterations, so round 2
+    // is the cap and is never announced — the version of this test that expected
+    // onRoundStart(2) at complexity 1 passed only because an earlier test had left
+    // consumeQueuedMessages returning steering messages, silently extending the budget.
+    // It was asserting the phantom round, and it was doing so by accident.
+    const steering3 = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(steering3.consumeQueuedMessages).mockReturnValue([]);
+    vi.mocked(steering3.getSteeringMessages).mockReturnValue([]);
 
     mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Progress test' });
 
     const orchestrator = new DeepResearchOrchestrator({
       ...options,
+      complexity: 2 as const, // 3 iterations → rounds 1 and 2 both research
       observer: { onRoundStart, onSearchProgress },
     });
 
     await orchestrator.run();
 
     expect(onRoundStart).toHaveBeenCalledWith(1);
-    expect(onRoundStart).toHaveBeenCalledWith(2); // Final synthesis round
+    expect(onRoundStart).toHaveBeenCalledWith(2);
+    expect(onRoundStart).not.toHaveBeenCalledWith(3); // the cap, which never researches
   });
 
   it('should increment totalResearchersPlanned after each delegate round', async () => {

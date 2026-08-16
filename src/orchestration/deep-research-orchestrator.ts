@@ -198,6 +198,24 @@ export class DeepResearchOrchestrator {
           }
         }
 
+        // The final iteration synthesizes; it never researches. Leave BEFORE announcing
+        // it, because announcing it is the whole problem: the log said `Round 2/2`, the
+        // observer fired onRoundStart (which arms the panel's deferred clear, consumed
+        // by a researcher start that never comes), the SDK emitted a `round_start`
+        // event, and a full infrastructure health check ran — 105 seconds of it on one
+        // measured run — for a round in which no researcher was ever dispatched. 92 of
+        // 93 capped runs in the retained logs announced a round that did nothing.
+        //
+        // This must sit AFTER the steering block above: a message consumed at the top of
+        // the final iteration raises maxRounds and legitimately turns this into a real
+        // research round. It must also not fire on round 1, which researches even when
+        // the budget is 1. The increment stays — the forced synthesis below is told
+        // which round it is synthesizing at.
+        if (this.currentRound > 1 && this.currentRound >= maxRounds) {
+          logger.log(`[DeepOrchestrator] Round cap (${maxRounds}) reached — skipping the evaluator and going straight to final synthesis ${this.elapsed()}`);
+          break;
+        }
+
         const roundLabel = this.currentRound > baseMaxRounds
           ? `Round ${this.currentRound}/${maxRounds} (extra, steering-driven, base=${baseMaxRounds})`
           : `Round ${this.currentRound}/${maxRounds}`;
@@ -225,17 +243,6 @@ export class DeepResearchOrchestrator {
                 excludeTools: this.options.excludeTools,
                 steeringMessages: steeringTexts,
             });
-        } else if (this.currentRound >= maxRounds) {
-            // Last iteration: the `plan.action === 'synthesize' || currentRound >=
-            // maxRounds` break below fires no matter what the evaluator decides, and
-            // the forced-synthesis path after the loop runs updatePlanForRound again
-            // with mustSynthesize. So on every capped run whose evaluator would have
-            // said `delegate` — the common case, since it is being cut off mid-plan —
-            // this call is a second full-context coordinator request whose result is
-            // discarded. Break straight to the forced synthesis: exactly one
-            // coordinator call either way, and the same outcome.
-            logger.log(`[DeepOrchestrator] Round cap (${maxRounds}) reached — skipping the evaluator and going straight to final synthesis ${this.elapsed()}`);
-            break;
         } else {
             const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
             observer?.onEvaluationStart?.(this.currentRound);

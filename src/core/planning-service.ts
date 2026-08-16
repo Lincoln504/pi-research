@@ -567,7 +567,18 @@ export class PlanningService implements IPlanningService {
     // callers that don't pass it (other/test callers) keep prior behavior.
     const maxRounds = options.maxRounds ?? _getMaxRounds(complexity);
     const complexityGuidance = this.getEvaluatorComplexityGuidance(complexity);
-    const roundPhaseGuidance = this.getRoundPhaseGuidance(round, maxRounds, complexity, maxTeamSize);
+    // The round budget counts ITERATIONS, and the last one only ever synthesizes — the
+    // orchestrator leaves the loop before dispatching anyone. Phase guidance is about
+    // how much RESEARCH is left, so it must be computed against the rounds that can
+    // still research, not against the iteration count.
+    //
+    // Passing the raw budget told the router it had a round in hand that did not exist.
+    // At round 2 of 3 that is the difference between MIDDLE ("prefer delegation... with
+    // 1 round remaining") and LATE ("synthesize if the core question is answerable") —
+    // so the router was pushed to delegate at exactly the point it should have been
+    // wrapping up, and whatever it asked for next was discarded by the cap.
+    const researchRounds = Math.max(1, maxRounds - 1);
+    const roundPhaseGuidance = this.getRoundPhaseGuidance(round, researchRounds, complexity, maxTeamSize);
 
     // Inject steering if present
     let steeringSection = '';
@@ -635,7 +646,11 @@ export class PlanningService implements IPlanningService {
     const runContext = [
       `## RUN CONTEXT`,
       `- **ROOT QUERY**: ${query}`,
-      `- **Current round**: ${round} / ${maxRounds}`,
+      // Same denominator as the phase guidance below — two different round counts in one
+      // prompt is worse than either alone. Research rounds, not iterations: the router's
+      // only decision is delegate-vs-synthesize, and the trailing synthesis pass is not a
+      // round it can spend.
+      `- **Current round**: ${round} / ${researchRounds} (research rounds; a final synthesis pass follows)`,
       initialAgendaSection.trim(),
       previousQueriesSection.trim(),
       // Round-phase guidance calibrates a ROUTING decision against the round budget. The

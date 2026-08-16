@@ -612,9 +612,10 @@ describe('PlanningService', () => {
         // of the USER message, not in the system prompt — the system prompt is kept
         // round-invariant so the prompt cache can hold it across rounds.
         const userText = lastEvaluatorUserMessage();
-        // No maxRounds passed → old behavior: base value (3), impossible "Round 4 of 3"
-        // text, and a ratio (4/3 > 0.8) that selects the LATE phase branch.
-        expect(userText).toContain(`Round ${currentRound} of ${baseMaxRounds}`);
+        // No maxRounds passed → falls back to the base value (3). The router is told the
+        // RESEARCH budget, which is one less than the iteration budget because the last
+        // iteration only synthesizes: "of 2", and a ratio (4/2) that selects LATE.
+        expect(userText).toContain(`Round ${currentRound} of ${baseMaxRounds - 1}`);
         expect(userText).toContain('Round Phase: LATE');
       });
 
@@ -630,11 +631,13 @@ describe('PlanningService', () => {
         });
 
         const userText = lastEvaluatorUserMessage();
-        // With the real, steering-extended budget (5) supplied, the ratio (4/5 = 0.8)
-        // lands in MIDDLE instead of LATE, and the display shows the true "of 5".
-        expect(userText).toContain(`Round ${currentRound} of ${steeringExtendedMaxRounds}`);
-        expect(userText).toContain('Round Phase: MIDDLE');
-        expect(userText).not.toContain('Round Phase: LATE');
+        // The steering-extended budget (5) is 5 ITERATIONS, of which 4 can research.
+        // Round 4 is therefore the last research round — LATE, not MIDDLE. Passing the
+        // raw budget produced MIDDLE here, telling the router to prefer delegation on
+        // the one round whose delegation the cap would discard.
+        expect(userText).toContain(`Round ${currentRound} of ${steeringExtendedMaxRounds - 1}`);
+        expect(userText).toContain('Round Phase: LATE');
+        expect(userText).not.toContain('Round Phase: MIDDLE');
       });
     });
 
@@ -1223,7 +1226,7 @@ describe('PlanningService', () => {
       it('carries the round-varying context in the ROUTER user message instead', async () => {
         const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1]]));
         expect(userMessage).toContain('## RUN CONTEXT');
-        expect(userMessage).toContain('Round 2 of 3');
+        expect(userMessage).toContain('Round 2 of 2'); // 3 iterations = 2 research rounds
         // ...and after the digests, not before them.
         expect(userMessage.indexOf('## RUN CONTEXT'))
           .toBeGreaterThan(userMessage.indexOf('Covered: alpha basics'));
