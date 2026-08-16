@@ -73,6 +73,7 @@ Write your report immediately after scraping is complete, or as soon as a tool r
 
 ## Report Format
 
+{{digest_section}}
 Use [N] inline citations throughout. Write in plain prose — no markdown headings, no bullet points, no bold or italic text. Use clear paragraphs separated by blank lines. The full CITED LINKS list goes at the very end.
 
 [Topic Title]

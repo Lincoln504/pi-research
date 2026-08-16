@@ -169,7 +169,10 @@ export class QuickResearchOrchestrator {
             .replace('{{store_section}}', () => storeSection)
             .replace('{{evidence_section}}', () => evidenceLines.join('\n\n'))
             .replace('{{coordination_section}}', '')
-            .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
+            .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).')
+            // Quick research has no research lead and no next round — see
+            // RESEARCHER_DIGEST_SECTION. Its report IS the deliverable.
+            .replace('{{digest_section}}', '');
 
         logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 
@@ -325,7 +328,14 @@ export class QuickResearchOrchestrator {
           // Store report in synthesis service so citations can be verified/processed
           const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           synthesisService.storeReport(this.options.researchId, 'quick', result);
-          
+          // Continue from the STORED body. Quick research uses the same researcher prompt as
+          // a deep run, so its report opens with a COVERAGE DIGEST block — routing metadata
+          // for a lead that does not exist in this mode. Unlike a deep run, this text IS the
+          // deliverable and goes straight to the user, so reading it back is what keeps the
+          // digest out of the delivered document.
+          result = synthesisService.getReport(this.options.researchId, 'quick') ?? result;
+
+
           // Ensure CITED LINKS section is accurate and consistent
           result = synthesisService.ensureCitedLinks(this.options.researchId, result);
 

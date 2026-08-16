@@ -26,7 +26,10 @@ import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
 import { safeGetApiKeyAndHeaders } from './llm/model-registry-factory.ts';
 import { withTimeout } from './llm/llm-timeout.ts';
 import { retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
-import { getConfig } from '../config.ts';
+import { getConfig, type Config } from '../config.ts';
+import type { Model } from '@earendil-works/pi-ai';
+import { DEFAULT_MODEL_CONTEXT_WINDOW } from '../constants.ts';
+import { deriveCoverageDigest, formatDigestsForRouter } from '../utils/coverage-digest.ts';
 import {
   PlanningResponseSchemaAsTSchema,
   EvaluationResponseSchemaAsTSchema,
@@ -53,6 +56,96 @@ import {
 const LLM_MAX_RETRIES = 2;
 const LLM_RETRY_INITIAL_DELAY_MS = 1000;
 const LLM_RETRY_MAX_DELAY_MS = 8000;
+
+/**
+ * Output ceiling for a ROUTING call.
+ *
+ * The router emits a decision, never a report — at worst a delegate plan of
+ * `maxTeamSize` researchers each carrying `queryBudget` queries, which is a couple of
+ * thousand tokens at Level 3. It used to share the synthesis budget because the same call
+ * could return the final report; under the split protocol it cannot, so a ceiling this
+ * far above the real ceiling is only there to leave room for a model that reasons before
+ * answering. Still clamped to the model by buildSafeOptions.
+ */
+const ROUTER_MAX_TOKENS = 8192;
+
+/** Rough bytes-per-token used to budget the synthesis corpus. Deliberately conservative. */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * Tokens held back from the context window, on top of the configured output ceiling, to
+ * cover everything in a synthesis request that is not the corpus: the system prompt, the
+ * global source list, the run context, and the slack between a chars/4 estimate and a real
+ * tokenizer on prose that is heavy with URLs and citation markers.
+ */
+const SYNTHESIS_OVERHEAD_TOKENS = 8000;
+
+/**
+ * Floor on the corpus budget. Below this, partitioning produces so many partial passes
+ * that the reduce costs more than the overflow it avoids — better to send one oversized
+ * request and let the provider's own error surface than to fan out indefinitely.
+ */
+const MIN_SYNTHESIS_CORPUS_CHARS = 40_000;
+
+/**
+ * How many reduce passes the synthesizer may run before it merges whatever it has.
+ * A run whose corpus needs more than this has grown far past anything the round budget
+ * can produce; the bound exists so a pathological input cannot spin.
+ */
+const MAX_SYNTHESIS_REDUCE_PASSES = 3;
+
+/**
+ * Characters of corpus a single synthesis request may carry for `model`.
+ *
+ * The final synthesis is the one call whose input grows without bound: it carries every
+ * report the run collected. Nothing upstream caps it — there is no per-report budget and
+ * no cap on report count — so on a deep, steering-extended run it can exceed the model's
+ * context window, and the failure is expensive and late: the provider rejects the request
+ * after the entire run has been paid for, and the orchestrator degrades to a mechanical
+ * concatenation of the raw reports. Budgeting here converts that cliff into a bounded
+ * two-pass reduce.
+ */
+export function synthesisCorpusBudgetChars(
+  model: { contextWindow?: number },
+  outputTokens: number,
+): number {
+  const window = model.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
+  const usable = window - outputTokens - SYNTHESIS_OVERHEAD_TOKENS;
+  return Math.max(MIN_SYNTHESIS_CORPUS_CHARS, usable * CHARS_PER_TOKEN);
+}
+
+/**
+ * Greedily group corpus entries into runs that each fit `budgetChars`, preserving order.
+ *
+ * Order is preserved because global citation ids are assigned by first appearance across
+ * the reports in this same order; keeping partitions contiguous keeps each partial pass
+ * looking at a coherent, mostly-self-consistent slice of the numbering rather than an
+ * arbitrary scatter of it.
+ *
+ * A single entry larger than the whole budget gets a partition to itself and is truncated
+ * by the caller — at that point there is no partitioning left to do.
+ */
+export function partitionCorpus<T>(
+  entries: Array<[string, T]>,
+  sizeOf: (entry: [string, T]) => number,
+  budgetChars: number,
+): Array<Array<[string, T]>> {
+  const partitions: Array<Array<[string, T]>> = [];
+  let current: Array<[string, T]> = [];
+  let currentSize = 0;
+  for (const entry of entries) {
+    const size = sizeOf(entry);
+    if (current.length > 0 && currentSize + size > budgetChars) {
+      partitions.push(current);
+      current = [];
+      currentSize = 0;
+    }
+    current.push(entry);
+    currentSize += size;
+  }
+  if (current.length > 0) partitions.push(current);
+  return partitions;
+}
 
 /**
  * Whether a failed coordinator/evaluator LLM call should be RETRIED. Retries only fast,
@@ -424,16 +517,36 @@ export class PlanningService implements IPlanningService {
   }
 
   /**
-   * Update plan / evaluate progress after a round
+   * Update plan / evaluate progress after a round.
+   *
+   * This is TWO jobs behind one entry point, selected by `mustSynthesize`:
+   *
+   * - **Routing** (`mustSynthesize` falsy) — decide whether the run continues. Reads the
+   *   researchers' COVERAGE DIGESTS, not their findings. Its input is a few thousand
+   *   tokens and stays flat as rounds accumulate. It cannot produce the report.
+   * - **Synthesis** (`mustSynthesize` true) — write the report. Reads every report in
+   *   full, exactly once, at the end of the run, under a corpus budget.
+   *
+   * They were one call reading the full corpus every round. That conflation is what made
+   * evaluator input grow with the square of the round count (round n re-sent rounds
+   * 1..n), put the final call at risk of exceeding the model's context window, and made
+   * the request shape uncacheable — a fresh single user message rebuilt each round, whose
+   * cache breakpoint therefore never matched. Splitting the roles removes the repetition
+   * rather than discounting it, so it needs no caching and behaves the same on every
+   * provider.
    */
   async updatePlanForRound(options: UpdatePlanOptions): Promise<ResearchPlan> {
     const { sessionId, query, complexity, round, model, reports, mustSynthesize, signal, observer, steeringMessages, modelRegistry } = options;
-    
-    logger.log(`[PlanningService] Evaluating Round ${round} findings for: "${query}"`);
+
+    // The router runs on every round except the terminal one; synthesis runs once.
+    const isRouter = !mustSynthesize;
+    const role = isRouter ? 'router' : 'synthesizer';
+
+    logger.log(`[PlanningService] ${isRouter ? 'Routing after' : 'Synthesizing at'} Round ${round} for: "${query}"`);
 
     const config = options.config ?? getConfig(options.cwd);
-    const promptTemplate = loadPrompt('system-lead-evaluator');
-    
+    const promptTemplate = loadPrompt(isRouter ? 'system-lead-router' : 'system-lead-synthesizer');
+
     const maxTeamSize = this.getTeamSize(complexity);
     const queryBudget = this.getQueryBudget(complexity);
     // Prefer the caller's live, steering-extended round budget (e.g. the
@@ -466,81 +579,59 @@ export class PlanningService implements IPlanningService {
       ? `\n## Previously Executed Queries\n${previousQueries.map(q => `- ${q}`).join('\n')}\n`
       : '';
 
-    // The evaluator system prompt is deliberately ROUND-INVARIANT: it interpolates only
-    // values that are fixed for the whole run (complexity, team size, query budget, the
+    // Both lead prompts are deliberately ROUND-INVARIANT: they interpolate only values
+    // that are fixed for the whole run (complexity, team size, query budget, the
     // disabled-tool list). Everything that changes between rounds — root query, round
     // number, agenda, executed queries, steering, round-phase guidance — is appended to
     // the END of the user message instead (see runContext below).
     //
     // The reason is prompt caching. Every provider caches on an exact prefix of the
     // serialized request, and the system prompt is the front of that prefix: a single
-    // round-varying byte in it invalidates the entire request, including the findings
-    // blob, which on a multi-round run is by far the largest thing we send. Anthropic-
-    // style caching makes this sharper still — pi-ai places one cache_control breakpoint
-    // at the end of the system prompt, so a system prompt that changes each round means
-    // that breakpoint is written and never read (paying the 1.25x write multiplier for
-    // nothing), and because invalidation is hierarchical (tools -> system -> messages)
-    // the message-level breakpoint cannot hit either.
+    // round-varying byte in it invalidates the entire request. Anthropic-style caching
+    // makes this sharper still — pi-ai places one cache_control breakpoint at the end of
+    // the system prompt (on `anthropic-messages`, and on `openai-completions` whenever
+    // the provider's `compat.cacheControlFormat` is "anthropic"), so a system prompt that
+    // changes each round means that breakpoint is written and never read, and because
+    // invalidation is hierarchical (tools -> system -> messages) the message-level
+    // breakpoint cannot hit either.
     //
-    // Keeping it invariant means round 2+ re-reads one cache entry that is also shared
-    // by every other run at the same complexity, and lets the findings prefix below do
-    // the same. Measured with llm_cache_read_tokens_total (see utils/llm-usage.ts).
-    const systemPrompt = injectCurrentDate(promptTemplate, 'evaluator');
-    const populatedPrompt = this.populatePrompt(systemPrompt, {
+    // Keeping it invariant means round 2+ re-reads one cache entry that is also shared by
+    // every other run at the same complexity. Measured with llm_cache_read_tokens_total
+    // (see utils/llm-usage.ts). Note this is a real but SMALL win: what dominated the
+    // evaluator's input was the findings corpus, and that is addressed structurally by
+    // the router/synthesizer split rather than by caching.
+    const systemPrompt = injectCurrentDate(promptTemplate, role);
+    // `partial_synthesis_section` is the only run-varying value either template takes, and
+    // only the synthesizer uses it — it names which reduce pass this call is. A
+    // single-pass synthesis and every router call pass '', so their system prompts stay
+    // byte-identical across the whole run.
+    const populate = (partialSection: string): string => this.populatePrompt(systemPrompt, {
       complexity_label: complexity === 1 ? 'Level 1 (Normal)' : complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)',
       disabled_tools_section: disabledToolsSection,
       complexity_guidance: complexityGuidance,
       max_team_size: maxTeamSize,
       query_budget: queryBudget,
       youtube_query_every_n: config.YOUTUBE_QUERY_EVERY_N,
+      partial_synthesis_section: partialSection,
     });
 
-    // Normalize citations across all reports to ONE global numbering BEFORE the
-    // evaluator/synthesis LLM sees them, and hand it the matching Global Source
-    // List. The evaluator prompt promises exactly this ("reports have already
-    // been normalized to these global numbers"); doing it here is what makes the
-    // synthesized body's [N] line up with the final CITED LINKS list that
-    // ensureCitedLinks() regenerates from the same normalization.
-    const { normalizedReports, globalCitations } = normalizeCitations(reports);
-    const globalSourceList = globalCitations.length > 0
-      ? 'GLOBAL SOURCE LIST (use these exact [N] numbers for every inline citation):\n' +
-        globalCitations
-          .map((c) => `[${c.id}] ${c.url}${c.source ? ` [Source: ${c.source}]` : ''}${c.description ? ` — ${c.description}` : ''}`)
-          .join('\n')
-      : '';
-    const findings = Array.from(normalizedReports.entries())
-        .map(([id, report]) => `### Researcher ${id}\n${report}`)
-        .join('\n\n');
-
-    // Run-varying context, appended AFTER the findings. `reports` is cumulative and
-    // iterated in insertion order, and normalizeCitations assigns global ids by first
-    // appearance in that same order, so a report written in round 1 is byte-identical
-    // in the round-2 and round-3 messages — the findings block is a genuine stable
-    // prefix that later rounds re-read from cache instead of re-paying for. Anything
-    // placed before it would destroy that: the global source list used to sit at the
-    // front and grew by a line per new URL, which moved every byte after it and made
-    // the whole message uncacheable from the first round onward.
+    // Run-varying context, appended AFTER the bulk of the message (digests for the
+    // router, findings for the synthesizer). `reports` is cumulative and iterated in
+    // insertion order, and normalizeCitations assigns global ids by first appearance in
+    // that same order, so a report written in round 1 is byte-identical in later rounds'
+    // messages. Anything placed before it would destroy that: the global source list used
+    // to sit at the front and grew by a line per new URL, which moved every byte after it.
     const runContext = [
       `## RUN CONTEXT`,
       `- **ROOT QUERY**: ${query}`,
       `- **Current round**: ${round} / ${maxRounds}`,
       initialAgendaSection.trim(),
       previousQueriesSection.trim(),
-      roundPhaseGuidance.trim(),
+      // Round-phase guidance calibrates a ROUTING decision against the round budget. The
+      // terminal synthesis has no decision left to make, so it is omitted there.
+      isRouter ? roundPhaseGuidance.trim() : '',
       steeringSection.trim(),
     ].filter(Boolean).join('\n\n');
-
-    const directive = mustSynthesize
-        ? `Research budget exhausted. Synthesize the final report now, based on the findings above.`
-        : `Evaluate the findings above and decide next steps (delegate more researchers or synthesize the final report).`;
-
-    const userMessage = [
-      'Findings from the research team follow.',
-      findings,
-      globalSourceList,
-      runContext,
-      directive,
-    ].filter(Boolean).join('\n\n---\n\n');
 
     try {
       const authResult = await safeGetApiKeyAndHeaders(modelRegistry, model);
@@ -548,53 +639,34 @@ export class PlanningService implements IPlanningService {
         throw new Error(`Failed to get API key for evaluation: ${authResult.error}`);
       }
 
-      const llmTimeout = config.LLM_TIMEOUT_MS;
+      const callOptions = {
+        model,
+        apiKey: authResult.apiKey || '',
+        headers: authResult.headers,
+        signal,
+        sessionId,
+        config,
+        complexity,
+        observer,
+      };
 
-      // Retry the transport call + validation on transient failures (see generatePlan for the
-      // rationale — a "terminated" abort only throws at validateAndExtractText, so validation
-      // must be inside the retried region; repair/fallback stays outside).
-      const { response, responseText } = await retryWithBackoff(
-        async () => {
-          const response = await withTimeout(
-            completeSimple(model, {
-              systemPrompt: populatedPrompt,
-              messages: [
-                { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-              ],
-              // The evaluator's response carries the final report whenever it synthesizes —
-              // which it may choose to do on ANY round (voluntary early finish), not just the
-              // forced final round. So every evaluator call gets the full synthesis budget; a
-              // small decision response simply uses a fraction of it. Clamped to the model.
-            }, buildSafeOptions(model, {
-              apiKey: authResult.apiKey || '',
-              headers: authResult.headers,
-              signal,
-              sessionId,
-            }, config.SYNTHESIS_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
-            llmTimeout, 'evaluator-updatePlanForRound',
-          );
-          const responseText = validateAndExtractText(response, 'Evaluator');
-          return { response, responseText };
-        },
-        {
-          maxRetries: LLM_MAX_RETRIES,
-          initialDelay: LLM_RETRY_INITIAL_DELAY_MS,
-          maxDelay: LLM_RETRY_MAX_DELAY_MS,
-          label: 'evaluator-updatePlanForRound',
-          signal,
-          isTransientError: (err) => isRetriableLlmError(err, signal),
-        },
-      );
-
-      // Track usage once, on the successful attempt (failed attempts throw before here).
-      recordLlmUsage(model, (response as any).usage, { component: 'evaluator', complexity, observer });
+      const responseText = isRouter
+        ? await this.callLead({
+            ...callOptions,
+            systemPrompt: populate(''),
+            userMessage: buildRouterMessage(this.resolveDigests(options), runContext),
+            maxTokens: ROUTER_MAX_TOKENS,
+            component: 'router',
+            label: 'router-updatePlanForRound',
+          })
+        : await this.synthesizeCorpus({ ...callOptions, reports, runContext, populate });
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;
       try {
           plan = this.parseJsonPlan(responseText);
       } catch {
-        logger.warn('[PlanningService] Evaluation JSON malformed, attempting agentic repair');
+        logger.warn(`[PlanningService] ${role} JSON malformed, attempting agentic repair`);
         const repaired = await repairJsonWithLlm<ResearchPlan>(
             responseText,
             completeSimple,
@@ -602,13 +674,13 @@ export class PlanningService implements IPlanningService {
             {
                 model,
                 schema: EvaluationResponseSchemaAsTSchema,
-                context: `Research evaluation for: ${query} (Round ${round})`,
+                context: `Research ${role} for: ${query} (Round ${round})`,
                 serviceName: 'PlanningService',
                 signal,
                 sessionId,
-                maxTokens: config.SYNTHESIS_MAX_TOKENS,
+                maxTokens: isRouter ? ROUTER_MAX_TOKENS : config.SYNTHESIS_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
-                onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'evaluator', complexity, observer }),
+                onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: role, complexity, observer }),
             }
         );
         if (repaired) {
@@ -629,16 +701,20 @@ export class PlanningService implements IPlanningService {
         // if there is a prior agenda to continue, delegate another round rather than giving up.
         // Round budget (maxRounds) still bounds this, so it cannot loop indefinitely.
         if (mustSynthesize) {
-          logger.warn('[PlanningService] Failed to generate valid evaluation on the final round; synthesizing from raw text');
+          logger.warn('[PlanningService] Failed to generate valid synthesis JSON on the final round; synthesizing from raw text');
           const safeContent = salvageReportText(responseText);
           plan = { action: 'synthesize', content: safeContent, researchers: [] };
         } else if (previousPlan?.researchers && previousPlan.researchers.length > 0) {
-          logger.warn('[PlanningService] Evaluation unparseable mid-research; continuing the prior agenda rather than synthesizing early');
+          logger.warn('[PlanningService] Routing decision unparseable mid-research; continuing the prior agenda rather than finishing early');
           plan = { action: 'delegate', content: '', researchers: previousPlan.researchers };
         } else {
-          logger.warn('[PlanningService] Evaluation unparseable and no prior agenda to continue; falling back to synthesize');
-          const safeContent = salvageReportText(responseText);
-          plan = { action: 'synthesize', content: safeContent, researchers: [] };
+          // A ROUTER's raw text is never a report — it has not read the findings. Salvaging
+          // it as `content` (which is what this branch used to do, back when one call did
+          // both jobs) would ship the model's routing prose to the user as the run's
+          // output. Hand back an empty synthesis decision instead, so the orchestrator
+          // runs the real terminal synthesis over the collected reports.
+          logger.warn('[PlanningService] Routing decision unparseable and no prior agenda to continue; deferring to final synthesis');
+          plan = { action: 'synthesize', content: '', researchers: [] };
         }
       }
 
@@ -647,6 +723,13 @@ export class PlanningService implements IPlanningService {
       // Respect mustSynthesize flag
       if (mustSynthesize) {
           finalPlan.action = 'synthesize';
+      } else if (finalPlan.action === 'synthesize' && finalPlan.content) {
+        // The router is told not to write prose and is given no findings to write it from,
+        // but a model that ignores that would produce an ungrounded report — and the
+        // orchestrator would ship it verbatim. Drop it; the terminal synthesis, which does
+        // read every report, writes the output.
+        logger.warn('[PlanningService] Router returned report content despite having no findings; discarding it in favour of the final synthesis');
+        finalPlan.content = '';
       }
 
       // Final safety cap if delegating
@@ -724,9 +807,251 @@ export class PlanningService implements IPlanningService {
   }
 
   /**
+   * Coverage digests for the router, one per researcher that has reported.
+   *
+   * Callers that hold the synthesis service pass them in. Callers that don't (tests, the
+   * SDK's direct entry points) get digests derived from the report bodies, so the router
+   * always sees an entry for every researcher rather than being handed nothing and
+   * concluding the round produced no work.
+   */
+  private resolveDigests(options: UpdatePlanOptions): Map<string, string> {
+    if (options.digests && options.digests.size > 0) return options.digests;
+    const derived = new Map<string, string>();
+    for (const [id, report] of options.reports.entries()) {
+      derived.set(id, deriveCoverageDigest(report));
+    }
+    return derived;
+  }
+
+  /**
+   * One lead LLM call: transport retry, timeout, text validation, usage accounting.
+   *
+   * Shared by the router and by every pass of the synthesizer so all of them get the same
+   * transient-failure handling. Retries the transport call AND validation together (see
+   * generatePlan — a "terminated" abort only throws at validateAndExtractText, so
+   * validation must sit inside the retried region); repair and fallback stay outside, in
+   * the caller.
+   */
+  private async callLead(args: {
+    model: Model<any>;
+    apiKey: string;
+    headers?: Record<string, string | null>;
+    signal?: AbortSignal;
+    sessionId: string;
+    config: Config;
+    complexity: 1 | 2 | 3;
+    observer?: UpdatePlanOptions['observer'];
+    systemPrompt: string;
+    userMessage: string;
+    maxTokens: number;
+    component: string;
+    label: string;
+  }): Promise<string> {
+    const { model, signal, config, complexity, observer, label } = args;
+
+    const { response, responseText } = await retryWithBackoff(
+      async () => {
+        const response = await withTimeout(
+          completeSimple(model, {
+            systemPrompt: args.systemPrompt,
+            messages: [
+              { role: 'user', content: [{ type: 'text', text: args.userMessage }], timestamp: Date.now() },
+            ],
+          }, buildSafeOptions(model, {
+            apiKey: args.apiKey,
+            headers: args.headers,
+            signal,
+            sessionId: args.sessionId,
+          }, args.maxTokens, config.LLM_THINKING_LEVEL)),
+          config.LLM_TIMEOUT_MS, label,
+        );
+        const responseText = validateAndExtractText(response, label);
+        return { response, responseText };
+      },
+      {
+        maxRetries: LLM_MAX_RETRIES,
+        initialDelay: LLM_RETRY_INITIAL_DELAY_MS,
+        maxDelay: LLM_RETRY_MAX_DELAY_MS,
+        label,
+        signal,
+        isTransientError: (err) => isRetriableLlmError(err, signal),
+      },
+    );
+
+    // Track usage once, on the successful attempt (failed attempts throw before here).
+    recordLlmUsage(model, (response as any).usage, { component: args.component, complexity, observer });
+    return responseText;
+  }
+
+  /**
+   * Produce the final report from the full corpus, in one pass when it fits and a bounded
+   * reduce when it does not.
+   *
+   * The reduce exists because this is the only call whose input is unbounded, and its
+   * failure mode is the worst in the system: the provider rejects an over-window request
+   * after the whole run has been paid for, and the user receives a mechanical
+   * concatenation of raw reports. Partitioning trades one guaranteed-to-fit pass per
+   * partition plus a merge for that cliff.
+   */
+  private async synthesizeCorpus(args: {
+    model: Model<any>;
+    apiKey: string;
+    headers?: Record<string, string | null>;
+    signal?: AbortSignal;
+    sessionId: string;
+    config: Config;
+    complexity: 1 | 2 | 3;
+    observer?: UpdatePlanOptions['observer'];
+    reports: Map<string, string>;
+    runContext: string;
+    populate: (partialSection: string) => string;
+  }): Promise<string> {
+    const { config, reports, runContext, populate } = args;
+
+    // Normalize citations across all reports to ONE global numbering BEFORE the synthesis
+    // LLM sees them, and hand it the matching Global Source List. The synthesizer prompt
+    // promises exactly this ("reports have already been normalized to these global
+    // numbers"); doing it here is what makes the synthesized body's [N] line up with the
+    // final CITED LINKS list that ensureCitedLinks() regenerates from the same
+    // normalization. Done once, before partitioning, so every partial pass sees the same
+    // global numbering as the merge.
+    const { normalizedReports, globalCitations } = normalizeCitations(reports);
+    const globalSourceList = globalCitations.length > 0
+      ? 'GLOBAL SOURCE LIST (use these exact [N] numbers for every inline citation):\n' +
+        globalCitations
+          .map((c) => `[${c.id}] ${c.url}${c.source ? ` [Source: ${c.source}]` : ''}${c.description ? ` — ${c.description}` : ''}`)
+          .join('\n')
+      : '';
+
+    const budgetChars = synthesisCorpusBudgetChars(args.model, config.SYNTHESIS_MAX_TOKENS);
+
+    let entries: Array<[string, string]> = Array.from(normalizedReports.entries())
+      .map(([id, report]) => [`Researcher ${id}`, truncateToBudget(report, budgetChars, id)] as [string, string]);
+
+    let pass = 0;
+    let reduced = false;
+    while (pass < MAX_SYNTHESIS_REDUCE_PASSES) {
+      const partitions = partitionCorpus(entries, entrySize, budgetChars);
+      if (partitions.length <= 1) break;
+      reduced = true;
+      logger.warn(
+        `[PlanningService] Synthesis corpus (${entries.reduce((n, e) => n + entrySize(e), 0)} chars) exceeds the ` +
+        `${budgetChars}-char budget for ${args.model.id}; reducing in ${partitions.length} partial passes (pass ${pass + 1})`,
+      );
+      const next: Array<[string, string]> = [];
+      for (const [index, partition] of partitions.entries()) {
+        const text = await this.callLead({
+          ...args,
+          systemPrompt: populate(partialSynthesisSection(index + 1, partitions.length)),
+          userMessage: buildSynthesisMessage(partition, globalSourceList, runContext, true),
+          maxTokens: config.SYNTHESIS_MAX_TOKENS,
+          component: 'synthesizer',
+          label: `synthesizer-reduce-${pass + 1}.${index + 1}`,
+        });
+        next.push([`Partial synthesis ${index + 1}`, text.trim()]);
+      }
+      entries = next;
+      pass++;
+    }
+
+    return this.callLead({
+      ...args,
+      systemPrompt: populate(reduced ? MERGE_SYNTHESIS_SECTION : ''),
+      userMessage: buildSynthesisMessage(entries, globalSourceList, runContext, false),
+      maxTokens: config.SYNTHESIS_MAX_TOKENS,
+      component: 'synthesizer',
+      label: 'synthesizer-final',
+    });
+  }
+
+  /**
    * Generate queries for a researcher
    */
   async generateQueries(options: GenerateQueriesOptions): Promise<string[]> {
     return options.researcher.queries || [];
   }
 }
+
+/** Chars a corpus entry contributes, including its `### <label>` heading line. */
+function entrySize(entry: [string, string]): number {
+  return entry[1].length + entry[0].length + 8;
+}
+
+/**
+ * Cut a single report that is larger than the entire corpus budget.
+ *
+ * Reached only when one researcher produced more text than the model can hold at once, at
+ * which point there is no partitioning left to do — the choice is a truncated report or a
+ * rejected request. The marker is left in the text so the model knows the tail is missing
+ * rather than treating the cut as the end of the findings.
+ */
+function truncateToBudget(report: string, budgetChars: number, id: string): string {
+  if (report.length <= budgetChars) return report;
+  logger.warn(
+    `[PlanningService] Report ${id} (${report.length} chars) exceeds the whole synthesis corpus budget ` +
+    `(${budgetChars}); truncating it — the tail of this report will not reach the final report`,
+  );
+  return `${report.slice(0, budgetChars)}\n\n[report truncated: exceeded the synthesis context budget]`;
+}
+
+/** The router's user message: coverage digests, then run context, then the ask. */
+export function buildRouterMessage(digests: ReadonlyMap<string, string>, runContext: string): string {
+  const digestBlock = formatDigestsForRouter(digests);
+  return [
+    'Coverage digests from the research team follow. Each one is what a researcher reported about its own coverage; you do not have the findings themselves.',
+    digestBlock || '(No researcher has reported yet.)',
+    runContext,
+    'Decide whether the research is complete or another round is needed. Return JSON only.',
+  ].filter(Boolean).join('\n\n---\n\n');
+}
+
+/** The synthesizer's user message: corpus, global source list, run context, directive. */
+function buildSynthesisMessage(
+  entries: Array<[string, string]>,
+  globalSourceList: string,
+  runContext: string,
+  isPartialPass: boolean,
+): string {
+  const isMerge = entries.some(([label]) => label.startsWith('Partial synthesis'));
+  const leadIn = isMerge
+    ? 'Partial syntheses of the research findings follow.'
+    : 'Findings from the research team follow.';
+  const body = entries.map(([label, text]) => `### ${label}\n${text}`).join('\n\n');
+  const directive = isPartialPass
+    ? 'Write the partial synthesis for the findings above, as plain text.'
+    : 'Write the final report now, based on the findings above.';
+  return [leadIn, body, globalSourceList, runContext, directive]
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+}
+
+/** Overrides the synthesizer's output contract for one partition of a reduce pass. */
+function partialSynthesisSection(index: number, total: number): string {
+  return [
+    '---',
+    '',
+    '## PARTIAL PASS — this OVERRIDES the output format and the CITED LINKS rules above',
+    '',
+    `The run's findings did not fit in one request. You are being given partition ${index} of ${total}.`,
+    '',
+    '- Write an exhaustive, topic-organized synthesis of ONLY the findings you were given. Every rule about detail, grounding and anonymity still applies at full strength — a later pass merges your output, so anything you omit is lost for good.',
+    '- Use the global [N] numbers from the Global Source List for every inline citation, exactly as instructed above.',
+    '- Do NOT write a CITED LINKS section. The merge pass writes the single one.',
+    '- Do NOT return JSON. Return the synthesis as plain text and nothing else.',
+    '- Do NOT mention partitioning, or that other findings exist.',
+  ].join('\n');
+}
+
+/** Tells the final pass that its inputs are partial syntheses rather than raw reports. */
+const MERGE_SYNTHESIS_SECTION = [
+  '---',
+  '',
+  '## MERGE PASS',
+  '',
+  'The material above is a set of partial syntheses of this run\'s findings, each covering a different part of it. Merge them into one report.',
+  '',
+  '- Reorganize across the partials BY TOPIC. Do not present them in sequence, and do not label or reference them.',
+  '- Keep every fact, date, name and statistic from every partial. Merging is not summarizing.',
+  '- Reconcile overlap: where two partials cover the same ground, state it once, keeping the citations from both.',
+  '- All other rules above — including the CITED LINKS section and the JSON output format — apply to your output as normal.',
+].join('\n');

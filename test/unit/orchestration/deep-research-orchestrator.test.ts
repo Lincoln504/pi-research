@@ -135,6 +135,7 @@ describe('DeepResearchOrchestrator', () => {
       buildFallbackSynthesis: vi.fn(() => '# Fallback Synthesis'),
       clearReports: vi.fn(),
       getAllReports: vi.fn(() => new Map()),
+      getAllDigests: vi.fn(() => new Map()),
       getReport: vi.fn(),
       getReportsForRound: vi.fn(() => new Map()),
       getReportCount: vi.fn(() => 0),
@@ -215,6 +216,92 @@ describe('DeepResearchOrchestrator', () => {
     expect(result).toBe('Multi-round result');
     expect(mockPlanningService.generatePlan).toHaveBeenCalled();
     expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
+  });
+
+  /**
+   * Routing and synthesis are separate calls.
+   *
+   * The router decides from coverage digests and never reads a finding, so its "finish"
+   * decision carries no report. Reusing it as the final report — which is what the
+   * single-call evaluator did — would ship an empty or ungrounded document at the end of a
+   * successful run. The coordinator's round-1 direct answer is the opposite case: that one
+   * IS a real report and must not trigger a second, redundant synthesis.
+   */
+  describe('router / synthesizer split', () => {
+    it('runs a separate synthesis call when the ROUTER chooses to finish', async () => {
+      const seen: any[] = [];
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+        seen.push(opts);
+        return opts.mustSynthesize
+          ? { action: 'synthesize', content: 'The synthesized report' }
+          : { action: 'synthesize', content: '', researchers: [] };
+      });
+
+      const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 });
+      const result = await orchestrator.run();
+
+      expect(result).toBe('The synthesized report');
+      expect(seen.filter(o => !o.mustSynthesize).length).toBeGreaterThan(0);
+      expect(seen.filter(o => o.mustSynthesize)).toHaveLength(1);
+    });
+
+    it('does NOT re-synthesize when the COORDINATOR answers directly on round 1', async () => {
+      // Round 1's plan comes from the coordinator, which had the query in front of it and
+      // delegated nothing. There are no reports to synthesize from — a second call would
+      // burn a request and return a report built from an empty corpus.
+      mockPlanningService.generatePlan.mockResolvedValue({
+        action: 'synthesize',
+        content: 'A direct answer',
+        researchers: [],
+      });
+
+      const orchestrator = new DeepResearchOrchestrator(options);
+      const result = await orchestrator.run();
+
+      expect(result).toBe('A direct answer');
+      expect(mockPlanningService.updatePlanForRound).not.toHaveBeenCalled();
+    });
+
+    it('passes coverage digests to the routing call', async () => {
+      // Without these the routing call falls back to deriving digests from report bodies,
+      // which works but discards everything the researchers actually asserted.
+      const digests = new Map([['1.1', 'Covered: alpha\nGaps: none\nSources: 3']]);
+      mockSynthesisService.getAllDigests.mockReturnValue(digests);
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) =>
+        opts.mustSynthesize
+          ? { action: 'synthesize', content: 'done' }
+          : { action: 'synthesize', content: '', researchers: [] },
+      );
+
+      const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 });
+      await orchestrator.run();
+
+      const routingCall = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls
+        .map(c => c[0] as any)
+        .find(o => !o.mustSynthesize);
+      expect(routingCall?.digests).toBe(digests);
+    });
+
+    it('emits exactly one synthesis decision when the router finishes early', async () => {
+      // The router's decision already fired onEvaluationDecision inside the loop. Firing
+      // again for the terminal synthesis double-counts it for the TUI progress bar.
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) =>
+        opts.mustSynthesize
+          ? { action: 'synthesize', content: 'done' }
+          : { action: 'synthesize', content: '', researchers: [] },
+      );
+      const onEvaluationDecision = vi.fn();
+
+      const orchestrator = new DeepResearchOrchestrator({
+        ...options,
+        complexity: 2,
+        observer: { onEvaluationDecision },
+      } as any);
+      await orchestrator.run();
+
+      const synthesisDecisions = onEvaluationDecision.mock.calls.filter(c => c[0] === 'synthesize');
+      expect(synthesisDecisions).toHaveLength(1);
+    });
   });
 
   it('throws (not hollow success) when synthesis is empty and ZERO reports were collected', async () => {

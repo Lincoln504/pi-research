@@ -9,7 +9,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PlanningService, isRetriableLlmError, salvageReportText } from '../../../src/core/planning-service.ts';
+import {
+  PlanningService,
+  isRetriableLlmError,
+  salvageReportText,
+  synthesisCorpusBudgetChars,
+  partitionCorpus,
+} from '../../../src/core/planning-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -699,21 +705,58 @@ describe('PlanningService', () => {
       expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1); // non-transient → not retried
     });
 
-    it('falls back to a synthesize plan wrapping the raw text when JSON parsing completely fails', async () => {
+    it('falls back to a synthesize plan wrapping the raw text when SYNTHESIS JSON parsing completely fails', async () => {
+      const longFallbackText = 'This is completely unparseable text that cannot be parsed as valid JSON by any means whatsoever.';
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(longFallbackText));
+      const plan = await service.updatePlanForRound({ ...BASE_OPTIONS, mustSynthesize: true });
+      expect(plan.action).toBe('synthesize');
+      // The contract is that the unparseable raw text is PRESERVED in content
+      // (not replaced by a placeholder). The synthesizer HAS read every report, so its
+      // prose — even in a broken envelope — is a report, and losing it loses the run.
+      expect(plan.content).toBe(longFallbackText);
+    });
+
+    it('never salvages ROUTER text as report content, however long it is', async () => {
+      // The router decides from coverage digests and has never seen a finding, so any
+      // prose it emits is ungrounded. Salvaging it (which the single-call evaluator used
+      // to do, and which the identical-looking synthesis path still does above) would ship
+      // it to the user as the run's output. It must hand back an empty synthesis instead,
+      // so the orchestrator's terminal synthesis writes the report from the real reports.
       const longFallbackText = 'This is completely unparseable text that cannot be parsed as valid JSON by any means whatsoever.';
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(longFallbackText));
       const plan = await service.updatePlanForRound(BASE_OPTIONS);
       expect(plan.action).toBe('synthesize');
-      // The contract is that the unparseable raw text is PRESERVED in content
-      // (not replaced by a placeholder), so the synthesis step still has it.
-      expect(plan.content).toBe(longFallbackText);
+      expect(plan.content).toBe('');
     });
 
-    it('drops too-short unparseable text rather than wrapping noise into content', async () => {
+    it('discards report content a router returns despite having no findings', async () => {
+      // A model that ignores "return a decision, not prose" produces a well-formed
+      // synthesize envelope with an invented report in it. Parsing succeeds, so the
+      // salvage guard above never runs — this is the second, separate gate.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(
+        '```json\n{"action":"synthesize","content":"An invented report the router could not possibly have grounded."}\n```',
+      ));
+      const plan = await service.updatePlanForRound(BASE_OPTIONS);
+      expect(plan.action).toBe('synthesize');
+      expect(plan.content).toBe('');
+    });
+
+    it('keeps report content the SYNTHESIZER returns', async () => {
+      // Same envelope, opposite verdict — the guard must key on the role, not on the shape
+      // of the response, or the real report is thrown away too.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(
+        '```json\n{"action":"synthesize","content":"A grounded report [1].\\n\\nCITED LINKS\\n[1] https://a.example.com"}\n```',
+      ));
+      const plan = await service.updatePlanForRound({ ...BASE_OPTIONS, mustSynthesize: true });
+      expect(plan.action).toBe('synthesize');
+      expect(plan.content).toContain('A grounded report [1].');
+    });
+
+    it('drops too-short unparseable synthesis text rather than wrapping noise into content', async () => {
       // Below the 50-char floor the raw text is discarded (empty content), so a
       // stray token never becomes the synthesis basis.
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse('nope'));
-      const plan = await service.updatePlanForRound(BASE_OPTIONS);
+      const plan = await service.updatePlanForRound({ ...BASE_OPTIONS, mustSynthesize: true });
       expect(plan.action).toBe('synthesize');
       expect(plan.content).toBe('');
     });
@@ -800,13 +843,16 @@ describe('PlanningService', () => {
       expect(ctx.systemPrompt.match(PLACEHOLDER) ?? []).toEqual([]);
     });
 
-    it('system-lead-evaluator.md leaves none, at every complexity level', async () => {
-      const real = readPrompt('system-lead-evaluator.md');
+    it.each([
+      ['system-lead-router.md', false],
+      ['system-lead-synthesizer.md', true],
+    ] as const)('%s leaves none, at every complexity level', async (file, mustSynthesize) => {
+      const real = readPrompt(file);
       expect(real.match(PLACEHOLDER)?.length ?? 0).toBeGreaterThan(0);
       vi.mocked(loadPrompt).mockReturnValue(real);
 
-      // The evaluator template branches on complexity (guidance, round phase and
-      // team/query budgets differ), so one level passing proves little.
+      // Both lead templates branch on complexity (guidance, round phase and team/query
+      // budgets differ), so one level passing proves little.
       for (const complexity of [1, 2, 3] as const) {
         await svc.updatePlanForRound({
           sessionId: 'test-session',
@@ -814,6 +860,7 @@ describe('PlanningService', () => {
           round: 1,
           query: 'test query',
           complexity,
+          mustSynthesize,
           model: STUB_MODEL,
           modelRegistry: MOCK_MODEL_REGISTRY,
           cwd: '/test/cwd',
@@ -823,53 +870,56 @@ describe('PlanningService', () => {
         expect(ctx.systemPrompt.match(PLACEHOLDER) ?? [], `complexity ${complexity}`).toEqual([]);
       }
     });
+
+    it('loads the router template when routing and the synthesizer template when synthesizing', async () => {
+      // The two roles are selected by `mustSynthesize` alone. Getting this backwards would
+      // hand the router the synthesis instructions — it would dutifully write a report
+      // from digests it was told are not findings.
+      const base = {
+        sessionId: 'test-session',
+        reports: new Map([['1.1', 'Report text.']]),
+        round: 2,
+        query: 'test query',
+        complexity: 2 as const,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+      };
+      await svc.updatePlanForRound({ ...base } as any);
+      expect(vi.mocked(loadPrompt).mock.calls.at(-1)![0]).toBe('system-lead-router');
+
+      await svc.updatePlanForRound({ ...base, mustSynthesize: true } as any);
+      expect(vi.mocked(loadPrompt).mock.calls.at(-1)![0]).toBe('system-lead-synthesizer');
+    });
   });
 
   /**
-   * Prompt-cache structure.
+   * The evaluator context protocol.
    *
-   * Every provider caches on an exact prefix of the serialized request, so what a
-   * multi-round run can reuse is decided entirely by WHERE the round-varying text sits.
-   * These two invariants are the whole mechanism, and both are silent when broken —
-   * nothing errors, the run just pays full input price on every round. The failure mode
-   * is a one-line prompt edit (a round number moved back into the system prompt, a new
-   * section prepended to the findings) so it needs a test, not a comment.
+   * The research lead is two jobs: a ROUTER that decides each round whether to continue,
+   * and a SYNTHESIZER that writes the report once at the end. They were one call that read
+   * every report on every round, which made its input grow with the square of the round
+   * count, put the final call at risk of exceeding the model's context window, and made the
+   * request uncacheable (a fresh single message rebuilt each round).
+   *
+   * Every invariant below is silent when broken — nothing errors, the run just costs more,
+   * or ships an ungrounded report. They need tests, not comments.
    */
-  describe('prompt-cache structure — the evaluator request keeps a stable prefix', () => {
+  describe('evaluator context protocol — routing reads digests, synthesis reads findings', () => {
     const PROMPT_DIR = path.join(
       path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts',
     );
-    const LEAD_IN = 'Findings from the research team follow.';
     const SEP = '\n\n---\n\n';
 
     let svc: PlanningService;
     beforeEach(async () => {
       svc = new PlanningService();
       await svc.initialize();
-      vi.mocked(loadPrompt).mockReturnValue(
-        readFileSync(path.join(PROMPT_DIR, 'system-lead-evaluator.md'), 'utf-8'),
+      vi.mocked(loadPrompt).mockImplementation((name: string) =>
+        readFileSync(path.join(PROMPT_DIR, `${name}.md`), 'utf-8'),
       );
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('ok')));
     });
-
-    const evaluate = async (round: number, reports: Map<string, string>) => {
-      await svc.updatePlanForRound({
-        sessionId: 'cache-session',
-        reports,
-        round,
-        maxRounds: 3,
-        query: 'test query',
-        complexity: 2 as const,
-        model: STUB_MODEL,
-        modelRegistry: MOCK_MODEL_REGISTRY,
-        cwd: '/test/cwd',
-      } as any);
-      const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
-      return {
-        systemPrompt: (call[1] as { systemPrompt: string }).systemPrompt,
-        userMessage: lastEvaluatorUserMessage(),
-      };
-    };
 
     // Reports carry real CITED LINKS blocks so the GLOBAL SOURCE LIST is actually
     // populated — and, crucially, GROWS between the rounds. An empty source list would
@@ -879,35 +929,365 @@ describe('PlanningService', () => {
     const round1Reports = new Map([['1.1', R1]]);
     const round2Reports = new Map([['1.1', R1], ['2.1', R2]]);
 
-    it('renders a byte-identical system prompt in round 1 and round 3', async () => {
-      const first = await evaluate(1, round1Reports);
-      const later = await evaluate(3, round2Reports);
-      // Differing round, differing report set, differing query history — none of it may
-      // reach the system prompt, or the cached prefix ends at byte zero.
-      expect(later.systemPrompt).toBe(first.systemPrompt);
+    const D1 = 'Goal: cover alpha\nCovered: alpha basics\nGaps: none\nSources: 1';
+    const D2 = 'Goal: cover beta\nCovered: beta basics\nGaps: beta pricing\nSources: 1';
+
+    const call = async (opts: Record<string, unknown>) => {
+      await svc.updatePlanForRound({
+        sessionId: 'cache-session',
+        maxRounds: 3,
+        query: 'test query',
+        complexity: 2 as const,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+        ...opts,
+      } as any);
+      const last = vi.mocked(completeSimple).mock.calls.at(-1)!;
+      return {
+        systemPrompt: (last[1] as { systemPrompt: string }).systemPrompt,
+        userMessage: lastEvaluatorUserMessage(),
+      };
+    };
+
+    const route = (round: number, reports: Map<string, string>, digests?: Map<string, string>) =>
+      call({ round, reports, digests });
+
+    const synthesize = (round: number, reports: Map<string, string>) =>
+      call({ round, reports, mustSynthesize: true });
+
+    describe('routing', () => {
+      it('sends the digests and NOT the report bodies', async () => {
+        // The whole saving. If a report body reaches the router, routing input is back to
+        // growing with the corpus and every projection in the design is void.
+        const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        expect(userMessage).toContain('Covered: alpha basics');
+        expect(userMessage).toContain('Gaps: beta pricing');
+        expect(userMessage).not.toContain('Round one finding');
+        expect(userMessage).not.toContain('Round two finding');
+      });
+
+      it('does not send the global source list — that is synthesis material', async () => {
+        const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        expect(userMessage).not.toContain('GLOBAL SOURCE LIST');
+        expect(userMessage).not.toContain('alpha.example.com');
+      });
+
+      it('grows by only the new digest when a round is added', async () => {
+        // The load-bearing claim: routing input is flat in the corpus, so round n costs
+        // what round 1 cost plus one digest — not the sum of every report so far.
+        const one = await route(1, round1Reports, new Map([['1.1', D1]]));
+        const two = await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        const growth = two.userMessage.length - one.userMessage.length;
+        // Generous ceiling: the digest itself, its `### Researcher` heading and separator,
+        // plus the round number changing. Nothing report-sized may pass.
+        expect(growth).toBeLessThan(D2.length + 200);
+        expect(growth).toBeGreaterThan(0);
+      });
+
+      it('derives digests from the reports when the caller supplies none', async () => {
+        // A caller that does not track digests must not leave the router blind — a router
+        // shown nothing concludes the round produced nothing and re-delegates work already
+        // done. It gets a mechanical digest instead, which says so.
+        const { userMessage } = await route(2, round2Reports);
+        expect(userMessage).toContain('### Researcher 1.1');
+        expect(userMessage).toContain('### Researcher 2.1');
+        expect(userMessage).toContain('emitted no coverage digest');
+        // A derived digest quotes the report's topic line, so it is bounded rather than
+        // absent: what must not survive is the rest of the body, here its source list.
+        expect(userMessage).not.toContain('alpha.example.com');
+        expect(userMessage).not.toContain('CITED LINKS');
+      });
+
+      it('bounds a derived digest to the topic line and a source count', async () => {
+        // The derivation runs on reports that can be tens of thousands of characters. If it
+        // ever passed more of the body through, routing input would silently start scaling
+        // with the corpus again — the exact failure this protocol exists to prevent.
+        const long = `Topic line about alpha.\n\n${'Body sentence with detail. '.repeat(400)}\n\nCITED LINKS\n[1] https://alpha.example.com — Alpha`;
+        const { userMessage } = await route(2, new Map([['1.1', long]]));
+        expect(userMessage).toContain('Topic line about alpha.');
+        expect(userMessage).not.toContain('Body sentence with detail.');
+        expect(userMessage).toContain('Sources: 1');
+      });
+
+        it('accepts the finish envelope the router prompt asks for, reason field and all', async () => {
+        // The router is told to return { action, reason }. `reason` is not in the plan
+        // schema — if validation rejected unknown keys, EVERY router finish would fall into
+        // the agentic-repair path and burn a second call to arrive at the same decision.
+        vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(
+          '```json\n{"action":"synthesize","reason":"every agenda item is covered"}\n```',
+        ));
+        const before = vi.mocked(completeSimple).mock.calls.length;
+        const plan = await svc.updatePlanForRound({
+          sessionId: 'cache-session',
+          reports: round1Reports,
+          digests: new Map([['1.1', D1]]),
+          round: 2,
+          maxRounds: 3,
+          query: 'test query',
+          complexity: 2 as const,
+          model: STUB_MODEL,
+          modelRegistry: MOCK_MODEL_REGISTRY,
+          cwd: '/test/cwd',
+        } as any);
+        expect(plan.action).toBe('synthesize');
+        // Exactly one call: no repair pass was triggered.
+        expect(vi.mocked(completeSimple).mock.calls.length).toBe(before + 1);
+      });
+
+    it('caps its output tokens far below the synthesis budget', async () => {
+        // The router cannot produce a report, so reserving the full synthesis ceiling for
+        // it is dead budget — and on providers that bill reserved output, real money.
+        await route(2, round2Reports, new Map([['1.1', D1]]));
+        const opts = vi.mocked(completeSimple).mock.calls.at(-1)![2] as { maxTokens?: number };
+        expect(opts.maxTokens).toBeLessThanOrEqual(8192);
+      });
     });
 
-    it('carries the round-varying context in the user message instead', async () => {
-      const { userMessage } = await evaluate(2, round2Reports);
-      expect(userMessage).toContain('## RUN CONTEXT');
-      expect(userMessage).toContain('Round 2 of 3');
-      // ...and after the findings, not before them.
-      expect(userMessage.indexOf('## RUN CONTEXT')).toBeGreaterThan(userMessage.indexOf('Round one finding'));
+    describe('synthesis', () => {
+      it('sends every report body in full, plus the global source list', async () => {
+        const { userMessage } = await synthesize(3, round2Reports);
+        expect(userMessage).toContain('Round one finding');
+        expect(userMessage).toContain('Round two finding');
+        expect(userMessage).toContain('GLOBAL SOURCE LIST');
+      });
+
+      it('places the global source list AFTER the findings', async () => {
+        // It grows by a line per new URL. In front of the findings it would move every
+        // byte after it and make the message uncacheable from the first round onward.
+        const { userMessage } = await synthesize(3, round2Reports);
+        expect(userMessage.indexOf('GLOBAL SOURCE LIST'))
+          .toBeGreaterThan(userMessage.indexOf('Round one finding'));
+      });
+
+      it('keeps round 1 findings a verbatim prefix of a later synthesis message', async () => {
+        const first = await synthesize(1, round1Reports);
+        const second = await synthesize(2, round2Reports);
+        const sections = first.userMessage.split(SEP);
+        expect(sections[0]).toBe('Findings from the research team follow.');
+        const stablePrefix = sections.slice(0, 2).join(SEP);
+        expect(stablePrefix).toContain('Round one finding');
+        expect(stablePrefix).not.toContain('GLOBAL SOURCE LIST');
+        expect(second.userMessage.startsWith(stablePrefix)).toBe(true);
+      });
     });
 
-    it('keeps round 1 findings a verbatim prefix of the round 2 message', async () => {
-      const first = await evaluate(1, round1Reports);
-      const second = await evaluate(2, round2Reports);
+    describe('stable system prompts', () => {
+      it('renders a byte-identical ROUTER system prompt in round 1 and round 3', async () => {
+        const first = await route(1, round1Reports, new Map([['1.1', D1]]));
+        const later = await route(3, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        // Differing round, differing report set, differing query history — none of it may
+        // reach the system prompt, or the cached prefix ends at byte zero.
+        expect(later.systemPrompt).toBe(first.systemPrompt);
+      });
 
-      // The lead-in plus the round-1 findings block: everything up to and including the
-      // second separator-delimited section. The global source list grows by a line per
-      // new URL and so must sit AFTER this, not before it.
-      const sections = first.userMessage.split(SEP);
-      expect(sections[0]).toBe(LEAD_IN);
-      const stablePrefix = sections.slice(0, 2).join(SEP);
-      expect(stablePrefix).toContain('Round one finding');
-      expect(stablePrefix).not.toContain('GLOBAL SOURCE LIST');
-      expect(second.userMessage.startsWith(stablePrefix)).toBe(true);
+      it('carries the round-varying context in the ROUTER user message instead', async () => {
+        const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1]]));
+        expect(userMessage).toContain('## RUN CONTEXT');
+        expect(userMessage).toContain('Round 2 of 3');
+        // ...and after the digests, not before them.
+        expect(userMessage.indexOf('## RUN CONTEXT'))
+          .toBeGreaterThan(userMessage.indexOf('Covered: alpha basics'));
+      });
+
+      it('renders a byte-identical SYNTHESIZER system prompt regardless of round', async () => {
+        const first = await synthesize(1, round1Reports);
+        const later = await synthesize(3, round2Reports);
+        expect(later.systemPrompt).toBe(first.systemPrompt);
+      });
     });
+  });
+});
+
+/**
+ * Synthesis corpus budgeting.
+ *
+ * The final synthesis is the one call whose input grows without bound — it carries every
+ * report the run collected, and nothing upstream caps report size or report count. When it
+ * exceeds the model's context window the provider rejects it AFTER the whole run has been
+ * paid for, and the user receives a mechanical concatenation of raw reports labelled as an
+ * interruption. These tests pin the bound that converts that cliff into a reduce.
+ */
+describe('synthesisCorpusBudgetChars', () => {
+  it('leaves room for the output ceiling and the request overhead', () => {
+    const budget = synthesisCorpusBudgetChars({ contextWindow: 262_144 }, 32_768);
+    // Whatever the exact reserve, the corpus must not be allowed to fill the window.
+    expect(budget).toBeLessThan(262_144 * 4);
+    expect(budget).toBeGreaterThan(0);
+  });
+
+  it('shrinks when the output ceiling grows', () => {
+    const small = synthesisCorpusBudgetChars({ contextWindow: 262_144 }, 8_000);
+    const large = synthesisCorpusBudgetChars({ contextWindow: 262_144 }, 64_000);
+    expect(large).toBeLessThan(small);
+  });
+
+  it('falls back to a default window for a model that does not declare one', () => {
+    expect(synthesisCorpusBudgetChars({}, 8_000)).toBeGreaterThan(0);
+  });
+
+  it('never returns a budget so small that partitioning cannot converge', () => {
+    // A tiny or negative window (a misconfigured models.json entry) must not produce a
+    // budget of zero — that would partition every report into its own pass forever.
+    expect(synthesisCorpusBudgetChars({ contextWindow: 1_000 }, 32_768)).toBeGreaterThanOrEqual(40_000);
+  });
+});
+
+describe('partitionCorpus', () => {
+  const size = (e: [string, string]) => e[1].length;
+
+  it('returns a single partition when everything fits', () => {
+    const entries: Array<[string, string]> = [['a', 'x'.repeat(10)], ['b', 'y'.repeat(10)]];
+    expect(partitionCorpus(entries, size, 100)).toHaveLength(1);
+  });
+
+  it('splits at the budget and preserves order', () => {
+    const entries: Array<[string, string]> = [
+      ['a', 'x'.repeat(60)], ['b', 'y'.repeat(60)], ['c', 'z'.repeat(60)],
+    ];
+    const parts = partitionCorpus(entries, size, 100);
+    expect(parts).toHaveLength(3);
+    expect(parts.flat().map(([k]) => k)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('packs greedily rather than one entry per partition', () => {
+    const entries: Array<[string, string]> = [
+      ['a', 'x'.repeat(40)], ['b', 'y'.repeat(40)], ['c', 'z'.repeat(40)],
+    ];
+    const parts = partitionCorpus(entries, size, 100);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toHaveLength(2);
+  });
+
+  it('gives an over-budget entry a partition of its own instead of dropping it', () => {
+    // Losing a report here would silently shrink the final report. The caller truncates
+    // this case; partitioning must still surface it.
+    const entries: Array<[string, string]> = [['a', 'x'.repeat(500)], ['b', 'y'.repeat(10)]];
+    const parts = partitionCorpus(entries, size, 100);
+    expect(parts.flat()).toHaveLength(2);
+    expect(parts[0]).toEqual([['a', 'x'.repeat(500)]]);
+  });
+
+  it('handles an empty corpus', () => {
+    expect(partitionCorpus([], size, 100)).toEqual([]);
+  });
+});
+
+describe('PlanningService — synthesis over an oversized corpus', () => {
+  let svc: PlanningService;
+
+  // A model whose window is small enough that a handful of reports overflow it, so the
+  // reduce path is exercised with realistic control flow rather than a mocked branch.
+  const SMALL_MODEL = { id: 'small-model', contextWindow: 20_000 } as any;
+
+  const bigReport = (tag: string) => `${tag} topic line.\n\n${`${tag} finding sentence. `.repeat(1200)}`;
+
+  beforeEach(async () => {
+    svc = new PlanningService();
+    await svc.initialize();
+    vi.mocked(loadPrompt).mockReturnValue('lead prompt {{partial_synthesis_section}}');
+    vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('merged report')));
+  });
+
+  const synthesize = (reports: Map<string, string>, model = SMALL_MODEL) =>
+    svc.updatePlanForRound({
+      sessionId: 'reduce-session',
+      reports,
+      round: 3,
+      maxRounds: 3,
+      query: 'test query',
+      complexity: 2 as const,
+      mustSynthesize: true,
+      model,
+      modelRegistry: MOCK_MODEL_REGISTRY,
+      cwd: '/test/cwd',
+    } as any);
+
+  it('makes exactly one call when the corpus fits', async () => {
+    await synthesize(new Map([['1.1', 'short report']]), { id: 'big-model', contextWindow: 262_144 } as any);
+    expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1);
+  });
+
+  it('reduces in partial passes and then merges when the corpus does not fit', async () => {
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    const plan = await synthesize(reports);
+    // More than one call means the reduce ran; the LAST call is the merge that produces
+    // the report, so its result is what ships.
+    expect(vi.mocked(completeSimple).mock.calls.length).toBeGreaterThan(1);
+    expect(plan.action).toBe('synthesize');
+    expect(plan.content).toBe('merged report');
+  });
+
+  it('sends every report to some partial pass — none is silently dropped', async () => {
+    // The failure this guards is invisible: a report that reaches no pass simply does not
+    // appear in the final report, and nothing says so.
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    await synthesize(reports);
+    const allSent = vi.mocked(completeSimple).mock.calls
+      .map(c => (c[1] as any).messages.map((m: any) => m.content.map((x: any) => x.text).join('')).join(''))
+      .join('\n');
+    expect(allSent).toContain('alpha topic line.');
+    expect(allSent).toContain('beta topic line.');
+    expect(allSent).toContain('gamma topic line.');
+  });
+
+  it('keeps each partial pass inside the budget', async () => {
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    await synthesize(reports);
+    const budget = synthesisCorpusBudgetChars(SMALL_MODEL, getConfig('/test/cwd').SYNTHESIS_MAX_TOKENS);
+    const messages = vi.mocked(completeSimple).mock.calls
+      .map(c => (c[1] as any).messages.map((m: any) => m.content.map((x: any) => x.text).join('')).join(''));
+    // Each request carries its partition plus the source list, run context and directive —
+    // the overhead reserve covers those, so the corpus share must be under budget.
+    for (const m of messages) expect(m.length).toBeLessThan(budget * 1.5);
+  });
+
+  it('tells a partial pass it is one, and the merge pass that its inputs are partials', async () => {
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    await synthesize(reports);
+    const calls = vi.mocked(completeSimple).mock.calls;
+    const first = (calls[0]![1] as any).systemPrompt as string;
+    const last = (calls.at(-1)![1] as any).systemPrompt as string;
+    // Without these the partial passes each write a CITED LINKS section and the merge
+    // concatenates three reports that all claim to be complete.
+    expect(first).toContain('PARTIAL PASS');
+    expect(last).toContain('MERGE PASS');
+    expect(last).not.toContain('PARTIAL PASS');
+  });
+
+  it('leaves the system prompt free of a partial-pass section on a single-pass synthesis', async () => {
+    await synthesize(new Map([['1.1', 'short report']]), { id: 'big-model', contextWindow: 262_144 } as any);
+    const sys = (vi.mocked(completeSimple).mock.calls.at(-1)![1] as any).systemPrompt as string;
+    expect(sys).not.toContain('PARTIAL PASS');
+    expect(sys).not.toContain('MERGE PASS');
+  });
+
+  it('truncates a single report larger than the whole budget rather than failing', async () => {
+    // Nothing left to partition at that point: the choice is a truncated report or a
+    // rejected request that discards the entire run.
+    const huge = `huge topic line.\n\n${'x'.repeat(200_000)}`;
+    const plan = await synthesize(new Map([['1.1', huge]]));
+    expect(plan.action).toBe('synthesize');
+    const sent = vi.mocked(completeSimple).mock.calls
+      .map(c => (c[1] as any).messages.map((m: any) => m.content.map((x: any) => x.text).join('')).join(''))
+      .join('\n');
+    expect(sent).toContain('report truncated');
+    expect(sent).toContain('huge topic line.');
   });
 });

@@ -92,16 +92,33 @@ describe('recordLlmUsage', () => {
       expect(observer.onTokensConsumed).toHaveBeenCalledWith(150, 0.03);
     });
 
-    it("routes component 'evaluator' to onEvaluationTokens with the same numbers", async () => {
+    // The research lead is two components — a router that decides each round and a
+    // synthesizer that writes the report once — but the user sees ONE evaluation cost row.
+    // Both must reach the same sink, or splitting the roles silently halves the reported
+    // evaluation cost.
+    it.each(['router', 'synthesizer'])(
+      "routes component '%s' to onEvaluationTokens with the same numbers",
+      async (component) => {
+        const observer = phaseObserver();
+        const reg = new MetricsRegistry();
+        await runWithRunRegistry(reg, async () => {
+          recordLlmUsage(model, usage, { component, complexity: 2, observer });
+        });
+        expect(observer.onEvaluationTokens).toHaveBeenCalledTimes(1);
+        expect(observer.onEvaluationTokens).toHaveBeenCalledWith(150, 0.03);
+        expect(observer.onPlanningTokens).not.toHaveBeenCalled();
+        expect(observer.onTokensConsumed).toHaveBeenCalledWith(150, 0.03);
+      },
+    );
+
+    it('sums router and synthesizer into the one evaluation row', async () => {
       const observer = phaseObserver();
       const reg = new MetricsRegistry();
       await runWithRunRegistry(reg, async () => {
-        recordLlmUsage(model, usage, { component: 'evaluator', complexity: 2, observer });
+        recordLlmUsage(model, usage, { component: 'router', complexity: 2, observer });
+        recordLlmUsage(model, usage, { component: 'synthesizer', complexity: 2, observer });
       });
-      expect(observer.onEvaluationTokens).toHaveBeenCalledTimes(1);
-      expect(observer.onEvaluationTokens).toHaveBeenCalledWith(150, 0.03);
-      expect(observer.onPlanningTokens).not.toHaveBeenCalled();
-      expect(observer.onTokensConsumed).toHaveBeenCalledWith(150, 0.03);
+      expect(observer.onEvaluationTokens).toHaveBeenCalledTimes(2);
     });
 
     it('fires no phase hook for other components or for zero usage', async () => {

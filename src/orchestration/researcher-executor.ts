@@ -23,6 +23,7 @@ import { recordResearcherFailure, getSteeringMessages, shouldStopResearch } from
 import { isAbortSentinel, boundSessionAbort } from './abort-utils.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 import { search } from '../web-research/search.ts';
+import { RESEARCHER_DIGEST_SECTION } from '../utils/coverage-digest.ts';
 
 /**
  * Run a single researcher with retries
@@ -205,6 +206,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       .replace('{{evidence_section}}', () => evidenceSection)
       .replace('{{coordination_section}}', () => previousQueriesSection)
       .replace('{{extra_tool_guidelines}}', '')
+      .replace('{{digest_section}}', () => RESEARCHER_DIGEST_SECTION)
       .trim() + steeringSection;
 
     logger.debug(`[ResearcherExecutor] Researcher ${id} attempt ${attempt} System Prompt:\n${prompt}`);
@@ -453,7 +455,11 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       synthesisService.storeReport(researchId, `${round}.${id}`, responseText);
 
-      observer?.onResearcherComplete?.(id, responseText);
+      // Emit what was STORED, not what the model returned: storeReport splits the coverage
+      // digest off the head of the report, and the SDK's `researcher_complete` event should
+      // carry the report a consumer would get from the run, not the routing metadata that
+      // was stripped out of it.
+      observer?.onResearcherComplete?.(id, synthesisService.getReport(researchId, `${round}.${id}`) ?? responseText);
       return;
     } catch (err) {
       lastError = err;
@@ -484,7 +490,8 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
           const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*WARNING: This report was truncated due to a timeout/error. Content may be incomplete.*');
           logger.log(`[ResearcherExecutor] Researcher ${id} salvaged partial content (${partialResponse.length} chars) after error: ${errMsg}`);
-          observer?.onResearcherComplete?.(id, partialResponse);
+          // As on the success path: emit the stored body, with the digest already split off.
+          observer?.onResearcherComplete?.(id, synthesisService.getReport(researchId, `${round}.${id}`) ?? partialResponse);
           return;
         }
       } catch (salvageErr) {

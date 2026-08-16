@@ -59,6 +59,8 @@ export interface RunResearchersOptions {
 export interface IResearchSynthesisService extends IService {
   storeReport(researchId: string, researcherId: string, report: string): void;
   getAllReports(researchId: string): Map<string, string>;
+  /** Coverage digest per stored report, derived when a researcher emitted none. */
+  getAllDigests(researchId: string): Map<string, string>;
   getReport(researchId: string, id: string): string | undefined;
   getReportsForRound(researchId: string, round: number): Map<string, string>;
   getReportCount(researchId: string): number;

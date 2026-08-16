@@ -56,6 +56,78 @@ describe('ResearchSynthesisService', () => {
     });
   });
 
+  // ─── coverage digests ────────────────────────────────────────────────────────
+
+  /**
+   * The digest is split off at the single point every report enters the system, so that
+   * every downstream consumer — citation normalization, the synthesis corpus, the fallback
+   * synthesis, the knowledge store — keeps seeing a body with no routing metadata in it.
+   */
+  describe('coverage digests', () => {
+    const withDigest = (topic: string) =>
+      `COVERAGE DIGEST\nCovered: ${topic} basics\nGaps: ${topic} pricing\nSources: 2\nEND COVERAGE DIGEST\n\n${topic} findings in prose.`;
+
+    it('strips the digest out of the stored report body', () => {
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      const body = service.getReport('s', '1.1');
+      expect(body).toBe('alpha findings in prose.');
+      expect(body).not.toContain('COVERAGE DIGEST');
+      expect(body).not.toContain('Gaps:');
+    });
+
+    it('returns the emitted digest for that report', () => {
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      expect(service.getAllDigests('s').get('1.1')).toContain('Gaps: alpha pricing');
+    });
+
+    it('derives a digest for a report that carries none', () => {
+      // The router must see an entry for every researcher that ran. An omission reads as
+      // "that researcher produced nothing", which argues for re-doing work already done.
+      service.storeReport('s', '1.1', 'Topic line.\n\nBody prose.');
+      const digest = service.getAllDigests('s').get('1.1');
+      expect(digest).toContain('Topic line.');
+      expect(digest).toMatch(/unknown/i);
+    });
+
+    it('returns one digest per stored report, in report order', () => {
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      service.storeReport('s', '2.1', withDigest('beta'));
+      expect([...service.getAllDigests('s').keys()]).toEqual(['1.1', '2.1']);
+    });
+
+    it('does not create a session entry when read for an unknown id', () => {
+      expect(service.getAllDigests('never-seen').size).toBe(0);
+      expect(service.hasReports('never-seen')).toBe(false);
+    });
+
+    it('drops digests with their reports on clearReports', () => {
+      // A digest map outliving its reports would hand the router coverage for findings the
+      // synthesizer no longer has.
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      service.clearReports('s');
+      expect(service.getAllDigests('s').size).toBe(0);
+    });
+
+    it('drops all digests on a global clear and on reset', () => {
+      service.storeReport('a', '1.1', withDigest('alpha'));
+      service.storeReport('b', '1.1', withDigest('beta'));
+      service.clearReports();
+      expect(service.getAllDigests('a').size).toBe(0);
+      service.storeReport('a', '1.1', withDigest('alpha'));
+      service.reset();
+      expect(service.getAllDigests('a').size).toBe(0);
+    });
+
+    it('keeps the digest out of the fallback synthesis', () => {
+      // The fallback ships raw report bodies to the user verbatim; a leaked digest would
+      // appear in the delivered document.
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      const fallback = service.buildFallbackSynthesis('s', 1);
+      expect(fallback).toContain('alpha findings in prose.');
+      expect(fallback).not.toContain('COVERAGE DIGEST');
+    });
+  });
+
   // ─── getAllReports ───────────────────────────────────────────────────────────
 
   describe('getAllReports', () => {

@@ -11,6 +11,7 @@
 
 import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks, rewriteCitationMarkers, type GlobalCitation } from '../utils/citation-utils.ts';
+import { splitCoverageDigest, deriveCoverageDigest } from '../utils/coverage-digest.ts';
 import { lastCitedLinksHeaderIndex, lastCitedLinksHeader } from '../utils/text-utils.ts';
 import { getScrapedLinks, isTranscribedLink, normalizeUrl } from '../utils/shared-links.ts';
 import { stripTrailingLlmPunctuation } from '../utils/url-utils.ts';
@@ -77,6 +78,12 @@ export class ResearchSynthesisService implements IService {
 
   // Map of sessionId -> Map<reportId, reportContent>
   private sessions = new Map<string, Map<string, string>>();
+  // Map of sessionId -> Map<reportId, coverageDigest>, split off the report at store time.
+  // Kept parallel to `sessions` rather than folded into it so every existing consumer of a
+  // report keeps receiving a plain string body. Lifecycle is mirrored everywhere `sessions`
+  // is mutated (store, LRU evict, clear, dispose) — a digest map that outlives its reports
+  // would hand the router coverage for findings the synthesizer no longer has.
+  private digests = new Map<string, Map<string, string>>();
   // Cap to prevent unbounded growth from orphaned sessions during long-lived Pi
   // sessions. Generous because each session map is small and the normal path clears
   // reports via cleanupResearchServices on run completion — this is only a backstop
@@ -103,6 +110,7 @@ export class ResearchSynthesisService implements IService {
       if (oldestKey !== undefined) {
         logger.warn(`[ResearchSynthesisService] Session limit (${ResearchSynthesisService.MAX_SESSIONS}) reached, evicting least-recently-used: ${oldestKey}`);
         this.sessions.delete(oldestKey);
+        this.digests.delete(oldestKey);
       }
     }
     reports = new Map<string, string>();
@@ -136,7 +144,38 @@ export class ResearchSynthesisService implements IService {
    * @param report - The researcher's report content
    */
   storeReport(sessionId: string, id: string, report: string): void {
-    this.getSessionReports(sessionId).set(id, report);
+    // Split the coverage digest off the head of the report here, at the single point every
+    // report enters the system. Downstream consumers — citation normalization, the
+    // synthesis corpus, the fallback synthesis, the knowledge store — then see a body with
+    // no routing metadata in it, unchanged from before this protocol existed.
+    const { digest, body } = splitCoverageDigest(report);
+    this.getSessionReports(sessionId).set(id, body);
+    if (digest) {
+      let sessionDigests = this.digests.get(sessionId);
+      if (!sessionDigests) {
+        sessionDigests = new Map<string, string>();
+        this.digests.set(sessionId, sessionDigests);
+      }
+      sessionDigests.set(id, digest);
+    }
+  }
+
+  /**
+   * Coverage digests for every stored report, in report order.
+   *
+   * A report whose researcher emitted no digest gets one derived from its body, so the
+   * router sees an entry for every researcher that ran. The alternative — omitting it —
+   * reads to the router as "that researcher produced nothing", which is both wrong and
+   * the more dangerous error: it argues for re-delegating work already done.
+   */
+  getAllDigests(sessionId: string): Map<string, string> {
+    const reports = this.peekSessionReports(sessionId);
+    const stored = this.digests.get(sessionId);
+    const out = new Map<string, string>();
+    for (const [id, body] of reports.entries()) {
+      out.set(id, stored?.get(id) ?? deriveCoverageDigest(body));
+    }
+    return out;
   }
 
   /**
@@ -187,8 +226,10 @@ export class ResearchSynthesisService implements IService {
   clearReports(sessionId?: string): void {
     if (sessionId) {
       this.sessions.delete(sessionId);
+      this.digests.delete(sessionId);
     } else {
       this.sessions.clear();
+      this.digests.clear();
     }
   }
 
@@ -442,6 +483,7 @@ export class ResearchSynthesisService implements IService {
    */
   reset(): void {
     this.sessions.clear();
+    this.digests.clear();
   }
 
   async initialize(): Promise<void> {
@@ -461,6 +503,7 @@ export class ResearchSynthesisService implements IService {
     this.lifecycle = ServiceLifecycle.DISPOSING;
     logger.debug('[ResearchSynthesisService] Disposing...');
     this.sessions.clear();
+    this.digests.clear();
     this.lifecycle = ServiceLifecycle.DISPOSED;
     logger.debug('[ResearchSynthesisService] Disposed');
   }

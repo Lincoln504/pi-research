@@ -248,28 +248,42 @@ serve that repetition from a prompt cache at a fraction of the input price — b
 for an **exact prefix** of the request, and only if nothing that varies sits in front
 of it.
 
-What pi-research does about it. The coordinator, evaluator and researcher prompts are
-laid out stable-part-first: the evaluator's system prompt interpolates only values that
-are fixed for the whole run (complexity, team size, query budget, disabled tools), and
-everything that changes between rounds — root query, round number, agenda, executed
-queries, steering, round-phase guidance — is appended after the findings as a `RUN
-CONTEXT` block. That is what makes round 2 and round 3 re-read round 1's findings from
-cache instead of paying for them again. Two unit tests hold the layout in place; if you
-edit `src/prompts/system-lead-evaluator.md`, keep run-varying text out of it.
+What pi-research does about it. The research lead is split into two roles so that the
+repetition is removed rather than merely discounted. The **router** decides each round
+whether to continue, and reads only a short coverage digest per researcher — a few
+thousand tokens that stay flat as rounds accumulate. The **synthesizer** runs once, at
+the end, and is the only call that reads the reports in full. Before the split, one call
+did both jobs and re-sent the whole corpus every round, so its input grew with the square
+of the round count.
 
-What your provider does about it depends on which API pi talks to, and pi decides that
-from the provider's `api` field in `~/.pi/agent/models.json`:
+On top of that, both lead prompts are laid out stable-part-first: they interpolate only
+values fixed for the whole run (complexity, team size, query budget, disabled tools), and
+everything that changes between rounds — root query, round number, agenda, executed
+queries, steering, round-phase guidance — is appended afterwards as a `RUN CONTEXT`
+block. Unit tests hold the layout in place; if you edit
+`src/prompts/system-lead-router.md` or `src/prompts/system-lead-synthesizer.md`, keep
+run-varying text out of them.
+
+What your provider does about it depends on which API pi talks to (the provider's `api`
+field in `~/.pi/agent/models.json`) and, on OpenAI-compatible endpoints, on one `compat`
+key:
 
 | Provider API | Behaviour |
 |--------------|-----------|
 | `anthropic-messages` | pi inserts `cache_control` breakpoints automatically — on the system prompt, the last tool definition, and the last user/assistant/tool-result block. Nothing to configure. |
-| `openai-completions` / `openai-responses` | pi sends **no** markers and relies on the provider caching repeated prefixes by itself. That is correct for OpenAI, DeepSeek, Gemini and GLM, which all cache implicitly. |
+| `openai-completions` | pi inserts the **same** Anthropic-style breakpoints into the OpenAI-shaped payload whenever `compat.cacheControlFormat` is `"anthropic"`. Auto-detection sets that key for exactly one case — OpenRouter routing to an `anthropic/*` model — so by default no markers are sent and the provider's own implicit prefix caching is relied on. That default is correct for OpenAI, DeepSeek, Gemini and GLM, which all cache implicitly. |
+| `openai-responses` | No markers at any setting; implicit caching only. |
+
+Note that the marker behaviour is gated on `cacheControlFormat`, **not** on the `api`
+field — setting the key makes an `openai-completions` provider emit explicit breakpoints
+exactly like an `anthropic-messages` one. That matters when reading the counters below:
+on a provider you have configured this way, a zero cache read is not evidence that
+markers are missing.
 
 The gap is providers that need explicit markers but are reached over an OpenAI-compatible
-endpoint. pi auto-detects only one such case — OpenRouter routing to an `anthropic/*`
-model. Anything else in that category (Qwen through OpenRouter, or any gateway fronting
-Claude) caches **nothing at all**, silently and with no error. Fix it per provider with
-a `compat` block:
+endpoint and are not the one auto-detected case. Anything in that category (Qwen through
+OpenRouter, or any gateway fronting Claude) caches **nothing at all**, silently and with
+no error. Fix it per provider with a `compat` block:
 
 ```json
 {
@@ -298,7 +312,8 @@ retention where the provider supports it. It raises the cache-write multiplier f
 
 Verifying it works. Set `PI_RESEARCH_DEBUG=true` and read the run log: every LLM call
 records `llm_cache_read_tokens_total` and `llm_cache_write_tokens_total` alongside
-`llm_tokens_total`, labelled by component (`coordinator` / `evaluator` / `researcher`).
+`llm_tokens_total`, labelled by component (`coordinator` / `router` / `synthesizer` /
+`researcher`).
 Cache reads that stay at zero on a multi-turn researcher mean the prefix is not being
 matched — usually a provider with a minimum cacheable prefix (commonly 1024–4096 tokens)
 that short prompts never reach, or an explicit-marker provider missing the `compat` block

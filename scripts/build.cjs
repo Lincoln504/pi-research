@@ -87,8 +87,15 @@ function copyThreadWorker() {
 // 'prompts')), so the templates must sit next to the bundle.
 function copyPrompts() {
   fs.mkdirSync(p('dist', 'prompts'), { recursive: true });
-  for (const f of fs.readdirSync(p('src', 'prompts'))) {
+  const sources = fs.readdirSync(p('src', 'prompts'));
+  for (const f of sources) {
     fs.copyFileSync(p('src', 'prompts', f), p('dist', 'prompts', f));
+  }
+  // Prune prompts that no longer exist in src. Copying alone leaves a deleted or renamed
+  // prompt behind in an incremental dist forever; verify-package rejects the orphan at
+  // publish time, which surfaces as a confusing failure long after the rename.
+  for (const f of fs.readdirSync(p('dist', 'prompts'))) {
+    if (!sources.includes(f)) fs.rmSync(p('dist', 'prompts', f));
   }
 }
 

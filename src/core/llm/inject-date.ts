@@ -35,7 +35,10 @@ function getCurrentDateString(): string {
  * training-cutoff defaults). The full date follows for precision. Applies to
  * coordinator, researcher, and evaluator across all modes.
  */
-export function injectCurrentDate(prompt: string, _agentType: 'coordinator' | 'researcher' | 'evaluator'): string {
+export function injectCurrentDate(
+  prompt: string,
+  _agentType: 'coordinator' | 'researcher' | 'router' | 'synthesizer',
+): string {
   const monthYear = getCurrentMonthYearString();
   const fullDate = getCurrentDateString();
   // Derive the stale-year examples from the current year so the guidance stays correct in any

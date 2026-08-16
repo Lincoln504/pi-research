@@ -79,7 +79,7 @@ function recordCacheTokens(parsed: Partial<TokenUsage>, labels: Record<string, s
  *  depend on an upper layer; the full ResearchObserver satisfies it. */
 export interface TokenSink {
   onTokensConsumed?: (tokens: number, cost: number) => void;
-  /** Phase-scoped sinks, fed from the `component` label ('coordinator'/'evaluator');
+  /** Phase-scoped sinks, fed from the `component` label ('coordinator', 'router'/'synthesizer');
    *  they drive the TUI coord/eval cost rows and the SDK planning_tokens /
    *  evaluation_tokens events. */
   onPlanningTokens?: (tokens: number, cost: number) => void;
@@ -87,7 +87,7 @@ export interface TokenSink {
 }
 
 export interface RecordUsageOptions {
-  /** Metrics `component` label (e.g. 'coordinator', 'evaluator', 'researcher'). */
+  /** Metrics `component` label (e.g. 'coordinator', 'router', 'synthesizer', 'researcher'). */
   component: string;
   /** Optional complexity label, stringified for the metric labels. */
   complexity?: number | string;
@@ -116,14 +116,17 @@ export function recordLlmUsage(
     recordCacheTokens(parsed, labels);
     opts.observer?.onTokensConsumed?.(tokens, cost);
     // Phase-scoped events: coordinator/evaluator call sites label their usage
-    // 'coordinator'/'evaluator' (see planning-service.ts); route those to the
+    // 'coordinator'/'router'/'synthesizer' (see planning-service.ts); route those to the
     // dedicated observer hooks so the TUI coord/eval cost rows and the SDK
     // planning_tokens/evaluation_tokens events fire. Before this mapping the hooks
     // had zero emit sites (regression in c90d7f37) — coordinator/evaluator usage
     // reached only onTokensConsumed, which the TUI observer does not implement.
     if (opts.component === 'coordinator') {
       opts.observer?.onPlanningTokens?.(tokens, cost);
-    } else if (opts.component === 'evaluator') {
+    } else if (opts.component === 'router' || opts.component === 'synthesizer') {
+      // Both halves of the research lead feed the one evaluation row. They used to be a
+      // single 'evaluator' component; splitting the roles must not split the cost the
+      // user sees, so they are summed here rather than given separate sinks.
       opts.observer?.onEvaluationTokens?.(tokens, cost);
     }
   }

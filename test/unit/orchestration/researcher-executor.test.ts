@@ -36,7 +36,7 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
 }));
 
 vi.mock('../../../src/core/llm/prompts.ts', () => ({
-  loadPrompt: vi.fn(() => 'researcher prompt {{goal}} {{store_section}} {{evidence_section}} {{coordination_section}} {{extra_tool_guidelines}}'),
+  loadPrompt: vi.fn(() => 'researcher prompt {{goal}} {{store_section}} {{evidence_section}} {{coordination_section}} {{extra_tool_guidelines}} {{digest_section}}'),
 }));
 
 vi.mock('../../../src/core/llm/inject-date.ts', () => ({
@@ -65,13 +65,14 @@ vi.mock('../../../src/web-research/search.ts', () => ({
 }));
 
 // Hoisted session mock references
-const { mockPrompt, mockAbort, mockSubscribe, mockRegister, mockUnregister, mockStoreReport } = vi.hoisted(() => ({
+const { mockPrompt, mockAbort, mockSubscribe, mockRegister, mockUnregister, mockStoreReport, mockGetReport } = vi.hoisted(() => ({
   mockPrompt: vi.fn().mockResolvedValue(undefined),
   mockAbort: vi.fn().mockResolvedValue(undefined),
   mockSubscribe: vi.fn(() => vi.fn()), // returns unsubscribe fn
   mockRegister: vi.fn(),
   mockUnregister: vi.fn(),
   mockStoreReport: vi.fn(),
+  mockGetReport: vi.fn(),
 }));
 
 vi.mock('../../../src/orchestration/researcher.ts', () => ({
@@ -159,6 +160,10 @@ describe('runResearcher', () => {
     mockRegister.mockClear();
     mockUnregister.mockClear();
     mockStoreReport.mockClear();
+    // Mirror the real service: reading a report back returns the STORED body, which is the
+    // report with its coverage digest already split off the head.
+    mockGetReport.mockReset();
+    mockGetReport.mockImplementation(() => mockStoreReport.mock.calls.at(-1)?.[2]);
     mockSearch.mockReset().mockResolvedValue([]);
     STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue(null);
 
@@ -173,6 +178,7 @@ describe('runResearcher', () => {
       if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) {
         return {
           storeReport: mockStoreReport,
+          getReport: mockGetReport,
           appendSteeringGuidance: vi.fn((text) => text),
           ensureCitedLinks: vi.fn((_id, text) => text),
           appendMetadata: vi.fn((_text, _modelId) => _text),
@@ -343,6 +349,26 @@ describe('runResearcher', () => {
     });
 
     it('fires onResearcherComplete with the researcher id and response text on success', async () => {
+      const onResearcherComplete = vi.fn();
+      const config = { id: '2', name: 'R2', goal: 'g', queries: [] };
+      await runResearcher(makeOptions({ config, observer: { onResearcherComplete } as any }));
+      expect(onResearcherComplete).toHaveBeenCalledWith('2', 'mock researcher report content');
+    });
+
+    it('emits the STORED report body, not the raw model text', async () => {
+      // storeReport splits the coverage digest off the head of the report. The SDK's
+      // researcher_complete event must carry the same body the run works from — emitting
+      // the raw text would leak routing metadata into every consumer of that event.
+      mockGetReport.mockReturnValue('body without the digest');
+      const onResearcherComplete = vi.fn();
+      const config = { id: '2', name: 'R2', goal: 'g', queries: [] };
+      await runResearcher(makeOptions({ config, observer: { onResearcherComplete } as any }));
+      expect(onResearcherComplete).toHaveBeenCalledWith('2', 'body without the digest');
+    });
+
+    it('falls back to the raw text when the store has no body for that id', async () => {
+      // Never emit `undefined` to an SDK consumer because a read missed.
+      mockGetReport.mockReturnValue(undefined);
       const onResearcherComplete = vi.fn();
       const config = { id: '2', name: 'R2', goal: 'g', queries: [] };
       await runResearcher(makeOptions({ config, observer: { onResearcherComplete } as any }));
@@ -549,6 +575,19 @@ describe('runResearcher', () => {
       const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
       expect(sessionCall.systemPrompt).toContain('https://hist.example.com');
       expect(sessionCall.systemPrompt).toContain('Found info about XYZ here');
+    });
+
+    it('asks a DEEP researcher for a coverage digest, leaving no placeholder behind', async () => {
+      // The digest is the router's only view of the run. A researcher that is never asked
+      // for one produces a report the router can only read a derived stub of — routing
+      // quality degrades silently, and an unreplaced {{digest_section}} would ship the
+      // literal placeholder into the system prompt.
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      await runResearcher(makeOptions());
+      const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
+      expect(sessionCall.systemPrompt).toContain('COVERAGE DIGEST');
+      expect(sessionCall.systemPrompt).toContain('END COVERAGE DIGEST');
+      expect(sessionCall.systemPrompt).not.toContain('{{digest_section}}');
     });
 
     it('includes initial search result links in the prompt', async () => {
