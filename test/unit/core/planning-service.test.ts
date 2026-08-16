@@ -974,8 +974,8 @@ describe('PlanningService', () => {
       });
 
       it('grows by only the new digest when a round is added', async () => {
-        // The load-bearing claim: routing input is flat in the corpus, so round n costs
-        // what round 1 cost plus one digest — not the sum of every report so far.
+        // The load-bearing claim: round n costs what round n-1 cost plus one DIGEST, not
+        // plus one report — and it never re-sends earlier rounds' reports at all.
         const one = await route(1, round1Reports, new Map([['1.1', D1]]));
         const two = await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
         const growth = two.userMessage.length - one.userMessage.length;
@@ -1069,6 +1069,68 @@ describe('PlanningService', () => {
         expect(stablePrefix).toContain('Round one finding');
         expect(stablePrefix).not.toContain('GLOBAL SOURCE LIST');
         expect(second.userMessage.startsWith(stablePrefix)).toBe(true);
+      });
+    });
+
+    /**
+     * The size claim, measured rather than argued.
+     *
+     * Before the split, the routing call carried exactly what the synthesizer carries now:
+     * every report, the global source list, the run context. So comparing the two messages
+     * over an IDENTICAL corpus is the old-vs-new routing input comparison, with none of the
+     * confounding a live A/B has (two runs scrape different sources and build different
+     * corpora).
+     */
+    describe('routing input size', () => {
+      // ~9,500 tokens per report at 4 chars/token — the figure measured from a real run.
+      const bigReport = (tag: string) =>
+        `${tag} topic line.\n\n${`${tag} finding sentence with detail. `.repeat(1200)}\n\nCITED LINKS\n[1] https://${tag}.example.com — ${tag}`;
+      const bigDigest = (tag: string) =>
+        `Goal: cover ${tag}\nCovered: ${tag} basics; ${tag} internals; ${tag} tradeoffs\nUnsubstantiated: none\nGaps: ${tag} pricing\nSources: 4`;
+
+      const corpus = (n: number) => {
+        const reports = new Map<string, string>();
+        const digests = new Map<string, string>();
+        for (let i = 1; i <= n; i++) {
+          reports.set(`${i}.1`, bigReport(`topic${i}`));
+          digests.set(`${i}.1`, bigDigest(`topic${i}`));
+        }
+        return { reports, digests };
+      };
+
+      // A window large enough that synthesis is always a SINGLE pass, so these two tests
+      // measure corpus size and not the reduce. With the reduce in play the last call
+      // carries partial syntheses rather than the corpus, which is a different quantity.
+      const WIDE_MODEL = { id: 'wide-model', contextWindow: 2_000_000 } as any;
+      const routeWide = (round: number, reports: Map<string, string>, digests: Map<string, string>) =>
+        call({ round, reports, digests, model: WIDE_MODEL });
+      const synthWide = (round: number, reports: Map<string, string>) =>
+        call({ round, reports, mustSynthesize: true, model: WIDE_MODEL });
+
+      it('is a small fraction of what the same corpus costs to synthesize', async () => {
+        const { reports, digests } = corpus(9); // level 2 at the end of its round budget
+        const routed = await routeWide(3, reports, digests);
+        const synthesized = await synthWide(3, reports);
+        expect(routed.userMessage.length).toBeLessThan(synthesized.userMessage.length * 0.1);
+      });
+
+      it('costs a digest per extra researcher, not a report', async () => {
+        // The precise claim. Routing input is NOT flat — it carries one digest per
+        // researcher, so it does grow. What changed is the constant: each additional
+        // researcher adds a digest to the routing call instead of a whole report. Measuring
+        // the MARGINAL bytes per researcher isolates that from the fixed overhead (system
+        // prompt, run context) that dominates a small corpus and distorts a ratio test.
+        // Anything that leaks a report body into the routing message collapses this gap.
+        const small = corpus(3);
+        const large = corpus(15);
+        const routeSmall = (await routeWide(2, small.reports, small.digests)).userMessage.length;
+        const routeLarge = (await routeWide(2, large.reports, large.digests)).userMessage.length;
+        const synthSmall = (await synthWide(3, small.reports)).userMessage.length;
+        const synthLarge = (await synthWide(3, large.reports)).userMessage.length;
+
+        const routeMarginal = (routeLarge - routeSmall) / 12;
+        const synthMarginal = (synthLarge - synthSmall) / 12;
+        expect(routeMarginal).toBeLessThan(synthMarginal / 50);
       });
     });
 

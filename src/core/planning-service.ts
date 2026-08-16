@@ -522,8 +522,9 @@ export class PlanningService implements IPlanningService {
    * This is TWO jobs behind one entry point, selected by `mustSynthesize`:
    *
    * - **Routing** (`mustSynthesize` falsy) — decide whether the run continues. Reads the
-   *   researchers' COVERAGE DIGESTS, not their findings. Its input is a few thousand
-   *   tokens and stays flat as rounds accumulate. It cannot produce the report.
+   *   researchers' COVERAGE DIGESTS, not their findings. It still grows with the number
+   *   of researchers, but by one digest each rather than one report each — measured at
+   *   two orders of magnitude less per researcher. It cannot produce the report.
    * - **Synthesis** (`mustSynthesize` true) — write the report. Reads every report in
    *   full, exactly once, at the end of the run, under a corpus budget.
    *
