@@ -355,6 +355,21 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
 // clearEmbeddingInstance — for testing / restart scenarios
 // ---------------------------------------------------------------------------
 
+/**
+ * Does THIS process currently hold a live embedding server (as opposed to a client
+ * pointing at someone else's, or nothing at all)?
+ *
+ * Asked by the teardown-time state clear, which is pid-scoped and therefore cannot
+ * tell "my leftover registration" from "my server that is still listening". That
+ * clear runs before disposeAllServices, so at that moment our own server usually
+ * IS still up — and deleting its entry makes it an invisible leader, since its
+ * leadership check reads a missing entry as benign and never steps down. Its own
+ * dispose clears the entry properly, keyed on serverId.
+ */
+export function ownsLiveEmbeddingServer(): boolean {
+    return _embeddingInstance !== null && _embeddingInstance instanceof EmbeddingServer;
+}
+
 export async function clearEmbeddingInstance(): Promise<void> {
   if (_embeddingInstance) {
     try {

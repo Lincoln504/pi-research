@@ -65,6 +65,13 @@ export function registerInfrastructureServices(container: ServiceContainer = get
       return new FileLockService({
         lockFilePath: pathConfig.getLockFilePath(),
         processLifecycle,
+        // The shared state lock guards a temp-file write plus fsync plus rename —
+        // sub-second work, unlike the knowledge-store init lock that the default
+        // five-minute ceiling was sized for (an FTS rebuild has no fixed duration).
+        // Inheriting that default here would let SDK teardown, which awaits a state
+        // write, stall for five minutes under sustained contention where it used to
+        // fail in twenty seconds. A ceiling should match what its lock protects.
+        acquireCeilingMs: 30_000,
       });
     },
     {

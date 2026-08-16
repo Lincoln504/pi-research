@@ -26,6 +26,41 @@ import { search } from '../web-research/search.ts';
 import { RESEARCHER_DIGEST_SECTION } from '../utils/coverage-digest.ts';
 
 /**
+ * Failures a retry cannot fix, because the next attempt sends the same request to
+ * the same account and gets the same answer.
+ *
+ * Deliberately narrow. The retry loop is otherwise unclassified and that is mostly
+ * FINE — the log history says so. Across 53 days the loop retried 126 attempts:
+ * "produced no text output" recovered 26/26; a provider rejecting
+ * `reasoning_effort: 'none'` recovered ~18/19, because OpenRouter routes the same
+ * model to different upstream providers per request and only some reject it;
+ * token-limit truncation recovered ~16/17. Classifying any of those as permanent
+ * would break runs that currently succeed.
+ *
+ * Insufficient credits is the one class with no recoveries at all: 30 retried
+ * attempts, every one belonging to an episode that went on to exhaust, 0 of 10
+ * recovered. Those ten cost five runs their entire output — searches already paid
+ * for, 70 results collected and discarded, and a synthesis call billed over an
+ * empty corpus before the run threw. The account balance does not change in the
+ * two seconds between attempts.
+ *
+ * Note what this does NOT cover: a researcher timeout retries and recovers ~88% of
+ * the time, so it stays retriable even though three attempts at a 15-minute budget
+ * cost 45 minutes of wall clock. That cost is real and worth addressing, but by
+ * bounding total retry time rather than by refusing the retry that usually works.
+ */
+export function isUnretriableResearcherError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  // Matched on the provider's wording rather than a bare "402": a status code can
+  // appear inside an unrelated payload (a token count, a URL, a quoted response
+  // body), and this gate ends a researcher's run — it must not fire on a
+  // coincidence. Same reasoning as isTransientSynthesisError's boundary anchoring.
+  return message.includes('requires more credits')
+    || message.includes('insufficient credits')
+    || message.includes('insufficient_quota');
+}
+
+/**
  * Run a single researcher with retries
  */
 export async function runResearcher(options: RunResearcherOptions): Promise<void> {
@@ -513,6 +548,15 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       if (tornDown) {
         logger.debug(`[ResearcherExecutor] Researcher ${id} aborted or container disposing, skipping retries.`);
         break; // Break out of the attempt loop
+      }
+
+      // A failure the account cannot retry its way out of. Spending the remaining
+      // attempts changes nothing except how long the user waits for the same answer,
+      // and it buries the real cause under three duplicate warnings.
+      if (isUnretriableResearcherError(err)) {
+        logger.error(`[ResearcherExecutor] Researcher ${id} failed with an unretriable provider error, not retrying: ${errMsg}`);
+        metrics.increment('researcher_unretriable_total', 1, { mode: 'deep', complexity: String(complexity) });
+        break;
       }
 
       if (attempt < maxAttempts) {

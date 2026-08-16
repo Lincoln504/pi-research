@@ -11,6 +11,7 @@ import { ServiceNames } from './service-interfaces.ts';
 import type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
 import { PlanningService } from './planning-service.ts';
+import { ownsLiveEmbeddingServer } from '../infrastructure/embedding/embedding-factory.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -167,9 +168,24 @@ export async function disposeCoreServices(container: ServiceContainer = getServi
         // process that never touched embeddings; an unconditional clear here would
         // deregister ANOTHER process's live leader, leaving it an invisible leader
         // (its check treats a missing entry as benign) and forcing a duplicate GPU
-        // model election on the next caller.
-        await stateManager.clearEmbeddingServer({ pid: process.pid });
-        logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
+        // model election on the next caller. That unconditional form produced 80
+        // orphan windows totalling 147 hours before it was pid-scoped, the worst
+        // running four days.
+        //
+        // A pid is not enough on its own, though: it cannot separate "my leftover
+        // registration" from "my server, still listening". This clear runs BEFORE
+        // disposeAllServices, so our own server is typically still up — and this is
+        // the one clear in the tree issued on behalf of an instance the caller does
+        // not hold, so it is the only one that can delete a live registration it
+        // owns. When we hold the server, leave it: its own dispose clears the entry
+        // under a serverId compare-and-set, which is the correct owner-scoped
+        // teardown and runs moments later in disposeAllServices.
+        if (ownsLiveEmbeddingServer()) {
+          logger.debug('[ServiceInitialization] Skipping embedding-server state clear — this process owns the live server; its own dispose deregisters it');
+        } else {
+          await stateManager.clearEmbeddingServer({ pid: process.pid });
+          logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
+        }
       }
     } catch {
       // Non-fatal: embedding server state will be cleaned up on next startup via PID check
