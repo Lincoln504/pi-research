@@ -168,7 +168,11 @@ function makeProgressObserver(): HeadlessObserverOptions {
           toStderr(`  • round ${data?.round}\n`);
           break;
         case 'search_start':
-          toStderr(`  • search burst: ${data?.queries?.length ?? 0} query/${(data?.queries?.length ?? 0) === 1 ? '' : 's'}\n`);
+          // "N queries", not "N query/s" — the old `query/${n===1?'':'s'}` form rendered a
+          // COUNT as what reads unmistakably as a RATE ("45 query/s"), so a burst that was
+          // in fact 45 queries looked like 45 per second and then appeared frozen. It also
+          // emitted a bare trailing slash ("1 query/") in the singular.
+          toStderr(`  • search burst: ${data?.queries?.length ?? 0} ${(data?.queries?.length ?? 0) === 1 ? 'query' : 'queries'}\n`);
           break;
         case 'researcher_start':
           toStderr(`  • researcher ${data?.id}: ${data?.name}\n`);
