@@ -75,27 +75,27 @@ export async function executePoolTaskWithDeathBackstop<T>(
  * Only the leader process has an instance of this scheduler.
  */
 /**
- * How long the queue has gone without handing a task to a worker.
+ * How long a task actually RAN, given when it was dispatched and when it was
+ * submitted.
  *
- * A queue that has never dispatched reports 0 rather than an epoch timestamp, so
- * treat that as "forever" — otherwise the subtraction reads as ~57 years of
- * silence by accident and lands on the right answer for the wrong reason.
+ * Duration used to be `now - submittedAt`, which folds queue wait into the work.
+ * That is the number `Search completed ... in Nms` prints and the number
+ * `browser_search_duration_ms` records, so it is what every latency investigation
+ * reads — and during a saturated burst it reported a 51s median against a true
+ * 5.8s execution median. A whole evening went into explaining a slowdown that had
+ * not happened. Moving the deadline off queue wait while leaving the measurement
+ * on it would have preserved exactly that misdiagnosis.
+ *
+ * A task that never reached a worker has no execution time; report its full
+ * elapsed span rather than zero, so a timeout is not silently recorded as instant.
  */
-export function millisSinceDispatch(lastDispatchAt: number, now: number): number {
-    return lastDispatchAt > 0 ? now - lastDispatchAt : Number.POSITIVE_INFINITY;
+export function executionMs(dispatchedAt: number, submittedAt: number, now: number = Date.now()): number {
+    return dispatchedAt > 0 ? now - dispatchedAt : now - submittedAt;
 }
 
-/**
- * Is a pool that could not serve a priority probe within `budgetMs` broken, or
- * merely busy?
- *
- * Busy if it dispatched something inside the same window: every running task
- * carries its own dispatch-armed deadline, so slots keep turning over and the
- * probe's turn is coming. Broken only if nothing has moved at all — which is what
- * a wedge actually looks like, and what the probe exists to catch.
- */
-export function isPoolWedged(millisSinceLastDispatch: number, budgetMs: number): boolean {
-    return millisSinceLastDispatch > budgetMs;
+/** How long a task sat in the queue before a worker took it. Zero if never dispatched. */
+export function queueWaitMs(dispatchedAt: number, submittedAt: number): number {
+    return dispatchedAt > 0 ? dispatchedAt - submittedAt : 0;
 }
 
 export class BrowserTaskScheduler implements IScheduler {
@@ -271,10 +271,19 @@ export class BrowserTaskScheduler implements IScheduler {
         // volume by making work wait, not by killing whatever it could not reach in time.
         // Waiting is now bounded by the caller's signal and the run-level timeouts; a task
         // that does get dispatched always gets its full budget.
+        // `dispatchedAt` is the same instant, kept for MEASUREMENT rather than for the
+        // deadline. Reporting `Date.now() - startTime` as the search's duration charged
+        // queue wait to the work, and that number is what every latency analysis reads:
+        // on the night this was diagnosed it reported a 51s median against a true 5.8s
+        // execution median, and invented an eightfold latency regression that never
+        // happened. Moving the deadline off queue wait without moving the measurement
+        // would have left the misdiagnosis in place while claiming to have fixed it.
         let timeoutId: NodeJS.Timeout | undefined;
+        let dispatchedAt = 0;
         let startDeadline: () => void = () => {};
         const timeoutPromise = new Promise<never>((_, reject) => {
             startDeadline = () => {
+                dispatchedAt = Date.now();
                 timeoutId = setTimeout(() => {
                     reject(new Error(`Search task timed out after ${timeoutMs}ms. query="${query}"`));
                 }, timeoutMs);
@@ -314,7 +323,7 @@ export class BrowserTaskScheduler implements IScheduler {
                 }, queueSignal),
                 timeoutPromise
             ]);
-            logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
+            logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${executionMs(dispatchedAt, startTime)}ms (queued ${queueWaitMs(dispatchedAt, startTime)}ms)`);
         } catch (error) {
             // A pool-shutdown/destroy error means the run is being torn down (quit/SIGTERM
             // mid-search-burst): the task never ran because dispose() destroyed the pool.
@@ -350,7 +359,8 @@ export class BrowserTaskScheduler implements IScheduler {
             settled.abort();
         }
 
-        const duration = Date.now() - startTime;
+        const duration = executionMs(dispatchedAt, startTime);
+        metrics.observe('browser_search_queue_wait_ms', queueWaitMs(dispatchedAt, startTime));
         // In-band worker error checked FIRST: a task the worker reports as failed
         // must count only as an error. Recording success unconditionally before
         // this check double-counted every worker-reported failure as
@@ -383,10 +393,13 @@ export class BrowserTaskScheduler implements IScheduler {
         const timeoutMs = cfg.SCRAPE_TIMEOUT_MS + (isMocking ? 5000 : cfg.BROWSER_TASK_TIMEOUT_MS);
 
         // Armed on dispatch, not on enqueue — see runSearch for why.
+        // See runSearch: dispatch time is tracked for measurement, not for the deadline.
         let timeoutId: NodeJS.Timeout | undefined;
+        let dispatchedAt = 0;
         let startDeadline: () => void = () => {};
         const timeoutPromise = new Promise<never>((_, reject) => {
             startDeadline = () => {
+                dispatchedAt = Date.now();
                 timeoutId = setTimeout(() => {
                     reject(new Error(`Scrape task timed out after ${timeoutMs}ms. url="${url}"`));
                 }, timeoutMs);
@@ -439,7 +452,8 @@ export class BrowserTaskScheduler implements IScheduler {
             settled.abort();
         }
 
-        const duration = Date.now() - startTime;
+        const duration = executionMs(dispatchedAt, startTime);
+        metrics.observe('browser_scrape_queue_wait_ms', queueWaitMs(dispatchedAt, startTime));
         // In-band error first — success-side recording must not precede it (see runSearch).
         if (result.error) {
             metrics.increment('browser_scrape_requests_total', 1, { status: 'error' });
@@ -456,43 +470,65 @@ export class BrowserTaskScheduler implements IScheduler {
         return result;
     }
 
-    async runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
+    async runHealthCheck(config?: Config, signal?: AbortSignal, budgetOverrideMs?: number): Promise<{ success: boolean }> {
         if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-        const timeoutMs = (45000 + 60000) / (isMocking ? 4 : 1);
+        // The one task budget that is not config-derived. `budgetOverrideMs` exists so
+        // the saturated-vs-wedged verdict below is reachable from a test: at 105s it is
+        // not, which is exactly how a previous version of that verdict shipped
+        // unreachable and stayed that way.
+        const timeoutMs = budgetOverrideMs ?? (45000 + 60000) / (isMocking ? 4 : 1);
 
         // A probe that never got a worker used to fail as "timed out (including queue
         // wait)", and the registry reported BrowserRuntime CRITICALLY UNHEALTHY —
         // during a burst in which the pool was healthily executing the run's own
-        // searches. Twice on the night this was measured. Saturated and wedged look
-        // identical from out here, so the verdict has to consult the queue: if it
-        // dispatched something inside the window, the pool is busy, not broken, and
-        // the honest answer is healthy. Only a queue that has stopped dispatching
-        // altogether is a fault.
+        // searches. Twice on the night this was measured.
+        //
+        // The verdict rests on whether the SLOTS ARE OCCUPIED, and it has to. An
+        // earlier version of this asked the queue when it last dispatched anything,
+        // which reads sensibly and is unreachable: healthcheck tasks have strict queue
+        // priority, so if any slot frees while this probe waits, the queue dispatches
+        // THIS probe — clearing the timer below. The wait timer can therefore only fire
+        // in a window where nothing was dispatched at all, making "dispatched recently"
+        // false by construction and every saturated pool a wedged one. The bug survived
+        // its own fix because no test drove a saturated pool through runHealthCheck.
+        //
+        // Occupancy has no such circularity: full slots mean workers are executing
+        // tasks, each bounded by its own dispatch-armed deadline, so the probe's turn
+        // is coming. Idle slots and an undispatched priority probe mean the queue
+        // itself has stopped, which is the fault this exists to catch.
         //
         // Once dispatched, the deadline measures execution alone (armed below, like
         // runSearch/runScrape), so a slow probe still fails on its own merits.
         let timeoutId: NodeJS.Timeout | undefined;
         let dispatched = false;
+        let hcDispatchedAt = 0;
         let startDeadline: () => void = () => {};
+        // Captured BEFORE the timer can run. Resolving the queue inside the callback
+        // would call getPriorityQueue() on a scheduler that may have shut down in the
+        // meantime, which builds a FRESH queue on the dead instance — undoing the
+        // isShutdown latch that exists to reject enqueues racing teardown, and
+        // reporting a routine shutdown as a wedge because a new queue has dispatched
+        // nothing.
+        const healthQueue = this.getPriorityQueue(config);
         const timeoutPromise = new Promise<{ success: boolean } | never>((resolve, reject) => {
             const onWaitExpired = () => {
                 if (dispatched) return;
-                const sinceDispatch = millisSinceDispatch(this.getPriorityQueue(config).getLastDispatchAt(), Date.now());
-                if (!isPoolWedged(sinceDispatch, timeoutMs)) {
-                    logger.debug(`[BrowserTaskScheduler] Healthcheck could not claim a worker within ${timeoutMs}ms, but the queue dispatched ${sinceDispatch}ms ago — pool saturated, not wedged.`);
+                if (healthQueue.isSaturated()) {
+                    logger.debug(`[BrowserTaskScheduler] Healthcheck could not claim a worker within ${timeoutMs}ms; all ${healthQueue.getConcurrency()} slots are executing tasks — pool saturated, not wedged.`);
                     resolve({ success: true });
                     return;
                 }
-                reject(new Error(`Health check could not reach a worker within ${timeoutMs}ms and the queue has dispatched nothing for ${sinceDispatch}ms — the pool is wedged.`));
+                reject(new Error(`Health check could not reach a worker within ${timeoutMs}ms while only ${healthQueue.getActiveCount()} of ${healthQueue.getConcurrency()} slots were busy — the queue is not dispatching.`));
             };
             timeoutId = setTimeout(onWaitExpired, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
             startDeadline = () => {
                 dispatched = true;
+                hcDispatchedAt = Date.now();
                 clearTimeout(timeoutId);
                 timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms.`)), timeoutMs);
                 if (timeoutId.unref) timeoutId.unref();
@@ -505,9 +541,10 @@ export class BrowserTaskScheduler implements IScheduler {
         const settled = new AbortController();
         const queueSignal = signal ? AbortSignal.any([signal, settled.signal]) : settled.signal;
         try {
-            const queue = this.getPriorityQueue(config);
+            // Same instance the wait-phase verdict reads, so the two cannot disagree
+            // about which queue this probe is waiting on.
             result = await Promise.race([
-                queue.enqueue('healthcheck', async () => {
+                healthQueue.enqueue('healthcheck', async () => {
                     startDeadline();
                     return await executePoolTaskWithDeathBackstop(() => {
                         const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
@@ -543,7 +580,7 @@ export class BrowserTaskScheduler implements IScheduler {
             settled.abort();
         }
 
-        const duration = Date.now() - startTime;
+        const duration = executionMs(hcDispatchedAt, startTime);
         // In-band error first — success-side recording must not precede it (see
         // runSearch). This path additionally owns the browser_pool_health gauge:
         // setting it to 1 before the check flickered the pool healthy on every

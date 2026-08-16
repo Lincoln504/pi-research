@@ -1,16 +1,26 @@
 /**
- * A busy pool is not a broken pool.
+ * A busy pool is not a broken pool — driven through the real runHealthCheck.
  *
- * The healthcheck probe's deadline used to include queue wait, so during a large
- * search burst it expired without ever reaching a worker and the registry reported
- * "critical component unhealthy mid-run: BrowserRuntime" — while the pool was
- * healthily executing that very burst. It happened twice on the night this was
- * measured, at 05:41:58 and 05:53:08, bracketing the saturated rounds.
+ * The probe's deadline used to include queue wait, so during a large search burst it
+ * expired without ever reaching a worker and the registry reported
+ * "critical component unhealthy mid-run: BrowserRuntime" while the pool was
+ * healthily executing that very burst. It fired twice on the night this was
+ * measured, bracketing the saturated rounds.
  *
- * Saturated and wedged are indistinguishable from outside the queue: both leave the
- * probe waiting. So the verdict consults the queue itself. A queue still handing
- * tasks to workers is busy, and the honest answer is healthy. A queue that has
- * dispatched nothing for a whole budget is wedged, and that is a real fault.
+ * The first attempt at a fix asked the queue when it had last dispatched anything.
+ * That reads sensibly and is unreachable: healthcheck tasks have strict queue
+ * priority, so if a slot frees while the probe waits, the queue dispatches THIS
+ * probe and cancels the wait timer. The timer can therefore only fire in a window
+ * where nothing dispatched at all — making "dispatched recently" false by
+ * construction and every saturated pool a wedged one. It shipped as a message
+ * change wearing a behaviour change's description, and it survived because the
+ * tests exercised the extracted predicate rather than runHealthCheck itself.
+ *
+ * These tests drive the real method against a real PriorityTaskQueue, with the
+ * budget shortened so the verdict is reachable at all. Occupancy is the signal:
+ * full slots mean workers are executing tasks bounded by their own dispatch-armed
+ * deadlines, so the probe's turn is coming; idle slots with an undispatched
+ * priority probe mean the queue itself has stopped.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -38,16 +48,10 @@ vi.mock('../../../../src/core/service-registry.ts', () => ({
   })),
 }));
 
-import {
-  BrowserTaskScheduler,
-  isPoolWedged,
-  millisSinceDispatch,
-} from '../../../../src/infrastructure/browser/browser-task-scheduler.ts';
+import { BrowserTaskScheduler } from '../../../../src/infrastructure/browser/browser-task-scheduler.ts';
 
-// The healthcheck budget is a fixed 105s, quartered to ~26s under the mock flags
-// the scheduler already reads. Too long to wait on in a unit test, so these tests
-// drive the queue directly and assert on the verdict the scheduler reaches.
 const CFG = { WORKER_THREADS: 1, WORKER_CONCURRENCY: 1 } as any;
+const BUDGET = 150; // ms — the probe's whole budget, so the verdict is reachable
 
 function makeScheduler(): BrowserTaskScheduler {
   const stateManager = { getBrowserServer: vi.fn(async () => null) } as any;
@@ -60,65 +64,85 @@ describe('healthcheck distinguishes a saturated pool from a wedged one', () => {
     poolState.workMs = 0;
   });
 
-  it('the queue records when it last handed a task to a worker', async () => {
-    // This is the signal the verdict rests on; without it saturation and a wedge
-    // are the same observation.
+  it('answers healthy when every slot is busy and the probe cannot get one', async () => {
+    // The exact production shape: the pool is full of the run's own work, which
+    // outlasts the probe's budget. The probe never reaches a worker.
     const scheduler = makeScheduler();
     const queue = (scheduler as any).getPriorityQueue(CFG);
 
-    expect(queue.getLastDispatchAt()).toBe(0);
-
-    const before = Date.now();
-    await queue.enqueue('search', async () => 'done');
-
-    expect(queue.getLastDispatchAt()).toBeGreaterThanOrEqual(before);
-  });
-
-  it('a queue that never dispatched leaves the timestamp at zero, so a wedge is detectable', async () => {
-    const scheduler = makeScheduler();
-    const queue = (scheduler as any).getPriorityQueue(CFG);
-
-    // Fill the single slot with work that does not finish, then queue behind it.
     let release!: () => void;
-    const blocked = new Promise<void>(r => { release = r; });
-    const held = queue.enqueue('scrape', async () => { await blocked; return 'held'; });
-    const dispatchedAt = queue.getLastDispatchAt();
+    const held = new Promise<void>(r => { release = r; });
+    const occupying = queue.enqueue('scrape', async () => { await held; return 'held'; });
+    await new Promise(r => setTimeout(r, 10)); // let it take the only slot
 
-    const waiting = queue.enqueue('healthcheck', async () => 'probe');
-    // The probe is queued behind the held task, so no new dispatch has happened.
-    expect(queue.getLastDispatchAt()).toBe(dispatchedAt);
+    const verdict = await scheduler.runHealthCheck(CFG, undefined, BUDGET);
+    expect(verdict).toEqual(expect.objectContaining({ success: true }));
 
     release();
-    await held;
-    await waiting;
-    // Once the slot frees, the probe dispatches and the timestamp advances.
-    expect(queue.getLastDispatchAt()).toBeGreaterThanOrEqual(dispatchedAt);
+    await occupying;
   });
 
-  it('reads a busy queue as healthy and a silent one as wedged', () => {
-    const budget = 105_000;
-
-    // Dispatched within the window: the pool is working, the probe is just in line.
-    expect(isPoolWedged(1_000, budget)).toBe(false);
-    expect(isPoolWedged(budget, budget)).toBe(false);
-
-    // Nothing has moved for longer than a whole budget: that is a wedge.
-    expect(isPoolWedged(budget + 1, budget)).toBe(true);
-    expect(isPoolWedged(Number.POSITIVE_INFINITY, budget)).toBe(true);
-  });
-
-  it('treats a queue that never dispatched as silent forever, not as dispatching in 1970', () => {
-    // getLastDispatchAt() reports 0, never an epoch time. Subtracting it directly
-    // would give ~57 years and reach the right verdict by accident — and the wrong
-    // one the moment the sentinel changes.
-    expect(millisSinceDispatch(0, 1_700_000_000_000)).toBe(Number.POSITIVE_INFINITY);
-    expect(millisSinceDispatch(1_699_999_999_000, 1_700_000_000_000)).toBe(1_000);
-  });
-
-  it('runHealthCheck succeeds normally when a worker is available', async () => {
+  it('answers unhealthy when slots are free and the probe still is not dispatched', async () => {
+    // A queue that has stopped dispatching is the fault this probe exists to catch,
+    // and it must not be excused as business.
     const scheduler = makeScheduler();
-    await expect(scheduler.runHealthCheck(CFG)).resolves.toEqual(
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+    // Stop the queue from dispatching while leaving its slots free — the shape of a
+    // wedge, as opposed to the shape of a busy pool. Capacity cannot be zeroed to
+    // simulate this: getPriorityQueue() recomputes concurrency from config on every
+    // task, so it would be restored before the probe was enqueued.
+    queue.process = () => {};
+
+    await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).rejects.toThrow(
+      /queue is not dispatching/,
+    );
+  });
+
+  it('still fails a probe that reaches a worker and then runs too long', async () => {
+    // Once dispatched the deadline measures execution, so a genuinely slow probe
+    // fails on its own merits rather than being excused by an idle pool.
+    poolState.workMs = 600; // > BUDGET
+    const scheduler = makeScheduler();
+
+    await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).rejects.toThrow(/timed out after/);
+  });
+
+  it('succeeds normally when a worker is available', async () => {
+    const scheduler = makeScheduler();
+    await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).resolves.toEqual(
       expect.objectContaining({ success: true }),
     );
+  });
+
+  it('reports occupancy from the queue, so saturation and a wedge are distinguishable at all', async () => {
+    const scheduler = makeScheduler();
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+
+    expect(queue.isSaturated()).toBe(false);
+    expect(queue.getConcurrency()).toBe(1);
+
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    const occupying = queue.enqueue('scrape', async () => { await held; return 'held'; });
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(queue.getActiveCount()).toBe(1);
+    expect(queue.isSaturated()).toBe(true);
+
+    release();
+    await occupying;
+    expect(queue.isSaturated()).toBe(false);
+  });
+
+  it('does not read a zero-capacity queue as busy', async () => {
+    // `0 >= 0` is true, so without an explicit guard a queue that can never dispatch
+    // anything reports as fully occupied — and a health probe would excuse the one
+    // state it exists to catch.
+    const scheduler = makeScheduler();
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+
+    queue.updateConcurrency(0);
+    expect(queue.getActiveCount()).toBe(0);
+    expect(queue.isSaturated()).toBe(false);
   });
 });

@@ -27,11 +27,6 @@ export class PriorityTaskQueue {
     private maxTotalConcurrency: number;
     private readonly maxQueueDepth: number;
     private isShutdown = false;
-    /** When the queue last handed a task to a worker (epoch ms), or 0 if never.
-     *  A saturated pool and a wedged pool look identical from the outside — both
-     *  leave a healthcheck waiting for a slot — so runHealthCheck reads this to
-     *  tell them apart: a queue still dispatching is busy, not broken. */
-    private lastDispatchAt = 0;
 
     constructor(maxTotalConcurrency: number, maxQueueDepth = 500) {
         this.maxTotalConcurrency = maxTotalConcurrency;
@@ -95,9 +90,31 @@ export class PriorityTaskQueue {
         });
     }
 
-    /** Epoch ms of the last dispatch, or 0 if this queue has never dispatched. */
-    getLastDispatchAt(): number {
-        return this.lastDispatchAt;
+    /** Tasks currently executing on a worker. */
+    getActiveCount(): number {
+        return this.activeCount;
+    }
+
+    /** How many tasks may execute at once. */
+    getConcurrency(): number {
+        return this.maxTotalConcurrency;
+    }
+
+    /**
+     * Is every worker slot occupied?
+     *
+     * The distinction a health probe needs. A probe that cannot claim a slot has
+     * learned nothing on its own — healthcheck tasks have strict queue priority, so
+     * the only reason one waits is that no slot came free, and that is equally true
+     * of a pool doing heavy honest work and a pool that has stopped. What separates
+     * them is whether the slots are occupied by RUNNING tasks (saturated) or sitting
+     * idle while the queue fails to dispatch (broken).
+     */
+    isSaturated(): boolean {
+        // Capacity zero is not saturation — it is a queue that can never dispatch.
+        // Without this guard `0 >= 0` reports a stopped queue as busy, which is the
+        // one verdict a health probe must never reach by accident.
+        return this.maxTotalConcurrency > 0 && this.activeCount >= this.maxTotalConcurrency;
     }
 
     private removeFromQueue(task: QueuedTask<any>): boolean {
@@ -148,7 +165,6 @@ export class PriorityTaskQueue {
         }
 
         this.activeCount++;
-        this.lastDispatchAt = Date.now();
         logger.debug(`[PriorityQueue] Starting task: ${task.type}. Active: ${this.activeCount}/${this.maxTotalConcurrency}`);
 
         // Race the task against caller abort. Without this, an abort while the
@@ -198,8 +214,16 @@ export class PriorityTaskQueue {
      * Update the maximum concurrency limit (e.g. if config changes).
      */
     updateConcurrency(maxTotalConcurrency: number) {
+        // Called on a path that runs per task, and the value almost never changes: this
+        // logged "Concurrency updated to 6" 709 times in one day, always to the value it
+        // already had. Log real changes only — a line that fires constantly and says
+        // nothing is what a reader learns to skip past, including on the day it matters.
+        // process() still runs unconditionally: it is idempotent, and a raise that
+        // arrived while the queue was full must be free to dispatch immediately.
+        if (maxTotalConcurrency !== this.maxTotalConcurrency) {
+            logger.debug(`[PriorityQueue] Concurrency changed ${this.maxTotalConcurrency} -> ${maxTotalConcurrency}`);
+        }
         this.maxTotalConcurrency = maxTotalConcurrency;
-        logger.debug(`[PriorityQueue] Concurrency updated to ${maxTotalConcurrency}`);
         this.process();
     }
 
