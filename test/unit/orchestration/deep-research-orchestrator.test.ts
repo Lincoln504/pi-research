@@ -282,6 +282,97 @@ describe('DeepResearchOrchestrator', () => {
       expect(routingCall?.digests).toBe(digests);
     });
 
+    it('runs another round of researchers when the ROUTER delegates', async () => {
+      // The evaluator's ability to ask for MORE research instead of finishing is the
+      // decision this whole split has to preserve. The router reads digests rather than
+      // findings, but its delegate contract is unchanged: the researchers it names must
+      // actually be launched, not just recorded.
+      // A DISTINCT prior agenda must exist, or "the router's researchers were silently
+      // swapped for the previous round's" is indistinguishable from correct behaviour and
+      // the assertions below pass vacuously.
+      mockPlanningService.getCurrentPlan.mockReturnValue({
+        action: 'delegate',
+        researchers: [{ id: '1.1', name: 'Stale Agenda', goal: 'the previous round', queries: ['stale q'] }],
+        allQueries: ['stale q'],
+      });
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) =>
+        opts.mustSynthesize
+          ? { action: 'synthesize', content: 'Final synthesis' }
+          : {
+              action: 'delegate',
+              researchers: [{ id: '2.1', name: 'Gap Filler', goal: 'cover the pricing gap', queries: ['pricing q'] }],
+              allQueries: ['pricing q'],
+            },
+      );
+
+      const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 });
+      await orchestrator.run();
+
+      // Round 1 launches the coordinator's plan; a later launch must carry the ROUTER's.
+      const launchedPlans = mockOrchestrationService.runResearchers.mock.calls.map((c: any[]) => c[0].plan);
+      expect(launchedPlans.length).toBeGreaterThan(1);
+      const routerPlan = launchedPlans.find((p: any) => p.researchers?.[0]?.name === 'Gap Filler');
+      expect(routerPlan).toBeDefined();
+      expect(routerPlan.researchers[0].goal).toBe('cover the pricing gap');
+      // The prior agenda must not have been substituted for it.
+      expect(launchedPlans.some((p: any) => p.researchers?.[0]?.name === 'Stale Agenda')).toBe(false);
+      // And its queries reach the search burst that feeds them. Asserted on the recorded
+      // first argument rather than via toHaveBeenCalledWith: the call passes an optional
+      // AbortSignal that is undefined here, which expect.anything() does not match.
+      const burstQueries = mockOrchestrationService.runSearchBurst.mock.calls.map((c: any[]) => c[0]);
+      expect(burstQueries.some((q: string[]) => q.includes('pricing q'))).toBe(true);
+    });
+
+    it('keeps delegating across rounds until the budget runs out', async () => {
+      // A router that never chooses to finish must be allowed to keep asking for research
+      // right up to the round cap — the cap, not the router, is what ends the run.
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) =>
+        opts.mustSynthesize
+          ? { action: 'synthesize', content: 'Final synthesis' }
+          : { action: 'delegate', researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }], allQueries: ['q'] },
+      );
+
+      const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 3 });
+      const result = await orchestrator.run();
+
+      expect(result).toBe('Final synthesis');
+      const routingCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls
+        .map(c => c[0] as any).filter(o => !o.mustSynthesize);
+      expect(routingCalls.length).toBeGreaterThan(0);
+      // Exactly one synthesis, at the end — delegating never triggers an early one.
+      expect(vi.mocked(mockPlanningService.updatePlanForRound).mock.calls
+        .map(c => c[0] as any).filter(o => o.mustSynthesize).length).toBe(1);
+    });
+
+    it('routes at depth 1 when steering extends the round budget', async () => {
+      // Depth 1's BASE budget is 2 rounds, and the orchestrator skips the evaluator at the
+      // cap — so without steering the router never runs and a depth-1 run goes straight
+      // from researchers to synthesis. Steering breaks that: queued messages raise
+      // maxRounds, round 2 stops being the cap, and the router runs for real. It is also
+      // the depth-1 case with the largest corpus, so it is exactly where routing on digests
+      // instead of findings matters.
+      const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
+      vi.mocked(consumeQueuedMessages).mockReturnValue([
+        { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+      ]);
+      const digests = new Map([['1.1', 'Covered: alpha\nGaps: none\nSources: 3']]);
+      mockSynthesisService.getAllDigests.mockReturnValue(digests);
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) =>
+        opts.mustSynthesize
+          ? { action: 'synthesize', content: 'Final synthesis' }
+          : { action: 'delegate', researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }], allQueries: ['q'] },
+      );
+
+      const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 });
+      await orchestrator.run();
+
+      const routingCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls
+        .map(c => c[0] as any)
+        .filter(o => !o.mustSynthesize);
+      expect(routingCalls.length).toBeGreaterThan(0);
+      for (const call of routingCalls) expect(call.digests).toBe(digests);
+    });
+
     it('emits exactly one synthesis decision when the router finishes early', async () => {
       // The router's decision already fired onEvaluationDecision inside the loop. Firing
       // again for the terminal synthesis double-counts it for the TUI progress bar.

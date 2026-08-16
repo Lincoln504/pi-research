@@ -717,6 +717,31 @@ describe('PlanningService', () => {
       expect(plan.content).toBe(longFallbackText);
     });
 
+    it('returns the ROUTER\'s own researchers, not the prior agenda', async () => {
+      // The evaluator's ability to ask for MORE research is the decision the split must
+      // preserve, and "asked for more" means the researchers IT named. Silently reusing the
+      // previous round's agenda would look like a working delegation while re-running work
+      // that is already done — so the assertion needs a DISTINCT prior plan present.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(JSON.stringify({
+        action: 'delegate',
+        researchers: [{ id: '2.1', name: 'Gap Filler', goal: 'cover the pricing gap', queries: ['pricing q'] }],
+        allQueries: ['pricing q'],
+      })));
+      const plan = await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        round: 2,
+        previousPlan: {
+          action: 'delegate',
+          researchers: [{ id: '1.1', name: 'Stale Agenda', goal: 'the previous round', queries: ['stale q'] }],
+        },
+      } as any);
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers).toHaveLength(1);
+      expect(plan.researchers![0]!.name).toBe('Gap Filler');
+      expect(plan.researchers![0]!.goal).toBe('cover the pricing gap');
+      expect(plan.researchers![0]!.queries).toContain('pricing q');
+    });
+
     it('never salvages ROUTER text as report content, however long it is', async () => {
       // The router decides from coverage digests and has never seen a finding, so any
       // prose it emits is ungrounded. Salvaging it (which the single-call evaluator used

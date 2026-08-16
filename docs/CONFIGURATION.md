@@ -257,6 +257,12 @@ the whole corpus every round, so its input grew with the square of the round cou
 synthesizer's corpus is also budgeted against the model's context window: over budget, the
 reports are reduced in partial passes and merged rather than truncated or rejected.
 
+How often the router runs depends on the round budget. Depth 2 and 3 route on every round
+but the last. Depth 1's base budget is two rounds and the last one is skipped, so a plain
+depth-1 run never routes — but steering raises the budget (up to two extra rounds), and a
+steered depth-1 run does route. That is also the depth-1 case carrying the most findings,
+so it is where routing on digests rather than on the full corpus matters most.
+
 On top of that, both lead prompts are laid out stable-part-first: they interpolate only
 values fixed for the whole run (complexity, team size, query budget, disabled tools), and
 everything that changes between rounds — root query, round number, agenda, executed
