@@ -70,9 +70,19 @@ export interface ScrapeResult {
 /**
  * Base scheduler interface
  */
+/**
+ * Called when a task's EXECUTION begins — i.e. the queue has handed it to a
+ * worker. Callers that keep their own guard over a scheduler call arm it here
+ * rather than at call time, so queue wait never counts against the work's
+ * budget. An implementation that cannot observe dispatch (BrowserClient, which
+ * only sees the leader's final reply) simply never calls it, and the caller's
+ * guard stays disarmed — that implementation bounds the call itself.
+ */
+export type TaskDispatchListener = () => void;
+
 export interface IScheduler {
-  runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]>;
-  runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult>;
+  runSearch(query: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<SearchResult[]>;
+  runScrape(url: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<ScrapeResult>;
   runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }>;
   shutdown(): Promise<void>;
   resetIdleTimerOnActivity?(): void;

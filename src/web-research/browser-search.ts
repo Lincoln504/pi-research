@@ -80,19 +80,20 @@ export async function performSearch(
     // Hard cap per query so a single Cloudflare block or hung browser worker
     // cannot stall the entire Promise.all burst.
     //
-    // The budget is the worker's nav budget (SEARCH_TIMEOUT_MS) PLUS the
-    // queue-wait/overhead margin (BROWSER_TASK_TIMEOUT_MS), mirroring the
-    // scheduler's own task-timeout ceiling in BrowserTaskScheduler.runSearch
-    // (= SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS). This clock starts at
-    // ENQUEUE (before runWorkerSearch queues onto the shared browser pool), so
-    // a budget of only SEARCH_TIMEOUT_MS would let a query that sat in the
-    // saturated worker queue burn its ENTIRE nav budget waiting for a slot and
-    // abort with zero actual search work — exactly the "Query timed out after
-    // 45000ms (likely blocked or slow startup)" cascade observed under
-    // concurrent load. Including the margin lets a queued query still use its
-    // full nav budget once a worker picks it up, and keeps this layer's hard
-    // cap coherent with the scheduler's so it never preempts the worker's own
-    // (post-dequeue) deadline.
+    // The budget mirrors the scheduler's own task ceiling in
+    // BrowserTaskScheduler.runSearch (= SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS)
+    // so this layer never preempts the worker's deadline with a shorter one.
+    //
+    // Both clocks now start at DISPATCH (see startQueryDeadline below), which is
+    // what makes mirroring the value correct. While this one started at enqueue,
+    // equal values meant the two raced and whichever fired first reported — which
+    // is why the same starvation shows up in the logs under two different messages
+    // on different days. The earlier response to that was to widen this budget
+    // (nav plus a margin) so a queued query could still use its full nav budget
+    // once picked up. That treats the symptom: a margin only buys one extra
+    // query's worth of wait, and a burst four times the pool's reach exhausts any
+    // constant. Measuring execution instead of waiting is the fix; the sum
+    // survives as the budget because a search legitimately costs nav plus overhead.
     const QUERY_TIMEOUT_MS = (config?.SEARCH_TIMEOUT_MS ?? 45_000) + (config?.BROWSER_TASK_TIMEOUT_MS ?? 10_000);
 
     // Deduplicated: resultMap and the failures map are both keyed by the query
@@ -111,8 +112,23 @@ export async function performSearch(
     const runQuery = async (query: string): Promise<void> => {
         const queryStartTime = Date.now();
         const timeoutController = new AbortController();
-        const timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
-        safeUnref(timeoutId);
+        // Armed by onDispatch below — when the browser queue hands this query to a
+        // worker — not here. Arming here charged queue wait to the query's budget, so
+        // a burst larger than the pool could serve inside one budget killed its own
+        // tail: every query enqueued in the same millisecond, and 90s later the ones
+        // still waiting aborted together having done no work. Measured at 78 of 100.
+        // The scheduler owns the execution deadline; this is the caller-side mirror of
+        // it, and against a follower scheduler — which cannot observe leader dispatch
+        // and so never calls onDispatch — it stays disarmed and the client's own
+        // bound applies instead.
+        let timeoutId: NodeJS.Timeout | undefined;
+        const startQueryDeadline = () => {
+            // Retries inside runWorkerSearch dispatch again; each attempt earns a
+            // fresh budget rather than inheriting what its predecessor spent.
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
+            safeUnref(timeoutId);
+        };
 
         try {
             if (signal?.aborted) {
@@ -124,7 +140,7 @@ export async function performSearch(
               ? AbortSignal.any([signal, timeoutController.signal])
               : timeoutController.signal;
 
-            const results = await runWorkerSearch(query, config, querySignal, 1, sessionId, container);
+            const results = await runWorkerSearch(query, config, querySignal, 1, sessionId, container, undefined, startQueryDeadline);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
 
@@ -226,10 +242,15 @@ export async function performSearch(
     // timeout with "retrying the same query later is reasonable", so the next round
     // re-queued them and the burst grew.
     //
-    // A lane only picks up its next query when the previous one finishes, so a query's
-    // deadline now measures the work rather than the wait, the shared queue never builds a
-    // backlog, and every query eventually runs. The burst takes longer in wall-clock terms;
-    // it no longer discards most of itself to get there.
+    // A lane only picks up its next query when the previous one finishes, so the shared
+    // queue never builds a backlog and every query eventually runs. The burst takes longer
+    // in wall-clock terms; it no longer discards most of itself to get there.
+    //
+    // Lanes are not what makes a query's deadline honest — dispatch-armed timers do that,
+    // at both this layer and the scheduler's, and they hold no matter how deep the queue
+    // gets. Lanes remain because bounding depth is worth having on its own: the pool is
+    // shared with scrapes and healthchecks and with other concurrent runs, and a burst that
+    // dumps its whole plan into the queue delays all of them.
     const lanes = Math.max(1, Math.min(maxWorkers, filteredQueries.length));
     let nextIndex = 0;
     const runLane = async (): Promise<void> => {

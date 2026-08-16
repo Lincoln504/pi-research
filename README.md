@@ -74,7 +74,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - Node.js >= 22.19.0
 - An LLM with a 100k+ context window (bring your own key or use a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
-- The pi runtime. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
+- pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
 - Cloudflare and similar systems block scraping on some sites. A run flags pages it can't reach and compensates with a wide pool of search results to cite.
 
 ### Channels

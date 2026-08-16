@@ -27,6 +27,11 @@ export class PriorityTaskQueue {
     private maxTotalConcurrency: number;
     private readonly maxQueueDepth: number;
     private isShutdown = false;
+    /** When the queue last handed a task to a worker (epoch ms), or 0 if never.
+     *  A saturated pool and a wedged pool look identical from the outside — both
+     *  leave a healthcheck waiting for a slot — so runHealthCheck reads this to
+     *  tell them apart: a queue still dispatching is busy, not broken. */
+    private lastDispatchAt = 0;
 
     constructor(maxTotalConcurrency: number, maxQueueDepth = 500) {
         this.maxTotalConcurrency = maxTotalConcurrency;
@@ -90,6 +95,11 @@ export class PriorityTaskQueue {
         });
     }
 
+    /** Epoch ms of the last dispatch, or 0 if this queue has never dispatched. */
+    getLastDispatchAt(): number {
+        return this.lastDispatchAt;
+    }
+
     private removeFromQueue(task: QueuedTask<any>): boolean {
         const queues = [this.healthcheckQueue, this.searchQueue, this.scrapeQueue];
         for (const q of queues) {
@@ -138,6 +148,7 @@ export class PriorityTaskQueue {
         }
 
         this.activeCount++;
+        this.lastDispatchAt = Date.now();
         logger.debug(`[PriorityQueue] Starting task: ${task.type}. Active: ${this.activeCount}/${this.maxTotalConcurrency}`);
 
         // Race the task against caller abort. Without this, an abort while the

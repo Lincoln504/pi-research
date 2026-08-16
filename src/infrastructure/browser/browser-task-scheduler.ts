@@ -19,7 +19,7 @@ import type { IStateManager } from '../../core/interfaces/state-manager-interfac
 import { BrowserServer, getBrowserServerAuthSecret } from './browser-server.ts';
 import { isPoolShutdownError } from './browser-error-utils.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
-import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
+import type { IScheduler, TaskDispatchListener } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
 import { raceWithDeadline } from '../../utils/safe-unref.ts';
 import { PriorityTaskQueue } from './priority-task-queue.ts';
@@ -74,6 +74,30 @@ export async function executePoolTaskWithDeathBackstop<T>(
  * Browser task scheduler - manages the worker pool and executes tasks.
  * Only the leader process has an instance of this scheduler.
  */
+/**
+ * How long the queue has gone without handing a task to a worker.
+ *
+ * A queue that has never dispatched reports 0 rather than an epoch timestamp, so
+ * treat that as "forever" — otherwise the subtraction reads as ~57 years of
+ * silence by accident and lands on the right answer for the wrong reason.
+ */
+export function millisSinceDispatch(lastDispatchAt: number, now: number): number {
+    return lastDispatchAt > 0 ? now - lastDispatchAt : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Is a pool that could not serve a priority probe within `budgetMs` broken, or
+ * merely busy?
+ *
+ * Busy if it dispatched something inside the same window: every running task
+ * carries its own dispatch-armed deadline, so slots keep turning over and the
+ * probe's turn is coming. Broken only if nothing has moved at all — which is what
+ * a wedge actually looks like, and what the probe exists to catch.
+ */
+export function isPoolWedged(millisSinceLastDispatch: number, budgetMs: number): boolean {
+    return millisSinceLastDispatch > budgetMs;
+}
+
 export class BrowserTaskScheduler implements IScheduler {
     private workerPoolManager: WorkerPoolManager | null = null;
     private server: BrowserServer | null = null;
@@ -218,7 +242,7 @@ export class BrowserTaskScheduler implements IScheduler {
         return this.server.start();
     }
 
-    async runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
+    async runSearch(query: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<SearchResult[]> {
         // Reject tasks once this scheduler has begun teardown. shutdown() nulls priorityQueue and
         // clears the scheduler reference (a future run gets a fresh scheduler), so getPriorityQueue()
         // here would otherwise build a FRESH, non-shutdown queue on this dead instance and dispatch
@@ -274,6 +298,10 @@ export class BrowserTaskScheduler implements IScheduler {
             result = await Promise.race([
                 queue.enqueue('search', async () => {
                     startDeadline();
+                    // Same instant, for the same reason, one layer up: whoever called us
+                    // arms their own guard here instead of at call time. A listener that
+                    // throws must not take the task down with it.
+                    try { onDispatch?.(); } catch { /* caller's guard, caller's problem */ }
                     // The shared timeoutPromise is deliberately NOT raced in here (its timer
                     // dies with the outer race); the backstop below carries its own timer, so
                     // a QUEUED task can never be dispatched against a disarmed guard, and a
@@ -343,7 +371,7 @@ export class BrowserTaskScheduler implements IScheduler {
         return result.results;
     }
 
-    async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult> {
+    async runScrape(url: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<ScrapeResult> {
         if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
@@ -376,6 +404,8 @@ export class BrowserTaskScheduler implements IScheduler {
             result = await Promise.race([
                 queue.enqueue('scrape', async () => {
                     startDeadline();
+                    // See runSearch: the caller's guard is armed on dispatch too.
+                    try { onDispatch?.(); } catch { /* caller's guard, caller's problem */ }
                     return await executePoolTaskWithDeathBackstop(
                         () => pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                         timeoutMs,
@@ -433,10 +463,40 @@ export class BrowserTaskScheduler implements IScheduler {
         const startTime = Date.now();
         const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = (45000 + 60000) / (isMocking ? 4 : 1);
+
+        // A probe that never got a worker used to fail as "timed out (including queue
+        // wait)", and the registry reported BrowserRuntime CRITICALLY UNHEALTHY —
+        // during a burst in which the pool was healthily executing the run's own
+        // searches. Twice on the night this was measured. Saturated and wedged look
+        // identical from out here, so the verdict has to consult the queue: if it
+        // dispatched something inside the window, the pool is busy, not broken, and
+        // the honest answer is healthy. Only a queue that has stopped dispatching
+        // altogether is a fault.
+        //
+        // Once dispatched, the deadline measures execution alone (armed below, like
+        // runSearch/runScrape), so a slow probe still fails on its own merits.
         let timeoutId: NodeJS.Timeout | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
+        let dispatched = false;
+        let startDeadline: () => void = () => {};
+        const timeoutPromise = new Promise<{ success: boolean } | never>((resolve, reject) => {
+            const onWaitExpired = () => {
+                if (dispatched) return;
+                const sinceDispatch = millisSinceDispatch(this.getPriorityQueue(config).getLastDispatchAt(), Date.now());
+                if (!isPoolWedged(sinceDispatch, timeoutMs)) {
+                    logger.debug(`[BrowserTaskScheduler] Healthcheck could not claim a worker within ${timeoutMs}ms, but the queue dispatched ${sinceDispatch}ms ago — pool saturated, not wedged.`);
+                    resolve({ success: true });
+                    return;
+                }
+                reject(new Error(`Health check could not reach a worker within ${timeoutMs}ms and the queue has dispatched nothing for ${sinceDispatch}ms — the pool is wedged.`));
+            };
+            timeoutId = setTimeout(onWaitExpired, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
+            startDeadline = () => {
+                dispatched = true;
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms.`)), timeoutMs);
+                if (timeoutId.unref) timeoutId.unref();
+            };
         });
 
         let result: { success: boolean; error?: string };
@@ -448,6 +508,7 @@ export class BrowserTaskScheduler implements IScheduler {
             const queue = this.getPriorityQueue(config);
             result = await Promise.race([
                 queue.enqueue('healthcheck', async () => {
+                    startDeadline();
                     return await executePoolTaskWithDeathBackstop(() => {
                         const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
                         execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));

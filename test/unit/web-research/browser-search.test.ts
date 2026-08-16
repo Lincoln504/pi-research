@@ -122,9 +122,9 @@ describe('browser-search', () => {
       await performSearch(queries);
 
       expect(runWorkerSearch).toHaveBeenCalledTimes(3);
-      expect(runWorkerSearch).toHaveBeenCalledWith('q1', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object));
-      expect(runWorkerSearch).toHaveBeenCalledWith('q2', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object));
-      expect(runWorkerSearch).toHaveBeenCalledWith('q3', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q1', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object), undefined, expect.any(Function));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q2', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object), undefined, expect.any(Function));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q3', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object), undefined, expect.any(Function));
     });
 
     it('should pass config to workers when provided', async () => {
@@ -135,13 +135,13 @@ describe('browser-search', () => {
 
       await performSearch(['test'], mockConfig);
 
-      expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, expect.any(AbortSignal), 1, undefined, expect.any(Object));
+      expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, expect.any(AbortSignal), 1, undefined, expect.any(Object), undefined, expect.any(Function));
     });
 
     it('passes sessionId through to runWorkerSearch so the per-session circuit breaker applies', async () => {
       await performSearch(['test'], undefined, undefined, undefined, undefined, undefined, 'pisess-abcd1234');
 
-      expect(runWorkerSearch).toHaveBeenCalledWith('test', undefined, expect.any(AbortSignal), 1, 'pisess-abcd1234', expect.any(Object));
+      expect(runWorkerSearch).toHaveBeenCalledWith('test', undefined, expect.any(AbortSignal), 1, 'pisess-abcd1234', expect.any(Object), undefined, expect.any(Function));
     });
 
     it('should use max workers from browser-manager', async () => {

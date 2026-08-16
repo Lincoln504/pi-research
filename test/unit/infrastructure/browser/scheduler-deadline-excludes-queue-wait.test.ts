@@ -98,6 +98,42 @@ describe('scheduler deadline excludes queue wait', () => {
     await expect(scheduler.runSearch('slow', CFG)).rejects.toThrow(/timed out/);
   });
 
+  it('tells the caller when the task was dispatched, not when it was accepted', async () => {
+    // Callers keep their own guard over this call (performSearch does). They arm it
+    // from this signal, so it has to fire at dispatch — firing it on acceptance would
+    // hand them back the enqueue-time deadline this whole change removes, and never
+    // firing it would leave their guard dead.
+    const scheduler = makeScheduler();
+    const dispatchOrder: string[] = [];
+
+    const first = scheduler.runSearch('first', CFG, undefined, () => dispatchOrder.push('first'));
+    // Queued behind `first` on a single-slot pool: not dispatched yet, so silent.
+    const second = scheduler.runSearch('second', CFG, undefined, () => dispatchOrder.push('second'));
+
+    await new Promise(r => setTimeout(r, 20)); // first is running, second is waiting
+    expect(dispatchOrder).toEqual(['first']);
+
+    await Promise.all([first, second]);
+    expect(dispatchOrder).toEqual(['first', 'second']);
+  });
+
+  it('reports scrape dispatch the same way', async () => {
+    const scheduler = makeScheduler();
+    const dispatched: string[] = [];
+
+    await scheduler.runScrape('https://a.example.com', CFG, undefined, () => dispatched.push('a'));
+
+    expect(dispatched).toEqual(['a']);
+  });
+
+  it('a caller whose dispatch listener throws does not take the task down with it', async () => {
+    const scheduler = makeScheduler();
+
+    await expect(
+      scheduler.runSearch('q', CFG, undefined, () => { throw new Error('caller bug'); }),
+    ).resolves.toBeDefined();
+  });
+
   it('reports the timeout without blaming queue wait', async () => {
     // The old message said "(including queue wait)", which sent readers looking at pool
     // saturation for what is now purely a slow-execution failure.

@@ -7,9 +7,9 @@
 
 import * as http from 'node:http';
 import type { Config } from '../../config.ts';
-import { getConfig } from '../../config.ts';
+
 import type { SearchResult } from '../../web-research/types.ts';
-import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
+import type { IScheduler, TaskDispatchListener } from '../../core/interfaces/scheduler-interfaces.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
@@ -18,10 +18,9 @@ import { getClientAgent } from './client-agent.ts';
 import type { NodeError } from '../../types/index.ts';
 
 /**
- * Client-side patience margin on top of the leader's own task budget. The leader
- * already bounds each task (nav budget + queue-wait margin) and answers with the
- * more informative in-band timeout; the follower only needs headroom for the HTTP
- * hop and leader-side dispatch, so its own timer never answers first.
+ * Client-side patience margin on top of a leader budget that bounds the WHOLE
+ * call (only the healthcheck does, now). The follower needs headroom for the HTTP
+ * hop, so its own timer never answers first.
  */
 const CLIENT_PATIENCE_MARGIN_MS = 15_000;
 
@@ -42,33 +41,37 @@ const CLIENT_TIMEOUT_CAP_MS = 300_000;
 const HEALTHCHECK_LEADER_BUDGET_MS = 45_000 + 60_000;
 
 /**
- * Per-operation follower timeout: the leader's own budget for that task kind
- * plus a patience margin, bounded by an absolute cap.
+ * Per-operation follower timeout.
  *
  * Invariant: the follower is at least as patient as the leader. The old flat 60s
  * undercut the leader's healthcheck budget (105s) and config-driven search/scrape
  * budgets (up to 130s+ within schema bounds), and the client-timeout text matches
  * isTaskTimeoutError, so retry gates skipped it — long tasks failed client-side,
  * unretried, while the leader was still working on them.
+ *
+ * Search and scrape get the cap, not a budget-derived value. The leader's task
+ * budget bounds EXECUTION only — it is armed when the queue dispatches, not when
+ * the request lands — so leader turnaround is queue wait plus that budget, and no
+ * value derived from the budget alone can out-wait it. Deriving one anyway is how
+ * a follower came to abandon requests the leader was still queueing, which is the
+ * same defect the leader-side deadline had. So this timer stops pretending to be a
+ * deadline and becomes what CLIENT_TIMEOUT_CAP_MS already describes: a detector
+ * for a leader that is listening but no longer answering. Work waits; it is not
+ * discarded because the pool was busy.
+ *
+ * The healthcheck keeps a budget-derived value: its leader side bounds the whole
+ * call (it answers "healthy, saturated" rather than queueing indefinitely), so a
+ * liveness probe stays as impatient as a liveness probe should be.
  */
-export function resolveClientRequestTimeoutMs(operation: string, config?: Config): number {
-    const cfg = config ?? getConfig();
-    let leaderBudgetMs: number;
+export function resolveClientRequestTimeoutMs(operation: string, _config?: Config): number {
     switch (operation) {
         case 'search':
-            // BrowserTaskScheduler.runSearch: SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS.
-            leaderBudgetMs = cfg.SEARCH_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
-            break;
         case 'browser-task':
-            // BrowserTaskScheduler.runScrape: SCRAPE_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS.
-            leaderBudgetMs = cfg.SCRAPE_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
-            break;
+            return CLIENT_TIMEOUT_CAP_MS;
         default:
             // healthcheck, plus any future/unknown path: the largest fixed budget.
-            leaderBudgetMs = HEALTHCHECK_LEADER_BUDGET_MS;
-            break;
+            return Math.min(CLIENT_TIMEOUT_CAP_MS, HEALTHCHECK_LEADER_BUDGET_MS + CLIENT_PATIENCE_MARGIN_MS);
     }
-    return Math.min(CLIENT_TIMEOUT_CAP_MS, leaderBudgetMs + CLIENT_PATIENCE_MARGIN_MS);
 }
 
 /**
@@ -99,7 +102,7 @@ export class BrowserClient implements IScheduler {
 
         return new Promise((resolve, reject) => {
             const agent = getClientAgent();
-            // Config-derived per task kind: leader budget + margin, capped.
+            // Wedge detector for search/scrape; leader budget + margin for the healthcheck.
             const timeoutMs = resolveClientRequestTimeoutMs(operation, config);
             let resolved = false;
             const controller = new AbortController();
@@ -269,11 +272,20 @@ export class BrowserClient implements IScheduler {
         });
     }
 
-    async runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
+    /**
+     * `onDispatch` is deliberately not invoked here. A follower sees only the
+     * leader's final reply, never the moment the leader's queue hands the task to
+     * a worker, so it has nothing truthful to report. Calling it on send would
+     * arm the caller's guard against queue wait — precisely the bug being fixed —
+     * so the caller's guard stays disarmed and this class bounds the call itself
+     * (see resolveClientRequestTimeoutMs).
+     */
+    async runSearch(query: string, config?: Config, signal?: AbortSignal, _onDispatch?: TaskDispatchListener): Promise<SearchResult[]> {
         return this.request('/search', { query }, signal, config);
     }
 
-    async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<any> {
+    /** See runSearch on why `onDispatch` is not invoked. */
+    async runScrape(url: string, config?: Config, signal?: AbortSignal, _onDispatch?: TaskDispatchListener): Promise<any> {
         return this.request('/scrape', { url }, signal, config);
     }
 

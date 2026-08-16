@@ -103,6 +103,9 @@ describe('search — attributes an empty result set to the right cause', () => {
 
     expect(runWorkerSearch).toHaveBeenCalledWith(
       'q', undefined, expect.any(AbortSignal), 1, 'pisess-1a2b3c4d', expect.anything(),
+      // handoverRetries left at its default, then the dispatch listener performSearch
+      // arms its per-query deadline from.
+      undefined, expect.any(Function),
     );
   });
 

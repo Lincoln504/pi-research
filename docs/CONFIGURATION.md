@@ -102,7 +102,7 @@ Timeouts
 | `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–1800000 | Coordinator / evaluator / repair / knowledge LLM call timeout. |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape (page-load) timeout. |
 | `PI_RESEARCH_SEARCH_TIMEOUT_MS` | `45000` | 5000–120000 | Browser search page timeout. |
-| `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Queue-wait / overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). |
+| `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). These ceilings bound **execution**: a task's clock starts when a worker picks it up, so time spent queued behind other work is not charged against it and raising this to cover a busy pool is neither needed nor effective. |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Pre-flight health-check timeout. |
 
 LLM output & reasoning

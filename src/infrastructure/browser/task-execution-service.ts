@@ -18,7 +18,7 @@ import { getServiceContainer, getService } from '../../core/service-registry.ts'
 import type { ServiceContainer } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerFactory, IScheduler } from '../../core/scheduler-factory.ts';
-import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
+import type { ISchedulerInternals, TaskDispatchListener } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserClient } from './browser-client.ts';
 
@@ -331,7 +331,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
 /**
  * Run a worker search query with retry logic.
  */
-export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string, container: ServiceContainer = getServiceContainer(), handoverRetries = LEADER_HANDOVER_RETRIES): Promise<SearchResult[]> {
+export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string, container: ServiceContainer = getServiceContainer(), handoverRetries = LEADER_HANDOVER_RETRIES, onDispatch?: TaskDispatchListener): Promise<SearchResult[]> {
     if (signal?.aborted) throw new Error('Aborted');
     
     const breaker = sessionId ? getBrowserCircuitBreaker(sessionId) : browserCircuitBreaker;
@@ -340,7 +340,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
         return await breaker.execute(async () => {
             if (signal?.aborted) throw new Error('Aborted');
             const scheduler = await getScheduler(config, container);
-            return await scheduler.runSearch(query, config, signal);
+            return await scheduler.runSearch(query, config, signal, onDispatch);
         });
     } catch (error: unknown) {
         if (signal?.aborted || (error instanceof Error && error.message === 'Aborted')) throw new Error('Aborted', { cause: error });
@@ -358,7 +358,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
             logger.warn(`[BrowserManager] Leader handover during search (handover attempts left: ${handoverRetries}): ${briefErrorMessage(error)}...`);
             await recoverFromLeaderHandover(container);
             await new Promise((resolve) => setTimeout(resolve, HANDOVER_BACKOFF_MS + Math.floor(Math.random() * 400)));
-            return runWorkerSearch(query, config, signal, retries, sessionId, container, handoverRetries - 1);
+            return runWorkerSearch(query, config, signal, retries, sessionId, container, handoverRetries - 1, onDispatch);
         }
 
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
@@ -381,7 +381,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
 
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runWorkerSearch(query, config, signal, retries - 1, sessionId, container, handoverRetries);
+            return runWorkerSearch(query, config, signal, retries - 1, sessionId, container, handoverRetries, onDispatch);
         }
         throw error;
     }
