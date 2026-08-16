@@ -250,8 +250,8 @@ of it.
 
 What pi-research does about it. The research lead is split into two roles so that the
 repetition is removed rather than merely discounted. The **router** decides each round
-whether to continue, and reads only a short coverage digest per researcher instead of
-every report collected so far. The **synthesizer** runs once, at the end, and is the only
+whether to continue, reading each report in full on the one round it arrives and only its
+short coverage digest thereafter, instead of re-reading every report collected so far. The **synthesizer** runs once, at the end, and is the only
 call that reads the reports in full. Before the split, one call did both jobs and re-sent
 the whole corpus every round, so its input grew with the square of the round count. The
 synthesizer's corpus is also budgeted against the model's context window: over budget, the

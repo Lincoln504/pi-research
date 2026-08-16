@@ -21,6 +21,7 @@ import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
 import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { normalizeCitations } from '../utils/citation-utils.ts';
+import { lastCitedLinksHeader } from '../utils/text-utils.ts';
 import { repairJsonWithLlm } from './llm/agentic-repair.ts';
 import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
 import { safeGetApiKeyAndHeaders } from './llm/model-registry-factory.ts';
@@ -664,7 +665,7 @@ export class PlanningService implements IPlanningService {
         ? await this.callLead({
             ...callOptions,
             systemPrompt: populate(''),
-            userMessage: buildRouterMessage(this.resolveDigests(options), runContext),
+            userMessage: buildRouterMessage(...this.buildRouterEvidence(options, round), runContext),
             maxTokens: ROUTER_MAX_TOKENS,
             component: 'router',
             label: 'router-updatePlanForRound',
@@ -824,6 +825,44 @@ export class PlanningService implements IPlanningService {
    * always sees an entry for every researcher rather than being handed nothing and
    * concluding the round produced no work.
    */
+  /**
+   * Split what the router sees into evidence it must judge and history it already judged.
+   *
+   * The fidelity/cost trade this protocol turns on. Sending every report every round gives
+   * a correct decision but grows with the square of the round count; sending only digests
+   * is cheap but makes the decision hostage to what each researcher claims about its own
+   * work. Sending each report in full exactly ONCE — on the round it arrives — costs the
+   * corpus linearly and still puts real prose in front of every decision.
+   */
+  private buildRouterEvidence(
+    options: UpdatePlanOptions,
+    round: number,
+  ): [Map<string, { body: string; digest: string }>, Map<string, string>] {
+    const digests = this.resolveDigests(options);
+    const { freshIds, priorIds } = splitReportsByRound(options.reports, round);
+
+    const fresh = new Map<string, { body: string; digest: string }>();
+    for (const id of freshIds) {
+      fresh.set(id, {
+        body: stripCitedLinks(options.reports.get(id) ?? ''),
+        digest: digests.get(id) ?? '(none provided)',
+      });
+    }
+
+    const prior = new Map<string, string>();
+    for (const id of priorIds) {
+      const digest = digests.get(id);
+      if (digest) prior.set(id, digest);
+    }
+    // A digest whose report is gone still belongs in the history block — dropping it hides
+    // that researcher from the router entirely.
+    for (const [id, digest] of digests.entries()) {
+      if (!fresh.has(id) && !prior.has(id)) prior.set(id, digest);
+    }
+
+    return [fresh, prior];
+  }
+
   private resolveDigests(options: UpdatePlanOptions): Map<string, string> {
     // Fill per REPORT, not per supplied digest. Taking `options.digests` wholesale would
     // leave the router blind to any researcher missing from it — and a researcher the
@@ -1066,12 +1105,80 @@ function truncateToBudget(report: string, budgetChars: number, id: string): stri
   return `${report.slice(0, budgetChars)}\n\n[report truncated: exceeded the synthesis context budget]`;
 }
 
-/** The router's user message: coverage digests, then run context, then the ask. */
-export function buildRouterMessage(digests: ReadonlyMap<string, string>, runContext: string): string {
-  const digestBlock = formatDigestsForRouter(digests);
+/**
+ * Which reports the router has not read in full yet.
+ *
+ * A report is FRESH on the one round it arrives, and thereafter is represented by its
+ * digest — the router already read it, and re-sending it is the repetition this protocol
+ * exists to remove. Derived from the `${round}.${id}` key the synthesis service stores
+ * under, so it needs no extra state and survives a `wait` retry re-running the same round.
+ *
+ * An id with no parseable round prefix is treated as FRESH. That errs toward showing the
+ * router more evidence: the failure mode of guessing wrong in the other direction is a
+ * decision made without ever having seen a finding.
+ */
+export function splitReportsByRound(
+  reports: ReadonlyMap<string, string>,
+  currentRound: number,
+): { freshIds: string[]; priorIds: string[] } {
+  const freshIds: string[] = [];
+  const priorIds: string[] = [];
+  for (const id of reports.keys()) {
+    const round = Number.parseInt(id.split('.')[0] ?? '', 10);
+    // Reports produced during round `currentRound - 1` are the ones this call is judging.
+    // `>=` rather than `===` so a round that produced nothing cannot strand a later
+    // report in the "already reviewed" bucket it was never shown in.
+    if (!Number.isFinite(round) || round >= currentRound - 1) freshIds.push(id);
+    else priorIds.push(id);
+  }
+  return { freshIds, priorIds };
+}
+
+/**
+ * Drop the trailing CITED LINKS section from a report body.
+ *
+ * Routing needs the findings, not the bibliography — and the bibliography is a large share
+ * of a report, since the researcher prompt asks for 3–6 dense sentences per source. The
+ * digest already carries the source count, which is the only part of it a routing decision
+ * uses. Anchored on a real line-leading header, never an incidental mention in prose.
+ */
+function stripCitedLinks(report: string): string {
+  const { lineStart } = lastCitedLinksHeader(report);
+  return (lineStart >= 0 ? report.slice(0, lineStart) : report).trim();
+}
+
+/**
+ * The router's user message.
+ *
+ * Earlier rounds come FIRST and are append-only — round r's block is a byte-identical
+ * prefix of round r+1's — so the stable part of the request sits where a prompt cache can
+ * hold it, and the volatile new reports sit after it.
+ *
+ * Each fresh report is shown with the digest its researcher wrote for it. That pairing is
+ * the point: a self-reported "Gaps: none" sitting next to thin prose is visible as a
+ * mismatch, where a digest on its own has to be taken on trust.
+ */
+export function buildRouterMessage(
+  fresh: ReadonlyMap<string, { body: string; digest: string }>,
+  priorDigests: ReadonlyMap<string, string>,
+  runContext: string,
+): string {
+  const priorBlock = priorDigests.size > 0
+    ? `## REVIEWED IN EARLIER ROUNDS\nYou read these reports in full when they arrived and already judged them. Only their coverage digests are repeated here.\n\n${formatDigestsForRouter(priorDigests)}`
+    : '';
+
+  const freshBlock = fresh.size > 0
+    ? `## NEW SINCE YOUR LAST DECISION — FULL REPORTS\nJudge these on the evidence in the reports themselves. Each carries the digest its researcher wrote; treat that as a claim to check against the report below it, not as a fact.\n\n${
+        Array.from(fresh.entries())
+          .map(([id, r]) => `### Researcher ${id}\nResearcher's coverage claim:\n${r.digest}\n\nReport:\n${r.body || '(this researcher produced no usable report)'}`)
+          .join('\n\n')
+      }`
+    : '(No new reports since your last decision.)';
+
   return [
-    'Coverage digests from the research team follow. Each one is what a researcher reported about its own coverage; you do not have the findings themselves.',
-    digestBlock || '(No researcher has reported yet.)',
+    'Findings from the research team follow.',
+    priorBlock,
+    freshBlock,
     runContext,
     'Decide whether the research is complete or another round is needed. Return JSON only.',
   ].filter(Boolean).join('\n\n---\n\n');

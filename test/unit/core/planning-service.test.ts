@@ -983,20 +983,45 @@ describe('PlanningService', () => {
       call({ round, reports, mustSynthesize: true });
 
     describe('routing', () => {
-      it('sends the digests and NOT the report bodies', async () => {
-        // The whole saving. If a report body reaches the router, routing input is back to
-        // growing with the corpus and every projection in the design is void.
-        const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
-        expect(userMessage).toContain('Covered: alpha basics');
-        expect(userMessage).toContain('Gaps: beta pricing');
-        expect(userMessage).not.toContain('Round one finding');
-        expect(userMessage).not.toContain('Round two finding');
+      it('sends the NEW round\'s reports in full, so the decision rests on evidence', async () => {
+        // The fidelity half of the contract. A router that never sees prose can only take a
+        // researcher's "Gaps: none" on trust; this is what lets it check the claim.
+        const { userMessage } = await route(3, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        expect(userMessage).toContain('Round two finding');   // round 2 = new at round 3
+        expect(userMessage).toContain('Gaps: beta pricing');  // its digest, alongside it
+      });
+
+      it('sends EARLIER rounds as digests only, never their bodies again', async () => {
+        // The cost half. A report the router already read must never be re-sent, or input is
+        // back to growing with the square of the round count.
+        const { userMessage } = await route(3, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        expect(userMessage).toContain('Covered: alpha basics'); // round 1's digest
+        expect(userMessage).not.toContain('Round one finding'); // but not its body
+      });
+
+      it('shows each report in full on exactly one round', async () => {
+        // Stated as the invariant rather than as two separate round assertions: this is the
+        // property that makes routing linear in the corpus instead of quadratic.
+        const digests = new Map([['1.1', D1], ['2.1', D2]]);
+        const atRound2 = (await route(2, round1Reports, digests)).userMessage;
+        const atRound3 = (await route(3, round2Reports, digests)).userMessage;
+        expect(atRound2).toContain('Round one finding');
+        expect(atRound3).not.toContain('Round one finding');
+      });
+
+      it('strips CITED LINKS from the reports it shows', async () => {
+        // Routing needs findings, not the bibliography — and the researcher prompt asks for
+        // 3-6 dense sentences per source, so it is a large share of a report. The digest
+        // already carries the source count, which is all a routing decision uses.
+        const { userMessage } = await route(2, round1Reports, new Map([['1.1', D1]]));
+        expect(userMessage).toContain('Round one finding');
+        expect(userMessage).not.toContain('CITED LINKS');
+        expect(userMessage).not.toContain('alpha.example.com');
       });
 
       it('does not send the global source list — that is synthesis material', async () => {
-        const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        const { userMessage } = await route(3, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
         expect(userMessage).not.toContain('GLOBAL SOURCE LIST');
-        expect(userMessage).not.toContain('alpha.example.com');
       });
 
       it('grows by only the new digest when a round is added', async () => {
@@ -1043,11 +1068,11 @@ describe('PlanningService', () => {
       });
 
       it('bounds a derived digest to the topic line and a source count', async () => {
-        // The derivation runs on reports that can be tens of thousands of characters. If it
-        // ever passed more of the body through, routing input would silently start scaling
-        // with the corpus again — the exact failure this protocol exists to prevent.
+        // Checked on an EARLIER-round report, where the digest is all the router gets. If the
+        // derivation ever passed more of the body through, routing input would silently
+        // start scaling with the whole corpus again.
         const long = `Topic line about alpha.\n\n${'Body sentence with detail. '.repeat(400)}\n\nCITED LINKS\n[1] https://alpha.example.com — Alpha`;
-        const { userMessage } = await route(2, new Map([['1.1', long]]));
+        const { userMessage } = await route(4, new Map([['1.1', long]]));
         expect(userMessage).toContain('Topic line about alpha.');
         expect(userMessage).not.toContain('Body sentence with detail.');
         expect(userMessage).toContain('Sources: 1');
@@ -1119,10 +1144,14 @@ describe('PlanningService', () => {
      * The size claim, measured rather than argued.
      *
      * Before the split, the routing call carried exactly what the synthesizer carries now:
-     * every report, the global source list, the run context. So comparing the two messages
-     * over an IDENTICAL corpus is the old-vs-new routing input comparison, with none of the
-     * confounding a live A/B has (two runs scrape different sources and build different
-     * corpora).
+     * every report, every round. So comparing the two messages over an IDENTICAL corpus is
+     * the old-vs-new comparison, with none of the confounding a live A/B has (two runs
+     * scrape different sources and build different corpora).
+     *
+     * The property that matters is NOT that routing is tiny — it now carries a full round of
+     * reports, deliberately, so the decision rests on evidence. It is that routing is bounded
+     * by TEAM SIZE rather than by round count: an extra round of history costs a digest, not
+     * a re-send of everything before it. That is what turns quadratic growth into linear.
      */
     describe('routing input size', () => {
       // ~9,500 tokens per report at 4 chars/token — the figure measured from a real run.
@@ -1150,26 +1179,27 @@ describe('PlanningService', () => {
       const synthWide = (round: number, reports: Map<string, string>) =>
         call({ round, reports, mustSynthesize: true, model: WIDE_MODEL });
 
-      it('is a small fraction of what the same corpus costs to synthesize', async () => {
-        const { reports, digests } = corpus(9); // level 2 at the end of its round budget
-        const routed = await routeWide(3, reports, digests);
-        const synthesized = await synthWide(3, reports);
-        expect(routed.userMessage.length).toBeLessThan(synthesized.userMessage.length * 0.1);
+      it('carries one round of reports, not the whole corpus', async () => {
+        // Nine researchers accumulated; the router sees the newest round in full and the
+        // rest as digests, so its input is a small multiple of ONE report rather than nine.
+        const { reports, digests } = corpus(9);
+        const routed = await routeWide(10, reports, digests);
+        const synthesized = await synthWide(10, reports);
+        expect(routed.userMessage.length).toBeLessThan(synthesized.userMessage.length * 0.25);
       });
 
-      it('costs a digest per extra researcher, not a report', async () => {
-        // The precise claim. Routing input is NOT flat — it carries one digest per
-        // researcher, so it does grow. What changed is the constant: each additional
-        // researcher adds a digest to the routing call instead of a whole report. Measuring
-        // the MARGINAL bytes per researcher isolates that from the fixed overhead (system
-        // prompt, run context) that dominates a small corpus and distorts a ratio test.
-        // Anything that leaks a report body into the routing message collapses this gap.
+      it('costs a digest per round of HISTORY, not a re-send of it', async () => {
+        // The quadratic term, measured. Each corpus is routed at the round right after its
+        // last researcher, so exactly one report is fresh in both cases and the twelve extra
+        // researchers land entirely in history. Their marginal cost must be digest-sized.
+        // Measuring MARGINAL bytes isolates this from the fixed overhead (system prompt, run
+        // context) that dominates a small corpus and would distort a ratio test.
         const small = corpus(3);
         const large = corpus(15);
-        const routeSmall = (await routeWide(2, small.reports, small.digests)).userMessage.length;
-        const routeLarge = (await routeWide(2, large.reports, large.digests)).userMessage.length;
-        const synthSmall = (await synthWide(3, small.reports)).userMessage.length;
-        const synthLarge = (await synthWide(3, large.reports)).userMessage.length;
+        const routeSmall = (await routeWide(4, small.reports, small.digests)).userMessage.length;
+        const routeLarge = (await routeWide(16, large.reports, large.digests)).userMessage.length;
+        const synthSmall = (await synthWide(4, small.reports)).userMessage.length;
+        const synthLarge = (await synthWide(16, large.reports)).userMessage.length;
 
         const routeMarginal = (routeLarge - routeSmall) / 12;
         const synthMarginal = (synthLarge - synthSmall) / 12;
