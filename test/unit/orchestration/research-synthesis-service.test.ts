@@ -95,6 +95,30 @@ describe('ResearchSynthesisService', () => {
       expect([...service.getAllDigests('s').keys()]).toEqual(['1.1', '2.1']);
     });
 
+    it('replaces the digest when the same report id is stored again', () => {
+      // storeReport's documented contract is that a re-store REPLACES the report. If the
+      // digest did not follow, the previous report's coverage claims would stay attached to
+      // a body that no longer supports them, and the router would route on superseded
+      // findings.
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      service.storeReport('s', '1.1', withDigest('beta'));
+      const digest = service.getAllDigests('s').get('1.1');
+      expect(digest).toContain('Gaps: beta pricing');
+      expect(digest).not.toContain('alpha');
+    });
+
+    it('drops a stale digest when the replacement report carries none', () => {
+      // The dangerous direction: the second store has no digest, so a set-only
+      // implementation silently keeps the first one. The derived digest — which reads the
+      // CURRENT body — must take over instead.
+      service.storeReport('s', '1.1', withDigest('alpha'));
+      service.storeReport('s', '1.1', 'Beta topic line.\n\nBeta prose.');
+      const digest = service.getAllDigests('s').get('1.1');
+      expect(digest).not.toContain('alpha');
+      expect(digest).toContain('Beta topic line.');
+      expect(digest).toMatch(/unknown/i);
+    });
+
     it('does not create a session entry when read for an unknown id', () => {
       expect(service.getAllDigests('never-seen').size).toBe(0);
       expect(service.hasReports('never-seen')).toBe(false);

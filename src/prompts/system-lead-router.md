@@ -42,7 +42,7 @@ Compare the union of the `Covered` lines against the root query and the initial 
 
 ## Decision Framework
 
-**FINISH if:** Coverage across the digests meets the complexity-specific synthesis criteria above.
+**FINISH if:** Coverage across the digests meets the complexity-specific synthesis criteria above. ("Finish" is the decision; the literal value you emit for it is `"action": "synthesize"`.)
 **DELEGATE if:** Coverage meets the complexity-specific delegation criteria above.
 **Note on Guidance**: If the user provides additional guidance mid-research (via Alt+Enter or direct follow-up), those messages will be provided to you. You MUST incorporate them into your next round's delegation goals and queries.
 

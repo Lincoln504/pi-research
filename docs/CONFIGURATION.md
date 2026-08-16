@@ -251,10 +251,11 @@ of it.
 What pi-research does about it. The research lead is split into two roles so that the
 repetition is removed rather than merely discounted. The **router** decides each round
 whether to continue, and reads only a short coverage digest per researcher instead of
-every report collected so far. The **synthesizer** runs once, at
-the end, and is the only call that reads the reports in full. Before the split, one call
-did both jobs and re-sent the whole corpus every round, so its input grew with the square
-of the round count.
+every report collected so far. The **synthesizer** runs once, at the end, and is the only
+call that reads the reports in full. Before the split, one call did both jobs and re-sent
+the whole corpus every round, so its input grew with the square of the round count. The
+synthesizer's corpus is also budgeted against the model's context window: over budget, the
+reports are reduced in partial passes and merged rather than truncated or rejected.
 
 On top of that, both lead prompts are laid out stable-part-first: they interpolate only
 values fixed for the whole run (complexity, team size, query budget, disabled tools), and
@@ -307,8 +308,14 @@ them OpenRouter falls back to hashing the first messages, which an agentic loop 
 
 `PI_CACHE_RETENTION=long` (a pi variable, not a pi-research one) requests 1-hour
 retention where the provider supports it. It raises the cache-write multiplier from
-1.25x to 2x, so it pays off only when a run's gaps between calls exceed the default
-5-minute window.
+1.25x to 2x, so it only pays off when a run's gaps between calls exceed the provider's
+default window — nominally 5 minutes.
+
+Measure before enabling it. On a direct probe against GLM over `anthropic-messages`, an
+entry was still read back unchanged after **seven minutes at the default retention**, and
+`long` produced an identical number — so on that route the doubled write multiplier buys
+nothing. The nominal 5-minute figure is a floor providers are free to exceed, not a
+deadline you can plan around.
 
 Verifying it works. Set `PI_RESEARCH_DEBUG=true` and read the run log: every LLM call
 records `llm_cache_read_tokens_total` and `llm_cache_write_tokens_total` alongside

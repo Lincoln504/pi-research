@@ -150,13 +150,22 @@ export class ResearchSynthesisService implements IService {
     // no routing metadata in it, unchanged from before this protocol existed.
     const { digest, body } = splitCoverageDigest(report);
     this.getSessionReports(sessionId).set(id, body);
+
+    // Storing the same id twice REPLACES the report, so it must replace the digest too.
+    // Setting only when the new report carries one would leave the previous report's
+    // coverage claims attached to a body that no longer supports them — the router would
+    // then route on findings that were superseded. Delete on absence so the derived digest
+    // (which reads the current body) takes over instead.
+    let sessionDigests = this.digests.get(sessionId);
     if (digest) {
-      let sessionDigests = this.digests.get(sessionId);
       if (!sessionDigests) {
         sessionDigests = new Map<string, string>();
         this.digests.set(sessionId, sessionDigests);
       }
       sessionDigests.set(id, digest);
+    } else if (sessionDigests) {
+      sessionDigests.delete(id);
+      if (sessionDigests.size === 0) this.digests.delete(sessionId);
     }
   }
 

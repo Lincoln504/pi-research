@@ -49,6 +49,7 @@ vi.mock('../../../src/core/llm/inject-date.ts', () => ({
 import { completeSimple } from '@earendil-works/pi-ai/compat';
 import { loadPrompt } from '../../../src/core/llm/prompts.ts';
 import { metrics } from '../../../src/utils/metrics.ts';
+import { logger } from '../../../src/logger.ts';
 import { getConfig } from '../../../src/config.ts';
 import { MAX_ROUNDS_LEVEL_3, MAX_EXTRA_ROUNDS_WITH_STEERING } from '../../../src/constants.ts';
 import type { StopReason } from '@earendil-works/pi-ai';
@@ -999,6 +1000,23 @@ describe('PlanningService', () => {
         expect(userMessage).not.toContain('CITED LINKS');
       });
 
+      it('fills gaps when the caller supplies digests for only some reports', async () => {
+        // A partial map must not hide a researcher. The router reads an absent entry as
+        // "that researcher produced nothing", which is the more dangerous error: it argues
+        // for re-delegating work that is already done.
+        const { userMessage } = await route(2, round2Reports, new Map([['1.1', D1]]));
+        expect(userMessage).toContain('Covered: alpha basics');   // supplied
+        expect(userMessage).toContain('### Researcher 2.1');       // derived
+        expect(userMessage).toContain('emitted no coverage digest');
+      });
+
+      it('keeps a digest whose report is no longer present', async () => {
+        // Dropping it would remove that researcher from the router's view entirely.
+        const { userMessage } = await route(2, round1Reports, new Map([['1.1', D1], ['9.9', D2]]));
+        expect(userMessage).toContain('### Researcher 9.9');
+        expect(userMessage).toContain('Gaps: beta pricing');
+      });
+
       it('bounds a derived digest to the topic line and a source count', async () => {
         // The derivation runs on reports that can be tens of thousands of characters. If it
         // ever passed more of the body through, routing input would silently start scaling
@@ -1333,11 +1351,102 @@ describe('PlanningService — synthesis over an oversized corpus', () => {
     expect(last).not.toContain('PARTIAL PASS');
   });
 
+  it('puts the partial-pass override AFTER the JSON format rule it overrides', async () => {
+    // Ordering is the whole point. Interpolated before the Output Requirements block, the
+    // "ONLY return valid JSON" rule would be the model's last instruction and would win —
+    // the partial would come back as an envelope and the merge would receive JSON blobs
+    // where it expects prose. Contains-checks do not catch this; position does.
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    vi.mocked(loadPrompt).mockReturnValue(
+      readFileSync(path.join(
+        path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts', 'system-lead-synthesizer.md',
+      ), 'utf-8'),
+    );
+    await synthesize(reports);
+    const first = (vi.mocked(completeSimple).mock.calls[0]![1] as any).systemPrompt as string;
+    expect(first.indexOf('PARTIAL PASS')).toBeGreaterThan(first.indexOf('ONLY return valid JSON'));
+  });
+
+  it('unwraps a partial pass that returns the JSON envelope anyway', async () => {
+    // Defence in depth behind the ordering fix: if a model returns an envelope regardless,
+    // the merge must receive the prose, not the braces around it.
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    vi.mocked(completeSimple).mockResolvedValue(
+      makeCompleteResponse('```json\n{"action":"synthesize","content":"PARTIAL PROSE BODY"}\n```'),
+    );
+    await synthesize(reports);
+    const mergeMessage = lastEvaluatorUserMessage();
+    expect(mergeMessage).toContain('PARTIAL PROSE BODY');
+    expect(mergeMessage).not.toContain('"action"');
+  });
+
   it('leaves the system prompt free of a partial-pass section on a single-pass synthesis', async () => {
     await synthesize(new Map([['1.1', 'short report']]), { id: 'big-model', contextWindow: 262_144 } as any);
     const sys = (vi.mocked(completeSimple).mock.calls.at(-1)![1] as any).systemPrompt as string;
     expect(sys).not.toContain('PARTIAL PASS');
     expect(sys).not.toContain('MERGE PASS');
+  });
+
+  it('divides the output budget across partial passes so the reduce converges', async () => {
+    // Left at the full synthesis ceiling, N partials can total more than the corpus they
+    // replaced, and the reduce needs pass after pass to converge (or runs out). Each
+    // partial must therefore be allotted a share of the budget, not the whole of it.
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    await synthesize(reports);
+    const calls = vi.mocked(completeSimple).mock.calls;
+    const partialCaps = calls.slice(0, -1).map(c => (c[2] as { maxTokens?: number }).maxTokens ?? 0);
+    const finalCap = (calls.at(-1)![2] as { maxTokens?: number }).maxTokens ?? 0;
+    expect(partialCaps.length).toBeGreaterThan(1);
+    for (const cap of partialCaps) expect(cap).toBeLessThan(finalCap);
+  });
+
+  it('sizes the partials so they fit the next pass when the floor does not bind', async () => {
+    // The convergence property itself. SMALL_MODEL's budget hits the floor (a misconfigured
+    // tiny window), where the contract is deliberately weaker — the extra passes absorb it.
+    // A realistic window is where all partials must fit one follow-up request.
+    const MEDIUM_MODEL = { id: 'medium-model', contextWindow: 60_000 } as any;
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+    ]);
+    await synthesize(reports, MEDIUM_MODEL);
+    const calls = vi.mocked(completeSimple).mock.calls;
+    const partialCaps = calls.slice(0, -1).map(c => (c[2] as { maxTokens?: number }).maxTokens ?? 0);
+    expect(partialCaps.length).toBeGreaterThan(1);
+    const budget = synthesisCorpusBudgetChars(MEDIUM_MODEL, getConfig('/test/cwd').SYNTHESIS_MAX_TOKENS);
+    expect(partialCaps.reduce((a, b) => a + b, 0) * 4).toBeLessThanOrEqual(budget);
+  });
+
+  it('warns rather than silently overflowing when the reduce runs out of passes', async () => {
+    // A corpus that stays over budget after every allowed pass still gets sent. The run has
+    // already been paid for by this point, and a provider rejection with no prior warning
+    // reads downstream as "the model refused" rather than "the corpus never fit".
+    const huge = 'x'.repeat(300_000);
+    vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(huge));
+    const reports = new Map([
+      ['1.1', bigReport('alpha')],
+      ['2.1', bigReport('beta')],
+      ['3.1', bigReport('gamma')],
+      ['4.1', bigReport('delta')],
+    ]);
+    await synthesize(reports);
+    const warned = vi.mocked(logger.warn).mock.calls
+      .map(c => c.map(String).join(' '))
+      .some(m => m.includes('Sending it anyway'));
+    expect(warned).toBe(true);
   });
 
   it('truncates a single report larger than the whole budget rather than failing', async () => {

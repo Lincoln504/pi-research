@@ -95,6 +95,15 @@ const MIN_SYNTHESIS_CORPUS_CHARS = 40_000;
 const MAX_SYNTHESIS_REDUCE_PASSES = 3;
 
 /**
+ * Floor on a partial pass's output ceiling. A wide fan-out divides the corpus budget many
+ * ways; without a floor a 12-partition reduce would allot each partial too few tokens to
+ * hold its slice of the findings, and "exhaustive synthesis" would quietly become
+ * summarisation. When the floor binds, the partials may not fit in one pass — that is what
+ * the remaining passes are for.
+ */
+const MIN_PARTIAL_SYNTHESIS_TOKENS = 4096;
+
+/**
  * Characters of corpus a single synthesis request may carry for `model`.
  *
  * The final synthesis is the one call whose input grows without bound: it carries every
@@ -816,12 +825,24 @@ export class PlanningService implements IPlanningService {
    * concluding the round produced no work.
    */
   private resolveDigests(options: UpdatePlanOptions): Map<string, string> {
-    if (options.digests && options.digests.size > 0) return options.digests;
-    const derived = new Map<string, string>();
+    // Fill per REPORT, not per supplied digest. Taking `options.digests` wholesale would
+    // leave the router blind to any researcher missing from it — and a researcher the
+    // router cannot see reads as one that produced nothing, which argues for re-delegating
+    // work already done. Iterating the reports guarantees exactly one entry per researcher
+    // whatever the caller passed.
+    const supplied = options.digests;
+    const resolved = new Map<string, string>();
     for (const [id, report] of options.reports.entries()) {
-      derived.set(id, deriveCoverageDigest(report));
+      resolved.set(id, supplied?.get(id) ?? deriveCoverageDigest(report));
     }
-    return derived;
+    // A digest for an id with no report (a caller tracking them separately) is still worth
+    // showing — dropping it would hide a researcher entirely.
+    if (supplied) {
+      for (const [id, digest] of supplied.entries()) {
+        if (!resolved.has(id)) resolved.set(id, digest);
+      }
+    }
+    return resolved;
   }
 
   /**
@@ -939,20 +960,45 @@ export class PlanningService implements IPlanningService {
         `[PlanningService] Synthesis corpus (${entries.reduce((n, e) => n + entrySize(e), 0)} chars) exceeds the ` +
         `${budgetChars}-char budget for ${args.model.id}; reducing in ${partitions.length} partial passes (pass ${pass + 1})`,
       );
+      // Budget each partial's OUTPUT so that all of them together fit the next pass's
+      // input. Left at the full synthesis ceiling, N partials can total N x 32k tokens —
+      // larger than the corpus they replaced — so the reduce would need pass after pass to
+      // converge and could still run out of passes. Dividing the budget makes one pass
+      // sufficient in practice. Floored so a wide fan-out cannot squeeze a partial down to
+      // uselessly few tokens; if the floor binds, the extra passes below absorb it.
+      const partialMaxTokens = Math.min(
+        config.SYNTHESIS_MAX_TOKENS,
+        Math.max(
+          MIN_PARTIAL_SYNTHESIS_TOKENS,
+          Math.floor(budgetChars / CHARS_PER_TOKEN / partitions.length),
+        ),
+      );
       const next: Array<[string, string]> = [];
       for (const [index, partition] of partitions.entries()) {
         const text = await this.callLead({
           ...args,
           systemPrompt: populate(partialSynthesisSection(index + 1, partitions.length)),
           userMessage: buildSynthesisMessage(partition, globalSourceList, runContext, true),
-          maxTokens: config.SYNTHESIS_MAX_TOKENS,
+          maxTokens: partialMaxTokens,
           component: 'synthesizer',
           label: `synthesizer-reduce-${pass + 1}.${index + 1}`,
         });
-        next.push([`Partial synthesis ${index + 1}`, text.trim()]);
+        next.push([`Partial synthesis ${index + 1}`, unwrapPartialSynthesis(text, this)]);
       }
       entries = next;
       pass++;
+    }
+
+    // Exiting on the pass cap with the corpus still over budget means the request below is
+    // knowingly oversized. Say so: a silent truncation-or-overflow here reads downstream as
+    // "the model refused", and the run has already been paid for by this point.
+    const finalSize = entries.reduce((n, e) => n + entrySize(e), 0);
+    if (finalSize > budgetChars) {
+      logger.warn(
+        `[PlanningService] Synthesis corpus is still ${finalSize} chars after ` +
+        `${MAX_SYNTHESIS_REDUCE_PASSES} reduce pass(es), over the ${budgetChars}-char budget for ` +
+        `${args.model.id}. Sending it anyway — the provider may reject this request.`,
+      );
     }
 
     return this.callLead({
@@ -971,6 +1017,31 @@ export class PlanningService implements IPlanningService {
   async generateQueries(options: GenerateQueriesOptions): Promise<string[]> {
     return options.researcher.queries || [];
   }
+}
+
+/**
+ * Take the prose out of a partial pass's response, whatever shape it arrived in.
+ *
+ * A partial pass is told to return plain text, and the override that says so is now the
+ * last thing in its prompt. A model can still return the synthesis envelope out of habit —
+ * and if it does, the merge pass would receive a raw JSON blob where it expects prose,
+ * then dutifully reproduce the braces in the final report. Unwrapping here costs one
+ * parse attempt and makes the reduce independent of that going right.
+ */
+function unwrapPartialSynthesis(text: string, service: { parseJsonPlan(t: string): ResearchPlan }): string {
+  const trimmed = text.trim();
+  if (!trimmed.includes('"content"')) return trimmed;
+  try {
+    const parsed = service.parseJsonPlan(trimmed);
+    const content = typeof parsed.content === 'string' ? parsed.content.trim() : '';
+    if (content) {
+      logger.debug('[PlanningService] Partial synthesis returned a JSON envelope; unwrapped its content');
+      return content;
+    }
+  } catch {
+    // Not an envelope — it is prose that happens to mention "content". Use it as written.
+  }
+  return trimmed;
 }
 
 /** Chars a corpus entry contributes, including its `### <label>` heading line. */
@@ -1026,12 +1097,20 @@ function buildSynthesisMessage(
     .join('\n\n---\n\n');
 }
 
-/** Overrides the synthesizer's output contract for one partition of a reduce pass. */
+/**
+ * Overrides the synthesizer's output contract for one partition of a reduce pass.
+ *
+ * Interpolated at the very END of the template, after the Output Requirements block, so
+ * this is the last instruction the model reads. Placed earlier it loses: the JSON-only
+ * format rule further down would be the final word, the model would return an envelope
+ * instead of prose, and the merge pass would receive raw JSON blobs where it expects
+ * partial syntheses.
+ */
 function partialSynthesisSection(index: number, total: number): string {
   return [
     '---',
     '',
-    '## PARTIAL PASS — this OVERRIDES the output format and the CITED LINKS rules above',
+    '## PARTIAL PASS — read this LAST; it OVERRIDES the Output Requirements and CITED LINKS rules above',
     '',
     `The run's findings did not fit in one request. You are being given partition ${index} of ${total}.`,
     '',

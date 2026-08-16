@@ -335,7 +335,6 @@ export class QuickResearchOrchestrator {
           // digest out of the delivered document.
           result = synthesisService.getReport(this.options.researchId, 'quick') ?? result;
 
-
           // Ensure CITED LINKS section is accurate and consistent
           result = synthesisService.ensureCitedLinks(this.options.researchId, result);
 

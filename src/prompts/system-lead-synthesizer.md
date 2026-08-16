@@ -29,8 +29,6 @@ If the RUN CONTEXT block carries an "ADDITIONAL USER GUIDANCE" section, treat ev
 
 > **MANDATORY TERMINATION RULE**: Your synthesis is not complete until it ends with `CITED LINKS`. Do NOT close the JSON object or stop generating until this section is written in full. A synthesis without `CITED LINKS` is a failed output.
 
-{{partial_synthesis_section}}
-
 ---
 
 ## Output Requirements
@@ -44,3 +42,5 @@ If the RUN CONTEXT block carries an "ADDITIONAL USER GUIDANCE" section, treat ev
   "content": "<Plain prose report with [N] citations, organized by topic. No markdown headings, bullets, or bold text. Followed by the mandatory CITED LINKS section.>"
 }
 ```
+
+{{partial_synthesis_section}}
