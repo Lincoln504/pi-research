@@ -108,7 +108,7 @@ export async function performSearch(
     // timeout guess that misdirects to the network or system load.
     let sampleWorkerError = '';
 
-    const searchTasks = filteredQueries.map(async (query) => {
+    const runQuery = async (query: string): Promise<void> => {
         const queryStartTime = Date.now();
         const timeoutController = new AbortController();
         const timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
@@ -211,9 +211,38 @@ export async function performSearch(
             clearTimeout(timeoutId);
             if (onProgress) onProgress(seenUrls.size);
         }
-    });
+    };
 
-    await Promise.all(searchTasks);
+    // Dispatch through a bounded number of lanes instead of handing every query to
+    // Promise.all at once.
+    //
+    // The old form started ALL N queries simultaneously, which meant N minus maxWorkers of
+    // them sat in the shared browser queue with their per-query deadline ALREADY TICKING —
+    // the clock started at enqueue, not when a worker picked the query up. That made the
+    // number of queries which could possibly succeed `maxWorkers x (budget / latency)`
+    // rather than N. Measured on a level-3 run: 100 queries dispatched into 6 workers went
+    // 94 deep in the queue, 78 of them aborted at the 90s mark having never run, and the
+    // burst returned 49 results. Worse, each of those was reported to its researcher as a
+    // timeout with "retrying the same query later is reasonable", so the next round
+    // re-queued them and the burst grew.
+    //
+    // A lane only picks up its next query when the previous one finishes, so a query's
+    // deadline now measures the work rather than the wait, the shared queue never builds a
+    // backlog, and every query eventually runs. The burst takes longer in wall-clock terms;
+    // it no longer discards most of itself to get there.
+    const lanes = Math.max(1, Math.min(maxWorkers, filteredQueries.length));
+    let nextIndex = 0;
+    const runLane = async (): Promise<void> => {
+        for (;;) {
+            const index = nextIndex++;
+            if (index >= filteredQueries.length) return;
+            // Stop pulling new work once the caller has cancelled; queries already
+            // dispatched settle through their own abort path.
+            if (signal?.aborted) return;
+            await runQuery(filteredQueries[index]!);
+        }
+    };
+    await Promise.all(Array.from({ length: lanes }, () => runLane()));
 
     // A cancelled run is not a broken one. Every query aborts with zero results,
     // which walks straight into the total-failure branch below and reports

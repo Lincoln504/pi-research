@@ -45,6 +45,7 @@ import {
   parseJsonPlan as _parseJsonPlan,
   buildFallbackCoordinatorPlan as _buildFallbackCoordinatorPlan,
   capResearcherQueries as _capResearcherQueries,
+  getEffectiveQueryBudget as _getEffectiveQueryBudget,
   generateResearchers as _generateResearchers,
 } from './planning-utils.ts';
 
@@ -333,8 +334,8 @@ export class PlanningService implements IPlanningService {
     return _buildFallbackCoordinatorPlan('PlanningService', rawText, query);
   }
 
-  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, serviceName: string): ResearchPlan {
-    return _capResearcherQueries(plan, complexity, serviceName);
+  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, serviceName: string, workerThreads?: number): ResearchPlan {
+    return _capResearcherQueries(plan, complexity, serviceName, workerThreads);
   }
 
   generateResearchers(plan: ResearchPlan, query: string, complexity: 1 | 2 | 3): ResearcherConfig[] {
@@ -365,7 +366,9 @@ export class PlanningService implements IPlanningService {
     const promptTemplate = loadPrompt('system-coordinator');
     
     const maxTeamSize = this.getTeamSize(complexity);
-    const queryBudget = this.getQueryBudget(complexity);
+    // Advertise the budget the pool can actually serve, so the model plans to it
+    // instead of planning to the level ceiling and having the excess trimmed.
+    const queryBudget = _getEffectiveQueryBudget(complexity, config.WORKER_THREADS);
     const complexityGuidance = this.getComplexityGuidance(complexity, maxTeamSize, queryBudget);
 
     // Inject steering if present
@@ -476,7 +479,7 @@ export class PlanningService implements IPlanningService {
       }
 
       // Final safety cap
-      plan = this.capResearcherQueries(plan, complexity, this.name);
+      plan = this.capResearcherQueries(plan, complexity, this.name, config.WORKER_THREADS);
       // The coordinator (round 1) MUST yield runnable researchers. If the model emitted empty or
       // absent query arrays, capResearcherQueries drops them all and force-synthesizes — but at
       // round 1 there are zero reports, so that is a silent no-op run ("no summary generated",
@@ -484,7 +487,7 @@ export class PlanningService implements IPlanningService {
       // empty plan slips through. Fall back to the single-researcher plan so the run investigates.
       if (!plan.researchers || plan.researchers.length === 0) {
           logger.warn('[PlanningService] Coordinator produced no runnable researchers (empty queries); using single-researcher fallback');
-          plan = this.capResearcherQueries(this.buildFallbackCoordinatorPlan(responseText, query), complexity, this.name);
+          plan = this.capResearcherQueries(this.buildFallbackCoordinatorPlan(responseText, query), complexity, this.name, config.WORKER_THREADS);
       }
       if (plan.action !== 'synthesize') {
           plan.action = 'delegate';
@@ -517,7 +520,7 @@ export class PlanningService implements IPlanningService {
       }
       logger.warn('[PlanningService] Coordinator call failed transiently; building fallback plan so the run can proceed');
       let plan = this.buildFallbackCoordinatorPlan('', query);
-      plan = this.capResearcherQueries(plan, complexity, this.name);
+      plan = this.capResearcherQueries(plan, complexity, this.name, config.WORKER_THREADS);
       if (plan.action !== 'synthesize') {
         plan.action = 'delegate';
       }
@@ -559,7 +562,9 @@ export class PlanningService implements IPlanningService {
     const promptTemplate = loadPrompt(isRouter ? 'system-lead-router' : 'system-lead-synthesizer');
 
     const maxTeamSize = this.getTeamSize(complexity);
-    const queryBudget = this.getQueryBudget(complexity);
+    // Advertise the budget the pool can actually serve, so the model plans to it
+    // instead of planning to the level ceiling and having the excess trimmed.
+    const queryBudget = _getEffectiveQueryBudget(complexity, config.WORKER_THREADS);
     // Prefer the caller's live, steering-extended round budget (e.g. the
     // orchestrator's maxRounds, which grows past the base complexity-table
     // value once steering messages unlock extra rounds). Only fall back to
@@ -745,7 +750,7 @@ export class PlanningService implements IPlanningService {
 
       // Final safety cap if delegating
       if (finalPlan.action === 'delegate') {
-          const capped = this.capResearcherQueries(finalPlan, complexity, this.name);
+          const capped = this.capResearcherQueries(finalPlan, complexity, this.name, config.WORKER_THREADS);
           // Mirror generatePlan's empty-after-cap guard, adapted to mid-run: a
           // delegate whose researchers ALL had empty query arrays caps to zero and
           // comes back force-synthesized — indistinguishable to the orchestrator
@@ -760,6 +765,7 @@ export class PlanningService implements IPlanningService {
                     { action: 'delegate', content: '', researchers: previousPlan.researchers },
                     complexity,
                     this.name,
+                    config.WORKER_THREADS,
                   );
                   if (fallback.researchers && fallback.researchers.length > 0) {
                       logger.warn('[PlanningService] Evaluator delegated zero runnable researchers; continuing the prior agenda rather than synthesizing early');
@@ -806,6 +812,7 @@ export class PlanningService implements IPlanningService {
           { action: 'delegate', content: '', researchers: previousPlan.researchers },
           complexity,
           this.name,
+          config.WORKER_THREADS,
         );
         this.currentPlans.set(sessionId, fallback);
         return fallback;

@@ -74,7 +74,7 @@ Research
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
 | `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | Unique researcher failures that abort the whole run. Raise to let slower, still-in-flight researchers finish before giving up. |
-| `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes. Higher = more throughput, more CPU/RAM. |
+| `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes. Higher = more throughput, more CPU/RAM. Also sets how much search a round may ask for — see below. |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process. |
 | `PI_RESEARCH_MAX_CONCURRENT_RUNS` | `3` | ≥1 | Machine-wide cap on research runs executing at the same time, across **every** process (CLI, agent skill, pi extension, SDK). Runs beyond the cap queue rather than fail. All concurrent runs share one leader-elected browser/embedding pool, so oversubscribing it degrades every run at once. |
 | `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS` | `600000` | ≥0 | How long a run queues for a free slot before failing with "maximum concurrent research runs reached" (CLI exit `75`). `0` = fail immediately instead of queueing. |
@@ -238,6 +238,28 @@ just export the variable for that process.
 > The base file is not loaded automatically by your shell. Either use the
 > `/research-config` TUI (which writes it), export variables in your shell, or use a
 > loader such as direnv. `.env.example` is a reference, not an active config file.
+
+### How the worker pool bounds a search round
+
+`PI_RESEARCH_WORKER_THREADS` is not only a throughput dial. A round's search burst is
+dispatched through exactly that many lanes, and a lane picks up its next query only when
+the previous one finishes — so the pool decides how much search a round can actually
+perform, and the per-researcher query budget is derived from it:
+
+```
+effective budget = min(level budget, floor(10 x WORKER_THREADS / team size))
+```
+
+At level 3 (5 researchers, ceiling 20 queries each) that gives 12 queries per researcher on
+a 6-worker pool and the full 20 on a 10-worker pool. The prompt advertises the derived
+figure, so the model plans to a budget that will be served rather than to the ceiling.
+
+This exists because the two used to be unrelated: level 3 asked for 5 x 20 = 100 queries
+regardless of pool size, and all 100 were dispatched at once against — commonly — 6
+workers. Everything past the first few sat in the queue while its own deadline ran down,
+and most of the burst aborted without ever being searched. Raising `WORKER_THREADS` now
+raises what a round is allowed to ask for; lowering it lowers that too, instead of
+producing a burst the machine cannot serve.
 
 ### Prompt caching
 

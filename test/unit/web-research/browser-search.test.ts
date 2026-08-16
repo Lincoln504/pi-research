@@ -389,4 +389,96 @@ describe('browser-search', () => {
       expect(vi.mocked(logger.error).mock.calls[0][0]).toContain('[Search]');
     });
   });
+
+  /**
+   * Burst dispatch.
+   *
+   * Handing every query to Promise.all at once put N-minus-maxWorkers of them in the shared
+   * browser queue with their per-query deadline ALREADY RUNNING — the clock started at
+   * enqueue, not when a worker picked the query up. The number that could possibly succeed
+   * was therefore `maxWorkers x (budget / latency)`, not N. Measured on a level-3 run: 100
+   * queries into 6 workers went 94 deep, 78 aborted at the 90s mark having never run, and
+   * the burst returned 49 results — then reported those as timeouts, which told the
+   * researchers to retry and grew the next burst.
+   */
+  describe('bounded dispatch', () => {
+    it('never runs more queries at once than there are workers', async () => {
+      vi.mocked(getMaxWorkers).mockReturnValue(3);
+      let inFlight = 0;
+      let peak = 0;
+      vi.mocked(runWorkerSearch).mockImplementation(async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise(r => setTimeout(r, 5));
+        inFlight--;
+        return mockSearchResults;
+      });
+
+      await performSearch(Array.from({ length: 30 }, (_, i) => `q${i}`));
+
+      expect(peak).toBeLessThanOrEqual(3);
+    });
+
+    it('still runs every query — pacing must not drop work', async () => {
+      // The whole point of pacing rather than trimming: nothing is discarded, it is just
+      // served in order.
+      vi.mocked(getMaxWorkers).mockReturnValue(2);
+      const seen: string[] = [];
+      vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
+        seen.push(q as string);
+        return mockSearchResults;
+      });
+
+      const queries = Array.from({ length: 25 }, (_, i) => `q${i}`);
+      const out = await performSearch(queries);
+
+      expect(seen.sort()).toEqual([...queries].sort());
+      for (const q of queries) expect(out.has(q)).toBe(true);
+    });
+
+    it('starts a query\'s deadline when it runs, not when the burst is dispatched', async () => {
+      // The correctness property. With a 2-lane pool and slow searches, the LAST query
+      // starts long after dispatch; under the old code its budget had already elapsed by
+      // then and it aborted without ever running. Here it must still get a full attempt.
+      vi.mocked(getMaxWorkers).mockReturnValue(2);
+      const startedAt: number[] = [];
+      const t0 = Date.now();
+      // Unique URLs per query: results are deduplicated ACROSS queries, so a shared fixture
+      // would leave every query after the first with an empty (but successful) result set
+      // and make the assertion below meaningless.
+      vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
+        startedAt.push(Date.now() - t0);
+        await new Promise(r => setTimeout(r, 10));
+        return [{ title: `t-${q}`, url: `https://example.com/${q}`, content: 'c' }];
+      });
+
+      // A budget far shorter than the total burst duration: 12 queries / 2 lanes x 10ms
+      // is ~60ms of wall clock, against a 40ms per-query budget.
+      const config = { SEARCH_TIMEOUT_MS: 30, BROWSER_TASK_TIMEOUT_MS: 10 } as any;
+      const out = await performSearch(Array.from({ length: 12 }, (_, i) => `q${i}`), config);
+
+      // Every query ran, including ones dispatched after the budget would have expired.
+      expect(startedAt).toHaveLength(12);
+      expect(Math.max(...startedAt)).toBeGreaterThan(40);
+      expect([...out.values()].every(v => v.length > 0)).toBe(true);
+    });
+
+    it('stops pulling new queries once the caller aborts', async () => {
+      vi.mocked(getMaxWorkers).mockReturnValue(2);
+      const ac = new AbortController();
+      let started = 0;
+      vi.mocked(runWorkerSearch).mockImplementation(async () => {
+        started++;
+        if (started === 3) ac.abort();
+        return mockSearchResults;
+      });
+
+      await expect(
+        performSearch(Array.from({ length: 40 }, (_, i) => `q${i}`), undefined, ac.signal),
+      ).rejects.toThrow('Aborted');
+
+      // Not all 40 were dispatched — the lanes stopped pulling work.
+      expect(started).toBeLessThan(40);
+    });
+  });
 });

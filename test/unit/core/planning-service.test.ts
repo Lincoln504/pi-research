@@ -296,6 +296,33 @@ describe('PlanningService', () => {
       await expect(service.generatePlan(BASE_OPTIONS)).rejects.toThrow('unauthorized');
     });
 
+    it('caps the ROUND-1 plan to what the browser pool can serve', async () => {
+      // This is the burst that caused the incident: the coordinator's round-1 plan is where
+      // 5 researchers x 20 queries = 100 came from, and 100 queries dispatched into a
+      // 6-worker pool spent their budget queueing rather than searching. The coordinator
+      // path needs the same pool-derived cap as the router path.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(JSON.stringify({
+        action: 'delegate',
+        researchers: Array.from({ length: 5 }, (_, i) => ({
+          id: `1.${i + 1}`, name: `R${i}`, goal: 'g',
+          queries: Array.from({ length: 20 }, (_, q) => `r${i}-q${q}`),
+        })),
+        allQueries: [],
+      })));
+      const config = { ...getConfig('/test/cwd'), WORKER_THREADS: 6 };
+
+      const plan = await service.generatePlan({
+        ...BASE_OPTIONS,
+        complexity: 3 as const,
+        config,
+      } as any);
+
+      // 6 workers -> 60 safe burst / 5 researchers = 12 each, so 60 total rather than 100.
+      expect(plan.action).toBe('delegate');
+      for (const r of plan.researchers!) expect(r.queries).toHaveLength(12);
+      expect(plan.allQueries).toHaveLength(60);
+    });
+
     it('returns a valid plan when LLM returns well-formed JSON', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(2)));
       const plan = await service.generatePlan(BASE_OPTIONS);
@@ -895,6 +922,89 @@ describe('PlanningService', () => {
         const ctx = vi.mocked(completeSimple).mock.calls.at(-1)![1] as { systemPrompt: string };
         expect(ctx.systemPrompt.match(PLACEHOLDER) ?? [], `complexity ${complexity}`).toEqual([]);
       }
+    });
+
+    it('advertises the POOL-derived query budget, not the level ceiling', async () => {
+      // The prompt has to ask for what the browser pool can actually serve. Level 3's
+      // ceiling is 20 queries per researcher (5 x 20 = the 100-query burst that, measured
+      // against 6 workers, spent its budget queueing). With a 4-worker pool the effective
+      // budget is 8 — and the model must be told 8, or it plans 20 and the excess is
+      // silently trimmed after the fact.
+      const real = readPrompt('system-lead-router.md');
+      vi.mocked(loadPrompt).mockReturnValue(real);
+      const config = { ...getConfig('/test/cwd'), WORKER_THREADS: 4 };
+
+      await svc.updatePlanForRound({
+        sessionId: 'budget-session',
+        reports: new Map([['1.1', 'Report text.']]),
+        round: 2,
+        query: 'test query',
+        complexity: 3 as const,
+        config,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+      } as any);
+
+      const sys = (vi.mocked(completeSimple).mock.calls.at(-1)![1] as { systemPrompt: string }).systemPrompt;
+      expect(sys).toContain('(8 per researcher)');
+      expect(sys).not.toContain('(20 per researcher)');
+    });
+
+    it('caps a returned plan to the pool-derived budget, not just the prompt', async () => {
+      // Advertising the right budget is not enough — a model that ignores it and returns
+      // 20 queries each must still be trimmed, or the burst is oversized regardless of what
+      // the prompt asked for.
+      vi.mocked(loadPrompt).mockReturnValue('router {{query_budget}}');
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(JSON.stringify({
+        action: 'delegate',
+        researchers: Array.from({ length: 5 }, (_, i) => ({
+          id: `2.${i + 1}`, name: `R${i}`, goal: 'g',
+          queries: Array.from({ length: 20 }, (_, q) => `r${i}-q${q}`),
+        })),
+        allQueries: [],
+      })));
+      const config = { ...getConfig('/test/cwd'), WORKER_THREADS: 4 };
+
+      const plan = await svc.updatePlanForRound({
+        sessionId: 'cap-session',
+        reports: new Map([['1.1', 'Report text.']]),
+        round: 2,
+        query: 'test query',
+        complexity: 3 as const,
+        config,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+      } as any);
+
+      expect(plan.action).toBe('delegate');
+      // 4 workers -> 40 safe burst / 5 researchers = 8 each, so 40 total rather than 100.
+      for (const r of plan.researchers!) expect(r.queries).toHaveLength(8);
+      expect(plan.allQueries).toHaveLength(40);
+    });
+
+    it('advertises the full level budget when the pool is large enough', async () => {
+      // The pool derivation is a cap, never an inflation — a big pool restores the ceiling
+      // but must not exceed it.
+      const real = readPrompt('system-lead-router.md');
+      vi.mocked(loadPrompt).mockReturnValue(real);
+      const config = { ...getConfig('/test/cwd'), WORKER_THREADS: 10 };
+
+      await svc.updatePlanForRound({
+        sessionId: 'budget-session-2',
+        reports: new Map([['1.1', 'Report text.']]),
+        round: 2,
+        query: 'test query',
+        complexity: 3 as const,
+        config,
+        model: STUB_MODEL,
+        modelRegistry: MOCK_MODEL_REGISTRY,
+        cwd: '/test/cwd',
+      } as any);
+
+      const sys = (vi.mocked(completeSimple).mock.calls.at(-1)![1] as { systemPrompt: string }).systemPrompt;
+      expect(sys).toContain('(20 per researcher)');
     });
 
     it('loads the router template when routing and the synthesizer template when synthesizing', async () => {

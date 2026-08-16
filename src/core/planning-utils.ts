@@ -19,6 +19,7 @@ import {
   MAX_QUERIES_PER_RESEARCHER_LEVEL_1,
   MAX_QUERIES_PER_RESEARCHER_LEVEL_2,
   MAX_QUERIES_PER_RESEARCHER_LEVEL_3,
+  SAFE_QUERIES_PER_WORKER,
 } from '../constants.ts';
 
 /**
@@ -206,13 +207,45 @@ export function buildFallbackCoordinatorPlan(serviceName: string, _rawText: stri
 /**
  * Cap researcher queries to stay within budget
  */
-export function capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, serviceName: string): ResearchPlan {
-  const budget = getQueryBudget(complexity);
+/**
+ * Per-researcher query budget, capped to what the configured browser pool can serve.
+ *
+ * `getQueryBudget` is the ceiling the complexity level asks for; this is what the pool can
+ * actually work through in one round. Level 3 asks for 5 researchers x 20 queries = 100,
+ * and a default pool of 6 workers cannot serve that in a sensible round — measured, a
+ * 100-query burst against 6 workers spent its whole budget queueing and returned a
+ * fraction of its results. Deriving the budget from `WORKER_THREADS` means a bigger pool
+ * genuinely buys more search and a small one is never oversubscribed, instead of the
+ * mismatch being silently absorbed by timeouts.
+ *
+ * `workerThreads` omitted (tests, callers without config) keeps the raw level budget.
+ */
+export function getEffectiveQueryBudget(complexity: 1 | 2 | 3, workerThreads?: number): number {
+  const base = getQueryBudget(complexity);
+  if (!workerThreads || workerThreads <= 0) return base;
+  const safeBurst = SAFE_QUERIES_PER_WORKER * workerThreads;
+  // At least one query per researcher: a researcher with none cannot run at all, which is
+  // a worse outcome than a slightly oversubscribed burst on a one-worker pool.
+  return Math.max(1, Math.min(base, Math.floor(safeBurst / getTeamSize(complexity))));
+}
+
+export function capResearcherQueries(
+  plan: ResearchPlan,
+  complexity: 1 | 2 | 3,
+  serviceName: string,
+  workerThreads?: number,
+): ResearchPlan {
+  const budget = getEffectiveQueryBudget(complexity, workerThreads);
 
   // Hard caps per round - based on actual maximum possible queries
   // Level 1: 2 researchers x 10 queries = 20 maximum
   // Level 2: 3 researchers x 15 queries = 45 maximum
   // Level 3: 5 researchers x 20 queries = 100 maximum
+  // Level ceiling only. A pool-derived cap here would be dead code: researchers are sliced
+  // to `getTeamSize(complexity)` below and each is capped to
+  // `floor(SAFE_QUERIES_PER_WORKER x workerThreads / teamSize)`, so the round total is
+  // already bounded by the pool budget before this runs. Verified by mutation — removing a
+  // pool-aware cap here failed no test, because it can never bind.
   const ROUND_HARD_CAP = complexity === 1 ? 20
     : complexity === 2 ? 45
     : 100;

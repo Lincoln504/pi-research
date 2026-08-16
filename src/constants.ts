@@ -170,6 +170,18 @@ export const MAX_SCRAPE_CONTENT_CHARS_PER_DOC = 500_000;
 export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
 
 /** Hard cap on search queries per researcher, enforced after LLM planning */
+/**
+ * Queries one browser worker can be expected to serve in a single round's search burst.
+ *
+ * The burst is dispatched through `WORKER_THREADS` lanes, so a burst of
+ * `SAFE_QUERIES_PER_WORKER x WORKER_THREADS` takes roughly ten sequential searches per lane
+ * to drain. Above that a round spends most of its wall-clock searching before a single
+ * researcher starts reading. Used to derive the effective per-researcher query budget so a
+ * complexity level cannot ask for more search than the configured pool can work through —
+ * a level-3 plan at the default pool asked for 100 queries against 6 workers.
+ */
+export const SAFE_QUERIES_PER_WORKER = 10;
+
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 10;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 15;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 20;

@@ -104,7 +104,7 @@ export interface IPlanningService extends IService {
   getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string;
   getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string;
   getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3, maxTeamSize: number): string;
-  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, serviceName: string): ResearchPlan;
+  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, serviceName: string, workerThreads?: number): ResearchPlan;
   parseJsonPlan(text: string): ResearchPlan;
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
   clearPlanningState(sessionId?: string): void;

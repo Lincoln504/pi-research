@@ -17,6 +17,7 @@ import {
   buildFallbackCoordinatorPlan,
   capResearcherQueries,
   generateResearchers,
+  getEffectiveQueryBudget,
 } from '../../../src/core/planning-utils.ts';
 
 import {
@@ -360,6 +361,45 @@ describe('buildFallbackCoordinatorPlan', () => {
 // capResearcherQueries
 // ---------------------------------------------------------------------------
 
+/**
+ * The per-researcher budget has to answer to the browser pool, not just the complexity
+ * level. Level 3 asks for 5 researchers x 20 queries = 100; a default pool of 6 workers
+ * cannot work through that in one round. Measured on a real run, a 100-query burst against
+ * 6 workers spent its budget queueing and returned a fraction of its results.
+ */
+describe('getEffectiveQueryBudget', () => {
+  it('keeps the level ceiling when the pool is big enough to serve it', () => {
+    // 10 workers x 10 = 100 safe burst; level 3 wants 5 x 20 = 100. Exactly fits.
+    expect(getEffectiveQueryBudget(3, 10)).toBe(20);
+  });
+
+  it('cuts the budget to what a smaller pool can serve', () => {
+    // 6 workers -> 60 safe burst / 5 researchers = 12 each (down from 20).
+    expect(getEffectiveQueryBudget(3, 6)).toBe(12);
+    // 4 workers -> 40 / 5 = 8 each.
+    expect(getEffectiveQueryBudget(3, 4)).toBe(8);
+  });
+
+  it('never raises a level budget above its own ceiling', () => {
+    // A huge pool must not turn level 1 into a level 3 burst — the level is still a cap.
+    expect(getEffectiveQueryBudget(1, 10)).toBe(getQueryBudget(1));
+    expect(getEffectiveQueryBudget(2, 10)).toBe(getQueryBudget(2));
+  });
+
+  it('always leaves at least one query per researcher', () => {
+    // A researcher with zero queries cannot run at all — worse than a slightly
+    // oversubscribed burst on a one-worker pool.
+    expect(getEffectiveQueryBudget(3, 1)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('falls back to the raw level budget when no pool size is supplied', () => {
+    for (const c of [1, 2, 3] as const) {
+      expect(getEffectiveQueryBudget(c)).toBe(getQueryBudget(c));
+      expect(getEffectiveQueryBudget(c, 0)).toBe(getQueryBudget(c));
+    }
+  });
+});
+
 describe('capResearcherQueries', () => {
   const svc = 'test-service';
 
@@ -371,6 +411,35 @@ describe('capResearcherQueries', () => {
       queries: Array.from({ length: queryCount }, (_, i) => `query-${id}-${i}`),
     };
   }
+
+  it('caps the whole round to what the pool can serve when given a pool size', () => {
+    // Five researchers each asking for a full level-3 budget is 100 queries — the burst
+    // that, measured against 6 workers, spent its budget queueing and returned a fraction
+    // of its results. The per-researcher cap is what bounds the round: 5 x 12 = 60.
+    const plan = {
+      action: 'delegate' as const,
+      researchers: Array.from({ length: 5 }, (_, i) => makeResearcher(`1.${i}`, 20)),
+      allQueries: [],
+    };
+    const capped = capResearcherQueries(plan, 3, svc, 6);
+    const total = capped.researchers!.reduce((n, r) => n + r.queries.length, 0);
+    expect(total).toBe(60);
+    for (const r of capped.researchers!) expect(r.queries.length).toBe(12);
+    // allQueries must be rebuilt from the capped set, not the original 100.
+    expect(capped.allQueries).toHaveLength(60);
+  });
+
+  it('leaves the round at the level cap when no pool size is supplied', () => {
+    // Backwards compatible: callers without config keep the old behaviour exactly.
+    const plan = {
+      action: 'delegate' as const,
+      researchers: Array.from({ length: 5 }, (_, i) => makeResearcher(`1.${i}`, 20)),
+      allQueries: [],
+    };
+    const capped = capResearcherQueries(plan, 3, svc);
+    const total = capped.researchers!.reduce((n, r) => n + r.queries.length, 0);
+    expect(total).toBe(100);
+  });
 
   it('renumbers duplicate researcher ids so neither report is silently overwritten', () => {
     // Two researchers sharing id "1.1" would collide on the `${round}.${id}` report key
