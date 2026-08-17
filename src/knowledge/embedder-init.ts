@@ -73,14 +73,31 @@ export async function warmupPipeline(
   useCache: boolean
 ): Promise<{ dummy: any; success: boolean; error?: Error }> {
   try {
-    const dummy = await withTimeout(
-      pipeline('warmup', { 
-        pooling: poolingMode as any, 
-        normalize: false,
-        ...(useCache === false ? { use_cache: false } : {}),
-      }),
-      20_000,
-      'Model warmup timed out after 20000ms.'
+    // Inside runCapturingStderr for the same reason the load above is, and for one
+    // more: warmup is the FIRST inference, so it is where a GPU that cannot serve the
+    // model actually fails. transformers.js reports that failure by printing
+    // "An error occurred during model execution: ..." plus a dump of the input tensors
+    // to console.error BEFORE rejecting — and this call was the only pipeline
+    // invocation in the module left unwrapped, so that dump went straight to the
+    // user's terminal. It is pure noise there: the rejection is caught two frames up,
+    // the embedder falls back to CPU, and the run continues to completion. What the
+    // user saw was a multi-line raw error for something that had already been handled.
+    //
+    // The load's capture ends before this runs, so wrapping the caller is not enough;
+    // and the server's captureStdio around startServer() covers only the FIRST
+    // initialization, not the re-initialization that follows every idle-timeout
+    // teardown — which is exactly when this was observed (2026-08-16, the fourth
+    // init of the session).
+    const dummy = await logger.runCapturingStderr(async () =>
+      withTimeout(
+        pipeline('warmup', {
+          pooling: poolingMode as any,
+          normalize: false,
+          ...(useCache === false ? { use_cache: false } : {}),
+        }),
+        20_000,
+        'Model warmup timed out after 20000ms.'
+      ),
     );
     return { dummy, success: true };
   } catch (warmupErr) {
@@ -402,16 +419,25 @@ export async function handleWebGPUWarmupError(
   initializationTimeoutMs: number,
   useCache: boolean
 ): Promise<{ success: boolean; pipeline?: FeatureExtractionPipeline; error?: Error; dummy?: any }> {
-  const isValidationError = warmupErr.message.toLowerCase().includes('validation');
-  
   markWebGpuFallback();
-  
-  if (isValidationError) {
-    logger.warn('[embedder] WebGPU validation error during warmup — falling back to CPU');
-    logger.debug('[embedder] Validation error details:', warmupErr.message);
-  } else {
-    logger.warn('[embedder] WebGPU OOM during warmup — falling back to CPU');
-  }
+
+  // Deliberately does NOT try to name the cause from this error's text. The split it
+  // replaced ("validation error" vs "OOM", chosen on whether the message contains
+  // "validation") reported the SYMPTOM as the diagnosis, and got it backwards in the
+  // case that matters: when the GPU is out of VRAM, Dawn raises
+  // VK_ERROR_OUT_OF_DEVICE_MEMORY through its device-error callback — native stderr,
+  // not this promise — and CreateBuffer then hands back an invalid buffer. What
+  // reaches JS is the first thing to *use* that buffer, i.e.
+  // "[Invalid Buffer] ... While calling CreateBindGroup", which contains the word
+  // "validation" and so was logged as a validation error. A 2026-08-16 run read
+  // exactly that way in the log while eighteen vkAllocateMemory failures sat directly
+  // above it. The native lines are captured into this same log, so point at them
+  // rather than paraphrasing them wrongly.
+  logger.warn(
+    '[embedder] WebGPU error during warmup — falling back to CPU. ' +
+    'The underlying cause (commonly VRAM exhaustion) is in the native Dawn/ONNX output logged just above this line.',
+  );
+  logger.debug('[embedder] Warmup error details:', warmupErr.message);
   
   // Clean up
   if (pipeline) {
