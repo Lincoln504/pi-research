@@ -5,11 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-08-17
 
-An investigation into prompt caching: how pi and each provider implement it, whether
-pi-research's own prompts are shaped so it can work, and what it was actually doing.
-Instrumented first, then fixed against the measurements.
+Minor, because the research lead is now two roles rather than one call doing both jobs:
+a **router** that decides each round whether to continue, and a **synthesizer** that
+writes the report once, at the end, under a budget derived from the model's context
+window. That started as an investigation into prompt caching — how pi and each provider
+implement it, whether pi-research's own prompts are shaped so it can work, and what it
+was actually doing — which was instrumented first and then fixed against the
+measurements, and which is what showed that the evaluator's cost was repetition rather
+than a caching misconfiguration.
+
+The rest is the largest correctness batch in the 1.3 line: search bursts no longer
+discard their own tail, browser task deadlines and durations stop charging queue wait to
+the work, and a run's round accounting, health verdicts and lock waits were each wrong in
+a way the logs had been recording for months.
 
 ### Added
 
