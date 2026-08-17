@@ -317,8 +317,8 @@ export class PlanningService implements IPlanningService {
     return _getComplexityGuidance(complexity, maxTeamSize, queryBudget);
   }
 
-  getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string {
-    return _getEvaluatorComplexityGuidance(complexity);
+  getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3, researchRounds: number): string {
+    return _getEvaluatorComplexityGuidance(complexity, researchRounds);
   }
 
   getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3, maxTeamSize: number): string {
@@ -486,9 +486,15 @@ export class PlanningService implements IPlanningService {
           logger.warn('[PlanningService] Coordinator produced no runnable researchers (empty queries); using single-researcher fallback');
           plan = this.capResearcherQueries(this.buildFallbackCoordinatorPlan(responseText, query), complexity, this.name);
       }
-      if (plan.action !== 'synthesize') {
-          plan.action = 'delegate';
-      }
+      // Round 1 always delegates. `action` is optional in the parsed schema and the
+      // coordinator prompt neither documents nor asks for one, so any value here is
+      // the model volunteering — and the only value that changes anything is
+      // "synthesize", which asks to ship an answer written before a single source was
+      // read. With researchers present it slipped past the emptiness guard above, ended
+      // the loop at round 1, and became the final report: no queries, no scrapes, no
+      // citations, from a tool whose entire contract is grounded research. Nothing
+      // downstream wants a coordinator synthesis, so it is not honoured here.
+      plan.action = 'delegate';
       this.currentPlans.set(sessionId, plan);
 
       return plan;
@@ -566,7 +572,6 @@ export class PlanningService implements IPlanningService {
     // the base per-complexity value when the caller doesn't supply one, so
     // callers that don't pass it (other/test callers) keep prior behavior.
     const maxRounds = options.maxRounds ?? _getMaxRounds(complexity);
-    const complexityGuidance = this.getEvaluatorComplexityGuidance(complexity);
     // The round budget counts ITERATIONS, and the last one only ever synthesizes — the
     // orchestrator leaves the loop before dispatching anyone. Phase guidance is about
     // how much RESEARCH is left, so it must be computed against the rounds that can
@@ -589,6 +594,9 @@ export class PlanningService implements IPlanningService {
     // budget. Anyone re-tuning this ladder should know the unsteered path no longer
     // exercises it.
     const researchRounds = Math.max(1, maxRounds - 1);
+    // Both of these are phrased against researchRounds, and must be: they land in the
+    // same prompt, and a router shown two different round budgets believes the larger.
+    const complexityGuidance = this.getEvaluatorComplexityGuidance(complexity, researchRounds);
     const roundPhaseGuidance = this.getRoundPhaseGuidance(round, researchRounds, complexity, maxTeamSize);
 
     // Inject steering if present

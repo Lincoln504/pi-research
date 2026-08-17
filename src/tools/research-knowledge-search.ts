@@ -54,6 +54,7 @@ import { loadPrompt } from '../core/llm/prompts.ts';
 import { formatParentContext } from '../orchestration/session-context.ts';
 import { getConfig, type ConfigInterface, type Config } from '../config.ts';
 import { createKnowledgeSearchPanel } from '../tui/knowledge-search-panel.ts';
+import { isCancellation } from '../utils/cancellation.ts';
 
 // ---------------------------------------------------------------------------
 // Phase 1: Tool Parameters
@@ -983,7 +984,6 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         return buildSteeringResult(result, urls);
       } catch (error) {
         const durationMs = Date.now() - startTime;
-        const msg = error instanceof Error ? error.message : String(error);
 
         // A CANCELLED search is not an empty store. Reporting the miss string here
         // told the calling agent, definitively, that the knowledge store has
@@ -991,7 +991,7 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         // the very work the user just interrupted. Propagate the abort instead;
         // the run is ending either way. (Same misclassification as the search
         // layer's "browser workers may be unavailable" on Ctrl-C.)
-        if (signal?.aborted || (error instanceof Error && error.name === 'AbortError') || /^(aborted|research (aborted|cancelled))$/i.test(msg)) {
+        if (isCancellation(error, signal)) {
           metrics.observe('research_knowledge_search_duration_ms', durationMs, { status: 'cancelled' });
           metrics.increment('research_knowledge_search_total', 1, { status: 'cancelled' });
           logger.debug('[research-knowledge-search] Cancelled mid-search — propagating rather than reporting an empty store.');

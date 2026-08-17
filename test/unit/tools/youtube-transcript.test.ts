@@ -172,6 +172,36 @@ describe('tools/youtube-transcript', () => {
     expect((res as any).content[0].text).toMatch(/YouTube Transcript Failed/);
   });
 
+  it('propagates a cancellation instead of blaming YouTube bot-protection', async () => {
+    // "never throws to the agent" is the right contract for a FAILURE and the wrong
+    // one for a Ctrl-C. The failure text names network trouble and bot-protection —
+    // neither of which happened — and then tells the agent to "continue with the rest
+    // of your research", which is the opposite of what the user just asked for.
+    const controller = new AbortController();
+    youtubeTranscriptCommand.mockImplementationOnce(async () => {
+      controller.abort();
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+    const tool = createYoutubeTranscriptTool({ ctx, tracker: new ToolUsageTracker(createDefaultToolLimits()) });
+
+    await expect(
+      tool.execute('id', { urls: ['https://youtu.be/dQw4w9WgXcQ'] }, controller.signal, undefined as any, ctx),
+    ).rejects.toThrow(/aborted/i);
+  });
+
+  it('still wraps a genuine failure that happens to arrive while a signal exists', async () => {
+    // The guard keys on the abort, not on the mere presence of a signal.
+    const controller = new AbortController();
+    youtubeTranscriptCommand.mockRejectedValueOnce(new Error('boom'));
+    const tool = createYoutubeTranscriptTool({ ctx, tracker: new ToolUsageTracker(createDefaultToolLimits()) });
+
+    const res = await tool.execute('id', { urls: ['https://youtu.be/dQw4w9WgXcQ'] }, controller.signal, undefined as any, ctx);
+
+    expect((res as any).details.error).toBe('boom');
+  });
+
   it('passes config-derived options through to the backend', async () => {
     const config = { YOUTUBE_TRANSCRIPT_MAX_VIDEOS: 3, YOUTUBE_TRANSCRIPT_TIMEOUT_MS: 12345, YOUTUBE_TRANSCRIPT_LANG: 'de' } as any;
     const tool = createYoutubeTranscriptTool({ ctx, tracker: new ToolUsageTracker(createDefaultToolLimits()), config });

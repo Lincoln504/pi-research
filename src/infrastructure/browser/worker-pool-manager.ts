@@ -261,10 +261,15 @@ export class WorkerPoolManager implements IService {
                             return;
                         }
                         this.consecutiveErrors++;
-                        metrics.increment('browser_pool_errors_total', 1);
+                        // Session-scoped on purpose. This handler is installed on the pool,
+                        // and the pool is built lazily inside whichever research run first
+                        // needed a browser — so the run-registry context every later
+                        // invocation inherits is that FIRST run's, long after it was
+                        // discarded. Pool health is process state, not run accounting.
+                        metrics.session.increment('browser_pool_errors_total', 1);
                         logger.error('[WorkerPoolManager] Cluster Error:', e);
                         if (this.consecutiveErrors >= 3) {
-                            metrics.increment('browser_pool_unhealthy_events_total', 1);
+                            metrics.session.increment('browser_pool_unhealthy_events_total', 1);
                             logger.error(`[WorkerPoolManager] Worker pool may be unhealthy: ${this.consecutiveErrors} consecutive errors. Consider restarting.`);
                             if (this.onPoolError) {
                                 this.onPoolError(e, this.consecutiveErrors);
@@ -437,7 +442,9 @@ export class WorkerPoolManager implements IService {
         // shutdown (and a subsequent re-init) happens while this timer is pending, the
         // generation no longer matches and the timer must NOT touch the new pool's state.
         const myGen = this.generation;
-        metrics.increment('browser_pool_auto_recoveries_total', 1);
+        // Session-scoped: every caller of schedulePoolReset is one of the pool's own
+        // lifecycle handlers, which carry the async context of pool construction.
+        metrics.session.increment('browser_pool_auto_recoveries_total', 1);
         logger.info('[WorkerPoolManager] Pool scheduled for auto-recovery; next ensurePool() will wait for old pool destruction.');
         // Destroy the old pool asynchronously after the event handler returns.
         const t = setTimeout(async () => {

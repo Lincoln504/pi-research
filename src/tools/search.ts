@@ -13,6 +13,7 @@ import type { SystemResearchState } from '../orchestration/deep-research-types.t
 import { logger } from '../logger.ts';
 import { type Config, getConfig } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
+import { isCancellation } from '../utils/cancellation.ts';
 import { tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 
 export function createSearchTool(options: {
@@ -134,6 +135,12 @@ export function createSearchTool(options: {
         };
       } catch (error) {
         const elapsed = Date.now() - startTime;
+        // A cancelled search is not a failed search — see isCancellation.
+        if (isCancellation(error, signal)) {
+          metrics.observe('tool_search_duration_ms', elapsed, { status: 'cancelled' });
+          metrics.increment('tool_search_calls_total', 1, { status: 'cancelled' });
+          throw error;
+        }
         metrics.observe('tool_search_duration_ms', elapsed, { status: 'error' });
         metrics.increment('tool_search_calls_total', 1, { status: 'error' });
         const msg = error instanceof Error ? error.message : String(error);

@@ -24,6 +24,7 @@ import { cacheScrapedContent, registerScrapedLinks, registerTranscribedLinks, re
 import { type Config, getConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { isCancellation } from '../utils/cancellation.ts';
 
 export function createYoutubeTranscriptTool(options: {
   ctx: ExtensionContext;
@@ -158,6 +159,12 @@ export function createYoutubeTranscriptTool(options: {
 
         return result;
       } catch (error) {
+        // A cancelled batch is not bot-protection — see isCancellation. "Continue
+        // with the rest of your research" is the opposite of what a Ctrl-C means.
+        if (isCancellation(error, signal)) {
+          metrics.increment('tool_youtube_transcript_calls_total', 1, { status: 'cancelled' });
+          throw error;
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         logger.error(`[youtube_transcript tool] Failed: ${errorMsg}`);
         metrics.increment('tool_youtube_transcript_calls_total', 1, { status: 'error' });

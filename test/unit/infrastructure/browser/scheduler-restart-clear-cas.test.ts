@@ -29,7 +29,7 @@ vi.mock('../../../../src/logger.ts', () => ({
   logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), info: vi.fn() },
 }));
 vi.mock('../../../../src/utils/metrics.ts', () => ({
-  metrics: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() },
+  metrics: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn(), session: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() }, },
 }));
 vi.mock('../../../../src/core/service-registry.ts', () => ({
   getService: vi.fn(async (name: string, _ctx: any, container: any) => {

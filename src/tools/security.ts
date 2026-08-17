@@ -11,6 +11,7 @@ import { searchSecurityDatabases } from '../security/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { getMaxGatheringCalls } from '../constants.ts';
 import { metrics } from '../utils/metrics.ts';
+import { isCancellation } from '../utils/cancellation.ts';
 import type { SecuritySearchParams } from '../security/types.ts';
 
 const MAX_DESCRIPTION_CHARS = 300;
@@ -171,6 +172,14 @@ export function createSecuritySearchTool(options: {
         results = await searchSecurityDatabases(searchParams, signal);
       } catch (error) {
         const duration = Date.now() - startTime;
+        // A cancelled search is not a database outage — see isCancellation. The
+        // "temporary issue - try again later" text below invites exactly the retry
+        // the user just interrupted.
+        if (isCancellation(error, signal)) {
+          metrics.observe('tool_security_search_duration_ms', duration, { status: 'cancelled' });
+          metrics.increment('tool_security_search_calls_total', 1, { status: 'cancelled' });
+          throw error;
+        }
         metrics.observe('tool_security_search_duration_ms', duration, { status: 'error' });
         metrics.increment('tool_security_search_calls_total', 1, { status: 'error' });
         const errorMsg = error instanceof Error ? error.message : String(error);

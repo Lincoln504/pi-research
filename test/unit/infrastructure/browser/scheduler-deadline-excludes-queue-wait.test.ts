@@ -22,7 +22,7 @@ vi.mock('../../../../src/utils/error-tracker.ts', () => ({
   errorTracker: { trackError: vi.fn() },
 }));
 vi.mock('../../../../src/utils/metrics.ts', () => ({
-  metrics: { increment: vi.fn(), observe: vi.fn(), setGauge: vi.fn() },
+  metrics: { increment: vi.fn(), observe: vi.fn(), setGauge: vi.fn(), session: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() }, },
 }));
 
 // One worker slot, so the second and later tasks genuinely queue behind the first.

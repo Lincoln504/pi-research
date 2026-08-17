@@ -165,9 +165,6 @@ export class DeepResearchOrchestrator {
     // observer events already fired, not a result to reuse. Final synthesis runs either
     // way, below.
     let routerChoseSynthesis = false;
-    // The round-1 COORDINATOR plan when it answered directly instead of delegating. Unlike
-    // a router decision this one carries the finished report, so it is used as-is.
-    let coordinatorSynthesisPlan: ResearchPlan | null = null;
     // Highest round number handed to observer.onRoundStart. The final synthesis
     // announces itself too, and it must not repeat or skip: `round_start` is an SDK
     // event and a consumer counting rounds reads the gaps.
@@ -300,19 +297,12 @@ export class DeepResearchOrchestrator {
         if (plan.action === 'synthesize' || this.currentRound >= maxRounds) {
             logger.log(`[DeepOrchestrator] Synthesis phase reached at Round ${this.currentRound} ${this.elapsed()}`);
             if (plan.action === 'synthesize') {
-                if (this.currentRound === 1) {
-                    // Round 1's plan comes from the COORDINATOR, which may legitimately
-                    // answer the query directly without delegating. That plan carries a
-                    // real report, written by a call that had the query in front of it —
-                    // there is nothing to synthesize from (no researchers ran), so it
-                    // ships as-is, exactly as before.
-                    coordinatorSynthesisPlan = plan;
-                } else {
-                    // Round 2+ comes from the ROUTER, which decides from coverage digests
-                    // and has never seen a finding. Its decision ends the loop; the report
-                    // is written by the terminal synthesis below.
-                    routerChoseSynthesis = true;
-                }
+                // Only the ROUTER (round 2+) can reach this: generatePlan pins round 1 to
+                // 'delegate' so a coordinator can never end the run before any source is
+                // read. The router decides from coverage digests and has never seen a
+                // finding, so its decision ends the loop but the report is written by the
+                // terminal synthesis below.
+                routerChoseSynthesis = true;
                 observer?.onEvaluationDecision?.('synthesize', plan, this.currentRound);
             }
             break;
@@ -491,10 +481,9 @@ export class DeepResearchOrchestrator {
       // The verdict does not depend on the synthesis text — it depends on whether there
       // was any source material — so nothing is lost by asking first.
       //
-      // The failed-researcher condition keeps the designed immediate-synthesis path
-      // intact: a coordinator that chose to answer directly (no delegation, no failures)
-      // is not a failed run. Note that path is currently unreachable — see the
-      // coordinatorSynthesisPlan comment above.
+      // Gated on failures, not merely on the absence of reports: a run cancelled before
+      // any researcher finished has no reports and no failures, and must not be reported
+      // as having produced nothing groundable.
       const synthesisCheckService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       const hasReports = synthesisCheckService.hasReports(researchId);
       const failedIds = getFailedResearchers(this.options.sessionId, researchId);
@@ -515,7 +504,7 @@ export class DeepResearchOrchestrator {
       // 'eval' box here would leave a perpetually-"evaluating" slice that nothing ever
       // completes, and re-emit start/progress after the decision. Symmetric with the
       // decision guard below.
-      if (!routerChoseSynthesis && coordinatorSynthesisPlan === null) {
+      if (!routerChoseSynthesis) {
         // The synthesis pass announces the round it is synthesizing AT, which is the
         // one the loop stopped on — not `maxRounds + 1`, a number outside the budget
         // every other event is expressed in. That was harmless while the loop
@@ -555,7 +544,7 @@ export class DeepResearchOrchestrator {
       const finalSteeringTexts = getSteeringMessages(this.options.sessionId).map(m => m.text);
 
       const synthesisServiceFinal = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-      const finalReport: ResearchPlan = coordinatorSynthesisPlan ?? await planningService.updatePlanForRound({
+      const finalReport: ResearchPlan = await planningService.updatePlanForRound({
           sessionId: researchId,
           query: query,
           complexity,
@@ -580,7 +569,7 @@ export class DeepResearchOrchestrator {
       // router chose to finish inside the loop, onEvaluationDecision('synthesize', ...)
       // was already fired at that point; emitting again would double-count synthesis for
       // observers (e.g. the TUI progress bar).
-      if (!routerChoseSynthesis && coordinatorSynthesisPlan === null) {
+      if (!routerChoseSynthesis) {
           // Same round the matching onEvaluationStart above used — see there.
           observer?.onEvaluationDecision?.('synthesize', finalReport, this.currentRound);
       }

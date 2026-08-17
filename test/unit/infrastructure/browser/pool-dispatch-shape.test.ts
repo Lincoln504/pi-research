@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WorkerChoiceStrategies } from 'poolifier';
 
 vi.mock('../../../../src/utils/metrics.ts', () => ({
-  metrics: { increment: vi.fn(), observe: vi.fn(), setGauge: vi.fn() },
+  metrics: { increment: vi.fn(), observe: vi.fn(), setGauge: vi.fn(), session: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() }, },
 }));
 
 import {

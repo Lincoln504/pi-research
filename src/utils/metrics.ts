@@ -243,6 +243,32 @@ class SessionMetrics {
     return this.getActive().measure(name, action, labels);
   }
 
+  /**
+   * Emit API that ALWAYS targets the session registry, ignoring any active run
+   * context.
+   *
+   * For process-lifetime callbacks that happen to be *registered* during a run.
+   * AsyncLocalStorage resolves at emit time from the async resource that fired,
+   * and for a listener installed on a long-lived emitter that resource is the
+   * emitter itself — created, for every lazily-initialized subsystem here, inside
+   * whichever run first needed it. So a worker-pool error handler installed during
+   * run 1 keeps writing into run 1's registry for the rest of the process: those
+   * counts disappear from every later run's summary (the registry was discarded
+   * when the run ended) and the dead registry stays reachable through the closure.
+   *
+   * Use this only where the emission is genuinely process-scoped. Anything that
+   * describes work a run asked for belongs in the run registry, which is what the
+   * plain emit methods above give you.
+   */
+  public readonly session = {
+    increment: (name: string, value: number = 1, labels?: Labels): void =>
+      this._session.increment(name, value, labels),
+    setGauge: (name: string, value: number, labels?: Labels): void =>
+      this._session.setGauge(name, value, labels),
+    observe: (name: string, value: number, labels?: Labels): void =>
+      this._session.observe(name, value, labels),
+  };
+
   // ── Session-level read API ─────────────────────────────────────────────
 
   /** Snapshot of the session registry (infrastructure / cross-run metrics). */

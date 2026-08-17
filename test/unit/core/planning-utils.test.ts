@@ -124,27 +124,43 @@ describe('getComplexityGuidance', () => {
 // ---------------------------------------------------------------------------
 
 describe('getEvaluatorComplexityGuidance', () => {
-  it('returns non-empty string for level 1', () => {
-    const result = getEvaluatorComplexityGuidance(1);
+  it.each([1, 2, 3] as const)('returns non-empty guidance for level %i', (level) => {
+    const result = getEvaluatorComplexityGuidance(level, 2);
     expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
   });
 
-  it('returns non-empty string for level 2', () => {
-    const result = getEvaluatorComplexityGuidance(2);
-    expect(typeof result).toBe('string');
-    expect(result.length).toBeGreaterThan(0);
+  it('states the caller\'s research-round budget, not the complexity table\'s', () => {
+    // This text is injected into the SAME prompt as getRoundPhaseGuidance, which is
+    // phrased against researchRounds (= maxRounds - 1, because the last iteration only
+    // synthesizes). The level-3 branch used to hardcode MAX_ROUNDS_LEVEL_3, so the router
+    // was told "Level 3 has 3 rounds available" a few lines above "Round 1 of 2" — and the
+    // gap widened by another round every time steering extended the budget. A model shown
+    // two budgets calibrates against the larger one and defers synthesis it will never get
+    // to make.
+    const result = getEvaluatorComplexityGuidance(3, 2);
+    expect(result).toContain('2 research rounds in total');
+    expect(result).not.toContain(`Level 3 has ${MAX_ROUNDS_LEVEL_3} rounds available`);
   });
 
-  it('returns non-empty string for level 3', () => {
-    const result = getEvaluatorComplexityGuidance(3);
-    expect(typeof result).toBe('string');
-    expect(result.length).toBeGreaterThan(0);
+  it('does not invite a follow-up round when the caller has only one', () => {
+    // researchRounds === 1 is the unsteered Level 1 / Level 2 reality: the router's single
+    // decision IS the last one. Naming a plural budget, or telling it to "use all available
+    // rounds", reads as permission to defer to a round it will never get.
+    for (const level of [2, 3] as const) {
+      const result = getEvaluatorComplexityGuidance(level, 1);
+      expect(result, `level ${level}`).toContain('ONE research round');
+      expect(result, `level ${level}`).not.toMatch(/\d+ research rounds in total/);
+      expect(result, `level ${level}`).not.toMatch(/delegate Round 2\b/);
+    }
   });
 
-  it('level 3 guidance mentions the MAX_ROUNDS_LEVEL_3 value', () => {
-    const result = getEvaluatorComplexityGuidance(3);
-    expect(result).toContain(String(MAX_ROUNDS_LEVEL_3));
+  it('tracks a steering-extended budget', () => {
+    expect(getEvaluatorComplexityGuidance(3, 5)).toContain('5 research rounds in total');
+  });
+
+  it('clamps a degenerate budget rather than promising zero rounds', () => {
+    expect(getEvaluatorComplexityGuidance(2, 0)).toContain('ONE research round');
   });
 });
 

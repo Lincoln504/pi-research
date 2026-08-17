@@ -33,7 +33,7 @@ vi.mock('../../../src/logger.ts', () => ({
 }));
 
 vi.mock('../../../src/utils/metrics.ts', () => ({
-  metrics: { increment: vi.fn(), observe: vi.fn() },
+  metrics: { increment: vi.fn(), observe: vi.fn(), session: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() }, },
 }));
 
 vi.mock('../../../src/core/llm/prompts.ts', () => ({
@@ -309,6 +309,39 @@ describe('PlanningService', () => {
       await service.generatePlan(BASE_OPTIONS);
       expect(service.getCurrentPlan('test-session')).not.toBeNull();
       expect(service.getCurrentPlan('test-session')!.action).toBe('delegate');
+    });
+
+    it('pins round 1 to delegate even when the coordinator volunteers a finished answer', async () => {
+      // `action` is optional in the parsed schema and the coordinator prompt neither
+      // documents nor asks for one, so any value is the model volunteering. The only
+      // value that changed anything was "synthesize", and it asked to ship an answer
+      // written before a single source was read: with researchers present it slipped
+      // past the emptiness guard, ended the loop at round 1, and became the final
+      // report — no queries, no scrapes, no citations, from a tool whose whole contract
+      // is grounded research.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(JSON.stringify({
+        action: 'synthesize',
+        content: 'The answer is 42, no research required.',
+        researchers: [{ id: '1.1', name: 'R', goal: 'G', queries: ['q1'] }],
+        allQueries: ['q1'],
+      })));
+
+      const plan = await service.generatePlan(BASE_OPTIONS);
+
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers).toHaveLength(1);
+      expect(service.getCurrentPlan('test-session')!.action).toBe('delegate');
+    });
+
+    it('pins round 1 to delegate when the coordinator answers directly with no team', async () => {
+      // Same shape without researchers: the emptiness guard replaces the plan with the
+      // deterministic single-researcher fallback, and the action must not survive it.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('direct answer')));
+
+      const plan = await service.generatePlan(BASE_OPTIONS);
+
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers!.length).toBeGreaterThan(0);
     });
 
     it('falls back to a single-researcher plan after failed JSON parse', async () => {

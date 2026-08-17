@@ -10,6 +10,7 @@ import { Value } from 'typebox/value';
 import { stackexchangeCommand } from '../stackexchange/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { getMaxGatheringCalls } from '../constants.ts';
+import { isCancellation } from '../utils/cancellation.ts';
 
 export function createStackexchangeTool(options: {
   ctx: ExtensionContext;
@@ -107,6 +108,9 @@ export function createStackexchangeTool(options: {
           signal,
         });
       } catch (error) {
+        // A cancelled query was never rate-limited — see isCancellation. Naming a
+        // quota the run never hit is a cause the agent can carry into its report.
+        if (isCancellation(error, signal)) throw error;
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
           content: [

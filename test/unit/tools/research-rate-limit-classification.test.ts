@@ -52,8 +52,7 @@ vi.mock('../../../src/logger.ts', () => {
 vi.mock('../../../src/utils/metrics.ts', () => ({
   metrics: {
     increment: vi.fn(),
-    recordRunSummary: vi.fn(),
-  },
+    recordRunSummary: vi.fn(), session: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() }, },
   MetricsRegistry: class {
     getSnapshot = vi.fn(() => ({ counters: {}, histograms: {} }));
   },

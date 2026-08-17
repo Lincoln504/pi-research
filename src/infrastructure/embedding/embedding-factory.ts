@@ -227,6 +227,29 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
       const POLL_TIMEOUT_MS = 120_000;
       const deadline = Date.now() + POLL_TIMEOUT_MS;
 
+      /**
+       * How many CONSECUTIVE polls must find a confirmed-live leader's endpoint
+       * unusable before its registration is judged stale.
+       *
+       * Deleting a live leader's entry is the expensive mistake in this loop: the
+       * leader is not told, treats a missing entry as benign, and never steps down,
+       * so the follower's subsequent election produces a second model init and a
+       * second GPU context while the first server keeps running, invisible. The old
+       * code reached that from two failed TCP probes ~2.5s apart — well inside a
+       * blip from a saturated accept backlog, a paused event loop during a large
+       * batch embed, or CPU starvation on a shared box.
+       *
+       * Not clearing at all is not the answer either: a leader whose HTTP server
+       * died while the process lives on leaves a registration nothing else collects,
+       * and every later process then falls back to its own in-process embedder. So
+       * the threshold is raised rather than removed. Each iteration costs the poll
+       * interval plus up to the 2s probe timeout, making this roughly 25s of
+       * uninterrupted unreachability — far past any blip, far short of the 120s wait.
+       */
+      const UNREACHABLE_POLLS_BEFORE_STALE = 10;
+      let unreachablePolls = 0;
+      let unreachableEndpoint: string | null = null;
+
       logger.info(`[EmbeddingFactory] Another process is initializing (port=${fastPathPort}), waiting...`);
 
       while (Date.now() < deadline) {
@@ -253,24 +276,44 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
           return localFallbackForMismatch(info.model);
         }
         if (info.port > 0) {
-          const portOk = await isPortListening(info.port);
-          if (portOk) {
+          // A new claimant resets the streak — the count must describe ONE endpoint's
+          // continuous unreachability, not a tally across successive leaders.
+          const endpoint = `${info.serverId}:${info.port}`;
+          if (endpoint !== unreachableEndpoint) {
+            unreachableEndpoint = endpoint;
+            unreachablePolls = 0;
+          }
+
+          // Reaching the counter below means "not usable this poll" by construction:
+          // the only usable outcome returns.
+          if (await isPortListening(info.port)) {
             logger.info(`[EmbeddingFactory] Connecting to embedding server on port ${info.port}`);
             const client = new EmbeddingClient(info.port, cfg.EMBEDDING_DEVICE, info.authSecret);
-            await client.fetchHealth();
-            _embeddingInstance = client;
-            _cachedModel = cfg.EMBEDDING_MODEL;
-            _cachedDevice = cfg.EMBEDDING_DEVICE;
-            return client;
+            try {
+              await client.fetchHealth();
+              _embeddingInstance = client;
+              _cachedModel = cfg.EMBEDDING_MODEL;
+              _cachedDevice = cfg.EMBEDDING_DEVICE;
+              return client;
+            } catch (err) {
+              // The socket accepted but the server did not answer. Previously this
+              // rejected out of getEmbedder entirely, so one failed health request
+              // against an otherwise-recoverable leader (mid model swap, momentarily
+              // wedged) took embedding down for the whole session instead of costing
+              // one poll. Count it as an unreachable poll and keep waiting.
+              logger.debug(`[EmbeddingFactory] Health check against port ${info.port} failed:`, err);
+            }
           }
-          // Port registered but not responding — wait one more interval and re-check
-          await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
-          const secondCheck = await isPortListening(info.port);
-          if (!secondCheck) {
-            logger.warn(`[EmbeddingFactory] Registered port ${info.port} is unreachable after two checks — clearing stale state`);
-            // serverId-scoped: this snapshot is up to ~2.5s old (two probes + sleep);
-            // the entry may already belong to a new claimant. See the dead-leader
-            // clear above for the failure this prevents.
+
+          unreachablePolls++;
+          if (unreachablePolls >= UNREACHABLE_POLLS_BEFORE_STALE) {
+            logger.warn(
+              `[EmbeddingFactory] Registered port ${info.port} unreachable for ${unreachablePolls} consecutive polls ` +
+              `(PID ${info.pid} is alive) — treating the registration as stale and electing a replacement.`,
+            );
+            // serverId-scoped: this snapshot is many seconds old by now and the entry
+            // may already belong to a new claimant. See the dead-leader clear above
+            // for the failure an unconditional delete causes.
             await stateManager.clearEmbeddingServer({ serverId: info.serverId }).catch((err) => logger.debug('Swallowed clear embedding server error:', err));
             break;
           }

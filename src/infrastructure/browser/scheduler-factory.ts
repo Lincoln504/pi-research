@@ -162,8 +162,19 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
 
         logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
     } finally {
+        // Deliberately does NOT dispose the browser-init lock. This function never
+        // acquires it, and FileLockService.dispose() is not a release — it drains for
+        // 5s and then FORCES the teardown, unlinking the lock file and retiring the
+        // instance. A browser init holds that lock for as long as it takes to launch a
+        // browser server, which is routinely longer than 5s, and the retry paths in
+        // task-execution-service call this function mid-run precisely when an init is
+        // likely in flight. The victim's critical section is not cancelled by the
+        // teardown, and the next getBrowserInitLock() builds a fresh instance (new uuid,
+        // new FIFO queue) over the now-unlinked path, so it acquires immediately: two
+        // concurrent browser inits, two elections, two listening servers. The lock is
+        // path-scoped and version-independent, so a restart does not invalidate it;
+        // the owning SchedulerFactoryService disposes it at container teardown.
         schedulerService.setSchedulerRestartInProgress(false);
-        await disposeBrowserInitLock(container).catch(() => {});
     }
 }
 

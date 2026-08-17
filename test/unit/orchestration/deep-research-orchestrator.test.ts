@@ -260,21 +260,34 @@ describe('DeepResearchOrchestrator', () => {
       expect(seen.filter(o => o.mustSynthesize)).toHaveLength(1);
     });
 
-    it('does NOT re-synthesize when the COORDINATOR answers directly on round 1', async () => {
-      // Round 1's plan comes from the coordinator, which had the query in front of it and
-      // delegated nothing. There are no reports to synthesize from — a second call would
-      // burn a request and return a report built from an empty corpus.
+    it('never ships a round-1 answer that no research backs', async () => {
+      // There used to be a direct-answer path here: a coordinator plan carrying
+      // {action:'synthesize', content} was adopted verbatim as the final report. It was
+      // unreachable in the shape that was harmless (no researchers — the emptiness guard
+      // in generatePlan replaced the whole plan) and reachable only in the shape that was
+      // not: with researchers present it ended the run at round 1 and shipped prose
+      // written before a single source was read — no queries, no scrapes, no citations.
+      // generatePlan now pins round 1 to 'delegate'; if a plan reaches here saying
+      // otherwise, the report is still written by the terminal synthesis over whatever
+      // corpus exists, never lifted out of the plan.
       mockPlanningService.generatePlan.mockResolvedValue({
         action: 'synthesize',
-        content: 'A direct answer',
+        content: 'An answer invented before any research ran',
         researchers: [],
+      });
+      mockPlanningService.updatePlanForRound.mockResolvedValue({
+        action: 'synthesize',
+        content: 'The synthesized report',
       });
 
       const orchestrator = new DeepResearchOrchestrator(options);
       const result = await orchestrator.run();
 
-      expect(result).toBe('A direct answer');
-      expect(mockPlanningService.updatePlanForRound).not.toHaveBeenCalled();
+      expect(result).toBe('The synthesized report');
+      expect(result).not.toContain('invented');
+      expect(mockPlanningService.updatePlanForRound).toHaveBeenCalledWith(
+        expect.objectContaining({ mustSynthesize: true }),
+      );
     });
 
     it('passes coverage digests to the routing call', async () => {
@@ -444,32 +457,19 @@ describe('DeepResearchOrchestrator', () => {
     await expect(orchestrator.run()).rejects.toThrow(/produced no report.*HTTP 429 rate_limit_error/s);
   });
 
-  it('immediate synthesis with no delegation and no failures still succeeds (zero reports is not a failure by itself)', async () => {
-    // The coordinator may legitimately answer directly on round 1 without
-    // delegating researchers. Zero reports + zero failed researchers + real
-    // content must ship — the hollow-run gate must not fire here.
-    mockPlanningService.generatePlan.mockResolvedValue({
-      action: 'synthesize',
-      content: 'Direct grounded answer',
-    });
+  it('zero reports is not a failure by itself — the hollow-run gate needs an actual failure', async () => {
+    // The gate throws "produced no report" only when researchers ran AND failed. A run
+    // that reaches synthesis with an empty corpus and nothing recorded as failed (an
+    // early router synthesize, a researcher that returned nothing without erroring) must
+    // still ship whatever the synthesis produced rather than dying on the gate.
     mockSynthesisService.hasReports.mockReturnValue(false);
-
-    const orchestrator = new DeepResearchOrchestrator(options);
-    await expect(orchestrator.run()).resolves.toBe('Direct grounded answer');
-  });
-
-  it('should handle immediate synthesis request', async () => {
-    mockPlanningService.generatePlan.mockResolvedValue({
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
       action: 'synthesize',
-      content: 'Direct synthesis',
+      content: 'Synthesized from what there was',
     });
 
     const orchestrator = new DeepResearchOrchestrator(options);
-    const result = await orchestrator.run();
-
-    expect(result).toBe('Direct synthesis');
-    expect(mockPlanningService.generatePlan).toHaveBeenCalled();
-    expect(mockOrchestrationService.runResearchers).not.toHaveBeenCalled();
+    await expect(orchestrator.run()).resolves.toBe('Synthesized from what there was');
   });
 
   it('should handle planning failure gracefully', async () => {
@@ -918,13 +918,16 @@ describe('DeepResearchOrchestrator', () => {
     );
   });
 
-  it('should not increment totalResearchersPlanned on synthesize action', async () => {
-    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Direct result' });
+  it('does not increment totalResearchersPlanned for a synthesize decision', async () => {
+    // Only a delegation adds to the planned count. Round 1 always delegates, so the
+    // count reflects that one team and nothing the router's synthesize decision does.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();
 
-    expect(mockPlanningService.incrementTotalResearchersPlanned).not.toHaveBeenCalled();
+    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledTimes(1);
+    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledWith(options.researchId, 1);
   });
 
   it('should fire onStart observer event at the beginning of run()', async () => {
@@ -943,7 +946,7 @@ describe('DeepResearchOrchestrator', () => {
     const onPlanningStart = vi.fn();
     const onPlanningProgress = vi.fn();
 
-    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Done' });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator({
       ...options,
@@ -1042,7 +1045,7 @@ describe('DeepResearchOrchestrator', () => {
   it('should fire onComplete with the final result string', async () => {
     const onComplete = vi.fn();
 
-    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Final answer' });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Final answer' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onComplete } });
     await orchestrator.run();
@@ -1102,7 +1105,7 @@ describe('DeepResearchOrchestrator', () => {
 
   it('fires onSynthesisStart on the evaluator-chose-synthesize path too (idempotent flip)', async () => {
     const onSynthesisStart = vi.fn();
-    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Direct' });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Direct' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onSynthesisStart } });
     await orchestrator.run();
@@ -1134,7 +1137,7 @@ describe('DeepResearchOrchestrator', () => {
   });
 
   it('passes skipStoreMaintenance: false to the final cleanup on a normal completion', async () => {
-    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Done' });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();

@@ -31,6 +31,7 @@ import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { isCancellation } from '../utils/cancellation.ts';
 
 export function createScrapeTool(options: {
   ctx: ExtensionContext;
@@ -267,6 +268,11 @@ export function createScrapeTool(options: {
         }, container);
         freshResults = Array.isArray(results) ? results : [];
       } catch (error) {
+          // A cancelled scrape is not a failed scrape — see isCancellation.
+          if (isCancellation(error, signal)) {
+            metrics.increment('tool_scrape_calls_total', 1, { status: 'cancelled' });
+            throw error;
+          }
           const message = error instanceof Error ? error.message : String(error);
           logger.error(`[scrape tool] Scrape failed: ${message}`);
           metrics.increment('tool_scrape_calls_total', 1, { status: 'error' });

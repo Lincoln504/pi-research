@@ -61,16 +61,32 @@ Scale your team (1-${maxTeamSize}) based on topic scope — not every round need
   } else {
     return `**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **Plan ONLY Round 1** — make it comprehensive, deploying up to ${maxTeamSize} researchers with full query budgets (${queryBudget} each) covering all major dimensions of the topic. Round 1 should aim to cover the full scope comprehensively.
 
-Rounds 2-3 are purely reactive — they only happen when Round 1 findings reveal gaps that warrant deeper diving into specific dimensions or broader exploration of adjacent topics. Do NOT pre-plan multiple rounds; let the findings drive the need. Think of Round 1 as the comprehensive landscape map, with follow-up rounds as targeted expeditions into areas that need more detail.
+Follow-up rounds are purely reactive — they only happen when Round 1 findings reveal gaps that warrant deeper diving into specific dimensions or broader exploration of adjacent topics. Do NOT pre-plan multiple rounds; let the findings drive the need. Think of Round 1 as the comprehensive landscape map, with follow-up rounds as targeted expeditions into areas that need more detail.
 
 **ULTRA-SPECIFICITY MANDATE**: Level 3 demands granular, exhaustive detail on every fact that benefits from it — exact figures, dates, names, mechanisms, edge cases, historical context, technical specifics, and primary-source precision. Plan dedicated researchers for drilling into the ultra-specific dimensions of any finding where greater detail adds value.`;
   }
 }
 
 /**
- * Get complexity-specific guidance for the evaluator
+ * Get complexity-specific guidance for the evaluator.
+ *
+ * `researchRounds` is the number of rounds that can still DELEGATE — the caller's
+ * live, steering-extended budget minus the terminal synthesis-only iteration. It is
+ * a parameter rather than a table lookup because this text sits in the same prompt
+ * as the round-phase guidance, which is already phrased against that number: a
+ * hardcoded per-level constant here told a Level 3 router it had "3 rounds
+ * available" three lines above "Round 1 of 2", and put the two apart by a further
+ * round whenever steering extended the budget. Every round count the model is shown
+ * must come from the same source.
  */
-export function getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string {
+export function getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3, researchRounds: number): string {
+  const rounds = Math.max(1, Math.floor(researchRounds));
+  // One line, correct in both directions. At a budget of one there is no follow-up to
+  // recommend and saying otherwise invites the model to defer to a round it will never
+  // get; above one, the encouragement to use the budget is the point.
+  const budgetLine = rounds === 1
+    ? 'This run has ONE research round, and it has already happened — there is no follow-up round to defer to, so decide on what is in front of you.'
+    : `This run has ${rounds} research rounds in total; lean toward using them rather than finishing early.`;
   if (complexity === 1) {
     return `**Level 1 (Normal)** - Thorough, well-rounded investigation with solid multi-source coverage.
 
@@ -84,14 +100,14 @@ export function getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string {
 - **SYNTHESIZE when**: You are confident the research is genuinely complete. This means multiple angles covered with substantial findings across all major topics, diverse sources cited throughout, and no significant gaps in coverage.
 - **DELEGATE when**: ANY gaps remain in major topics, insufficient source diversity, missing details, or areas that need deeper exploration. Don't synthesize prematurely.
 
-**DEFAULT PATH: When in doubt, DELEGATE**. It is better to conduct additional research rounds than to synthesize with incomplete findings. Level 2 is designed for multi-round research. Each round adds depth and citation diversity — but do not delegate unnecessarily. Synthesize after Round 1 ONLY if the researcher produced comprehensive coverage of the topic with good source diversity. If Round 1 has any gaps, delegate Round 2. A third round is only warranted when Round 2 still leaves significant holes. Scale researcher count to match the gaps — focused gaps may only need 1 researcher, while broad gaps benefit from the full team.`;
+**DEFAULT PATH: When in doubt, DELEGATE**. It is better to conduct additional research rounds than to synthesize with incomplete findings. Level 2 is designed for multi-round research. Each round adds depth and citation diversity — but do not delegate unnecessarily. Synthesize after Round 1 ONLY if the researcher produced comprehensive coverage of the topic with good source diversity; if it has any gaps, delegate. ${budgetLine} Scale researcher count to match the gaps — focused gaps may only need 1 researcher, while broad gaps benefit from the full team.`;
   } else {
     return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive with extensive citations.
 
 - **SYNTHESIZE when**: You are confident the research is genuinely and exhaustively complete. This means exhaustively covered across ALL substantial avenues with multiple diverse sources per major topic, comprehensive citations throughout, and no meaningful gaps remain.
 - **DELEGATE when**: ANY meaningful gaps, nuanced angles, insufficient source diversity, inadequate citations, or areas needing deeper investigation remain.
 
-**DEFAULT PATH: When in doubt, DELEGATE**. It is better to conduct additional research rounds than to synthesize with incomplete findings. Level 3 has ${MAX_ROUNDS_LEVEL_3} rounds available. Be generous with follow-up delegation — lean toward using all available rounds. Each round adds breadth, depth, and citation diversity. Delegate for follow-up whenever remaining gaps or under-explored angles exist, even if progress has been good. Only synthesize when you have genuinely comprehensive coverage across all major areas with no meaningful gaps that another round would address.
+**DEFAULT PATH: When in doubt, DELEGATE**. It is better to conduct additional research rounds than to synthesize with incomplete findings. ${budgetLine} Be generous with follow-up delegation. Each round adds breadth, depth, and citation diversity. Delegate for follow-up whenever remaining gaps or under-explored angles exist, even if progress has been good. Only synthesize when you have genuinely comprehensive coverage across all major areas with no meaningful gaps that another round would address.
 
 **ULTRA-SPECIFICITY MANDATE**: For every fact, finding, or topic area where greater granularity adds value, delegate additional researchers to pursue it. This includes: exact figures and statistics, precise dates and timelines, technical mechanisms, named individuals and their specific contributions, primary-source verbatim data, edge cases, and any dimension where surface-level coverage would leave the reader with unanswered questions.`;
   }

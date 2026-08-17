@@ -483,3 +483,53 @@ describe('metrics singleton — simulated research run lifecycle', () => {
     expect(metrics.getRunHistory()[2]!.snapshot.counters['search_queries_total']).toBe(6);
   });
 });
+
+// ---------------------------------------------------------------------------
+// metrics.session — explicit session-scoped emit
+// ---------------------------------------------------------------------------
+
+describe('metrics.session — process-lifetime emit', () => {
+  beforeEach(() => {
+    metrics.clearSession();
+  });
+
+  it('writes to the session registry even inside an active run context', async () => {
+    const runReg = new MetricsRegistry();
+
+    await runWithRunRegistry(runReg, async () => {
+      metrics.session.increment('browser_pool_errors_total', 1);
+      metrics.session.setGauge('browser_pool_workers', 4);
+      metrics.session.observe('probe_ms', 12);
+      // The plain API still routes to the run, so the two are genuinely distinct.
+      metrics.increment('search_queries_total', 3);
+    });
+
+    const session = metrics.getSessionSnapshot();
+    expect(session.counters['browser_pool_errors_total']).toBe(1);
+    expect(session.gauges['browser_pool_workers']).toBe(4);
+    expect(session.histograms['probe_ms']?.count).toBe(1);
+    expect(session.counters['search_queries_total']).toBeUndefined();
+
+    expect(runReg.getSnapshot().counters['search_queries_total']).toBe(3);
+    expect(runReg.getSnapshot().counters['browser_pool_errors_total']).toBeUndefined();
+  });
+
+  it('accumulates across runs, which is the whole reason it exists', async () => {
+    // A pool error handler is installed inside the FIRST run that needed a browser and
+    // keeps firing for the life of the process. Routed through the plain API it wrote
+    // into that first run's registry forever: invisible in every later run's summary,
+    // and holding the discarded registry alive through the closure.
+    for (let i = 0; i < 3; i++) {
+      await runWithRunRegistry(new MetricsRegistry(), async () => {
+        metrics.session.increment('browser_pool_errors_total', 1);
+      });
+    }
+    expect(metrics.getSessionSnapshot().counters['browser_pool_errors_total']).toBe(3);
+  });
+
+  it('behaves identically outside a run context', () => {
+    metrics.session.increment('browser_pool_auto_recoveries_total', 2);
+    metrics.increment('browser_pool_auto_recoveries_total', 1);
+    expect(metrics.getSessionSnapshot().counters['browser_pool_auto_recoveries_total']).toBe(3);
+  });
+});
