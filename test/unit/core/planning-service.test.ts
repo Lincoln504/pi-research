@@ -1232,6 +1232,16 @@ describe('PlanningService', () => {
           .toBeGreaterThan(userMessage.indexOf('Covered: alpha basics'));
       });
 
+      it('shows the synthesizer no round number, because it has no round decision', async () => {
+        // The forced final synthesis runs AT the cap, so a research-round denominator
+        // read "Current round: 2 / 1" there — the impossible round number that
+        // denominator was introduced to remove — and promised a final synthesis pass
+        // to the call that was itself the final synthesis pass.
+        const { userMessage } = await synthesize(2, round2Reports);
+        expect(userMessage).not.toContain('Current round');
+        expect(userMessage).not.toContain('a final synthesis pass follows');
+      });
+
       it('renders a byte-identical SYNTHESIZER system prompt regardless of round', async () => {
         const first = await synthesize(1, round1Reports);
         const later = await synthesize(3, round2Reports);

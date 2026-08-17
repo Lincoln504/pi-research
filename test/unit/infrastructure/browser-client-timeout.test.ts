@@ -9,11 +9,14 @@
  * at least as patient as the leader, under an absolute cap so a wedged leader
  * still fails in bounded time.
  *
- * Search and scrape no longer derive from the leader budget at all. That budget
+ * Search and scrape no longer derive from the leader TASK budget at all. That budget
  * bounds execution only — armed at dispatch, not at request arrival — so leader
- * turnaround is queue wait plus budget and nothing derived from the budget can
- * out-wait it. Those two are wedge detectors now; only the healthcheck, whose
- * leader side bounds the whole call, stays budget-derived.
+ * turnaround is queue wait plus budget and nothing derived from it can out-wait it.
+ * Those two are wedge detectors, derived instead from the budget of whatever owns
+ * the request: a detector that fires after its caller is already dead detects
+ * nothing, and a flat 300s cap against a researcher timeout that defaults to 300s
+ * and bottoms out at 180s was exactly that. Only the healthcheck, whose leader side
+ * bounds the whole call, stays leader-budget-derived.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -24,6 +27,8 @@ const cfg = (overrides: Record<string, number>) => ({
   SEARCH_TIMEOUT_MS: 45_000,
   SCRAPE_TIMEOUT_MS: 15_000,
   BROWSER_TASK_TIMEOUT_MS: 10_000,
+  // The budget of whatever OWNS a search/scrape request. Schema: min 180s, default 300s.
+  RESEARCHER_TIMEOUT_MS: 300_000,
   ...overrides,
 }) as any;
 
@@ -50,16 +55,40 @@ describe('resolveClientRequestTimeoutMs', () => {
     expect(t).toBeGreaterThan(60_000); // the exact regression: flat 60s < 105s
   });
 
-  it('maxed schema values (120s+120s) stay under the cap and still out-wait the leader', () => {
-    const c = cfg({ SEARCH_TIMEOUT_MS: 120_000, SCRAPE_TIMEOUT_MS: 120_000, BROWSER_TASK_TIMEOUT_MS: 120_000 });
-    const t = resolveClientRequestTimeoutMs('search', c);
-    expect(t).toBeGreaterThan(searchBudget(c));
-    expect(t).toBeLessThanOrEqual(CAP);
+  it('out-waits the leader whenever the configuration leaves room to', () => {
+    // With default leader budgets there is plenty of room.
+    const c = cfg({});
+    expect(resolveClientRequestTimeoutMs('search', c)).toBeGreaterThan(searchBudget(c));
+    expect(resolveClientRequestTimeoutMs('browser-task', c)).toBeGreaterThan(scrapeBudget(c));
   });
 
-  it('absolute cap binds on out-of-range config, so a wedged leader fails in bounded time', () => {
-    const c = cfg({ SEARCH_TIMEOUT_MS: 10_000_000, BROWSER_TASK_TIMEOUT_MS: 10_000_000 });
-    expect(resolveClientRequestTimeoutMs('search', c)).toBe(CAP);
+  it('cannot out-wait a leader budget the owning caller does not itself allow for', () => {
+    // Schema maxima: a 240s leader task budget under a 300s researcher timeout. No
+    // follower value can both out-wait the leader and fire before the researcher
+    // dies, because the researcher would outlive the task by only 60s. That is a
+    // property of the configuration, not of this function — and the resolution has
+    // to favour firing first, since a detector that never fires reports nothing.
+    // Documented here so the collision is a known state rather than a surprise.
+    const maxed = cfg({ SEARCH_TIMEOUT_MS: 120_000, BROWSER_TASK_TIMEOUT_MS: 120_000 });
+    const t = resolveClientRequestTimeoutMs('search', maxed);
+    expect(t).toBeLessThanOrEqual(CAP);
+    expect(t).toBeLessThan(maxed.RESEARCHER_TIMEOUT_MS);
+    expect(t).toBe(searchBudget(maxed)); // exactly collides, does not undercut
+  });
+
+  it('fires before the researcher that owns the request is killed', () => {
+    // The whole point of a wedge detector. At the schema minimum and at the default,
+    // the flat 300s cap could never fire first, so a wedged-but-listening leader
+    // surfaced as a bare researcher timeout with nothing said about the browser.
+    for (const owner of [180_000, 300_000, 900_000, 1_800_000]) {
+      const t = resolveClientRequestTimeoutMs('search', cfg({ RESEARCHER_TIMEOUT_MS: owner }));
+      expect(t, `owner budget ${owner}`).toBeLessThan(owner);
+      expect(resolveClientRequestTimeoutMs('browser-task', cfg({ RESEARCHER_TIMEOUT_MS: owner }))).toBeLessThan(owner);
+    }
+  });
+
+  it('absolute cap still binds on an out-of-range owner budget', () => {
+    expect(resolveClientRequestTimeoutMs('search', cfg({ RESEARCHER_TIMEOUT_MS: 10_000_000 }))).toBe(CAP);
   });
 
   it('search/scrape out-wait leader queue wait, which no budget-derived value can', () => {
@@ -68,6 +97,8 @@ describe('resolveClientRequestTimeoutMs', () => {
     // A follower timer derived from the budget alone therefore abandons requests the
     // leader is still queueing: the same defect the leader-side deadline had. These
     // two are wedge detectors instead, and must not track the budget at all.
+    // Changing the leader's TASK budget must not move these at all — only the owning
+    // caller's budget may.
     const small = cfg({ SEARCH_TIMEOUT_MS: 1_000, SCRAPE_TIMEOUT_MS: 1_000, BROWSER_TASK_TIMEOUT_MS: 1_000 });
     const large = cfg({ SEARCH_TIMEOUT_MS: 120_000, SCRAPE_TIMEOUT_MS: 120_000, BROWSER_TASK_TIMEOUT_MS: 120_000 });
 

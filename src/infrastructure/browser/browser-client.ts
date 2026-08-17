@@ -7,6 +7,7 @@
 
 import * as http from 'node:http';
 import type { Config } from '../../config.ts';
+import { getConfig } from '../../config.ts';
 
 import type { SearchResult } from '../../web-research/types.ts';
 import type { IScheduler, TaskDispatchListener } from '../../core/interfaces/scheduler-interfaces.ts';
@@ -49,25 +50,38 @@ const HEALTHCHECK_LEADER_BUDGET_MS = 45_000 + 60_000;
  * isTaskTimeoutError, so retry gates skipped it — long tasks failed client-side,
  * unretried, while the leader was still working on them.
  *
- * Search and scrape get the cap, not a budget-derived value. The leader's task
- * budget bounds EXECUTION only — it is armed when the queue dispatches, not when
- * the request lands — so leader turnaround is queue wait plus that budget, and no
- * value derived from the budget alone can out-wait it. Deriving one anyway is how
- * a follower came to abandon requests the leader was still queueing, which is the
- * same defect the leader-side deadline had. So this timer stops pretending to be a
- * deadline and becomes what CLIENT_TIMEOUT_CAP_MS already describes: a detector
- * for a leader that is listening but no longer answering. Work waits; it is not
- * discarded because the pool was busy.
+ * Search and scrape do not derive from the leader's TASK budget. That budget bounds
+ * EXECUTION only — it is armed when the queue dispatches, not when the request
+ * lands — so leader turnaround is queue wait plus that budget, and no value derived
+ * from it alone can out-wait it. Deriving one anyway is how a follower came to
+ * abandon requests the leader was still queueing, the same defect the leader-side
+ * deadline had. This timer is a detector for a leader that is listening but no
+ * longer answering; work waits, and is not discarded because the pool was busy.
+ *
+ * It is derived from the budget of whatever OWNS the call instead, because a
+ * detector that fires after its caller is already dead detects nothing. The flat
+ * 300s cap was exactly that: RESEARCHER_TIMEOUT_MS defaults to 300s and its schema
+ * minimum is 180s, so the researcher holding the request was always killed first
+ * and the user got a bare researcher timeout with nothing said about the browser
+ * leader — where before they at least got a request-timeout they could classify
+ * and retry. Firing at a fraction of the owner's budget leaves room for the
+ * failure to be reported and retried within the life of the thing that asked.
  *
  * The healthcheck keeps a budget-derived value: its leader side bounds the whole
  * call (it answers "healthy, saturated" rather than queueing indefinitely), so a
  * liveness probe stays as impatient as a liveness probe should be.
  */
-export function resolveClientRequestTimeoutMs(operation: string, _config?: Config): number {
+/** Fraction of the owning caller's budget at which the wedge detector fires, so the
+ *  failure is reported and retriable inside the life of whatever asked for it. */
+const OWNER_BUDGET_FRACTION = 0.8;
+
+export function resolveClientRequestTimeoutMs(operation: string, config?: Config): number {
     switch (operation) {
         case 'search':
-        case 'browser-task':
-            return CLIENT_TIMEOUT_CAP_MS;
+        case 'browser-task': {
+            const ownerBudgetMs = (config ?? getConfig()).RESEARCHER_TIMEOUT_MS;
+            return Math.min(CLIENT_TIMEOUT_CAP_MS, Math.floor(ownerBudgetMs * OWNER_BUDGET_FRACTION));
+        }
         default:
             // healthcheck, plus any future/unknown path: the largest fixed budget.
             return Math.min(CLIENT_TIMEOUT_CAP_MS, HEALTHCHECK_LEADER_BUDGET_MS + CLIENT_PATIENCE_MARGIN_MS);
@@ -273,19 +287,19 @@ export class BrowserClient implements IScheduler {
     }
 
     /**
-     * `onDispatch` is deliberately not invoked here. A follower sees only the
+     * `onTaskEvent` is deliberately not invoked here. A follower sees only the
      * leader's final reply, never the moment the leader's queue hands the task to
      * a worker, so it has nothing truthful to report. Calling it on send would
      * arm the caller's guard against queue wait — precisely the bug being fixed —
      * so the caller's guard stays disarmed and this class bounds the call itself
      * (see resolveClientRequestTimeoutMs).
      */
-    async runSearch(query: string, config?: Config, signal?: AbortSignal, _onDispatch?: TaskDispatchListener): Promise<SearchResult[]> {
+    async runSearch(query: string, config?: Config, signal?: AbortSignal, _onTaskEvent?: TaskDispatchListener): Promise<SearchResult[]> {
         return this.request('/search', { query }, signal, config);
     }
 
-    /** See runSearch on why `onDispatch` is not invoked. */
-    async runScrape(url: string, config?: Config, signal?: AbortSignal, _onDispatch?: TaskDispatchListener): Promise<any> {
+    /** See runSearch on why `onTaskEvent` is not invoked. */
+    async runScrape(url: string, config?: Config, signal?: AbortSignal, _onTaskEvent?: TaskDispatchListener): Promise<any> {
         return this.request('/scrape', { url }, signal, config);
     }
 

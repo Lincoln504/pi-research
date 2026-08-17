@@ -28,6 +28,55 @@ const __dirname = dirname(__filename);
 /**
  * Worker pool manager for browser operations.
  */
+/**
+ * The pool's dispatch shape: how a worker is chosen, and how much each may hold.
+ *
+ * Separated out so it is testable. The claim this configuration makes is behavioural
+ * — that no task is parked behind a busy worker while another idles — and the first
+ * test written for it asserted that this file contained the string
+ * "WorkerChoiceStrategies.LEAST_USED", which passes against an implementation that
+ * dispatches nothing.
+ *
+ * LEAST_USED picks the node minimising executing + queued. ROUND_ROBIN is a bare
+ * modular cursor whose only filter is a one-time `ready` flag — it cannot see load,
+ * and poolifier consults per-node capacity only AFTER the strategy has chosen. A task
+ * handed to a busy node is queued ON that node and never re-routed, so one degraded
+ * worker takes a share of every burst with it: on 2026-08-15 a worker whose browser
+ * launch hung was still handed roughly one turn in six, and the run lost exactly the
+ * three queries that landed on it while five workers sat idle.
+ *
+ * The guarantee is conditional, not absolute, and worth stating precisely: a
+ * load-reading strategy never parks a task WHILE A FREE NODE EXISTS. The
+ * PriorityTaskQueue above normally makes sure one does, by capping in-flight work at
+ * exactly WORKER_THREADS x WORKER_CONCURRENCY — which is why a WORKER_CONCURRENCY
+ * change has to rebuild the pool, or the two layers disagree about capacity. But that
+ * cap is released early when a caller aborts a task still running on a worker, and a
+ * respawning worker is not `ready`, so there are windows where every node is genuinely
+ * full. In those, ties resolve to the lowest-index node and a task does park.
+ *
+ * Which is also why poolifier's stolen-task accounting defect is made rare rather than
+ * unreachable: stealing fires only when something is queued on a node, and a stolen
+ * task's completion decrements the ORIGINAL node's executing count instead of the one
+ * that ran it, freeing a slot on a worker that is still working. That produced 1,425
+ * genuinely overlapping task pairs across 37 days at a configured concurrency of 1.
+ *
+ * LEAST_BUSY was the other candidate and is worse here: it minimises accumulated
+ * run+wait time, which turns on per-task performance measurement for every task and
+ * still lets a busy fast worker outrank an idle slow one. LEAST_USED overrides no
+ * statistics requirements, so it costs nothing extra.
+ */
+export function buildWorkerPoolOptions(config: Config): {
+    workerChoiceStrategy: typeof WorkerChoiceStrategies[keyof typeof WorkerChoiceStrategies];
+    enableTasksQueue: boolean;
+    tasksQueueOptions: { concurrency: number };
+} {
+    return {
+        workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
+        enableTasksQueue: true,
+        tasksQueueOptions: { concurrency: config.WORKER_CONCURRENCY },
+    };
+}
+
 export class WorkerPoolManager implements IService {
     readonly name = ServiceNames.WORKER_POOL_MANAGER;
     lifecycle = ServiceLifecycle.UNINITIALIZED;
@@ -242,42 +291,7 @@ export class WorkerPoolManager implements IService {
                             }
                         }
                     },
-                    // LEAST_USED picks the node minimising executing + queued. ROUND_ROBIN
-                    // is a bare modular cursor whose only filter is a one-time `ready` flag
-                    // — it cannot see load at all, and poolifier only consults per-node
-                    // capacity AFTER the strategy has chosen. A task handed to a busy node
-                    // is queued ON that node and never re-routed, so one degraded worker
-                    // takes a share of every burst down with it: on 2026-08-15 a worker
-                    // whose browser launch hung was still handed roughly one turn in six,
-                    // and the run lost exactly the three queries that landed on it while
-                    // five workers sat idle and the shared queue was empty.
-                    //
-                    // The guarantee this buys is structural, not statistical: the
-                    // PriorityTaskQueue above caps in-flight work at exactly
-                    // WORKER_THREADS x WORKER_CONCURRENCY, which is the pool's total
-                    // capacity, so at every dispatch there is always a node with a free
-                    // slot and an empty queue. A strategy that reads load always finds it.
-                    // (Which is also why the concurrency check above must recreate the
-                    // pool — if the two layers' capacities diverge, the guarantee goes.)
-                    //
-                    // It removes a second failure with it. Nothing is ever queued on a
-                    // node, so poolifier's task stealing never fires — and stealing is
-                    // what triggers its own accounting defect, where a stolen task's
-                    // completion decrements the ORIGINAL node's executing count instead of
-                    // the one that ran it. That frees a slot on a worker still working,
-                    // which then legitimately accepts a second task: 1,425 genuinely
-                    // overlapping task pairs across 37 days at concurrency 1.
-                    //
-                    // LEAST_BUSY was the other candidate and is worse here: it minimises
-                    // accumulated run+wait time, which turns on per-task performance
-                    // measurement for every task and still lets a busy fast worker outrank
-                    // an idle slow one. LEAST_USED overrides no statistics requirements,
-                    // so it costs nothing extra.
-                    workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
-                    enableTasksQueue: true,
-                    tasksQueueOptions: {
-                        concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
-                    }
+                    ...buildWorkerPoolOptions(config || getConfig()),
                 });
 
                 // Secondary race check: if a shutdown() was called concurrent with

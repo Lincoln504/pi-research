@@ -244,11 +244,28 @@ export async function initBrowser(): Promise<void> {
           // timeout races ahead.
           launchPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser launch rejection: ${err.message}`));
           let launchTimeoutId: NodeJS.Timeout | undefined;
+          let raceLost = false;
+          // If the launch resolves AFTER we gave up on it, nobody holds the result:
+          // `browser` is assigned only from the race's winner, so the catch below —
+          // whose comment promises to "close any partially-launched browser" — finds
+          // null and closes nothing. Camoufox's own launch bound is 180s against our
+          // 90s, so a launch completing in that window leaves a fully-started headless
+          // Firefox with no owner, surviving the orphan sweep (its parent worker is
+          // alive) until the pool shuts down. Adopt and close it, exactly as
+          // createPageSafe already does for an orphaned page.
+          launchPromise.then((b: any) => {
+            if (!raceLost) return;
+            logToDebugFile('WARN', `[Worker-${workerId}] Browser launch completed after its deadline; closing the orphaned instance.`);
+            try { b?.close?.(); } catch { /* already gone */ }
+          }).catch(() => { /* rejection already logged above */ });
           try {
             return await Promise.race([
               launchPromise,
               new Promise<never>((_, reject) => {
-                launchTimeoutId = setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs);
+                launchTimeoutId = setTimeout(() => {
+                  raceLost = true;
+                  reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`));
+                }, launchTimeoutMs);
               })
             ]);
           } finally {
@@ -283,10 +300,23 @@ export async function initBrowser(): Promise<void> {
         const contextPromise = browser.newContext();
         contextPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser context rejection: ${err.message}`));
         let contextTimeoutId: NodeJS.Timeout | undefined;
+        let contextRaceLost = false;
+        // Same adoption as the launch above. Here the catch below CAN close the
+        // browser (it is assigned by now), which disposes the stray context with it —
+        // but only when initBrowser is entered with a dead browser, and it leaves the
+        // context open for the window in between. Closing it directly is unconditional.
+        contextPromise.then((c: any) => {
+          if (!contextRaceLost) return;
+          logToDebugFile('WARN', `[Worker-${workerId}] Browser context creation completed after its deadline; closing the orphaned context.`);
+          try { c?.close?.(); } catch { /* already gone */ }
+        }).catch(() => { /* rejection already logged above */ });
         context = await Promise.race([
           contextPromise,
           new Promise<never>((_, reject) => {
-            contextTimeoutId = setTimeout(() => reject(new Error('Browser context creation timed out after 30000ms')), 30000);
+            contextTimeoutId = setTimeout(() => {
+              contextRaceLost = true;
+              reject(new Error('Browser context creation timed out after 30000ms'));
+            }, 30000);
           })
         ]);
         if (contextTimeoutId) clearTimeout(contextTimeoutId);

@@ -122,10 +122,18 @@ export async function performSearch(
         // and so never calls onDispatch — it stays disarmed and the client's own
         // bound applies instead.
         let timeoutId: NodeJS.Timeout | undefined;
-        const startQueryDeadline = () => {
-            // Retries inside runWorkerSearch dispatch again; each attempt earns a
-            // fresh budget rather than inheriting what its predecessor spent.
+        const onTaskEvent = (event: 'dispatched' | 'settled') => {
+            // Disarm on every event, so the clock only ever runs while a worker is
+            // actually holding this query. Arming alone was not enough: retries inside
+            // runWorkerSearch dispatch AGAIN, and between a failed attempt and its
+            // redispatch there is a backoff sleep, a re-enqueue and a fresh queue wait.
+            // A timer left running across that gap aborts the retry for its
+            // predecessor's overrun, and reports it as "the browser pool was
+            // saturated" — the same charge-the-wait-to-the-work mistake, one attempt
+            // removed.
             if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = undefined;
+            if (event !== 'dispatched') return;
             timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
             safeUnref(timeoutId);
         };
@@ -140,7 +148,7 @@ export async function performSearch(
               ? AbortSignal.any([signal, timeoutController.signal])
               : timeoutController.signal;
 
-            const results = await runWorkerSearch(query, config, querySignal, 1, sessionId, container, undefined, startQueryDeadline);
+            const results = await runWorkerSearch(query, config, querySignal, 1, sessionId, container, undefined, onTaskEvent);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
 

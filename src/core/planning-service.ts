@@ -646,11 +646,17 @@ export class PlanningService implements IPlanningService {
     const runContext = [
       `## RUN CONTEXT`,
       `- **ROOT QUERY**: ${query}`,
-      // Same denominator as the phase guidance below — two different round counts in one
-      // prompt is worse than either alone. Research rounds, not iterations: the router's
-      // only decision is delegate-vs-synthesize, and the trailing synthesis pass is not a
-      // round it can spend.
-      `- **Current round**: ${round} / ${researchRounds} (research rounds; a final synthesis pass follows)`,
+      // Router only, and in RESEARCH rounds — the same denominator as the phase
+      // guidance below, because two different round counts in one prompt is worse than
+      // either alone. The router's only decision is delegate-vs-synthesize, and the
+      // trailing synthesis pass is not a round it can spend.
+      //
+      // Omitted for the synthesizer, which has no round decision to calibrate. Showing
+      // it there reintroduced the impossible round number this denominator was meant to
+      // remove: the forced final synthesis runs AT the cap, so it read "Current round:
+      // 2 / 1" on every complexity-1 run — and then promised a final synthesis pass to
+      // the call that was itself the final synthesis pass.
+      isRouter ? `- **Current round**: ${round} / ${researchRounds} (research rounds; a final synthesis pass follows)` : '',
       initialAgendaSection.trim(),
       previousQueriesSection.trim(),
       // Round-phase guidance calibrates a ROUTING decision against the round budget. The

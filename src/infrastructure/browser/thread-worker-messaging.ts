@@ -259,14 +259,41 @@ async function extractSearchResults(page: any): Promise<any[]> {
 /**
  * Execute a search task
  */
+/**
+ * Bind a task-timeout signal to the page it is bounding.
+ *
+ * `page.setDefaultTimeout` bounds Playwright's action and navigation verbs
+ * individually; it does not bound their sum, and it does not bound a Response read
+ * at all. Closing the page is what actually ends the work: any in-flight call
+ * rejects with 'Target closed', which runTask's catch already maps back to the
+ * task timeout. Fire-and-forget, `{ once }` so the listener cannot outlive the task.
+ */
+function bindTaskAbortToPage(page: any, signal?: AbortSignal): void {
+  if (!signal) return;
+  const onAbort = () => { page.close().catch(() => {}); };
+  if (signal.aborted) onAbort();
+  else signal.addEventListener('abort', onAbort, { once: true });
+}
+
 export async function executeSearchTask(
   _context: any,
-  query: string
+  query: string,
+  signal?: AbortSignal
 ): Promise<{ results: any[]; jitter: number }> {
   const page = await createPageSafe(_context);
   const SEARCH_TIMEOUT = parseTimeoutMs(process.env['PI_RESEARCH_SEARCH_TIMEOUT_MS'], 45000);
   page.setDefaultTimeout(SEARCH_TIMEOUT);
   page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
+
+  // Same binding the scrape path has used all along, and for the same reason: the
+  // worker's task deadline was armed but its signal was only ever handed to
+  // executeScrapeTask, so on a search it fired into nothing. Playwright's own
+  // per-action timeouts still bound each verb, but the sum of them plus the jitter
+  // sleep can outlast the whole task budget — and poolifier keeps counting this node
+  // as executing until the worker replies, so the node stays pinned long after the
+  // caller was answered. Closing the page rejects whatever is in flight with
+  // 'Target closed', which runTask's catch already recognises as the timeout.
+  bindTaskAbortToPage(page, signal);
 
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
@@ -692,11 +719,15 @@ const HEALTH_FALLBACK_URL = 'https://example.com/';
 async function executeHealthCheckAttempt(
   _context: any,
   navTimeoutMs: number,
-  url: string = HEALTH_PRIMARY_URL
+  url: string = HEALTH_PRIMARY_URL,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; navMs: number }> {
   const page = await createPageSafe(_context);
   page.setDefaultTimeout(navTimeoutMs);
   page.setDefaultNavigationTimeout(navTimeoutMs);
+  // See executeSearchTask: the probe runs twice (primary then fallback), so its own
+  // nav timeout bounds each attempt but not the pair.
+  bindTaskAbortToPage(page, signal);
 
   try {
     const navStart = Date.now();
@@ -721,7 +752,8 @@ async function executeHealthCheckAttempt(
  */
 export async function executeHealthCheck(
   _context: any,
-  initMs: number
+  initMs: number,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; navMs: number }> {
   // Nav timeout: read from env (passed through getBrowserEnv), floor at 10s.
   // The outer BrowserTaskScheduler.runHealthCheck() has its own 45s hard deadline.
@@ -733,14 +765,14 @@ export async function executeHealthCheck(
   }
 
   try {
-    return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT);
+    return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT, HEALTH_PRIMARY_URL, signal);
   } catch (firstError: unknown) {
     // One retry: if the first attempt fails, the page may have been in a bad state
     // (challenge redirect, partial load, transient network blip). A second attempt
     // on a fresh page helps distinguish a real outage from a one-off failure.
     logToDebugFile('WARN', `[Worker-${workerId}] Health check attempt 1 failed: ${firstError instanceof Error ? firstError.message : String(firstError)}. Retrying once...`);
     try {
-      return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT);
+      return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT, HEALTH_PRIMARY_URL, signal);
     } catch (retryError: unknown) {
       const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
       // A TIMEOUT is left to propagate: upstream (isBusyPoolHealthFailure) already
@@ -756,7 +788,7 @@ export async function executeHealthCheck(
         // healthy enough to research (search has its own retries/fallbacks downstream).
         logToDebugFile('WARN', `[Worker-${workerId}] Search-provider health probe failed twice (${retryMsg}); verifying open-web reachability via fallback endpoint...`);
         try {
-          const fallback = await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT, HEALTH_FALLBACK_URL);
+          const fallback = await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT, HEALTH_FALLBACK_URL, signal);
           logToDebugFile('WARN', `[Worker-${workerId}] Fallback endpoint reachable — open web is up, search provider is degraded. Proceeding with research.`);
           return fallback;
         } catch (fallbackError: unknown) {

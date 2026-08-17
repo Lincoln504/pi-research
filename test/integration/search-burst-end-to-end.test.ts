@@ -183,9 +183,9 @@ describe('search burst end to end', () => {
     const { getScheduler } = await import('../../src/infrastructure/browser/scheduler-factory.ts');
     const scheduler: any = await getScheduler();
     const realRunSearch = scheduler.runSearch.bind(scheduler);
-    scheduler.runSearch = async (q: string, cfg: any, signal: any, onDispatch: any) => {
-      if (q !== slow) return realRunSearch(q, cfg, signal, onDispatch);
-      onDispatch?.();
+    scheduler.runSearch = async (q: string, cfg: any, signal: any, onTaskEvent: any) => {
+      if (q !== slow) return realRunSearch(q, cfg, signal, onTaskEvent);
+      onTaskEvent?.('dispatched');
       await new Promise((_, reject) => setTimeout(() => reject(new Error('worker hung')), 10_000));
     };
 

@@ -71,18 +71,24 @@ export interface ScrapeResult {
  * Base scheduler interface
  */
 /**
- * Called when a task's EXECUTION begins — i.e. the queue has handed it to a
- * worker. Callers that keep their own guard over a scheduler call arm it here
- * rather than at call time, so queue wait never counts against the work's
- * budget. An implementation that cannot observe dispatch (BrowserClient, which
- * only sees the leader's final reply) simply never calls it, and the caller's
- * guard stays disarmed — that implementation bounds the call itself.
+ * Reports when a task's EXECUTION starts and stops.
+ *
+ * Callers that keep their own guard over a scheduler call arm it on 'dispatched'
+ * rather than at call time, so queue wait never counts against the work's budget,
+ * and disarm it on 'settled' so the guard is not left running over a period in
+ * which nothing is executing — between a failed attempt and its retry, that
+ * period includes a backoff sleep, a re-enqueue and a fresh queue wait, and a
+ * timer left armed across it kills the retry for the predecessor's overrun.
+ *
+ * An implementation that cannot observe dispatch (BrowserClient, which only sees
+ * the leader's final reply) never calls it at all, and the caller's guard stays
+ * disarmed — that implementation bounds the call itself.
  */
-export type TaskDispatchListener = () => void;
+export type TaskDispatchListener = (event: 'dispatched' | 'settled') => void;
 
 export interface IScheduler {
-  runSearch(query: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<SearchResult[]>;
-  runScrape(url: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<ScrapeResult>;
+  runSearch(query: string, config?: Config, signal?: AbortSignal, onTaskEvent?: TaskDispatchListener): Promise<SearchResult[]>;
+  runScrape(url: string, config?: Config, signal?: AbortSignal, onTaskEvent?: TaskDispatchListener): Promise<ScrapeResult>;
   runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }>;
   shutdown(): Promise<void>;
   resetIdleTimerOnActivity?(): void;

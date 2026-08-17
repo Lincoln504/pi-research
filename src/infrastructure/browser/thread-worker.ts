@@ -116,14 +116,14 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     let result: any;
     if (type === 'search') {
       if (!query) throw new Error('Search task requires a query');
-      const searchResult = await executeSearchTask(getContext(), query);
+      const searchResult = await executeSearchTask(getContext(), query, abortController.signal);
       result = { results: searchResult.results, duration: Date.now() - startTime, jitter: searchResult.jitter };
     } else if (type === 'scrape') {
       if (!url) throw new Error('Scrape task requires a URL');
       const scrapeResult = await executeScrapeTask(getContext(), url, abortController.signal);
       result = { ...scrapeResult, duration: Date.now() - startTime };
     } else if (type === 'healthcheck') {
-      const healthResult = await executeHealthCheck(getContext(), initMs);
+      const healthResult = await executeHealthCheck(getContext(), initMs, abortController.signal);
       result = { ...healthResult, duration: Date.now() - startTime };
     } else {
       result = { error: 'Unknown task type', duration: Date.now() - startTime };

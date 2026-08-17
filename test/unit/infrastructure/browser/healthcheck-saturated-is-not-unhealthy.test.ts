@@ -16,11 +16,16 @@
  * change wearing a behaviour change's description, and it survived because the
  * tests exercised the extracted predicate rather than runHealthCheck itself.
  *
- * These tests drive the real method against a real PriorityTaskQueue, with the
- * budget shortened so the verdict is reachable at all. Occupancy is the signal:
- * full slots mean workers are executing tasks bounded by their own dispatch-armed
- * deadlines, so the probe's turn is coming; idle slots with an undispatched
- * priority probe mean the queue itself has stopped.
+ * The second attempt asked whether the slots were occupied. That fails in the
+ * opposite and worse direction: activeCount rises before pool.execute and falls when
+ * it settles, so workers stuck in a browser launch that never finishes are occupied
+ * slots — and the very incident this was written for would have reported HEALTHY.
+ *
+ * Slot churn is no better, since a wedged pool still turns slots over as deadlines
+ * and death-backstops fire. The signal has to be a SUCCESSFUL completion: a busy
+ * pool produces them continuously, a stopped one produces none. These tests drive
+ * the real method against a real PriorityTaskQueue, with the probe's budget
+ * shortened so the verdict is reachable at all.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -64,19 +69,64 @@ describe('healthcheck distinguishes a saturated pool from a wedged one', () => {
     poolState.workMs = 0;
   });
 
-  it('answers healthy when every slot is busy and the probe cannot get one', async () => {
-    // The exact production shape: the pool is full of the run's own work, which
-    // outlasts the probe's budget. The probe never reaches a worker.
+  it('answers healthy when the pool is full and still completing work', async () => {
+    // The production shape: the pool is full of the run's own work, which outlasts
+    // the probe's budget, and that work is succeeding.
     const scheduler = makeScheduler();
     const queue = (scheduler as any).getPriorityQueue(CFG);
 
-    let release!: () => void;
-    const held = new Promise<void>(r => { release = r; });
-    const occupying = queue.enqueue('scrape', async () => { await held; return 'held'; });
+    // A real busy pool completes work continuously while the probe waits — that
+    // stream of successes is the evidence. Occupy the slot with short tasks back to
+    // back rather than one long one, which is what a search burst actually looks
+    // like, and what makes the probe wait without the pool being broken.
+    let keepWorking = true;
+    const churn = (async () => {
+      while (keepWorking) await queue.enqueue('scrape', async () => { await new Promise(r => setTimeout(r, 20)); return 'ok'; });
+    })();
     await new Promise(r => setTimeout(r, 10)); // let it take the only slot
 
     const verdict = await scheduler.runHealthCheck(CFG, undefined, BUDGET);
     expect(verdict).toEqual(expect.objectContaining({ success: true }));
+
+    keepWorking = false;
+    await churn;
+  });
+
+  it('answers UNHEALTHY when the slots are full but nothing is completing', async () => {
+    // The incident this was written for: workers occupied by browser launches that
+    // never finish. Occupancy alone reports that as busy — activeCount rises before
+    // the work starts — so the first version of this fix would have called a dead
+    // pool healthy. Only a successful completion distinguishes them.
+    const scheduler = makeScheduler();
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+
+    let release!: () => void;
+    const wedged = new Promise<void>(r => { release = r; });
+    const occupying = queue.enqueue('scrape', async () => { await wedged; return 'never'; });
+    await new Promise(r => setTimeout(r, 10));
+
+    await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).rejects.toThrow(
+      /no task has ever completed successfully/,
+    );
+
+    release();
+    await occupying;
+  });
+
+  it('does not accept slot churn as evidence — a failing task is not a working pool', async () => {
+    // A wedged pool still turns its slots over as deadlines and death-backstops fire.
+    // Counting that as progress would excuse exactly the state this probe exists for.
+    const scheduler = makeScheduler();
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+
+    await queue.enqueue('scrape', async () => { throw new Error('worker died'); }).catch(() => {});
+
+    let release!: () => void;
+    const wedged = new Promise<void>(r => { release = r; });
+    const occupying = queue.enqueue('scrape', async () => { await wedged; return 'never'; });
+    await new Promise(r => setTimeout(r, 10));
+
+    await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).rejects.toThrow(/completed successfully/);
 
     release();
     await occupying;
@@ -87,14 +137,14 @@ describe('healthcheck distinguishes a saturated pool from a wedged one', () => {
     // and it must not be excused as business.
     const scheduler = makeScheduler();
     const queue = (scheduler as any).getPriorityQueue(CFG);
-    // Stop the queue from dispatching while leaving its slots free — the shape of a
-    // wedge, as opposed to the shape of a busy pool. Capacity cannot be zeroed to
-    // simulate this: getPriorityQueue() recomputes concurrency from config on every
-    // task, so it would be restored before the probe was enqueued.
+    // Stop the queue from dispatching while leaving its slots free — a queue-side
+    // wedge, as opposed to a worker-side one. Capacity cannot be zeroed to simulate
+    // this: getPriorityQueue() recomputes concurrency from config on every task, so
+    // it would be restored before the probe was enqueued.
     queue.process = () => {};
 
     await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).rejects.toThrow(
-      /queue is not dispatching/,
+      /could not reach a worker/,
     );
   });
 

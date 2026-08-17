@@ -106,24 +106,29 @@ describe('scheduler deadline excludes queue wait', () => {
     const scheduler = makeScheduler();
     const dispatchOrder: string[] = [];
 
-    const first = scheduler.runSearch('first', CFG, undefined, () => dispatchOrder.push('first'));
+    const record = (name: string) => (event: string) => dispatchOrder.push(`${name}:${event}`);
+    const first = scheduler.runSearch('first', CFG, undefined, record('first'));
     // Queued behind `first` on a single-slot pool: not dispatched yet, so silent.
-    const second = scheduler.runSearch('second', CFG, undefined, () => dispatchOrder.push('second'));
+    const second = scheduler.runSearch('second', CFG, undefined, record('second'));
 
     await new Promise(r => setTimeout(r, 20)); // first is running, second is waiting
-    expect(dispatchOrder).toEqual(['first']);
+    expect(dispatchOrder).toEqual(['first:dispatched']);
 
     await Promise.all([first, second]);
-    expect(dispatchOrder).toEqual(['first', 'second']);
+    // Each task reports both edges, and the second is not dispatched until the first
+    // has settled — the caller's guard therefore never runs while nothing executes.
+    expect(dispatchOrder).toEqual([
+      'first:dispatched', 'first:settled', 'second:dispatched', 'second:settled',
+    ]);
   });
 
   it('reports scrape dispatch the same way', async () => {
     const scheduler = makeScheduler();
     const dispatched: string[] = [];
 
-    await scheduler.runScrape('https://a.example.com', CFG, undefined, () => dispatched.push('a'));
+    await scheduler.runScrape('https://a.example.com', CFG, undefined, e => dispatched.push(e));
 
-    expect(dispatched).toEqual(['a']);
+    expect(dispatched).toEqual(['dispatched', 'settled']);
   });
 
   it('a caller whose dispatch listener throws does not take the task down with it', async () => {

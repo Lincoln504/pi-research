@@ -27,6 +27,12 @@ export class PriorityTaskQueue {
     private maxTotalConcurrency: number;
     private readonly maxQueueDepth: number;
     private isShutdown = false;
+    /** When a task last completed WITHOUT error (epoch ms), or 0 if never. The only
+     *  evidence that separates a pool doing heavy work from one that has stopped —
+     *  see isSaturated's caller. Failures deliberately do not count: a wedged pool
+     *  still turns its slots over as deadlines and death-backstops fire, so slot
+     *  churn proves nothing, and neither does dispatch. */
+    private lastSuccessAt = 0;
 
     constructor(maxTotalConcurrency: number, maxQueueDepth = 500) {
         this.maxTotalConcurrency = maxTotalConcurrency;
@@ -88,6 +94,11 @@ export class PriorityTaskQueue {
             logger.debug(`[PriorityQueue] Task enqueued: ${type}. Active: ${this.activeCount}, Capacity: ${this.maxTotalConcurrency}. Queues: H:${this.healthcheckQueue.length} S:${this.searchQueue.length} SC:${this.scrapeQueue.length}`);
             this.process();
         });
+    }
+
+    /** Epoch ms of the last task that completed successfully, or 0 if none has. */
+    getLastSuccessAt(): number {
+        return this.lastSuccessAt;
     }
 
     /** Tasks currently executing on a worker. */
@@ -198,6 +209,7 @@ export class PriorityTaskQueue {
             } else {
                 result = await fnPromise;
             }
+            this.lastSuccessAt = Date.now();
             task.resolve(result);
         } catch (err) {
             task.reject(err);

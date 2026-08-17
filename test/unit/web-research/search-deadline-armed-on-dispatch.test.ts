@@ -53,8 +53,8 @@ const workUntil = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); }, { once: true });
   });
 
-/** onDispatch is the 8th positional parameter of runWorkerSearch. */
-const dispatchOf = (args: unknown[]) => args[7] as (() => void) | undefined;
+/** onTaskEvent is the 8th positional parameter of runWorkerSearch. */
+const eventsOf = (args: unknown[]) => args[7] as ((e: 'dispatched' | 'settled') => void) | undefined;
 
 describe('per-query search deadline is armed on dispatch', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -64,7 +64,7 @@ describe('per-query search deadline is armed on dispatch', () => {
       // Three budgets' worth of queue wait, then dispatch and do fast work. The wait
       // honours the abort signal, so a call-time timer really does kill this query.
       await workUntil(180, signal);
-      dispatchOf([query, _cfg, signal, ...rest])?.();
+      eventsOf([query, _cfg, signal, ...rest])?.('dispatched');
       await workUntil(5, signal);
       return [{ title: 't', url: `https://example.com/${query}`, content: 'c' }];
     });
@@ -80,7 +80,7 @@ describe('per-query search deadline is armed on dispatch', () => {
     // throws an infrastructure error when EVERY query comes back empty, which would
     // mask the per-query verdict this test is about.
     vi.mocked(runWorkerSearch).mockImplementation(async (query: string, _cfg: any, signal: any, ...rest: any[]) => {
-      dispatchOf([query, _cfg, signal, ...rest])?.();
+      eventsOf([query, _cfg, signal, ...rest])?.('dispatched');
       await workUntil(query === 'slow' ? 400 : 5, signal); // 400ms > the 60ms budget
       return [{ title: 't', url: `https://example.com/${query}`, content: 'c' }];
     });
@@ -97,10 +97,11 @@ describe('per-query search deadline is armed on dispatch', () => {
     // runWorkerSearch retries internally and dispatches again; a timer left running
     // from the first attempt would kill the second mid-flight.
     vi.mocked(runWorkerSearch).mockImplementation(async (query: string, _cfg: any, signal: any, ...rest: any[]) => {
-      const onDispatch = dispatchOf([query, _cfg, signal, ...rest]);
-      onDispatch?.();
+      const onTaskEvent = eventsOf([query, _cfg, signal, ...rest]);
+      onTaskEvent?.('dispatched');
       await workUntil(45, signal); // most of the budget
-      onDispatch?.(); // retry dispatches again
+      onTaskEvent?.('settled');   // attempt 1 ends
+      onTaskEvent?.('dispatched'); // retry dispatches again
       await workUntil(45, signal); // would exceed 60ms if the clock had never been reset
       return [{ title: 't', url: 'https://example.com/retry', content: 'c' }];
     });
@@ -108,6 +109,31 @@ describe('per-query search deadline is armed on dispatch', () => {
     const results = await performSearch(['retry'], CFG);
 
     expect(results.get('retry')).toHaveLength(1);
+  });
+
+  it('a retry that has to queue is not killed by the previous attempt\'s clock', async () => {
+    // Re-arming on the next dispatch was not enough on its own. Between an attempt
+    // failing and its retry being dispatched there is a backoff sleep, a re-enqueue
+    // and a fresh queue wait — and the predecessor's timer was still running across
+    // all of it. It would fire mid-wait and abort a query that had executed for two
+    // seconds, reporting it as "the browser pool was saturated": the same
+    // charge-the-wait-to-the-work mistake, one attempt removed.
+    vi.mocked(runWorkerSearch).mockImplementation(async (query: string, _cfg: any, signal: any, ...rest: any[]) => {
+      const onTaskEvent = eventsOf([query, _cfg, signal, ...rest]);
+      onTaskEvent?.('dispatched');
+      await workUntil(30, signal);   // attempt 1 does some work, then fails
+      onTaskEvent?.('settled');
+      // The gap: backoff plus queue wait, longer than the whole 60ms budget. Nothing
+      // is executing here, so nothing should be counting against it.
+      await workUntil(150, signal);
+      onTaskEvent?.('dispatched');
+      await workUntil(20, signal);
+      return [{ title: 't', url: `https://example.com/${query}`, content: 'c' }];
+    });
+
+    const results = await performSearch(['retry-after-wait'], CFG);
+
+    expect(results.get('retry-after-wait')).toHaveLength(1);
   });
 
   it('stays disarmed when the scheduler never reports dispatch', async () => {

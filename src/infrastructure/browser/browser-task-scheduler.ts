@@ -245,7 +245,7 @@ export class BrowserTaskScheduler implements IScheduler {
         return this.server.start();
     }
 
-    async runSearch(query: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<SearchResult[]> {
+    async runSearch(query: string, config?: Config, signal?: AbortSignal, onTaskEvent?: TaskDispatchListener): Promise<SearchResult[]> {
         // Reject tasks once this scheduler has begun teardown. shutdown() nulls priorityQueue and
         // clears the scheduler reference (a future run gets a fresh scheduler), so getPriorityQueue()
         // here would otherwise build a FRESH, non-shutdown queue on this dead instance and dispatch
@@ -311,18 +311,18 @@ export class BrowserTaskScheduler implements IScheduler {
                 queue.enqueue('search', async () => {
                     startDeadline();
                     // Same instant, for the same reason, one layer up: whoever called us
-                    // arms their own guard here instead of at call time. A listener that
-                    // throws must not take the task down with it.
-                    try { onDispatch?.(); } catch { /* caller's guard, caller's problem */ }
-                    // The shared timeoutPromise is deliberately NOT raced in here (its timer
-                    // dies with the outer race); the backstop below carries its own timer, so
-                    // a QUEUED task can never be dispatched against a disarmed guard, and a
-                    // worker dying mid-task cannot pin the queue slot forever.
-                    return await executePoolTaskWithDeathBackstop(
-                        () => pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                        timeoutMs,
-                        'Search',
-                    );
+                    // arms their own guard here instead of at call time, and disarms it
+                    // when we settle. A listener that throws must not take the task down.
+                    try { onTaskEvent?.('dispatched'); } catch { /* caller's guard, caller's problem */ }
+                    try {
+                        return await executePoolTaskWithDeathBackstop(
+                            () => pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                            timeoutMs,
+                            'Search',
+                        );
+                    } finally {
+                        try { onTaskEvent?.('settled'); } catch { /* as above */ }
+                    }
                 }, queueSignal),
                 timeoutPromise
             ]);
@@ -384,7 +384,7 @@ export class BrowserTaskScheduler implements IScheduler {
         return result.results;
     }
 
-    async runScrape(url: string, config?: Config, signal?: AbortSignal, onDispatch?: TaskDispatchListener): Promise<ScrapeResult> {
+    async runScrape(url: string, config?: Config, signal?: AbortSignal, onTaskEvent?: TaskDispatchListener): Promise<ScrapeResult> {
         if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
@@ -420,13 +420,17 @@ export class BrowserTaskScheduler implements IScheduler {
             result = await Promise.race([
                 queue.enqueue('scrape', async () => {
                     startDeadline();
-                    // See runSearch: the caller's guard is armed on dispatch too.
-                    try { onDispatch?.(); } catch { /* caller's guard, caller's problem */ }
-                    return await executePoolTaskWithDeathBackstop(
-                        () => pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                        timeoutMs,
-                        'Scrape',
-                    );
+                    // See runSearch: the caller's guard is armed on dispatch and disarmed on settle.
+                    try { onTaskEvent?.('dispatched'); } catch { /* caller's guard, caller's problem */ }
+                    try {
+                        return await executePoolTaskWithDeathBackstop(
+                            () => pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                            timeoutMs,
+                            'Scrape',
+                        );
+                    } finally {
+                        try { onTaskEvent?.('settled'); } catch { /* as above */ }
+                    }
                 }, queueSignal),
                 timeoutPromise
             ]);
@@ -490,19 +494,27 @@ export class BrowserTaskScheduler implements IScheduler {
         // during a burst in which the pool was healthily executing the run's own
         // searches. Twice on the night this was measured.
         //
-        // The verdict rests on whether the SLOTS ARE OCCUPIED, and it has to. An
-        // earlier version of this asked the queue when it last dispatched anything,
-        // which reads sensibly and is unreachable: healthcheck tasks have strict queue
-        // priority, so if any slot frees while this probe waits, the queue dispatches
-        // THIS probe — clearing the timer below. The wait timer can therefore only fire
-        // in a window where nothing was dispatched at all, making "dispatched recently"
-        // false by construction and every saturated pool a wedged one. The bug survived
-        // its own fix because no test drove a saturated pool through runHealthCheck.
+        // The verdict needs evidence of WORK GETTING DONE, and nothing weaker suffices.
+        // Two earlier attempts show why.
         //
-        // Occupancy has no such circularity: full slots mean workers are executing
-        // tasks, each bounded by its own dispatch-armed deadline, so the probe's turn
-        // is coming. Idle slots and an undispatched priority probe mean the queue
-        // itself has stopped, which is the fault this exists to catch.
+        // Asking when the queue last dispatched anything is unreachable: healthcheck
+        // tasks have strict queue priority, so if a slot frees while this probe waits,
+        // the queue dispatches THIS probe and cancels the timer below. The timer can
+        // only fire in a window where nothing dispatched at all, making "dispatched
+        // recently" false by construction and every saturated pool a wedged one.
+        //
+        // Asking whether the slots are occupied fails in the opposite direction, which
+        // is worse. activeCount rises before pool.execute and falls when it settles, so
+        // six workers whose browser launches have hung are six occupied slots — the
+        // exact incident this was written for would have reported HEALTHY.
+        //
+        // Slot churn is no better: a wedged pool still turns its slots over as task
+        // deadlines and death-backstops fire. Only a SUCCESSFUL completion proves a
+        // worker did something, and it is reachable — a busy pool produces them
+        // continuously, and a stopped one produces none. Note what this correctly does
+        // NOT call a fault: one dead worker among five healthy ones still yields
+        // successes, and the pool really is healthy. That was a dispatch defect, not a
+        // health one.
         //
         // Once dispatched, the deadline measures execution alone (armed below, like
         // runSearch/runScrape), so a slow probe still fails on its own merits.
@@ -520,12 +532,17 @@ export class BrowserTaskScheduler implements IScheduler {
         const timeoutPromise = new Promise<{ success: boolean } | never>((resolve, reject) => {
             const onWaitExpired = () => {
                 if (dispatched) return;
-                if (healthQueue.isSaturated()) {
-                    logger.debug(`[BrowserTaskScheduler] Healthcheck could not claim a worker within ${timeoutMs}ms; all ${healthQueue.getConcurrency()} slots are executing tasks — pool saturated, not wedged.`);
+                const lastSuccessAt = healthQueue.getLastSuccessAt();
+                const sinceSuccess = lastSuccessAt > 0 ? Date.now() - lastSuccessAt : Number.POSITIVE_INFINITY;
+                if (healthQueue.isSaturated() && sinceSuccess <= timeoutMs) {
+                    logger.debug(`[BrowserTaskScheduler] Healthcheck could not claim a worker within ${timeoutMs}ms, but all ${healthQueue.getConcurrency()} slots are busy and a task completed ${sinceSuccess}ms ago — pool saturated, not wedged.`);
                     resolve({ success: true });
                     return;
                 }
-                reject(new Error(`Health check could not reach a worker within ${timeoutMs}ms while only ${healthQueue.getActiveCount()} of ${healthQueue.getConcurrency()} slots were busy — the queue is not dispatching.`));
+                reject(new Error(
+                    `Health check could not reach a worker within ${timeoutMs}ms — ${healthQueue.getActiveCount()} of ${healthQueue.getConcurrency()} slots busy, ` +
+                    `${lastSuccessAt > 0 ? `last successful task ${sinceSuccess}ms ago` : 'no task has ever completed successfully'}.`,
+                ));
             };
             timeoutId = setTimeout(onWaitExpired, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
