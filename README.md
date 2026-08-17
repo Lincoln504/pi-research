@@ -48,7 +48,7 @@ In pi it works out of the box on your session's model and pi's configuration. St
 
 ### How it works
 
-A research run loops through agent teams: a coordinator plans and opens with a search, researcher agents scrape and read in parallel, and an evaluator decides whether to go another round or synthesize. The result is one cited Markdown report with findings optionally saved to the knowledge store.
+A research run loops through agent teams: a coordinator plans and opens with a search, researcher agents scrape and read in parallel, and a research lead decides whether to go another round — then writes the report from every report collected. The result is one cited Markdown report with findings optionally saved to the knowledge store.
 
 Three depth levels (normal, deep, ultra) set the team size and number of rounds. Ask in natural language and the tool picks the right one:
 

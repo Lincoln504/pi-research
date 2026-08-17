@@ -88,7 +88,7 @@ export const ConfigSchema = Type.Object({
    *  never killed before it has used its full nav budget plus time waiting in the queue.
    *  (default: 10000) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
-  /** Timeout for coordinator/evaluator/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-30min).
+  /** Timeout for coordinator/research-lead/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-30min).
    *  Not exposed in TUI — controlled via PI_RESEARCH_LLM_TIMEOUT_MS env var.
    *  Ceiling raised to 30min (matching RESEARCHER_TIMEOUT_MS): a slow model on a
    *  large-context synthesis/plan call can legitimately run >10min, and the old
@@ -96,7 +96,7 @@ export const ConfigSchema = Type.Object({
    *  (e.g. 900000), causing those calls to time out mid-generation. */
   LLM_TIMEOUT_MS: Type.Number({ minimum: 60000, maximum: 1800000, default: 300000 }),
   /** Chain-of-thought "thinking" level for the engine's own LLM calls (coordinator,
-   *  evaluator, synthesis, JSON-repair, knowledge extraction) AND the researcher
+   *  router, synthesizer, JSON-repair, knowledge extraction) AND the researcher
    *  sub-agents. Default 'off': these calls emit structured JSON / cited reports, not
    *  open-ended reasoning, so thinking only burns the output-token budget (often
    *  truncating before the JSON/report block) and adds latency for at most a marginal
@@ -111,22 +111,26 @@ export const ConfigSchema = Type.Object({
     Type.Literal('medium'),
     Type.Literal('high'),
   ], { default: 'off' }),
-  /** Max output tokens for the coordinator plan + mid-round evaluator decision (and,
-   *  when the evaluator synthesizes mid-round, the report). Default 16384. The blanket
+  /** Max output tokens for the coordinator's round-1 plan. Default 16384. The routing
+   *  decision has its OWN, much smaller ceiling (it emits a decision, never a report,
+   *  and cannot synthesize mid-round under the split protocol); the final report uses
+   *  SYNTHESIS_MAX_TOKENS below. The blanket
    *  4096 cap previously throttled every call and could be exhausted by a thinking block
    *  before any text was emitted. Capped at the model's real ceiling at call time.
    *  Not exposed in TUI — controlled via PI_RESEARCH_PLANNING_MAX_TOKENS env var. */
   PLANNING_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 16384 }),
-  /** Max output tokens for the final synthesized research report (the forced-synthesis
-   *  evaluator call). Default 32768 so a full cited report is never truncated. Capped at
+  /** Max output tokens for the final synthesized research report (the synthesizer call,
+   *  and each pass of a reduce when the corpus does not fit in one). Default 32768 so a
+   *  full cited report is never truncated. It is also the reserve subtracted from the
+   *  model's context window when budgeting that corpus. Capped at
    *  the model's real maxTokens at call time.
    *  Not exposed in TUI — controlled via PI_RESEARCH_SYNTHESIS_MAX_TOKENS env var. */
   SYNTHESIS_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 32768 }),
   /** LLM Model override for researcher sub-agents and knowledge synthesis.
    *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
    *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
-   *  and the knowledge synthesis background LLM. The coordinator and evaluator always
-   *  use the caller's model (ctx.model).
+   *  and the knowledge synthesis background LLM. The coordinator and the research lead
+   *  always use the caller's model (ctx.model).
    */
   RESEARCH_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */

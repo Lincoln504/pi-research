@@ -3,7 +3,9 @@
  *
  * A researcher emits a short, structured account of what it covered at the HEAD of its
  * report, delimited by `COVERAGE DIGEST` / `END COVERAGE DIGEST`. The digest is split off
- * when the report is stored: the router reads digests, the synthesizer reads bodies.
+ * when the report is stored, so every consumer of a report body sees one without routing
+ * metadata in it. The router reads a fresh report in full WITH its digest beside it, and
+ * represents every earlier round by digest alone; the synthesizer reads bodies only.
  *
  * Why the head and not the tail: the tail already belongs to `CITED LINKS`, and a report
  * that gets truncated mid-write (timeout, token ceiling — see researcher-executor's
@@ -67,7 +69,7 @@ export const RESEARCHER_DIGEST_SECTION = `Your report has three parts in this ex
 
 ### Part 1 — COVERAGE DIGEST (first, mandatory)
 
-Open the report with this block, exactly as shown. The research lead reads it to decide what still needs investigating, and reads it INSTEAD of your report — so anything you leave out of it is invisible when the next round is planned.
+Open the report with this block, exactly as shown. The research lead reads it to decide what still needs investigating. On the round your report arrives the lead reads the digest alongside the full report and checks one against the other; on every later round it sees ONLY this digest — so anything you leave out of it is invisible to every decision after the first.
 
 ${COVERAGE_DIGEST_HEADER}
 Goal: [your assigned goal, restated in one line]
@@ -79,7 +81,7 @@ ${COVERAGE_DIGEST_TERMINATOR}
 
 Rules for the digest:
 - Keep it under 150 words total. It is an index, not a summary — no [N] citations, no findings prose, no URLs.
-- Be honest about \`Gaps\` and \`Unsubstantiated\`. Claiming full coverage you do not have is the single most damaging thing you can write here: the lead will stop researching the topic.
+- Be honest about \`Gaps\` and \`Unsubstantiated\`. Claiming full coverage you do not have is the single most damaging thing you can write here: it argues for ending the research on this topic, and after the round it arrives there is no report left for the lead to check the claim against.
 - Write both delimiter lines exactly, in capitals, each on its own line.
 
 ### Part 2 — Report body

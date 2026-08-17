@@ -558,9 +558,10 @@ export default async function (pi: ExtensionAPI) {
     // the executor (deep) and quick orchestrator inject "ADDITIONAL USER GUIDANCE"/
     // "ADDITIONAL CONSIDERATIONS" into the researcher system prompt themselves.
     // Appending the same messages again here delivered every steering message
-    // TWICE to every researcher — return the prompt untouched. (The coordinator/
-    // evaluator never pass through this hook at all: they run via completeSimple,
-    // not an agent session, and get steering from planning-service directly.)
+    // TWICE to every researcher — return the prompt untouched. (The coordinator and
+    // the research lead never pass through this hook at all: they run via
+    // completeSimple, not an agent session, and get steering from planning-service
+    // directly.)
     const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
     if (isResearcher) {
       return { systemPrompt: event.systemPrompt };

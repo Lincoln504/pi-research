@@ -58,9 +58,9 @@ export interface ResearchObserver {
   // Synthesis/Completion
   /**
    * Fired when the run enters FINAL synthesis / stops consuming steering:
-   *   - deep mode: right before the forced (mustSynthesize) evaluator call, and
-   *     on the evaluator-chose-synthesize path (idempotent there — the flag is
-   *     already off via onEvaluationDecision('synthesize')).
+   *   - deep mode: right before the synthesizer call, and on the path where the
+   *     router chose to finish early (idempotent there — the flag is already off
+   *     via onEvaluationDecision('synthesize')).
    *   - quick mode: as soon as the researcher session settles, i.e. the point
    *     the 500ms steering-consume poller stops running.
    * TUI consequence: steeringAcceptable flips false, so a late steer takes the

@@ -9,7 +9,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runResearcher } from '../../../src/orchestration/researcher-executor.ts';
+import { loadPrompt } from '../../../src/core/llm/prompts.ts';
 import type { RunResearcherOptions } from '../../../src/orchestration/orchestration-types.ts';
 import { getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
@@ -588,6 +592,28 @@ describe('runResearcher', () => {
       expect(sessionCall.systemPrompt).toContain('COVERAGE DIGEST');
       expect(sessionCall.systemPrompt).toContain('END COVERAGE DIGEST');
       expect(sessionCall.systemPrompt).not.toContain('{{digest_section}}');
+    });
+
+    it('renders the SHIPPED researcher.md with no placeholder left behind', async () => {
+      // Every other test here feeds loadPrompt a stub listing the placeholders the code
+      // already knows about, so a `{{placeholder}}` added to src/prompts/researcher.md and
+      // never wired into the replace chain is invisible: nothing throws, and the literal
+      // braces are sent to the model as an instruction it cannot act on. The named
+      // assertion above catches exactly one placeholder, by name — which is how
+      // `{{digest_section}}` came to need wiring in two separate call sites.
+      const real = readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts/researcher.md'),
+        'utf-8',
+      );
+      const PLACEHOLDER = /\{\{[a-z_0-9]+\}\}/gi;
+      expect(real.match(PLACEHOLDER)?.length ?? 0).toBeGreaterThan(0); // it really is a template
+      vi.mocked(loadPrompt).mockReturnValueOnce(real);
+
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      await runResearcher(makeOptions());
+
+      const sessionCall = vi.mocked(createResearcherSession).mock.calls.at(-1)![0] as any;
+      expect(sessionCall.systemPrompt.match(PLACEHOLDER) ?? []).toEqual([]);
     });
 
     it('includes initial search result links in the prompt', async () => {

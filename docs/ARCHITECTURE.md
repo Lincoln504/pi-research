@@ -31,8 +31,8 @@ pi CLI
    search burst, then hands each researcher a set of result URLs to start from.
 4. Researchers scrape and read those pages through the scrape tooling and return cited
    reports. They consider only what they scraped this session.
-5. The evaluator reviews the round and either runs another round or synthesizes the
-   final report.
+5. The research lead's **router** reviews the round and either runs another round or ends
+   the loop; its **synthesizer** then writes the final report from every report collected.
 6. The result is returned as a single cited Markdown report; the cited URLs and their
    summaries are queued into the knowledge store for future runs.
 
@@ -49,11 +49,19 @@ agent skill can pass). The pi extension's `research` tool has a minimum depth of
 an in-session agent can never request quick mode.
 
 Depth 1–3 — deep (`DeepResearchOrchestrator`): the run proceeds in **rounds**. A round
-is one coordinate → research → evaluate cycle — the round's agenda is planned (by the
-coordinator in round 1, by the evaluator thereafter), a batch of **researchers** runs it
-in parallel, and the evaluator then decides whether to run another round or synthesize.
-Two limits apply independently: how many researchers run *within* a round, and how many
-rounds the run may take.
+is one coordinate → research → route cycle — the round's agenda is planned (by the
+coordinator in round 1, by the research lead's **router** thereafter), a batch of
+**researchers** runs it in parallel, and the router then decides whether to run another
+round or end the loop. Two limits apply independently: how many researchers run *within*
+a round, and how many rounds the run may take.
+
+The research lead is two roles, not one call doing both jobs. The router only decides; it
+reads each report in full on the one round it arrives and only that report's short
+coverage digest thereafter, so its input grows with team size rather than with the square
+of the round count. The **synthesizer** runs exactly once, at the end, reads every report
+in full, and writes the report — under a corpus budget derived from the model's context
+window, reducing in partial passes and merging when the corpus does not fit. The two
+prompts are `src/prompts/system-lead-router.md` and `system-lead-synthesizer.md`.
 
 | Depth | Label  | Researchers per round (max) | Rounds (max) |
 |-------|--------|-----------------------------|--------------|
@@ -61,7 +69,7 @@ rounds the run may take.
 | 2     | deep   | 3                           | 3            |
 | 3     | ultra  | 5                           | 3            |
 
-These are ceilings, not targets: the coordinator and evaluator use as many researchers
+These are ceilings, not targets: the coordinator and router use as many researchers
 and rounds as the topic needs. A depth-2 run, for example, may spawn up to 3 researchers
 in each of up to 3 rounds. Queued steering messages (Alt+Enter) can unlock a few extra
 rounds past the cap (`MAX_EXTRA_ROUNDS_WITH_STEERING`).
@@ -70,7 +78,7 @@ The coordinator also runs the initial search burst and distributes its result UR
 round 1's researchers (`distributeSearchResults`), so in deep mode the researchers
 themselves do not call `search`.
 
-LLM-call conventions. Coordinator, evaluator, synthesis, JSON-repair, and
+LLM-call conventions. Coordinator, router, synthesizer, JSON-repair, and
 knowledge-extraction calls go through `completeSimple` (`src/core/llm/pi-ai-completion.ts`)
 with `buildSafeOptions` (`src/core/llm/llm-utils.ts`); researcher sub-agents go through
 `createAgentSession`.
@@ -369,7 +377,7 @@ stable `Agent` connector API, so it follows `^8`.)
 
 Transient-failure resilience — every LLM call is a potential single point of failure on a
 streaming endpoint that can drop mid-response (undici surfaces this as `terminated`). The
-coordinator and evaluator calls retry fast transient transport failures (socket aborts, 5xx,
+coordinator and research-lead calls retry fast transient transport failures (socket aborts, 5xx,
 429, provider overload) with bounded exponential backoff — mirroring the per-researcher retry
 (`PI_RESEARCH_MAX_RETRIES`) — and, if still failing, degrade to a deterministic fallback plan
 rather than aborting the run. An app-level LLM timeout is not retried (it already spent the

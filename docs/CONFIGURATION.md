@@ -78,8 +78,8 @@ Research
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process. |
 | `PI_RESEARCH_MAX_CONCURRENT_RUNS` | `3` | ≥1 | Machine-wide cap on research runs executing at the same time, across **every** process (CLI, agent skill, pi extension, SDK). Runs beyond the cap queue rather than fail. All concurrent runs share one leader-elected browser/embedding pool, so oversubscribing it degrades every run at once. |
 | `PI_RESEARCH_RUN_ACQUIRE_TIMEOUT_MS` | `600000` | ≥0 | How long a run queues for a free slot before failing with "maximum concurrent research runs reached" (CLI exit `75`). `0` = fail immediately instead of queueing. |
-| `PI_RESEARCH_MODEL` | _(pi: session model; CLI/skill: required)_ | — | The model research runs on. **Required for the standalone CLI / agent skill** — they use only this configured model (never the model selected inside the pi extension) and refuse to start without one (the CLI's per-run `--model` flag also satisfies this). On the SDK it selects the session model when no `model` option is given. In the pi extension it overrides researcher sub-agents and knowledge synthesis, while the coordinator and evaluator keep using the session model. Accepts `provider/id` or a bare model id. |
-| `PI_RESEARCH_DISABLED_TOOLS` | _(none)_ | — | Comma-separated research tools to disable for a run (`search`, `scrape`, `security_search`, `stackexchange`, `youtube_transcript`, `grep`, `read`). Removed from every researcher's toolset and named in the coordinator/evaluator prompt. Strictly additive — it can only remove capabilities, never grant one, and it stacks on top of the default exclusions rather than replacing them. An unrecognized name excludes nothing and is warned about rather than failing the run. |
+| `PI_RESEARCH_MODEL` | _(pi: session model; CLI/skill: required)_ | — | The model research runs on. **Required for the standalone CLI / agent skill** — they use only this configured model (never the model selected inside the pi extension) and refuse to start without one (the CLI's per-run `--model` flag also satisfies this). On the SDK it selects the session model when no `model` option is given. In the pi extension it overrides researcher sub-agents and knowledge synthesis, while the coordinator and research lead keep using the session model. Accepts `provider/id` or a bare model id. |
+| `PI_RESEARCH_DISABLED_TOOLS` | _(none)_ | — | Comma-separated research tools to disable for a run (`search`, `scrape`, `security_search`, `stackexchange`, `youtube_transcript`, `grep`, `read`). Removed from every researcher's toolset and named in the coordinator and research-lead prompts. Strictly additive — it can only remove capabilities, never grant one, and it stacks on top of the default exclusions rather than replacing them. An unrecognized name excludes nothing and is warned about rather than failing the run. |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` (TUI) | `false` | — | Front-ends write a Markdown report to disk and surface its path. |
 | `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the agent skill, which runs from the host agent's arbitrary directory. |
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
@@ -99,7 +99,7 @@ Timeouts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–1800000 | Coordinator / evaluator / repair / knowledge LLM call timeout. |
+| `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–1800000 | Coordinator / research-lead / repair / knowledge LLM call timeout. |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape (page-load) timeout. |
 | `PI_RESEARCH_SEARCH_TIMEOUT_MS` | `45000` | 5000–120000 | Browser search page timeout. |
 | `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). These ceilings bound **execution**: a task's clock starts when a worker picks it up, so time spent queued behind other work is not charged against it and raising this to cover a busy pool is neither needed nor effective. |
@@ -111,8 +111,8 @@ These are advanced, env-only knobs (not in the TUI).
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_LLM_THINKING_LEVEL` | `off` | off · minimal · low · medium · high | Chain-of-thought level for all engine LLM work (coordinator, evaluator, synthesis, JSON-repair, knowledge extraction, and researcher sub-agents). Off by default — these calls emit structured JSON / cited reports, so a thinking block only consumes the output budget and can truncate the answer. Clamped per model by pi. |
-| `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the plan + mid-round evaluator decision. Clamped to the model's real ceiling. |
+| `PI_RESEARCH_LLM_THINKING_LEVEL` | `off` | off · minimal · low · medium · high | Chain-of-thought level for all engine LLM work (coordinator, router, synthesizer, JSON-repair, knowledge extraction, and researcher sub-agents). Off by default — these calls emit structured JSON / cited reports, so a thinking block only consumes the output budget and can truncate the answer. Clamped per model by pi. |
+| `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the coordinator's plan. The router's decision has its own, smaller ceiling; the final synthesis uses `PI_RESEARCH_SYNTHESIS_MAX_TOKENS`. Clamped to the model's real ceiling. |
 | `PI_RESEARCH_SYNTHESIS_MAX_TOKENS` | `32768` | 1024–131072 | Max output tokens for the final synthesized report. Clamped to the model's real ceiling. |
 
 Knowledge store
@@ -243,7 +243,7 @@ just export the variable for that process.
 
 A research run re-sends a large, mostly-unchanged prompt many times: a researcher
 re-sends its whole conversation (including every scraped page) on each tool turn, and
-the evaluator re-sends the accumulated findings on each round. Every provider will
+the research lead used to re-send the accumulated findings on every round. Every provider will
 serve that repetition from a prompt cache at a fraction of the input price — but only
 for an **exact prefix** of the request, and only if nothing that varies sits in front
 of it.

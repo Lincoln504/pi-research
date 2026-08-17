@@ -72,13 +72,30 @@ describe('worker pool dispatch shape', () => {
 
 /**
  * The gauges that make the failure above visible have to describe the pool that
- * exists NOW.
+ * exists NOW, and they have to be readable from the run that is asking.
  */
 describe('dispatch-health gauges', () => {
   const gauge = (name: string) =>
-    vi.mocked(metrics.setGauge).mock.calls.filter(c => c[0] === name).at(-1)?.[1];
+    vi.mocked(metrics.session.setGauge).mock.calls.filter(c => c[0] === name).at(-1)?.[1];
 
   beforeEach(() => vi.clearAllMocks());
+
+  it('writes to the SESSION registry, never to whichever run happens to be active', () => {
+    // The only caller is the leader's 5s leadership tick — a self-rescheduling timer
+    // chain started when this process won the election, i.e. inside whichever research
+    // run first needed a browser. AsyncLocalStorage resolves at emit time from the async
+    // resource that fired, so a run-scoped emit here writes into that FIRST run's
+    // registry for the life of the process: absent from every later run's summary, and
+    // keeping a discarded registry reachable through the timer. The pool's dispatch
+    // shape is process state.
+    const mgr = new WorkerPoolManager();
+    (mgr as any).pool = { info: { queuedTasks: 4, idleWorkerNodes: 2, stolenTasks: 7 } };
+
+    mgr.recordDispatchHealth();
+
+    expect(vi.mocked(metrics.setGauge)).not.toHaveBeenCalled();
+    expect(vi.mocked(metrics.session.setGauge)).toHaveBeenCalled();
+  });
 
   it('reports parked tasks only when a node was idle to take them', () => {
     const mgr = new WorkerPoolManager();

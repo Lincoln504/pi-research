@@ -874,14 +874,6 @@ export class PlanningService implements IPlanningService {
   }
 
   /**
-   * Coverage digests for the router, one per researcher that has reported.
-   *
-   * Callers that hold the synthesis service pass them in. Callers that don't (tests, the
-   * SDK's direct entry points) get digests derived from the report bodies, so the router
-   * always sees an entry for every researcher rather than being handed nothing and
-   * concluding the round produced no work.
-   */
-  /**
    * Split what the router sees into evidence it must judge and history it already judged.
    *
    * The fidelity/cost trade this protocol turns on. Sending every report every round gives
@@ -919,6 +911,14 @@ export class PlanningService implements IPlanningService {
     return [fresh, prior];
   }
 
+  /**
+   * Coverage digests for the router, one per researcher that has reported.
+   *
+   * Callers that hold the synthesis service pass them in. Callers that don't (tests, the
+   * SDK's direct entry points) get digests derived from the report bodies, so the router
+   * always sees an entry for every researcher rather than being handed nothing and
+   * concluding the round produced no work.
+   */
   private resolveDigests(options: UpdatePlanOptions): Map<string, string> {
     // Fill per REPORT, not per supplied digest. Taking `options.digests` wholesale would
     // leave the router blind to any researcher missing from it — and a researcher the

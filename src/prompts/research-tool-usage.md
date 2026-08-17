@@ -61,7 +61,7 @@ The `research` tool retrieves from the internet. Do NOT use it when the answer c
 - `depth: 3` — **ABSOLUTELY NEVER without explicit user request.** The user MUST use trigger words like "ultra", "exhaustive", "comprehensive deep-dive", or "maximum research". If the user does not explicitly request this level, use depth 1 or depth 2.
 
 **How depth works internally:**
-- `depth: 1-3` — AI-orchestrated: coordinator plans a team, researchers execute, evaluator decides whether to continue deeper. Team size and number of rounds scale with complexity. The coordinator and evaluator dynamically determine how many researchers are needed each round — it's not a fixed number.
+- `depth: 1-3` — AI-orchestrated: coordinator plans a team, researchers execute, a research lead decides whether to continue deeper and writes the final report. Team size and number of rounds scale with complexity. The coordinator and the lead dynamically determine how many researchers are needed each round — it's not a fixed number.
 
 **Max siblings per round by depth:**
 - `depth: 1` — up to {{max_team_size_l1}} researchers per round

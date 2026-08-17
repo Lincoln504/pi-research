@@ -160,10 +160,11 @@ export class DeepResearchOrchestrator {
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
     // Whether the ROUTER chose to finish inside the loop, as opposed to the loop ending
-    // because the round budget ran out. The router never carries the report — it routes on
-    // coverage digests and has not read the findings — so this only records which UI and
-    // observer events already fired, not a result to reuse. Final synthesis runs either
-    // way, below.
+    // because the round budget ran out. The router never carries the report: it is asked
+    // for a decision, is given no corpus to write from (it sees each report once, on the
+    // round it arrives, and digests thereafter), and any content it returns anyway is
+    // discarded in planning-service. So this only records which UI and observer events
+    // already fired, not a result to reuse. Final synthesis runs either way, below.
     let routerChoseSynthesis = false;
     // Highest round number handed to observer.onRoundStart. The final synthesis
     // announces itself too, and it must not repeat or skip: `round_start` is an SDK
@@ -264,8 +265,10 @@ export class DeepResearchOrchestrator {
                 modelRegistry: ctx.modelRegistry,
                 cwd: ctx.cwd,
                 config: this.config,
-                // Reports are still passed so a caller-side digest miss can fall back to
-                // deriving one; the routing call itself reads `digests`, not these.
+                // Both are used by routing, for different rounds: the bodies of the reports
+                // that arrived THIS round are sent in full, and every earlier researcher is
+                // represented by its digest alone. Passing reports also lets a caller-side
+                // digest miss fall back to deriving one from the body.
                 reports: synthesisService.getAllReports(researchId),
                 digests: synthesisService.getAllDigests(researchId),
                 previousPlan: planningService.getCurrentPlan(researchId),
@@ -299,9 +302,9 @@ export class DeepResearchOrchestrator {
             if (plan.action === 'synthesize') {
                 // Only the ROUTER (round 2+) can reach this: generatePlan pins round 1 to
                 // 'delegate' so a coordinator can never end the run before any source is
-                // read. The router decides from coverage digests and has never seen a
-                // finding, so its decision ends the loop but the report is written by the
-                // terminal synthesis below.
+                // read. The router's decision ends the loop, but it has never held the
+                // whole corpus — only this round's reports and earlier digests — so the
+                // report itself is written by the terminal synthesis below.
                 routerChoseSynthesis = true;
                 observer?.onEvaluationDecision?.('synthesize', plan, this.currentRound);
             }
@@ -468,10 +471,11 @@ export class DeepResearchOrchestrator {
       }
 
       // Final Synthesis — always its own call. Routing and synthesis are separate jobs:
-      // the router decides from coverage digests and never reads the findings, so it
-      // cannot produce the report and there is nothing from the loop to reuse. This costs
-      // one extra call on runs the router ends early, and in exchange removes a full
-      // re-send of the corpus from every round that preceded it.
+      // no router call ever holds the whole corpus (it reads each report on the single
+      // round it arrives, and digests after that), so none of them can produce the report
+      // and there is nothing from the loop to reuse. This costs one extra call on runs the
+      // router ends early, and in exchange removes a full re-send of the corpus from every
+      // round that preceded it.
       //
       // ZERO reports collected AND researchers actually failed — the run attempted
       // research and produced nothing groundable. Checked BEFORE the synthesis call

@@ -69,7 +69,7 @@ export function getUnitsPerResearcher(config?: Config): number {
   return 1 + Math.min(batches, 4);
 }
 
-/** Progress bar weight per lead evaluator round */
+/** Progress bar weight per research-lead round */
 export const LEAD_EVAL_UNITS = 2;
 
 

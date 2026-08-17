@@ -398,23 +398,32 @@ export class WorkerPoolManager implements IService {
      * the last live reading forever — so a burst that ended with tasks parked left a
      * standing non-zero gauge for a pool that no longer exists, and every later read
      * of it was a report about a dead process.
+     *
+     * Session-scoped, for the same reason as the pool's error counters above. The only
+     * caller is the leader's 5s leadership tick — a self-rescheduling timer chain
+     * started when this process won the election, i.e. inside whichever research run
+     * first needed a browser. AsyncLocalStorage resolves at emit time from the async
+     * resource that fired, so a plain `metrics.setGauge` here would write into that
+     * FIRST run's registry for the life of the process: invisible to every later run's
+     * summary, and holding a discarded registry reachable through the timer. The pool's
+     * dispatch shape is process state, not run accounting.
      */
     recordDispatchHealth(): void {
         const info = (this.pool as unknown as { info?: Record<string, number> } | null)?.info;
         if (!info) {
-            metrics.setGauge('browser_pool_parked_tasks', 0);
-            metrics.setGauge('browser_pool_queued_tasks', 0);
-            metrics.setGauge('browser_pool_idle_workers', 0);
+            metrics.session.setGauge('browser_pool_parked_tasks', 0);
+            metrics.session.setGauge('browser_pool_queued_tasks', 0);
+            metrics.session.setGauge('browser_pool_idle_workers', 0);
             return;
         }
         const queued = info['queuedTasks'] ?? 0;
         const idle = info['idleWorkerNodes'] ?? 0;
-        metrics.setGauge('browser_pool_parked_tasks', idle > 0 ? queued : 0);
-        metrics.setGauge('browser_pool_queued_tasks', queued);
-        metrics.setGauge('browser_pool_idle_workers', idle);
+        metrics.session.setGauge('browser_pool_parked_tasks', idle > 0 ? queued : 0);
+        metrics.session.setGauge('browser_pool_queued_tasks', queued);
+        metrics.session.setGauge('browser_pool_idle_workers', idle);
         // Cumulative, not a level: never zeroed on teardown, or a restart would read
         // as the defect having been fixed.
-        metrics.setGauge('browser_pool_stolen_tasks', info['stolenTasks'] ?? 0);
+        metrics.session.setGauge('browser_pool_stolen_tasks', info['stolenTasks'] ?? 0);
     }
 
     /**

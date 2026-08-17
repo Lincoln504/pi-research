@@ -36,14 +36,21 @@ const CLIENT_PATIENCE_MARGIN_MS = 15_000;
 const CLIENT_TIMEOUT_CAP_MS = 300_000;
 
 
+/** Fraction of the owning caller's budget at which the wedge detector fires, so the
+ *  failure is reported and retriable inside the life of whatever asked for it. */
+const OWNER_BUDGET_FRACTION = 0.8;
+
 /**
  * Per-operation follower timeout.
  *
- * Invariant: the follower is at least as patient as the leader. The old flat 60s
- * undercut the leader's healthcheck budget (105s) and config-driven search/scrape
- * budgets (up to 130s+ within schema bounds), and the client-timeout text matches
- * isTaskTimeoutError, so retry gates skipped it — long tasks failed client-side,
- * unretried, while the leader was still working on them.
+ * The rule this used to state — "the follower is at least as patient as the leader" —
+ * is no longer the rule, and the change was deliberate; it is written out here because
+ * it is the obvious thing to reach for and it is wrong for two of the three cases
+ * below. What it replaced was worse still: a flat 60s that undercut the leader's
+ * healthcheck budget (105s) and its config-driven search/scrape budgets (130s+ within
+ * schema bounds), and whose message matches isTaskTimeoutError, so the retry gates
+ * skipped it — long tasks failed client-side, unretried, while the leader was still
+ * working on them.
  *
  * Search and scrape do not derive from the leader's TASK budget. That budget bounds
  * EXECUTION only — it is armed when the queue dispatches, not when the request
@@ -67,11 +74,11 @@ const CLIENT_TIMEOUT_CAP_MS = 300_000;
  * a liveness probe stays as impatient as a liveness probe should be. (It used to be
  * described as answering "healthy, saturated" instead of failing; that branch was
  * unreachable and has been removed. The bound is what matters here, not the verdict.)
+ * Even there the old invariant is only conditional: at the schema's extreme settings
+ * the derived leader budget exceeds the absolute cap, and the cap wins. That is the
+ * intended order — five minutes is already far past the point where a liveness probe
+ * tells anyone anything, whatever the leader is still doing.
  */
-/** Fraction of the owning caller's budget at which the wedge detector fires, so the
- *  failure is reported and retriable inside the life of whatever asked for it. */
-const OWNER_BUDGET_FRACTION = 0.8;
-
 export function resolveClientRequestTimeoutMs(operation: string, config?: Config): number {
     switch (operation) {
         case 'search':
