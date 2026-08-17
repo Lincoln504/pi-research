@@ -45,6 +45,23 @@ const TRASH_SWEEP_AGE_MS = 10 * 60_000;
 const HEARTBEAT_MIN_INTERVAL_MS = 2_000;
 
 /**
+ * Ceiling on the held-lock mtime heartbeat interval.
+ *
+ * The interval derives from liveOwnerStaleThreshold/4, which is sized so a live
+ * holder is never judged stale between two refreshes. That is the right shape for
+ * the live-owner rule and the wrong size for everything downstream of it: the
+ * knowledge-store init lock derived a 60s interval, and _unidentifiedStaleThreshold
+ * doubles it, so a lock torn by SIGKILL — unidentifiable by construction — was left
+ * alone for two minutes while the acquirer's stall bound gave up after twenty
+ * seconds. The recovery the unidentified rule exists to allow could not happen.
+ *
+ * A utimes every few seconds costs nothing, so cap it. The cap does not change who
+ * may be reclaimed: liveOwnerStaleThreshold is untouched, and refreshing more often
+ * than required only makes a live holder harder to mistake for a dead one.
+ */
+const HEARTBEAT_MAX_INTERVAL_MS = 5_000;
+
+/**
  * Ceiling on how long a lock whose owner cannot be identified is left alone.
  *
  * Such a lock is treated as live (we could not prove otherwise), but "treated as
@@ -219,13 +236,33 @@ export class FileLockService implements IService {
    * prevents an unreadable file from holding the lock forever.
    */
   private _unidentifiedStaleThreshold(): number {
-    const heartbeatInterval = Math.max(HEARTBEAT_MIN_INTERVAL_MS, Math.ceil(this.liveOwnerStaleThreshold / 4));
-    const heartbeatRuns = heartbeatInterval <= MAX_TIMER_DELAY_MS;
+    const heartbeatInterval = this._heartbeatIntervalMs();
     // Never shorter than a heartbeat interval plus a tick, or a live holder could be
     // reclaimed in the gap between two refreshes.
-    return heartbeatRuns
-      ? Math.max(this.lockStaleThreshold, heartbeatInterval * 2)
-      : UNIDENTIFIED_MAX_STALE_MS;
+    return heartbeatInterval === null
+      ? UNIDENTIFIED_MAX_STALE_MS
+      : Math.max(this.lockStaleThreshold, heartbeatInterval * 2);
+  }
+
+  /**
+   * The interval at which a held lock's mtime is refreshed, or null when this lock
+   * class opts out of live-owner reclaim entirely and therefore runs no heartbeat.
+   *
+   * One helper because two call sites depend on the SAME number: the timer that does
+   * the refreshing, and the window that judges an unrefreshed lock abandoned. They
+   * were computed independently from the same formula, which is a drift waiting to
+   * happen in exactly the direction that reclaims a live holder.
+   *
+   * The opt-out is detected from the DERIVED interval, before the cap: an effectively
+   * infinite liveOwnerStaleThreshold is how the run semaphore says "never steal from a
+   * live owner", and clamping it into a runnable timer would quietly start a heartbeat
+   * there — which in turn would shorten its unidentified window from the ten-minute
+   * ceiling to seconds, reclaiming run slots the opt-out exists to protect.
+   */
+  private _heartbeatIntervalMs(): number | null {
+    const derived = Math.ceil(this.liveOwnerStaleThreshold / 4);
+    if (derived > MAX_TIMER_DELAY_MS) return null;
+    return Math.min(HEARTBEAT_MAX_INTERVAL_MS, Math.max(HEARTBEAT_MIN_INTERVAL_MS, derived));
   }
 
   /**
@@ -368,12 +405,12 @@ export class FileLockService implements IService {
    */
   private _startHeartbeat(): void {
     this._stopHeartbeat();
-    const interval = Math.max(HEARTBEAT_MIN_INTERVAL_MS, Math.ceil(this.liveOwnerStaleThreshold / 4));
     // An effectively-infinite threshold (the run-semaphore's never-steal-from-a-
     // live-owner opt-out) needs no heartbeat — and would overflow the 32-bit
-    // timer delay, which Node clamps to 1ms (a utimes busy-loop). Skip entirely;
-    // the opt-out's semantics are unchanged.
-    if (interval > MAX_TIMER_DELAY_MS) return;
+    // timer delay, which Node clamps to 1ms (a utimes busy-loop). _heartbeatIntervalMs
+    // returns null there; the opt-out's semantics are unchanged.
+    const interval = this._heartbeatIntervalMs();
+    if (interval === null) return;
     this.heartbeatTimer = setInterval(() => {
       const handle = this.lockHandle;
       if (handle === null) return;
@@ -657,6 +694,12 @@ export class FileLockService implements IService {
             const errnoError = error as NodeJS.ErrnoException;
             if (errnoError.code === 'EEXIST') {
               contentionCount++;
+              // When the contended lock becomes eligible for reclaim, if this tick can
+              // know it. Scoped per observation: a tick that could not read the lock
+              // learned nothing, and an eligibility carried over from an earlier one is
+              // no longer evidence of anything. See the stall check below for why the
+              // stall bound must not fire before this moment.
+              let reclaimEligibleAt: number | null = null;
               // Read lock content to verify ownership and liveness before considering stale
               try {
                 const rawContent = await fs.readFile(this.lockFilePath, 'utf-8');
@@ -673,6 +716,21 @@ export class FileLockService implements IService {
                 }
                 lastSeenUuid = lockUuid;
                 lastSeenMtime = stats.mtimeMs;
+
+                // A lock with no readable pid is judged purely on age (see
+                // _shouldReclaim), and its mtime never moves again — so it can never
+                // show progress and the stall bound is guaranteed to expire first.
+                // Record when it becomes reclaimable so the wait below can outlast the
+                // stall bound rather than abandoning the recovery at 20s.
+                //
+                // Deliberately NOT extended to a live owner: there the heartbeat is the
+                // designed progress signal, its absence past lockTimeout is real evidence
+                // of a wedge, and reporting that to the caller promptly beats waiting out
+                // a two-to-four-minute live-owner threshold on a lock we may well never
+                // be handed.
+                reclaimEligibleAt = (parsed?.pid ?? null) === null
+                  ? stats.mtimeMs + this._unidentifiedStaleThreshold()
+                  : null;
 
                 if (lockUuid === this.lockUuid) {
                   // This is our own lock — a previous attempt was interrupted. Reclaim.
@@ -733,7 +791,20 @@ export class FileLockService implements IService {
 
               const stalledFor = Date.now() - lastProgressAt;
               const waitedFor = Date.now() - startTime;
-              if (stalledFor >= this.lockTimeout || waitedFor >= this.acquireCeilingMs) {
+              // Never give up on a lock we are about to be ALLOWED to take. The stall
+              // bound and the reclaim window are two different clocks, and on every
+              // lock class configured here the stall bound is the shorter one — so a
+              // torn, ownerless lock timed the acquirer out before its reclaim window
+              // opened, and the pid-less recovery path could not run. The knowledge-store
+              // init lock is the measured case: reclaimable at 60s, abandoned at 20s.
+              // The ceiling below is still absolute.
+              // A try-take (lockTimeout 0) is excluded outright: it is configured to fail
+              // on the spot rather than wait for anything, and the run semaphore's slot
+              // files carry a TEN-MINUTE unidentified window, so honouring eligibility
+              // there would turn "is this slot free right now" into a ten-minute block.
+              const awaitingReclaim =
+                this.lockTimeout > 0 && reclaimEligibleAt !== null && Date.now() < reclaimEligibleAt;
+              if ((stalledFor >= this.lockTimeout && !awaitingReclaim) || waitedFor >= this.acquireCeilingMs) {
                 metrics.observe('state_lock_acquire_duration_ms', waitedFor, { status: 'timeout' });
                 metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
                 // Say which bound was hit. "Timeout after 20000ms" on a lock whose

@@ -729,17 +729,34 @@ describe('DeepResearchOrchestrator', () => {
     await orchestrator.run();
 
     expect(MAX_ROUNDS_LEVEL_1).toBe(2);
-    expect(onRoundStart).toHaveBeenCalledWith(1);
-    expect(onRoundStart).not.toHaveBeenCalledWith(2);
-    // The health check is the expensive half — it is what cost 105s on the measured run.
-    const healthRounds = vi.mocked(mockOrchestrationService.checkHealth).mock.calls.map(c => c[0]);
-    expect(healthRounds).not.toContain(2);
+
+    // The two costs the phantom round actually incurred, asserted directly rather than
+    // through the announcement. The announcement is a poor proxy now that the final
+    // synthesis legitimately announces the same round number (see the contiguity test
+    // below), and `not.toHaveBeenCalledWith(2)` would go on passing if the loop stopped
+    // announcing anything at all.
+    //
+    // The health check is the expensive half — 105s of it on the measured run. Only
+    // round 1 reaches it, and the real implementation returns immediately for round 1
+    // (nothing has run through the pool yet), so at complexity 1 no probe is performed
+    // at all. Remove the cap check and this list becomes [1, 2], with round 2 doing the
+    // full probe.
+    expect(vi.mocked(mockOrchestrationService.checkHealth).mock.calls.map(c => c[0])).toEqual([1]);
+    // The evaluator is the other half. One call, and it is the forced final synthesis —
+    // not a routing call for a round whose delegation the cap would discard.
+    const planCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
+    expect(planCalls).toHaveLength(1);
+    expect(planCalls[0]![0]).toEqual(expect.objectContaining({ mustSynthesize: true }));
+    // Round 1 researched; round 2 exists only as the synthesis pass.
+    expect(onRoundStart.mock.calls.map(c => c[0])).toEqual([1, 2]);
   });
 
-  it('still runs the capped round when steering extends the budget into it', async () => {
-    // The cap check sits after steering consumption for this reason: a message consumed
-    // at the top of the final iteration raises maxRounds and legitimately turns it into
-    // a real research round. Leaving earlier would silently drop that.
+  it('announces a contiguous round sequence that ends at the budget, not past it', async () => {
+    // `round_start` is an SDK event, and a consumer counting rounds reads the gaps. The
+    // final synthesis used to announce `maxRounds + 1` — a number outside the budget
+    // every other event is expressed in — which was invisible while the loop also
+    // announced the phantom final round (1, 2, 3, then a 4 nobody minded). With the
+    // phantom gone it left a hole: a 3-round run emitted 1, 2, 4.
     const onRoundStart = vi.fn();
     const steering2 = await import('../../../src/orchestration/session-state.ts');
     vi.mocked(steering2.consumeQueuedMessages).mockReturnValue([]);
@@ -748,9 +765,17 @@ describe('DeepResearchOrchestrator', () => {
       action: 'delegate',
       researchers: [{ id: '1', role: 'r', focus: 'f', queries: ['q'] }],
     });
-    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Final' });
+    // Keep delegating, so the loop ends on the CAP rather than on a router decision —
+    // the only path that reaches the post-loop announcement. The forced final call
+    // (mustSynthesize) still has to return a report, or the run fails before the
+    // sequence under test is complete.
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) =>
+      opts?.mustSynthesize
+        ? { action: 'synthesize', content: 'Final' }
+        : { action: 'delegate', researchers: [{ id: '2', role: 'r', focus: 'f', queries: ['q'] }] },
+    );
 
-    // complexity 2 → 3 iterations, so round 2 is a genuine research round.
+    // complexity 2 → 3 iterations: rounds 1 and 2 research, round 3 synthesizes.
     const orchestrator = new DeepResearchOrchestrator({
       ...options,
       complexity: 2 as const,
@@ -758,7 +783,7 @@ describe('DeepResearchOrchestrator', () => {
     });
     await orchestrator.run();
 
-    expect(onRoundStart).toHaveBeenCalledWith(2);
+    expect(onRoundStart.mock.calls.map(c => c[0])).toEqual([1, 2, 3]);
   });
 
   it('a steering message consumed at the top of the capped round turns it into a real one', async () => {

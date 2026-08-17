@@ -98,6 +98,23 @@ export function queueWaitMs(dispatchedAt: number, submittedAt: number): number {
     return dispatchedAt > 0 ? dispatchedAt - submittedAt : 0;
 }
 
+/**
+ * Record a task's queue wait, whether or not it was ever dispatched.
+ *
+ * Split by outcome because the two are different quantities and must not be summed
+ * into one distribution: a dispatched task's wait ENDED, while an abandoned task's
+ * wait was still running when the caller gave up, so the latter is a lower bound.
+ * Folding abandonments in as `queueWaitMs`'s zero would pull the distribution
+ * DOWNWARD in exactly the bursts where it should spike.
+ */
+export function observeQueueWait(metric: string, dispatchedAt: number, submittedAt: number): void {
+    metrics.observe(
+        metric,
+        dispatchedAt > 0 ? dispatchedAt - submittedAt : Date.now() - submittedAt,
+        { dispatched: dispatchedAt > 0 ? 'yes' : 'no' },
+    );
+}
+
 export class BrowserTaskScheduler implements IScheduler {
     private workerPoolManager: WorkerPoolManager | null = null;
     private server: BrowserServer | null = null;
@@ -360,10 +377,16 @@ export class BrowserTaskScheduler implements IScheduler {
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
             settled.abort();
+            // Recorded here rather than on the success path below, because the tasks
+            // that wait longest are precisely the ones that do not succeed — measuring
+            // queue wait only on completed tasks censors the tail this metric exists to
+            // expose. A task that never reached a worker has no dispatch instant, so its
+            // wait is the whole elapsed time and is labelled as such; averaging it in as
+            // a zero would have understated saturation exactly when it was worst.
+            observeQueueWait('browser_search_queue_wait_ms', dispatchedAt, startTime);
         }
 
         const duration = executionMs(dispatchedAt, startTime);
-        metrics.observe('browser_search_queue_wait_ms', queueWaitMs(dispatchedAt, startTime));
         // In-band worker error checked FIRST: a task the worker reports as failed
         // must count only as an error. Recording success unconditionally before
         // this check double-counted every worker-reported failure as
@@ -457,10 +480,11 @@ export class BrowserTaskScheduler implements IScheduler {
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
             settled.abort();
+            // See runSearch: recorded on every outcome, not only on success.
+            observeQueueWait('browser_scrape_queue_wait_ms', dispatchedAt, startTime);
         }
 
         const duration = executionMs(dispatchedAt, startTime);
-        metrics.observe('browser_scrape_queue_wait_ms', queueWaitMs(dispatchedAt, startTime));
         // In-band error first — success-side recording must not precede it (see runSearch).
         if (result.error) {
             metrics.increment('browser_scrape_requests_total', 1, { status: 'error' });
@@ -494,27 +518,35 @@ export class BrowserTaskScheduler implements IScheduler {
         // during a burst in which the pool was healthily executing the run's own
         // searches. Twice on the night this was measured.
         //
-        // The verdict needs evidence of WORK GETTING DONE, and nothing weaker suffices.
-        // Two earlier attempts show why.
+        // Arming the deadline on DISPATCH is the whole fix, and it is sufficient. Three
+        // attempts were made to add a second, wait-phase verdict that would excuse a
+        // saturated pool, and all three were wrong. They are recorded here because each
+        // one reads sensibly and the next reader will otherwise reach for one of them:
         //
-        // Asking when the queue last dispatched anything is unreachable: healthcheck
-        // tasks have strict queue priority, so if a slot frees while this probe waits,
-        // the queue dispatches THIS probe and cancels the timer below. The timer can
-        // only fire in a window where nothing dispatched at all, making "dispatched
-        // recently" false by construction and every saturated pool a wedged one.
+        //   1. "did the queue dispatch anything recently" — unreachable. Healthcheck
+        //      tasks have strict queue priority, so if a slot frees while this probe
+        //      waits, the queue dispatches THIS probe and cancels the timer. The timer
+        //      can only fire in a window where nothing dispatched at all.
+        //   2. "are the slots occupied" — wrong in the dangerous direction. activeCount
+        //      rises before pool.execute, so six workers hung inside a browser launch
+        //      are six occupied slots, and the exact incident this was written for
+        //      would have reported HEALTHY.
+        //   3. "has a task completed successfully recently" — unreachable for the same
+        //      reason as (1). A success frees a slot, a freed slot dispatches this
+        //      probe, so at expiry the last success is necessarily older than the whole
+        //      budget. The condition it tested was false by construction.
         //
-        // Asking whether the slots are occupied fails in the opposite direction, which
-        // is worse. activeCount rises before pool.execute and falls when it settles, so
-        // six workers whose browser launches have hung are six occupied slots — the
-        // exact incident this was written for would have reported HEALTHY.
+        // The general form of the mistake: with strict priority, a probe that waited
+        // out its entire budget without being dispatched IS the evidence of a wedge.
+        // There is no second signal to consult, and every attempt to find one either
+        // could not fire or fired for a dead pool. The numbers below are kept for the
+        // DIAGNOSTIC message — an operator needs to know whether the slots were busy
+        // and when work last succeeded — and not for the verdict.
         //
-        // Slot churn is no better: a wedged pool still turns its slots over as task
-        // deadlines and death-backstops fire. Only a SUCCESSFUL completion proves a
-        // worker did something, and it is reachable — a busy pool produces them
-        // continuously, and a stopped one produces none. Note what this correctly does
-        // NOT call a fault: one dead worker among five healthy ones still yields
-        // successes, and the pool really is healthy. That was a dispatch defect, not a
-        // health one.
+        // False positives are bounded by arithmetic rather than by judgement: the probe
+        // allows 105s while every task that can hold a slot is itself deadlined well
+        // under that (search 55s, scrape 25s plus backstop), so a slot frees inside the
+        // budget unless the pool has genuinely stopped.
         //
         // Once dispatched, the deadline measures execution alone (armed below, like
         // runSearch/runScrape), so a slow probe still fails on its own merits.
@@ -529,16 +561,17 @@ export class BrowserTaskScheduler implements IScheduler {
         // reporting a routine shutdown as a wedge because a new queue has dispatched
         // nothing.
         const healthQueue = this.getPriorityQueue(config);
-        const timeoutPromise = new Promise<{ success: boolean } | never>((resolve, reject) => {
+        // Rejects only. It used to be typed as resolvable because a branch here answered
+        // "healthy" without running the probe; nothing does that now, and the type says so.
+        const timeoutPromise = new Promise<never>((_, reject) => {
             const onWaitExpired = () => {
                 if (dispatched) return;
                 const lastSuccessAt = healthQueue.getLastSuccessAt();
                 const sinceSuccess = lastSuccessAt > 0 ? Date.now() - lastSuccessAt : Number.POSITIVE_INFINITY;
-                if (healthQueue.isSaturated() && sinceSuccess <= timeoutMs) {
-                    logger.debug(`[BrowserTaskScheduler] Healthcheck could not claim a worker within ${timeoutMs}ms, but all ${healthQueue.getConcurrency()} slots are busy and a task completed ${sinceSuccess}ms ago — pool saturated, not wedged.`);
-                    resolve({ success: true });
-                    return;
-                }
+                // Diagnosis, not verdict — see the note above. These three numbers say
+                // which wedge this is: slots busy with nothing completing is a worker
+                // fault, slots free is a queue fault, and the last-success age separates
+                // "stopped just now" from "never started".
                 reject(new Error(
                     `Health check could not reach a worker within ${timeoutMs}ms — ${healthQueue.getActiveCount()} of ${healthQueue.getConcurrency()} slots busy, ` +
                     `${lastSuccessAt > 0 ? `last successful task ${sinceSuccess}ms ago` : 'no task has ever completed successfully'}.`,
@@ -561,8 +594,8 @@ export class BrowserTaskScheduler implements IScheduler {
         const settled = new AbortController();
         const queueSignal = signal ? AbortSignal.any([signal, settled.signal]) : settled.signal;
         try {
-            // Same instance the wait-phase verdict reads, so the two cannot disagree
-            // about which queue this probe is waiting on.
+            // Same instance the wait-expiry message reads, so the diagnosis cannot
+            // describe a different queue from the one this probe waited on.
             result = await Promise.race([
                 healthQueue.enqueue('healthcheck', async () => {
                     startDeadline();
@@ -598,6 +631,7 @@ export class BrowserTaskScheduler implements IScheduler {
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
             settled.abort();
+            observeQueueWait('browser_healthcheck_queue_wait_ms', hcDispatchedAt, startTime);
         }
 
         const duration = executionMs(hcDispatchedAt, startTime);

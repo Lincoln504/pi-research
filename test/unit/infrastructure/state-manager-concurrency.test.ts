@@ -179,8 +179,11 @@ describe('StateManager Concurrency and Lock Resilience', () => {
     const lockFilePath = manager.getLockFilePath();
     await fs.mkdir(path.dirname(lockFilePath), { recursive: true });
     
-    // Create a fresh lock that never goes away
-    await fs.writeFile(lockFilePath, 'eternal');
+    // A fresh lock that never goes away, held by a provably-live owner (this process).
+    // The owner has to be identifiable: a lock with no readable pid is judged on age
+    // alone, and the acquirer waits for that window to open rather than timing out
+    // short of it — so an opaque 'eternal' would be reclaimed rather than waited on.
+    await fs.writeFile(lockFilePath, JSON.stringify({ uuid: 'eternal', pid: process.pid }));
     
     // Mock sleep to be fast so we don't actually wait 10s in the test
     // These fields live on FileLockService, not on StateManager

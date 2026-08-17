@@ -15,10 +15,18 @@
  * These run the real strategy against real worker-node shapes instead.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WorkerChoiceStrategies } from 'poolifier';
 
-import { buildWorkerPoolOptions } from '../../../../src/infrastructure/browser/worker-pool-manager.ts';
+vi.mock('../../../../src/utils/metrics.ts', () => ({
+  metrics: { increment: vi.fn(), observe: vi.fn(), setGauge: vi.fn() },
+}));
+
+import {
+  buildWorkerPoolOptions,
+  WorkerPoolManager,
+} from '../../../../src/infrastructure/browser/worker-pool-manager.ts';
+import { metrics } from '../../../../src/utils/metrics.ts';
 
 /** The load figure LEAST_USED minimises, per node. */
 const load = (n: { executing: number; queued: number }) => n.executing + n.queued;
@@ -74,5 +82,57 @@ describe('worker pool dispatch shape', () => {
     const leastUsed = allBusy.reduce((best, n, i) => (load(n) < load(allBusy[best]!) ? i : best), 0);
     expect(leastUsed).toBe(0); // ties resolve to the lowest index
     expect(wouldPark(allBusy[leastUsed]!, 1)).toBe(true);
+  });
+});
+
+/**
+ * The gauges that make the failure above visible have to describe the pool that
+ * exists NOW.
+ */
+describe('dispatch-health gauges', () => {
+  const gauge = (name: string) =>
+    vi.mocked(metrics.setGauge).mock.calls.filter(c => c[0] === name).at(-1)?.[1];
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('reports parked tasks only when a node was idle to take them', () => {
+    const mgr = new WorkerPoolManager();
+    (mgr as any).pool = { info: { queuedTasks: 4, idleWorkerNodes: 2, stolenTasks: 7 } };
+
+    mgr.recordDispatchHealth();
+
+    expect(gauge('browser_pool_parked_tasks')).toBe(4);
+    expect(gauge('browser_pool_queued_tasks')).toBe(4);
+    expect(gauge('browser_pool_idle_workers')).toBe(2);
+    expect(gauge('browser_pool_stolen_tasks')).toBe(7);
+  });
+
+  it('does not call a full pool parked — queueing is correct there', () => {
+    const mgr = new WorkerPoolManager();
+    (mgr as any).pool = { info: { queuedTasks: 4, idleWorkerNodes: 0, stolenTasks: 0 } };
+
+    mgr.recordDispatchHealth();
+
+    expect(gauge('browser_pool_parked_tasks')).toBe(0);
+    expect(gauge('browser_pool_queued_tasks')).toBe(4); // still visible, just not a fault
+  });
+
+  it('zeroes the levels when there is no pool, rather than leaving the last reading standing', () => {
+    // Returning early held the last live value forever, so a burst that ended with
+    // tasks parked left a standing non-zero gauge for a pool that no longer exists —
+    // and every later read of it was a report about a dead process.
+    const mgr = new WorkerPoolManager();
+    (mgr as any).pool = { info: { queuedTasks: 4, idleWorkerNodes: 2, stolenTasks: 7 } };
+    mgr.recordDispatchHealth();
+
+    (mgr as any).pool = null;
+    mgr.recordDispatchHealth();
+
+    expect(gauge('browser_pool_parked_tasks')).toBe(0);
+    expect(gauge('browser_pool_queued_tasks')).toBe(0);
+    expect(gauge('browser_pool_idle_workers')).toBe(0);
+    // Cumulative, not a level: zeroing it on teardown would read as the stolen-task
+    // defect having been fixed.
+    expect(gauge('browser_pool_stolen_tasks')).toBe(7);
   });
 });

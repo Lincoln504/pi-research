@@ -381,14 +381,34 @@ export class WorkerPoolManager implements IService {
      * choice strategy handed work to a busy node when a free one existed — which is
      * also the precondition for poolifier's task stealing, and therefore for its
      * stolen-task accounting defect. `stolenTasks` is recorded for the same reason.
+     *
+     * Two limits, stated because a gauge that reads zero is otherwise taken as proof:
+     * `idleWorkerNodes` counts nodes that are READY and free, so during a respawn
+     * window a genuinely parked task is attributed to legitimate saturation; and with
+     * every node busy the figure is zero by construction, which is correct but is not
+     * evidence the strategy is choosing well. `browser_pool_idle_workers` is exported
+     * alongside so the denominator is visible rather than inferred.
+     *
+     * With no pool the gauges are ZEROED rather than left alone. Returning early held
+     * the last live reading forever — so a burst that ended with tasks parked left a
+     * standing non-zero gauge for a pool that no longer exists, and every later read
+     * of it was a report about a dead process.
      */
     recordDispatchHealth(): void {
         const info = (this.pool as unknown as { info?: Record<string, number> } | null)?.info;
-        if (!info) return;
+        if (!info) {
+            metrics.setGauge('browser_pool_parked_tasks', 0);
+            metrics.setGauge('browser_pool_queued_tasks', 0);
+            metrics.setGauge('browser_pool_idle_workers', 0);
+            return;
+        }
         const queued = info['queuedTasks'] ?? 0;
         const idle = info['idleWorkerNodes'] ?? 0;
         metrics.setGauge('browser_pool_parked_tasks', idle > 0 ? queued : 0);
         metrics.setGauge('browser_pool_queued_tasks', queued);
+        metrics.setGauge('browser_pool_idle_workers', idle);
+        // Cumulative, not a level: never zeroed on teardown, or a restart would read
+        // as the defect having been fixed.
         metrics.setGauge('browser_pool_stolen_tasks', info['stolenTasks'] ?? 0);
     }
 

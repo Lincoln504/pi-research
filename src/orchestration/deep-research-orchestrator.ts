@@ -168,6 +168,10 @@ export class DeepResearchOrchestrator {
     // The round-1 COORDINATOR plan when it answered directly instead of delegating. Unlike
     // a router decision this one carries the finished report, so it is used as-is.
     let coordinatorSynthesisPlan: ResearchPlan | null = null;
+    // Highest round number handed to observer.onRoundStart. The final synthesis
+    // announces itself too, and it must not repeat or skip: `round_start` is an SDK
+    // event and a consumer counting rounds reads the gaps.
+    let lastAnnouncedRound = 0;
 
     try {
       while (this.currentRound < maxRounds) {
@@ -221,6 +225,7 @@ export class DeepResearchOrchestrator {
           : `Round ${this.currentRound}/${maxRounds}`;
         logger.log(`[DeepOrchestrator] ${roundLabel} ${this.elapsed()}`);
         observer?.onRoundStart?.(this.currentRound);
+        lastAnnouncedRound = this.currentRound;
 
         // Check infrastructure health (advisory: logs status, never aborts the run).
         await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
@@ -471,7 +476,16 @@ export class DeepResearchOrchestrator {
       // completes, and re-emit start/progress after the decision. Symmetric with the
       // decision guard below.
       if (!routerChoseSynthesis && coordinatorSynthesisPlan === null) {
-        observer?.onRoundStart?.(maxRounds + 1); // Progress indicator for synthesis
+        // The synthesis pass announces the round it is synthesizing AT, which is the
+        // one the loop stopped on — not `maxRounds + 1`, a number outside the budget
+        // every other event is expressed in. That was harmless while the loop
+        // announced the phantom final round (1,2,3 then a 4 nobody minded); with the
+        // phantom gone it left a hole: a 3-round run emitted round_start 1, 2, 4.
+        // Guarded so a one-round budget cannot announce the same round twice.
+        if (this.currentRound > lastAnnouncedRound) {
+          observer?.onRoundStart?.(this.currentRound);
+          lastAnnouncedRound = this.currentRound;
+        }
         observer?.onEvaluationStart?.(maxRounds);
         observer?.onEvaluationProgress?.('evaluating');
       }

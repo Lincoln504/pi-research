@@ -574,9 +574,20 @@ export class PlanningService implements IPlanningService {
     //
     // Passing the raw budget told the router it had a round in hand that did not exist.
     // At round 2 of 3 that is the difference between MIDDLE ("prefer delegation... with
-    // 1 round remaining") and LATE ("synthesize if the core question is answerable") —
-    // so the router was pushed to delegate at exactly the point it should have been
-    // wrapping up, and whatever it asked for next was discarded by the cap.
+    // 1 round remaining") and LATE ("synthesize if the core question is answerable").
+    //
+    // To be precise about what was and was not wrong, because an earlier revision of
+    // this comment overstated it: a delegation made at round 2 DOES run — its
+    // researchers execute and their findings reach the synthesizer. What did not exist
+    // was the round AFTER it. The router was being calibrated as though it had another
+    // routing decision coming, when the one it was making was its last.
+    //
+    // Consequence worth naming: with the complexity table's 2/3/3 budgets, an unsteered
+    // run reaches the router exactly once, at the final research round, so LATE is the
+    // only phase it ever sees. That is correct — it IS the last decision — but it means
+    // the EARLY/MIDDLE branches are reachable only once steering has extended the
+    // budget. Anyone re-tuning this ladder should know the unsteered path no longer
+    // exercises it.
     const researchRounds = Math.max(1, maxRounds - 1);
     const roundPhaseGuidance = this.getRoundPhaseGuidance(round, researchRounds, complexity, maxTeamSize);
 

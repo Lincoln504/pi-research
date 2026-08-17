@@ -42,6 +42,7 @@ vi.mock('../../../../src/core/service-registry.ts', () => ({
 }));
 
 import { BrowserTaskScheduler } from '../../../../src/infrastructure/browser/browser-task-scheduler.ts';
+import { metrics } from '../../../../src/utils/metrics.ts';
 
 // Budget per task = SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS = 120ms.
 // Each task does 80ms of work, so four of them queued serially span ~320ms — well past
@@ -137,6 +138,52 @@ describe('scheduler deadline excludes queue wait', () => {
     await expect(
       scheduler.runSearch('q', CFG, undefined, () => { throw new Error('caller bug'); }),
     ).resolves.toBeDefined();
+  });
+
+  it('records queue wait on a task that FAILED, not only on one that succeeded', async () => {
+    // The tasks that wait longest are precisely the ones that do not succeed, so
+    // recording this only on the success path censored the tail the metric exists to
+    // expose — the saturated bursts were invisible in it by construction.
+    poolState.workMs = 400; // > the 120ms budget, so this one times out
+    const scheduler = makeScheduler();
+
+    await expect(scheduler.runSearch('slow', CFG)).rejects.toThrow(/timed out/);
+
+    const waits = vi.mocked(metrics.observe).mock.calls.filter(c => c[0] === 'browser_search_queue_wait_ms');
+    expect(waits).toHaveLength(1);
+    expect(waits[0]![2]).toEqual({ dispatched: 'yes' });
+  });
+
+  it('labels a task that never reached a worker, and reports its whole wait', async () => {
+    // An abandoned task has no dispatch instant, so its wait is the full elapsed span
+    // and is still running when the caller gives up — a lower bound, not a completed
+    // measurement. Recording it as `queueWaitMs`'s zero would pull the distribution
+    // DOWNWARD in exactly the bursts where it should spike, which is worse than not
+    // recording it at all.
+    const scheduler = makeScheduler();
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+    queue.process = () => {}; // dispatch nothing, so the task only ever waits
+
+    const caller = new AbortController();
+    const running = scheduler.runSearch('abandoned', CFG, caller.signal);
+    await new Promise(r => setTimeout(r, 60));
+    caller.abort();
+
+    await expect(running).rejects.toThrow();
+
+    const waits = vi.mocked(metrics.observe).mock.calls.filter(c => c[0] === 'browser_search_queue_wait_ms');
+    expect(waits).toHaveLength(1);
+    expect(waits[0]![2]).toEqual({ dispatched: 'no' });
+    expect(waits[0]![1]).toBeGreaterThanOrEqual(50); // the real wait, not zero
+  });
+
+  it('records scrape queue wait on failure too', async () => {
+    poolState.workMs = 400;
+    const scheduler = makeScheduler();
+
+    await expect(scheduler.runScrape('https://slow.example.com', CFG)).rejects.toThrow(/timed out/);
+
+    expect(vi.mocked(metrics.observe).mock.calls.filter(c => c[0] === 'browser_scrape_queue_wait_ms')).toHaveLength(1);
   });
 
   it('reports the timeout without blaming queue wait', async () => {

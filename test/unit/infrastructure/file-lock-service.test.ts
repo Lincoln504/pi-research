@@ -148,9 +148,37 @@ describe('FileLockService', () => {
 
     it('leaves an unidentifiable lock alone while its holder could still be refreshing it', async () => {
       await fs.writeFile(lockFilePath, crypto.randomUUID(), 'utf-8');
-      // Past the 15s crash-cleanup threshold, but inside the 60s window in which a
-      // live holder's heartbeat could still account for the file's age.
-      const staleTime = new Date(Date.now() - 40_000);
+      // Inside the window in which a live holder's heartbeat could still account for
+      // the file's age. That window is two heartbeat intervals — 10s at the capped
+      // 5s cadence — so 8s is not yet evidence of abandonment.
+      const staleTime = new Date(Date.now() - 8_000);
+      await fs.utimes(lockFilePath, staleTime, staleTime);
+
+      service = new FileLockService({
+        lockFilePath,
+        lockTimeout: 200,
+        lockRetryDelay: 10,
+        // The acquirer now waits for a reclaim window it can see coming rather than
+        // timing out short of it, so the ceiling is what ends this wait. Without a
+        // short one the test would simply sit until the window opened and then win.
+        acquireCeilingMs: 500,
+      });
+      await service.initialize();
+
+      // Reclaiming here would mean evicting a possibly-live holder because its content
+      // could not be parsed.
+      await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
+      await service.dispose();
+      service = null as any;
+    });
+
+    it('reclaims an unidentifiable lock once it has gone motionless past that window', async () => {
+      // The other half, and the recovery that matters: a lock torn by SIGKILL between
+      // open(...,'wx') and write() has no pid by construction and its mtime never moves
+      // again. Holding it for the live-owner threshold made knowledge-store init fail
+      // where it used to reclaim and proceed.
+      await fs.writeFile(lockFilePath, crypto.randomUUID(), 'utf-8');
+      const staleTime = new Date(Date.now() - 20_000); // past the 10s window
       await fs.utimes(lockFilePath, staleTime, staleTime);
 
       service = new FileLockService({
@@ -160,11 +188,8 @@ describe('FileLockService', () => {
       });
       await service.initialize();
 
-      // Under the old rule this reclaimed at 40s. Reclaiming here would mean
-      // evicting a possibly-live holder because its content could not be parsed.
-      await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
-      await service.dispose();
-      service = null as any;
+      await expect(service.acquireLock()).resolves.toBeUndefined();
+      await service.releaseLock();
     });
 
     it('still reclaims an unidentifiable lock under the never-steal opt-out, so a run slot cannot leak forever', async () => {
@@ -389,8 +414,15 @@ describe('FileLockService', () => {
 
   describe('timeout error message', () => {
     it('rejection message matches "Failed to acquire lock" when a non-stale lock exists', async () => {
-      // Write a fresh (non-stale) lock file
-      await fs.writeFile(lockFilePath, crypto.randomUUID(), 'utf-8');
+      // A fresh lock whose owner is THIS process, and therefore provably alive. It has
+      // to be identified: an unparseable lock is judged on age alone, and the acquirer
+      // now waits for that judgement rather than timing out short of it, so this would
+      // wait ten seconds and then win instead of failing.
+      await fs.writeFile(
+        lockFilePath,
+        JSON.stringify({ uuid: crypto.randomUUID(), pid: process.pid }),
+        'utf-8',
+      );
 
       service = new FileLockService({
         lockFilePath,

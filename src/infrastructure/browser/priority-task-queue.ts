@@ -27,11 +27,15 @@ export class PriorityTaskQueue {
     private maxTotalConcurrency: number;
     private readonly maxQueueDepth: number;
     private isShutdown = false;
-    /** When a task last completed WITHOUT error (epoch ms), or 0 if never. The only
-     *  evidence that separates a pool doing heavy work from one that has stopped —
-     *  see isSaturated's caller. Failures deliberately do not count: a wedged pool
-     *  still turns its slots over as deadlines and death-backstops fire, so slot
-     *  churn proves nothing, and neither does dispatch. */
+    /** When a task last completed WITHOUT error (epoch ms), or 0 if never.
+     *
+     *  Diagnostic only — it is reported in the health probe's failure message so an
+     *  operator can tell a pool that stopped a moment ago from one that never started.
+     *  It was briefly used as a health VERDICT and must not be again: a success frees a
+     *  slot, a freed slot dispatches the waiting probe (healthchecks have strict
+     *  priority), so by the time a probe times out this value is necessarily older than
+     *  its whole budget. Failures deliberately do not count either — a wedged pool still
+     *  turns its slots over as deadlines and death-backstops fire. */
     private lastSuccessAt = 0;
 
     constructor(maxTotalConcurrency: number, maxQueueDepth = 500) {
@@ -109,23 +113,6 @@ export class PriorityTaskQueue {
     /** How many tasks may execute at once. */
     getConcurrency(): number {
         return this.maxTotalConcurrency;
-    }
-
-    /**
-     * Is every worker slot occupied?
-     *
-     * The distinction a health probe needs. A probe that cannot claim a slot has
-     * learned nothing on its own — healthcheck tasks have strict queue priority, so
-     * the only reason one waits is that no slot came free, and that is equally true
-     * of a pool doing heavy honest work and a pool that has stopped. What separates
-     * them is whether the slots are occupied by RUNNING tasks (saturated) or sitting
-     * idle while the queue fails to dispatch (broken).
-     */
-    isSaturated(): boolean {
-        // Capacity zero is not saturation — it is a queue that can never dispatch.
-        // Without this guard `0 >= 0` reports a stopped queue as busy, which is the
-        // one verdict a health probe must never reach by accident.
-        return this.maxTotalConcurrency > 0 && this.activeCount >= this.maxTotalConcurrency;
     }
 
     private removeFromQueue(task: QueuedTask<any>): boolean {

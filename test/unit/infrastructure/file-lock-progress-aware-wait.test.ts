@@ -164,18 +164,96 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
 
   it('uses a heartbeat-derived window when this lock class heartbeats', async () => {
     const { svc } = await makeLock({ lockStaleThreshold: 15_000, liveOwnerStaleThreshold: 120_000 });
-    // Heartbeat every 30s → reclaimable at 60s, not at the 120s live-owner threshold
-    // and not at the 15s crash-cleanup one.
-    await expect(call(svc, 40_000)).resolves.toBe(false);
-    await expect(call(svc, 70_000)).resolves.toBe(true);
+    // Heartbeat is capped at 5s → reclaimable just past the 15s stale threshold, and
+    // not at the 120s live-owner threshold. The cap matters: derived from
+    // liveOwnerStaleThreshold/4 alone the interval would be 30s and the window 60s,
+    // which is longer than the acquirer's own stall bound on every lock class we
+    // configure — the reclaim could never happen (see the torn-lock test below).
+    await expect(call(svc, 10_000)).resolves.toBe(false);
+    await expect(call(svc, 20_000)).resolves.toBe(true);
   });
 
   it('never reclaims inside one heartbeat interval, so a late tick cannot lose the lock', async () => {
     const { svc } = await makeLock({ lockStaleThreshold: 1_000, liveOwnerStaleThreshold: 120_000 });
-    // A tiny stale threshold must not drag the window below the refresh cadence.
-    await expect(call(svc, 30_000)).resolves.toBe(false);
-    await expect(call(svc, 61_000)).resolves.toBe(true);
+    // A tiny stale threshold must not drag the window below the refresh cadence: the
+    // floor is two capped heartbeat intervals, not the 1s asked for.
+    await expect(call(svc, 8_000)).resolves.toBe(false);
+    await expect(call(svc, 11_000)).resolves.toBe(true);
   });
+
+  it('reclaims a torn, ownerless lock instead of timing out short of its own window', async () => {
+    // The recovery the unidentified rule exists for: a lock file torn by SIGKILL
+    // between open(...,'wx') and write(). It has no pid, so it is judged purely on
+    // age — and its mtime never moves again, so it can never show progress and the
+    // stall bound is guaranteed to expire first. Both clocks were left to run
+    // independently and the shorter one always won, so the reclaim was unreachable
+    // on every lock class configured in this repo: knowledge-store init became
+    // eligible at 60s and was abandoned at 20s.
+    //
+    // These numbers are the same shape, scaled down: window 4s, stall bound 500ms.
+    const { lockPath } = await makeLock({ lockTimeout: 5_000 });
+    await fs.writeFile(lockPath, '', 'utf-8'); // torn: no uuid, no pid, unparseable
+    const now = new Date();
+    await fs.utimes(lockPath, now, now);
+
+    const peer = await peerOn(lockPath, {
+      lockStaleThreshold: 1_000,
+      liveOwnerStaleThreshold: 8_000, // heartbeat 2s → unidentified window 4s
+      lockTimeout: 500,               // stall bound, far shorter than that window
+      acquireCeilingMs: 20_000,
+      lockRetryDelay: 25,
+    });
+
+    const started = Date.now();
+    await expect(peer.acquireLock()).resolves.toBeUndefined();
+    const waited = Date.now() - started;
+    expect(waited).toBeGreaterThan(500);  // it did NOT give up at the stall bound
+    expect(waited).toBeLessThan(15_000);  // and it did not just wait out the ceiling
+    await peer.releaseLock();
+  }, 30_000);
+
+  it('the ceiling still ends a wait for a reclaim window that is too far off', async () => {
+    // Honouring the reclaim window must not become a licence to ignore the ceiling —
+    // a window beyond it is simply unreachable, and the caller has to be told.
+    const { lockPath } = await makeLock({ lockTimeout: 5_000 });
+    await fs.writeFile(lockPath, '', 'utf-8');
+    const now = new Date();
+    await fs.utimes(lockPath, now, now);
+
+    const peer = await peerOn(lockPath, {
+      lockStaleThreshold: 60_000,      // window 60s
+      liveOwnerStaleThreshold: 120_000,
+      lockTimeout: 500,
+      acquireCeilingMs: 1_500,         // the bound under test
+      lockRetryDelay: 25,
+    });
+
+    const started = Date.now();
+    await expect(peer.acquireLock()).rejects.toThrow(/ceiling 1500ms/);
+    expect(Date.now() - started).toBeLessThan(6_000);
+  }, 20_000);
+
+  it('a try-take does not wait for a reclaim window, however short', async () => {
+    // lockTimeout 0 means "answer now". The run semaphore's slot files are pid-less
+    // when torn AND carry the ten-minute no-heartbeat window, so honouring
+    // eligibility there would turn a non-blocking probe into a ten-minute block.
+    const { lockPath } = await makeLock({ lockTimeout: 5_000 });
+    await fs.writeFile(lockPath, JSON.stringify({ uuid: 'no-pid-owner' }), 'utf-8');
+    const now = new Date();
+    await fs.utimes(lockPath, now, now);
+
+    const peer = await peerOn(lockPath, {
+      lockTimeout: 0,
+      lockRetries: 24,
+      lockRetryDelay: 50,
+      lockStaleThreshold: 15_000,
+      liveOwnerStaleThreshold: Number.MAX_SAFE_INTEGER,
+    });
+
+    const started = Date.now();
+    await expect(peer.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  }, 20_000);
 
   it('falls back to the absolute ceiling when no heartbeat runs', async () => {
     // The run semaphore's never-steal opt-out disables the heartbeat entirely, so its

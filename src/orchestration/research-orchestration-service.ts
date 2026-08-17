@@ -664,6 +664,14 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param ctx - Optional extension context for container isolation
    */
   async checkHealth(round: number, _researchId?: string, ctx?: any): Promise<void> {
+    // Round 1 is skipped because there is nothing to diagnose yet — the pool was
+    // built moments earlier and no work has run through it. A consequence worth
+    // stating: a complexity-1 run has exactly ONE research round, so it now never
+    // runs this at all. That is correct rather than a gap. It used to run at the
+    // phantom final round, which dispatched no researchers and on one measured run
+    // spent 105 seconds probing infrastructure that the synthesis pass ahead of it
+    // does not use. This check is advisory logging; a quick run loses nothing but
+    // that cost.
     if (round <= 1) return;
 
     try {
