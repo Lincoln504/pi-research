@@ -6,7 +6,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-research-orchestrator.ts';
 import { resetServiceContainer, registerService, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
-import { getFailedResearchers, getResearcherFailureReasons } from '../../../src/orchestration/session-state.ts';
+import {
+  getFailedResearchers,
+  getResearcherFailureReasons,
+  consumeQueuedMessages,
+  getSteeringMessages,
+} from '../../../src/orchestration/session-state.ts';
 import { MAX_ROUNDS_LEVEL_1 } from '../../../src/constants.ts';
 
 // Mock the service registry
@@ -83,11 +88,21 @@ describe('DeepResearchOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Re-default the session-state failure mocks: clearAllMocks clears call
-    // history but NOT mockReturnValue overrides, so a per-test override (the
-    // hollow-run tests) would otherwise leak into every later test.
+    // Re-default the session-state mocks: clearAllMocks clears call history but NOT
+    // mockReturnValue/mockImplementation overrides, so a per-test override leaks into
+    // every later test in the file.
+    //
+    // The steering pair matters most and was the one left out. A test overriding
+    // consumeQueuedMessages to return a queued message silently RAISES maxRounds for
+    // every test after it, which changes how many rounds run — and the test named
+    // "should enforce maximum rounds and force synthesis" was running three rounds
+    // while its comment asserted two, with no assertion capable of noticing. Re-default
+    // them here rather than in each affected test, which is how the leak survived the
+    // first time it was found.
     vi.mocked(getFailedResearchers).mockReturnValue([]);
     vi.mocked(getResearcherFailureReasons).mockReturnValue({});
+    vi.mocked(consumeQueuedMessages).mockReturnValue([]);
+    vi.mocked(getSteeringMessages).mockReturnValue([]);
 
     // Create mock planning service
     mockPlanningService = {
@@ -555,6 +570,13 @@ describe('DeepResearchOrchestrator', () => {
     const result = await orchestrator.run();
 
     expect(result).toContain('Forced synthesis result');
+    // The cap is the point of this test, and asserting only on the returned string does
+    // not test it: a run of any length ends with the forced synthesis and returns this
+    // same text. Until the steering mock leak above was fixed, this test was silently
+    // running THREE rounds while its comment claimed two, and nothing here could tell.
+    const calls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
+    expect(calls.map((c: any[]) => Boolean(c[0].mustSynthesize))).toEqual([true]);
+    expect(vi.mocked(mockOrchestrationService.runResearchers).mock.calls).toHaveLength(1);
   });
 
   it('should extend round budget when queued steering messages exist at run start', async () => {

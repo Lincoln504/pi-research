@@ -112,3 +112,61 @@ describe('buildResearchSummary — footnote', () => {
     expect(summary).toContain('1 error encountered');
   });
 });
+
+describe('extractRunStats — counters that double-count or never fire', () => {
+  it('counts each search query ONCE, not once per layer that observes it', () => {
+    // `browser_search_queries_total` is incremented exactly once per query by
+    // browser-search, and its only caller then adds successes+failures to
+    // `search_queries_total` — the same queries, one layer up. Summing both reported
+    // "N searches" at exactly twice the truth in the report footer and the session
+    // metrics view.
+    const stats = extractRunStats(snapshot({
+      'researchers_launched_total{mode="deep",complexity="1",round="1"}': 1,
+      'browser_search_queries_total{status="success"}': 8,
+      'browser_search_queries_total{status="no_results"}': 2,
+      'search_queries_total{status="success"}': 8,
+      'search_queries_total{status="failed"}': 2,
+      'llm_tokens_total{component="researcher",complexity="1"}': 100,
+    }))!;
+
+    expect(stats.searchQueries).toBe(10);
+  });
+
+  it('still reports queries when the burst threw before any query was dispatched', () => {
+    // The caller-level counter is the fallback for exactly that case: the per-query
+    // counter never fired, so preferring it unconditionally would report zero searches
+    // for a run that attempted them.
+    const stats = extractRunStats(snapshot({
+      'researchers_launched_total{mode="deep",complexity="1",round="1"}': 1,
+      'search_queries_total{status="error"}': 5,
+      'llm_tokens_total{component="researcher",complexity="1"}': 100,
+    }))!;
+
+    expect(stats.searchQueries).toBe(5);
+  });
+
+  it('reports the rounds a run completed', () => {
+    // This read `evaluator_runs_total`, whose emit site was deleted in c90d7f37 —
+    // leaving the reader as its only reference in the repository. The value was
+    // therefore always 0, and buildResearchSummary gates the "N rounds" element on
+    // `> 1`, so it had never rendered for any multi-round run.
+    const stats = extractRunStats(snapshot({
+      'researchers_launched_total{mode="deep",complexity="2",round="1"}': 2,
+      'research_rounds_completed_total{mode="deep",complexity="2"}': 2,
+      'llm_tokens_total{component="researcher",complexity="2"}': 100,
+    }))!;
+
+    expect(stats.roundsCompleted).toBe(2);
+    expect(buildResearchSummary(stats)).toMatch(/\*\*2\*\* rounds/);
+  });
+
+  it('still reads a snapshot captured before the counter was renamed', () => {
+    const stats = extractRunStats(snapshot({
+      'researchers_launched_total{mode="deep",complexity="2",round="1"}': 2,
+      'evaluator_runs_total{mode="deep",complexity="2"}': 3,
+      'llm_tokens_total{component="researcher",complexity="2"}': 100,
+    }))!;
+
+    expect(stats.roundsCompleted).toBe(3);
+  });
+});

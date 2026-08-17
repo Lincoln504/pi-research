@@ -45,7 +45,12 @@ vi.mock('../../../../src/utils/metrics.ts', () => ({
 }));
 
 const poolState = vi.hoisted(() => ({ workMs: 0 }));
-vi.mock('../../../../src/core/service-registry.ts', () => ({
+// Spread the real module rather than replacing it: the busy-pool tolerance gate this
+// file pins lives behind src/healthcheck/index.ts, whose registry reads ServiceLifecycle
+// from here at class-field-initializer time. A replacement mock leaves it undefined and
+// the import throws before any test runs.
+vi.mock('../../../../src/core/service-registry.ts', async (importActual) => ({
+  ...(await importActual<Record<string, unknown>>()),
   getServiceContainer: vi.fn(() => ({})),
   getService: vi.fn(async () => ({
     initialize: vi.fn(async () => {}),
@@ -61,6 +66,7 @@ vi.mock('../../../../src/core/service-registry.ts', () => ({
 
 import { BrowserTaskScheduler } from '../../../../src/infrastructure/browser/browser-task-scheduler.ts';
 import { metrics } from '../../../../src/utils/metrics.ts';
+import { isBusyPoolHealthFailure } from '../../../../src/healthcheck/index.ts';
 
 const CFG = { WORKER_THREADS: 1, WORKER_CONCURRENCY: 1 } as any;
 const BUDGET = 150; // ms — the probe's whole budget, so the wait verdict is reachable
@@ -76,31 +82,36 @@ describe('a busy pool does not fail the probe, because the probe outranks its wo
     poolState.workMs = 0;
   });
 
-  it('is dispatched ahead of queued work rather than waiting behind it', async () => {
-    // The production shape, and the reason no saturation verdict is needed: the pool is
-    // full of the run's own work, and the probe still gets the next slot because
-    // healthchecks outrank searches and scrapes. Under the old enqueue-time deadline
-    // this same setup expired the probe and reported the pool critically unhealthy.
+  it('waits behind in-flight work and still gets its full budget once dispatched', async () => {
+    // The production shape, and the reason no saturation verdict is needed. The numbers
+    // are chosen so the old enqueue-time deadline and the new dispatch-armed one give
+    // DIFFERENT answers, which an earlier version of this test did not manage: it used
+    // 20ms churn against a 150ms budget, so the probe waited ~20ms and the old timer had
+    // 130ms of headroom left. It passed either way and its comment claiming otherwise
+    // was arithmetically false.
+    //
+    // Here the slot is held for 100ms and the probe then executes for 100ms — 200ms
+    // total against a 150ms budget. Armed at enqueue, the timer fires at 150ms while the
+    // probe is mid-flight. Armed at dispatch, the probe gets its full 150ms of execution
+    // and finishes in 100.
+    poolState.workMs = 100;
     const scheduler = makeScheduler();
     const queue = (scheduler as any).getPriorityQueue(CFG);
 
-    let keepWorking = true;
-    const churn = (async () => {
-      while (keepWorking) await queue.enqueue('scrape', async () => { await new Promise(r => setTimeout(r, 20)); return 'ok'; });
-    })();
+    const occupying = queue.enqueue('scrape', async () => { await new Promise(r => setTimeout(r, 100)); return 'ok'; });
     await new Promise(r => setTimeout(r, 10)); // let it take the only slot
 
     await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).resolves.toEqual(
       expect.objectContaining({ success: true }),
     );
+    await occupying;
 
-    keepWorking = false;
-    await churn;
-
-    // It really ran, rather than being excused: an execution duration was recorded.
+    // It really ran, rather than being excused: an execution duration was recorded, and
+    // it measures the work rather than the wait.
     const durations = vi.mocked(metrics.observe).mock.calls.filter(c => c[0] === 'browser_healthcheck_duration_ms');
     expect(durations).toHaveLength(1);
     expect(durations[0]![2]).toEqual({ status: 'success' });
+    expect(durations[0]![1]).toBeLessThan(BUDGET);
   });
 
   it('answers UNHEALTHY when the slots are full and nothing ever frees one', async () => {
@@ -116,7 +127,7 @@ describe('a busy pool does not fail the probe, because the probe outranks its wo
     await new Promise(r => setTimeout(r, 10));
 
     await expect(scheduler.runHealthCheck(CFG, undefined, BUDGET)).rejects.toThrow(
-      /could not reach a worker/,
+      /timed out after/,
     );
 
     release();
@@ -184,6 +195,39 @@ describe('a busy pool does not fail the probe, because the probe outranks its wo
     const waits = vi.mocked(metrics.observe).mock.calls.filter(c => c[0] === 'browser_healthcheck_queue_wait_ms');
     expect(waits).toHaveLength(1);
     expect(waits[0]![2]).toEqual({ dispatched: 'yes' });
+  });
+
+  it('phrases its failure so the busy-pool tolerance gate still recognises it', async () => {
+    // This is a COUPLING, and it decides whether a run lives. isBusyPoolHealthFailure
+    // is what stops a probe that queued out under load from aborting research, and it
+    // decides by regex-matching /tim(e|ed) out|timeout/ on this message. A rewrite of
+    // the message dropped the word entirely — "Health check could not reach a worker
+    // within 105000ms" — so a busy pool stopped reading as a timeout, the gate rejected
+    // it, and the run aborted at quick-research-orchestrator and research-health. The
+    // commit that did it was the one written to stop a busy pool being reported as dead.
+    //
+    // Asserting the substring here would only restate the implementation. This drives
+    // the REAL message through the REAL classifier, so the two cannot drift apart
+    // silently again.
+    const scheduler = makeScheduler();
+    const queue = (scheduler as any).getPriorityQueue(CFG);
+
+    let release!: () => void;
+    const wedged = new Promise<void>(r => { release = r; });
+    const occupying = queue.enqueue('scrape', async () => { await wedged; return 'never'; });
+    await new Promise(r => setTimeout(r, 10));
+
+    const message = await scheduler.runHealthCheck(CFG, undefined, BUDGET).then(
+      () => { throw new Error('expected the probe to fail'); },
+      (err: Error) => err.message,
+    );
+
+    expect(isBusyPoolHealthFailure({
+      components: [{ component: 'BrowserRuntime', healthy: false, error: `Browser healthcheck failed: ${message}` }],
+    } as any)).toBe(true);
+
+    release();
+    await occupying;
   });
 
   it('records the wait of a probe that never reached a worker at all', async () => {

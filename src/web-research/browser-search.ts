@@ -6,6 +6,7 @@
 
 import { runWorkerSearch } from '../infrastructure/browser/task-execution-service.ts';
 import { getMaxWorkers } from '../infrastructure/browser/config.ts';
+import { isTaskTimeoutError } from '../infrastructure/browser/browser-error-utils.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { normalizeUrl } from '../utils/url-utils.ts';
@@ -192,7 +193,21 @@ export async function performSearch(
             }
         } catch (error) {
             const queryDuration = Date.now() - queryStartTime;
-            const isTimeout = timeoutController.signal.aborted && !signal?.aborted;
+            // Two clocks can end this query, and only one of them used to be recognised.
+            // The scheduler's own execution deadline is armed in the same synchronous
+            // block as this layer's guard, with the SAME duration derived from the same
+            // two config values — so on the leader path the scheduler's timer is always
+            // registered first, always fires first, and its rejection clears this layer's
+            // timer before Node ever reaches it. `timeoutController.signal.aborted` was
+            // therefore false for every real search timeout in the leader path.
+            //
+            // The consequences all pointed the wrong way: the query was logged at ERROR,
+            // counted as `status=error`, and reported to the researcher as "an
+            // infrastructure failure" — while `timeoutCount` stayed at zero, making the
+            // whole-burst timeout attribution below unreachable. A task timeout is a
+            // timeout whichever clock names it.
+            const isTimeout = (timeoutController.signal.aborted || isTaskTimeoutError(error))
+                && !signal?.aborted;
             const status = isTimeout ? 'timeout' : 'error';
             
             if (isTimeout) timeoutCount++;

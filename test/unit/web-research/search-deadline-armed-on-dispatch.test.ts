@@ -54,10 +54,26 @@ const workUntil = (ms: number, signal?: AbortSignal) =>
   });
 
 /** onTaskEvent is the 8th positional parameter of runWorkerSearch. */
-const eventsOf = (args: unknown[]) => args[7] as ((e: 'dispatched' | 'settled') => void) | undefined;
+const ON_TASK_EVENT_ARG = 7;
+const eventsOf = (args: unknown[]) => args[ON_TASK_EVENT_ARG] as ((e: 'dispatched' | 'settled') => void) | undefined;
 
 describe('per-query search deadline is armed on dispatch', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('pins the argument position these tests read the callback from', async () => {
+    // Every test below reaches into a fixed positional slot. If the signature grows a
+    // parameter, `eventsOf` silently returns undefined, `?.('dispatched')` becomes a
+    // no-op, no timer is ever armed — and three of these tests still pass, because
+    // "never dispatched therefore never armed therefore succeeds" is exactly what the
+    // follower test asserts as CORRECT. The suite would go green while testing nothing.
+    vi.mocked(runWorkerSearch).mockImplementation(async (query: string) =>
+      [{ title: 't', url: `https://example.com/${query}`, content: 'c' }]);
+
+    await performSearch(['probe'], CFG);
+
+    const args = vi.mocked(runWorkerSearch).mock.calls[0]!;
+    expect(typeof args[ON_TASK_EVENT_ARG]).toBe('function');
+  });
 
   it('a query held in the queue past its whole budget still succeeds once dispatched', async () => {
     vi.mocked(runWorkerSearch).mockImplementation(async (query: string, _cfg: any, signal: any, ...rest: any[]) => {

@@ -654,6 +654,40 @@ describe('runResearcher', () => {
       expect(mockPrompt).toHaveBeenCalledTimes(1);
     });
 
+    it('does NOT retry a failure the account cannot retry its way out of', async () => {
+      // The predicate is unit-tested separately, but nothing asserted the retry loop
+      // consulted it — deleting the guard left both files green and restored the
+      // five-runs-lost-to-credit-exhaustion regression: 30 retried attempts across two
+      // days, 0 of 10 episodes recovered, each run ending with no output after paying
+      // for a search burst and a synthesis call over an empty corpus.
+      mockPrompt.mockRejectedValue(new Error('402 This request requires more credits, or fewer max_tokens'));
+
+      await expect(runResearcher(makeOptions({
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 2 } as any,
+      }))).rejects.toThrow('requires more credits');
+
+      expect(mockPrompt).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(metrics.increment).mock.calls.map(c => c[0]))
+        .toContain('researcher_unretriable_total');
+    });
+
+    it('still retries the transient failures that usually recover', async () => {
+      // The classifier has to stay narrow. "produced no text output" recovered 26 of 26
+      // times in the retained logs, and a reasoning-effort rejection about 18 of 19 —
+      // OpenRouter routes the same model to different upstream providers per request,
+      // so the same call succeeds on a later attempt. Treating either as permanent
+      // would break runs that currently succeed.
+      mockPrompt
+        .mockRejectedValueOnce(new Error('Researcher produced no text output'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(runResearcher(makeOptions({
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 2 } as any,
+      }))).resolves.toBeUndefined();
+
+      expect(mockPrompt).toHaveBeenCalledTimes(2);
+    });
+
     it('does NOT retry when the failure is a container-disposal error', async () => {
       mockPrompt.mockRejectedValue(new Error("Cannot get service 'x' during container disposal"));
 

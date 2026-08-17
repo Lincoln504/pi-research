@@ -133,9 +133,19 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   // Researchers launched
   const researchersLaunched = sumCounter(counters, 'researchers_launched_total');
 
-  // Search queries — combine browser search and regular search
+  // Search queries. These two counters count the SAME queries, one layer apart:
+  // browser-search increments `browser_search_queries_total` exactly once per query
+  // across its success/no-results/timeout/error branches, and its only caller then
+  // increments `search_queries_total` by successes plus failures — the same set. Summing
+  // them reported "N searches" at exactly twice the truth in the report footer and the
+  // session metrics view, and three times it on the outer-catch path, which adds
+  // `queries.length` a second time.
+  //
+  // Same shape as the URL counters below, and resolved the same way: the per-query
+  // counter IS the count; the caller-level one is a fallback for a search that threw
+  // before dispatching anything, where the inner counter never fired at all.
   const browserSearchQueries = sumCounter(counters, 'browser_search_queries_total');
-  const searchQueries = sumCounter(counters, 'search_queries_total') + browserSearchQueries;
+  const searchQueries = browserSearchQueries || sumCounter(counters, 'search_queries_total');
 
   // URLs discovered via search. browser_search_unique_urls_total is the
   // cross-query deduped subset of the SAME batch counted by
@@ -203,8 +213,14 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
     }
   }
 
-  // Rounds completed — evaluator runs give us the round count
-  const roundsCompleted = sumCounter(counters, 'evaluator_runs_total');
+  // Rounds completed. This read `evaluator_runs_total`, whose only reference in the
+  // whole repository was this line — the emit site was deleted in c90d7f37 and the
+  // reader was left behind, so the value was always 0 and `buildResearchSummary`'s
+  // `roundsCompleted > 1` gate meant the "N rounds" element had never once rendered for
+  // any multi-round run. The orchestrator now emits a counter that says what it means.
+  // The old name is still summed so a snapshot captured before this change still reads.
+  const roundsCompleted =
+    sumCounter(counters, 'research_rounds_completed_total') || sumCounter(counters, 'evaluator_runs_total');
 
   // Complexity
   let complexity = 1;

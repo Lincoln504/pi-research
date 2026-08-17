@@ -2,6 +2,20 @@ import { logger } from '../../logger.ts';
 
 export type TaskType = 'search' | 'scrape' | 'healthcheck';
 
+/**
+ * Did this resolved value carry an in-band worker failure?
+ *
+ * Worker tasks report failure by RESOLVING with `{ error: ... }` rather than by
+ * rejecting, so "the promise settled successfully" and "the task succeeded" are
+ * different facts about the same value.
+ */
+function isTaskFailureResult(result: unknown): boolean {
+    return typeof result === 'object'
+        && result !== null
+        && typeof (result as { error?: unknown }).error === 'string'
+        && (result as { error: string }).error.length > 0;
+}
+
 export interface QueuedTask<T> {
     type: TaskType;
     fn: () => Promise<T>;
@@ -196,7 +210,13 @@ export class PriorityTaskQueue {
             } else {
                 result = await fnPromise;
             }
-            this.lastSuccessAt = Date.now();
+            // A worker-reported failure arrives as a RESOLVED value carrying `error` —
+            // poolifier delivers it that way, and the scheduler only turns it into a
+            // throw afterwards. Resolution alone therefore does not mean the task
+            // succeeded: a worker returning `{error:'Task timed out'}` for every task
+            // would keep this timestamp fresh through a total outage, which is the one
+            // thing it must not do.
+            if (!isTaskFailureResult(result)) this.lastSuccessAt = Date.now();
             task.resolve(result);
         } catch (err) {
             task.reject(err);

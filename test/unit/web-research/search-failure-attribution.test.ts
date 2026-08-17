@@ -109,6 +109,45 @@ describe('search — attributes an empty result set to the right cause', () => {
     );
   });
 
+  it('labels a task timeout as a TIMEOUT, whichever clock named it', async () => {
+    // Two clocks can end a query, and only one used to be recognised. The scheduler's
+    // execution deadline is armed in the same synchronous block as this layer's guard,
+    // with the same duration derived from the same two config values — so the
+    // scheduler's timer is registered first, fires first, and its rejection clears this
+    // layer's timer before Node reaches it. `timeoutController.signal.aborted` was
+    // therefore false for every real search timeout on the leader path.
+    //
+    // The query was then logged at ERROR, counted as `status=error`, and reported to
+    // the researcher as "an infrastructure failure" whose cause it should not act on —
+    // when the honest report is that it timed out and retrying is reasonable. The
+    // whole-burst timeout attribution downstream was unreachable for the same reason,
+    // since `timeoutCount` never left zero.
+    vi.mocked(runWorkerSearch).mockImplementation(async (q: string) => {
+      if (q === 'good') return okResult;
+      throw new Error('Search task timed out after 55000ms. query="slow"');
+    });
+
+    const results = await search(['good', 'slow']);
+
+    const failed = results.find((r) => r.query === 'slow')!;
+    expect(failed.error?.type).toBe('timeout');
+    expect(failed.error?.message).toMatch(/[Rr]etrying the same query later is reasonable/);
+    expect(failed.error?.message).not.toMatch(/infrastructure failure/);
+  });
+
+  it('still calls a genuine backend fault an infrastructure failure', async () => {
+    // The widened classifier must not swallow everything: a worker that died is not a
+    // timeout, and the researcher is told so.
+    vi.mocked(runWorkerSearch).mockImplementation(async (q: string) => {
+      if (q === 'good') return okResult;
+      throw new Error('Worker exited unexpectedly');
+    });
+
+    const results = await search(['good', 'dead']);
+
+    expect(results.find((r) => r.query === 'dead')!.error?.type).toBe('service_unavailable');
+  });
+
   it('propagates a cancellation instead of reporting per-query failures', async () => {
     const controller = new AbortController();
     vi.mocked(runWorkerSearch).mockImplementation(async () => {

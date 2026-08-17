@@ -80,6 +80,18 @@ export function createSecuritySearchTool(options: {
       const startTime = Date.now();
       metrics.increment('tool_security_search_calls_total', 1);
 
+      // Validate BEFORE spending the budget: a rejected call did no work, and charging
+      // it against the shared MAX_GATHERING_CALLS allowance turns a malformed call into
+      // a permanently lost one. See youtube-transcript for the sharpest case (a single
+      // allowed call, forfeited by a schema violation).
+      if (!Value.Check(SecuritySearchParamsSchema, params)) {
+          metrics.increment('tool_security_search_calls_total', 1, { status: 'invalid_params' });
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for security_search tool.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('security_search');
       if (!allowed) {
@@ -87,14 +99,6 @@ export function createSecuritySearchTool(options: {
           return {
             content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
             details: { blocked: true, reason: 'limit_reached' },
-          };
-      }
-
-      if (!Value.Check(SecuritySearchParamsSchema, params)) {
-          metrics.increment('tool_security_search_calls_total', 1, { status: 'invalid_params' });
-          return {
-            content: [{ type: 'text', text: 'Invalid parameters for security_search tool.' }],
-            details: { error: 'invalid_parameters' },
           };
       }
 

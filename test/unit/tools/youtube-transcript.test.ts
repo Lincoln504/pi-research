@@ -83,6 +83,34 @@ describe('tools/youtube-transcript', () => {
     expect(youtubeTranscriptCommand).not.toHaveBeenCalled();
   });
 
+  it('does not spend the researcher\'s only call on a request it refused', async () => {
+    // The budget was recorded BEFORE validation, so a researcher passing one URL too
+    // many (the schema caps the array; the allowance is a single call) got a validation
+    // error and lost its only call — and the retry was then told "You have already used
+    // your one youtube_transcript call", which was false. The round lost transcripts
+    // entirely, for a mistake the researcher could have corrected.
+    const tracker = new ToolUsageTracker(createDefaultToolLimits());
+    const tool = createYoutubeTranscriptTool({ ctx, tracker });
+
+    const rejected = await tool.execute('id', { urls: 'not-an-array' } as any, undefined, undefined as any, ctx);
+    expect((rejected as any).details.error).toBe('invalid_params');
+
+    // The corrected retry must still be served.
+    const retry = await tool.execute('id', { urls: ['https://youtu.be/dQw4w9WgXcQ'] }, undefined, undefined as any, ctx);
+    expect((retry as any).details.fetched).toBe(1);
+    expect(youtubeTranscriptCommand).toHaveBeenCalledOnce();
+  });
+
+  it('does not spend it on an empty url list either', async () => {
+    const tracker = new ToolUsageTracker(createDefaultToolLimits());
+    const tool = createYoutubeTranscriptTool({ ctx, tracker });
+
+    await tool.execute('id', { urls: ['   '] }, undefined, undefined as any, ctx);
+    const retry = await tool.execute('id', { urls: ['https://youtu.be/dQw4w9WgXcQ'] }, undefined, undefined as any, ctx);
+
+    expect((retry as any).details.fetched).toBe(1);
+  });
+
   it('caps urls to the configured max (maxItems schema)', async () => {
     const config = { YOUTUBE_TRANSCRIPT_MAX_VIDEOS: 2, YOUTUBE_TRANSCRIPT_TIMEOUT_MS: 20000, YOUTUBE_TRANSCRIPT_LANG: 'en' } as any;
     const tool = createYoutubeTranscriptTool({ ctx, tracker: new ToolUsageTracker(createDefaultToolLimits()), config });

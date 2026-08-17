@@ -16,6 +16,7 @@ import { errorTracker } from '../../utils/error-tracker.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
 import { Utf8Body } from '../../utils/http-body.ts';
 import { getClientAgent } from './client-agent.ts';
+import { getHealthCheckBudgetMs } from './config.ts';
 import type { NodeError } from '../../types/index.ts';
 
 /**
@@ -34,12 +35,6 @@ const CLIENT_PATIENCE_MARGIN_MS = 15_000;
  */
 const CLIENT_TIMEOUT_CAP_MS = 300_000;
 
-/**
- * Mirror of the leader's fixed healthcheck budget in
- * BrowserTaskScheduler.runHealthCheck (45s probe deadline + 60s queue-wait
- * margin) — not config-derived there either.
- */
-const HEALTHCHECK_LEADER_BUDGET_MS = 45_000 + 60_000;
 
 /**
  * Per-operation follower timeout.
@@ -67,9 +62,11 @@ const HEALTHCHECK_LEADER_BUDGET_MS = 45_000 + 60_000;
  * and retry. Firing at a fraction of the owner's budget leaves room for the
  * failure to be reported and retried within the life of the thing that asked.
  *
- * The healthcheck keeps a budget-derived value: its leader side bounds the whole
- * call (it answers "healthy, saturated" rather than queueing indefinitely), so a
- * liveness probe stays as impatient as a liveness probe should be.
+ * The healthcheck keeps a budget-derived value: its leader side bounds the WHOLE call,
+ * wait included — the probe's wait timer rejects rather than queueing indefinitely — so
+ * a liveness probe stays as impatient as a liveness probe should be. (It used to be
+ * described as answering "healthy, saturated" instead of failing; that branch was
+ * unreachable and has been removed. The bound is what matters here, not the verdict.)
  */
 /** Fraction of the owning caller's budget at which the wedge detector fires, so the
  *  failure is reported and retriable inside the life of whatever asked for it. */
@@ -83,8 +80,12 @@ export function resolveClientRequestTimeoutMs(operation: string, config?: Config
             return Math.min(CLIENT_TIMEOUT_CAP_MS, Math.floor(ownerBudgetMs * OWNER_BUDGET_FRACTION));
         }
         default:
-            // healthcheck, plus any future/unknown path: the largest fixed budget.
-            return Math.min(CLIENT_TIMEOUT_CAP_MS, HEALTHCHECK_LEADER_BUDGET_MS + CLIENT_PATIENCE_MARGIN_MS);
+            // healthcheck, plus any future/unknown path: the leader's own budget plus a
+            // margin. Read from the SAME function the leader reads, not from a local
+            // copy of the constant — the two were separate literals and would have
+            // drifted the moment either moved, leaving the follower less patient than
+            // the leader it is waiting on.
+            return Math.min(CLIENT_TIMEOUT_CAP_MS, getHealthCheckBudgetMs(config) + CLIENT_PATIENCE_MARGIN_MS);
     }
 }
 

@@ -74,19 +74,21 @@ export function createStackexchangeTool(options: {
       _onUpdate,
       extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
+      // Validate BEFORE spending the budget — see security.ts. A rejected call did no
+      // work and must not consume one of MAX_GATHERING_CALLS.
+      if (!Value.Check(StackExchangeParamsSchema, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for stackexchange tool.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
       // Record call in tracker - returns false if limit reached
       const allowed = tracker.recordCall('stackexchange');
       if (!allowed) {
           return {
             content: [{ type: 'text', text: tracker.getLimitMessage('stackexchange') }],
             details: { blocked: true, reason: 'limit_reached' },
-          };
-      }
-
-      if (!Value.Check(StackExchangeParamsSchema, params)) {
-          return {
-            content: [{ type: 'text', text: 'Invalid parameters for stackexchange tool.' }],
-            details: { error: 'invalid_parameters' },
           };
       }
 

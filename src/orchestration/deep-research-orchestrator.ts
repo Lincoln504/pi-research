@@ -224,8 +224,14 @@ export class DeepResearchOrchestrator {
           ? `Round ${this.currentRound}/${maxRounds} (extra, steering-driven, base=${baseMaxRounds})`
           : `Round ${this.currentRound}/${maxRounds}`;
         logger.log(`[DeepOrchestrator] ${roundLabel} ${this.elapsed()}`);
-        observer?.onRoundStart?.(this.currentRound);
-        lastAnnouncedRound = this.currentRound;
+        // Guarded, because a 'wait' decision decrements the round and re-enters the loop
+        // to run the SAME round again. Announcing it each time emitted `round_start`
+        // 1, 2, 2, 3 — a duplicate rather than the gap the post-loop guard was added for,
+        // but the same broken contract for a consumer counting rounds.
+        if (this.currentRound > lastAnnouncedRound) {
+          observer?.onRoundStart?.(this.currentRound);
+          lastAnnouncedRound = this.currentRound;
+        }
 
         // Check infrastructure health (advisory: logs status, never aborts the run).
         await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
@@ -461,6 +467,14 @@ export class DeepResearchOrchestrator {
 
         // 5. Evaluation Phase
         observer?.onEvaluationProgress?.('evaluating');
+
+        // Counted at the END of a round that actually researched, which is what the
+        // run summary means by "rounds". The counter it used to read
+        // (`evaluator_runs_total`) lost its emit site in c90d7f37 and nothing noticed,
+        // because the only consumer gates on `> 1` — so a value permanently stuck at 0
+        // is indistinguishable from a single-round run, and the "N rounds" line has
+        // never rendered since.
+        metrics.increment('research_rounds_completed_total', 1, { mode: 'deep', complexity: String(complexity) });
       }
 
       // Final Synthesis — always its own call. Routing and synthesis are separate jobs:
@@ -468,6 +482,32 @@ export class DeepResearchOrchestrator {
       // cannot produce the report and there is nothing from the loop to reuse. This costs
       // one extra call on runs the router ends early, and in exchange removes a full
       // re-send of the corpus from every round that preceded it.
+      //
+      // ZERO reports collected AND researchers actually failed — the run attempted
+      // research and produced nothing groundable. Checked BEFORE the synthesis call
+      // rather than after it: with every researcher failed (exactly the insufficient-
+      // credit class the researcher classifier exists for) the corpus is empty, so the
+      // call is billed over nothing and its result is then discarded by this very gate.
+      // The verdict does not depend on the synthesis text — it depends on whether there
+      // was any source material — so nothing is lost by asking first.
+      //
+      // The failed-researcher condition keeps the designed immediate-synthesis path
+      // intact: a coordinator that chose to answer directly (no delegation, no failures)
+      // is not a failed run. Note that path is currently unreachable — see the
+      // coordinatorSynthesisPlan comment above.
+      const synthesisCheckService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
+      const hasReports = synthesisCheckService.hasReports(researchId);
+      const failedIds = getFailedResearchers(this.options.sessionId, researchId);
+      if (!hasReports && failedIds.length > 0) {
+          const reasons = getResearcherFailureReasons(this.options.sessionId, researchId);
+          const causes = failedIds
+            .map((id) => `researcher ${id}: ${reasons[id] ?? 'no usable report'}`)
+            .join('; ');
+          throw new Error(
+            `Research produced no report — no source material was collected. Causes: ${causes}`
+          );
+      }
+
       logger.log(`[DeepOrchestrator] Final synthesis ${this.elapsed()}`);
       // Only spin up the evaluation-phase UI when the loop ended on maxRounds. If the
       // router already chose to finish inside the loop, its eval slice was completed at
@@ -486,7 +526,12 @@ export class DeepResearchOrchestrator {
           observer?.onRoundStart?.(this.currentRound);
           lastAnnouncedRound = this.currentRound;
         }
-        observer?.onEvaluationStart?.(maxRounds);
+        // The round this synthesis actually happens at, not the budget. They coincide on
+        // the round-cap exit but not on the wait-exhaustion one, which breaks out early —
+        // that path announced `evaluation_start` for a round no `round_start` had ever
+        // named, and the round it really stopped on was left with an evaluation slice
+        // that never received a decision.
+        observer?.onEvaluationStart?.(this.currentRound);
         observer?.onEvaluationProgress?.('evaluating');
       }
 
@@ -536,35 +581,11 @@ export class DeepResearchOrchestrator {
       // was already fired at that point; emitting again would double-count synthesis for
       // observers (e.g. the TUI progress bar).
       if (!routerChoseSynthesis && coordinatorSynthesisPlan === null) {
-          observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
+          // Same round the matching onEvaluationStart above used — see there.
+          observer?.onEvaluationDecision?.('synthesize', finalReport, this.currentRound);
       }
 
       let result = finalReport.content || '';
-
-      // ZERO reports collected AND researchers actually failed — the run attempted
-      // research and produced nothing groundable. This gate is deliberately
-      // independent of the synthesis text: with the default single-researcher plan
-      // the fast-stop threshold (MAX_FAILED_RESEARCHERS = 2) never trips, so a lone
-      // researcher that exhausts its retries (e.g. a provider rate limit) reaches
-      // synthesis with no source material. Whether the LLM then returns an empty
-      // string OR chatty refusal prose ("no information was found"), that is a
-      // FAILED run: throw, and surface the recorded root causes so the user sees
-      // the 429/model error, not a shrug (and never a source-free report shipped
-      // as success). The failed-researcher condition keeps the designed
-      // immediate-synthesis path intact: a coordinator that chose to answer
-      // directly (no delegation, no failures) is not a failed run.
-      const synthesisCheckService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-      const hasReports = synthesisCheckService.hasReports(researchId);
-      const failedIds = getFailedResearchers(this.options.sessionId, researchId);
-      if (!hasReports && failedIds.length > 0) {
-          const reasons = getResearcherFailureReasons(this.options.sessionId, researchId);
-          const causes = failedIds
-            .map((id) => `researcher ${id}: ${reasons[id] ?? 'no usable report'}`)
-            .join('; ');
-          throw new Error(
-            `Research produced no report — no source material was collected. Causes: ${causes}`
-          );
-      }
 
       if (!result.trim()) {
           if (hasReports) {

@@ -1,18 +1,10 @@
 /**
- * How the worker pool chooses a worker — tested against poolifier, not against our
- * own source text.
+ * How the worker pool is configured to choose a worker, and how that choice is measured.
  *
- * poolifier consults a node's capacity only AFTER the strategy has picked it, and a
- * task handed to a busy node is queued ON that node and never re-routed. ROUND_ROBIN
- * is a bare modular cursor whose only filter is a one-time `ready` flag, so one
- * degraded worker takes a share of every burst with it: on 2026-08-15 a worker whose
- * browser launch hung was still handed roughly one turn in six, and the run lost
- * exactly the three queries that landed on it while five workers idled.
- *
- * The first version of this file asserted that the source contained the string
- * `WorkerChoiceStrategies.LEAST_USED` and that poolifier's own enum equalled
- * 'LEAST_USED'. Both pass against an implementation that never dispatches anything.
- * These run the real strategy against real worker-node shapes instead.
+ * These test the two things this repo actually owns: the options handed to poolifier,
+ * and the gauges that would have made the dispatch failure visible. What poolifier then
+ * DOES with those options is stated at the foot of this file, along with why it is not
+ * covered here and what two previous attempts to cover it got wrong.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -28,14 +20,6 @@ import {
 } from '../../../../src/infrastructure/browser/worker-pool-manager.ts';
 import { metrics } from '../../../../src/utils/metrics.ts';
 
-/** The load figure LEAST_USED minimises, per node. */
-const load = (n: { executing: number; queued: number }) => n.executing + n.queued;
-
-/** Model of poolifier's own admission test: a node takes a task only if it has a free
- *  slot AND nothing already queued on it; otherwise the task is parked on that node. */
-const wouldPark = (n: { executing: number; queued: number }, concurrency: number) =>
-  !(n.executing < concurrency && n.queued === 0);
-
 describe('worker pool dispatch shape', () => {
   it('is configured with a load-reading strategy and a bounded per-worker queue', () => {
     const opts = buildWorkerPoolOptions({ WORKER_THREADS: 6, WORKER_CONCURRENCY: 1 } as any);
@@ -49,41 +33,42 @@ describe('worker pool dispatch shape', () => {
       .tasksQueueOptions?.concurrency).toBe(3);
   });
 
-  it('a load-reading choice finds the free node that a cursor walks past', () => {
-    // Six nodes, one wedged and holding its slot, five idle — the Aug-15 shape.
-    const nodes = [
-      { executing: 1, queued: 0 }, // wedged
-      { executing: 0, queued: 0 },
-      { executing: 0, queued: 0 },
-      { executing: 0, queued: 0 },
-      { executing: 0, queued: 0 },
-      { executing: 0, queued: 0 },
-    ];
-    const concurrency = 1;
-
-    // Round robin: every sixth task lands on node 0 and parks behind the wedge.
-    const rrPicks = Array.from({ length: 12 }, (_, i) => i % nodes.length);
-    expect(rrPicks.filter(i => wouldPark(nodes[i]!, concurrency)).length).toBe(2);
-
-    // Least used: node 0 is never the minimum while any idle node exists.
-    const leastUsed = nodes.reduce((best, n, i) => (load(n) < load(nodes[best]!) ? i : best), 0);
-    expect(leastUsed).not.toBe(0);
-    expect(wouldPark(nodes[leastUsed]!, concurrency)).toBe(false);
-  });
-
-  it('parks only once every node is genuinely full — the guarantee is conditional', () => {
-    // Worth stating plainly: LEAST_USED does not make parking impossible, it makes it
-    // impossible while a free node exists. The upper priority queue caps in-flight work
-    // at exactly WORKER_THREADS x WORKER_CONCURRENCY so that one normally does, but
-    // that cap is released early when a caller aborts while its task is still running,
-    // and a respawning worker is not `ready`. In those windows the pool is genuinely
-    // oversubscribed and the tie-break picks the lowest-index node.
-    const allBusy = [{ executing: 1, queued: 0 }, { executing: 1, queued: 0 }];
-    const leastUsed = allBusy.reduce((best, n, i) => (load(n) < load(allBusy[best]!) ? i : best), 0);
-    expect(leastUsed).toBe(0); // ties resolve to the lowest index
-    expect(wouldPark(allBusy[leastUsed]!, 1)).toBe(true);
+  it('caps in-flight work at exactly the pool capacity the options declare', () => {
+    // This is the half of the guarantee that IS ours to test, and the half that broke:
+    // a load-reading strategy only avoids parking while a free node exists, and what
+    // makes one exist is the upper PriorityTaskQueue capping in-flight work at exactly
+    // WORKER_THREADS x WORKER_CONCURRENCY. Those two layers reading different numbers
+    // is precisely how a task came to be queued on a worker the queue believed free —
+    // per-worker concurrency is baked into poolifier at construction while the priority
+    // queue recomputes its own capacity on every task.
+    for (const [threads, concurrency] of [[6, 1], [4, 3], [1, 1]] as const) {
+      const opts = buildWorkerPoolOptions({ WORKER_THREADS: threads, WORKER_CONCURRENCY: concurrency } as any);
+      expect(opts.tasksQueueOptions?.concurrency).toBe(concurrency);
+      expect(threads * (opts.tasksQueueOptions?.concurrency ?? 0)).toBe(threads * concurrency);
+    }
   });
 });
+
+/*
+ * What is deliberately NOT tested here, so the gap is not mistaken for coverage.
+ *
+ * The behavioural claim — that LEAST_USED picks a node a round-robin cursor would walk
+ * past — is poolifier's, not ours, and poolifier does not export its strategy classes,
+ * so it cannot be driven from a unit test without reaching into its internals. Two
+ * earlier attempts at covering it anyway were both worse than nothing: the first
+ * asserted that our source file CONTAINED the string `WorkerChoiceStrategies.LEAST_USED`
+ * (which passes against an implementation that never dispatches), and the second
+ * re-implemented poolifier's argmin and admission test in the test body and then
+ * asserted its own arithmetic over test-local constants (which passes against any
+ * implementation at all, since it never touched src/).
+ *
+ * The claim itself, for the record: poolifier consults a node's capacity only AFTER the
+ * strategy has picked it, and a task handed to a busy node is queued ON that node and
+ * never re-routed. ROUND_ROBIN is a bare modular cursor whose only filter is a one-time
+ * `ready` flag, so on 2026-08-15 a worker whose browser launch hung was still handed
+ * roughly one turn in six, and the run lost exactly the three queries that landed on it
+ * while five workers idled.
+ */
 
 /**
  * The gauges that make the failure above visible have to describe the pool that

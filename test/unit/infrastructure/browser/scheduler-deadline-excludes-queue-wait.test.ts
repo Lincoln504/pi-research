@@ -140,6 +140,27 @@ describe('scheduler deadline excludes queue wait', () => {
     ).resolves.toBeDefined();
   });
 
+  it('reports a queued task\'s DURATION as its execution, not its elapsed span', async () => {
+    // The helpers that compute this are unit-tested next door, but nothing asserted the
+    // scheduler used them: swapping `executionMs(dispatchedAt, startTime)` back for
+    // `Date.now() - startTime` restores the 51s-vs-5.8s misdiagnosis in full and leaves
+    // that file green. The only other test observing this metric matches its value with
+    // `expect.anything()`. This one drives a real queue wait and reads the number.
+    const scheduler = makeScheduler();
+
+    // Occupy the single slot so the measured task genuinely waits behind it.
+    const blocker = scheduler.runSearch('blocker', CFG);
+    await new Promise(r => setTimeout(r, 10));
+    await Promise.all([blocker, scheduler.runSearch('measured', CFG)]);
+
+    const durations = vi.mocked(metrics.observe).mock.calls.filter(c => c[0] === 'browser_search_duration_ms');
+    expect(durations).toHaveLength(2);
+    // Both ran for ~80ms. The second waited ~80ms more; charging that to the work would
+    // report ~160ms. Well inside the 120ms budget either way, so only the measurement
+    // distinguishes them.
+    for (const d of durations) expect(d[1]).toBeLessThan(130);
+  });
+
   it('records queue wait on a task that FAILED, not only on one that succeeded', async () => {
     // The tasks that wait longest are precisely the ones that do not succeed, so
     // recording this only on the success path censored the tail the metric exists to

@@ -328,3 +328,43 @@ function isFullMockMode(): boolean {
     return process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
            process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
 }
+/**
+ * How long the leader's health probe may take, end to end.
+ *
+ * This was a hardcoded 105s (45s probe + 60s queue-wait margin) and the verdict logic
+ * that reads it is built on an arithmetic claim: the probe out-waits any task that can
+ * hold a worker slot, so a probe that never reaches a worker really has found a wedge.
+ * That claim held for the DEFAULT timeouts and for no others. `SEARCH_TIMEOUT_MS` and
+ * `BROWSER_TASK_TIMEOUT_MS` are both settable to 120 000, so a search may legally hold
+ * a slot for 240s — and a user who merely raised the search timeout would see healthy
+ * pools reported as wedged, which aborts the run at the readiness gate.
+ *
+ * Deriving it instead makes the invariant hold by construction:
+ *   - the longest a single task may hold a slot, plus
+ *   - the probe's own work: the worker runs up to THREE navigation attempts (primary,
+ *     retry, neutral-endpoint fallback) at `max(10s, HEALTH_CHECK_TIMEOUT_MS)` each,
+ *     and a budget below that sum makes the fallback ladder unreachable — so raising
+ *     HEALTH_CHECK_TIMEOUT_MS used to make the health check strictly worse.
+ *
+ * Floored at the historical 105s so default installs are unchanged.
+ */
+export const HEALTHCHECK_MIN_BUDGET_MS = 45_000 + 60_000;
+
+/** Navigation attempts executeHealthCheck makes: primary, retry, fallback endpoint. */
+const HEALTHCHECK_NAV_ATTEMPTS = 3;
+
+export function getHealthCheckBudgetMs(config?: Config): number {
+    const c = (config || getConfig()) as Partial<Config>;
+    // Each field is read defensively. A missing or non-finite value would otherwise
+    // propagate a NaN into `setTimeout`, which Node coerces to 1ms — turning the health
+    // probe's deadline into an instant failure. Falling back to the schema default is
+    // the only reading that cannot silently invert the bound.
+    const ms = (value: unknown, fallback: number): number =>
+        typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+    const longestSlotHold =
+        Math.max(ms(c.SEARCH_TIMEOUT_MS, 45_000), ms(c.SCRAPE_TIMEOUT_MS, 15_000))
+        + ms(c.BROWSER_TASK_TIMEOUT_MS, 10_000);
+    // Mirrors the worker's own floor in executeHealthCheck.
+    const probeWork = HEALTHCHECK_NAV_ATTEMPTS * Math.max(10_000, ms(c.HEALTH_CHECK_TIMEOUT_MS, 10_000));
+    return Math.max(HEALTHCHECK_MIN_BUDGET_MS, longestSlotHold + probeWork);
+}

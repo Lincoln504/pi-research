@@ -75,18 +75,12 @@ export function createYoutubeTranscriptTool(options: {
       _onUpdate: AgentToolUpdateCallback<unknown>,
       extensionCtx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      // Rate-limit enforcement (one call per researcher).
-      if (tracker) {
-        const allowed = tracker.recordCall('youtube_transcript');
-        if (!allowed) {
-          metrics.increment('tool_youtube_transcript_calls_total', 1, { status: 'rate_limited' });
-          return {
-            content: [{ type: 'text', text: tracker.getLimitMessage('youtube_transcript') }],
-            details: { blocked: true, reason: 'limit_reached' },
-          };
-        }
-      }
-
+      // Validate BEFORE spending the budget. Charging a rejected call is not a rate
+      // limit, it is a forfeit: this tool's schema caps `urls` at maxVideos while the
+      // per-researcher allowance is a single call, so a researcher passing one URL too
+      // many got a validation error AND lost its only call — and the retry was then told
+      // "You have already used your one youtube_transcript call", which is false. The
+      // round loses transcripts entirely. grep and search already validate first.
       if (!Value.Check(YoutubeParamsSchema, params)) {
         metrics.increment('tool_youtube_transcript_calls_total', 1, { status: 'invalid_params' });
         return {
@@ -103,6 +97,19 @@ export function createYoutubeTranscriptTool(options: {
           content: [{ type: 'text', text: 'No YouTube links provided.' }],
           details: { error: 'no_urls' },
         };
+      }
+
+      // Rate-limit enforcement (one call per researcher), now that the call is one that
+      // would actually do work.
+      if (tracker) {
+        const allowed = tracker.recordCall('youtube_transcript');
+        if (!allowed) {
+          metrics.increment('tool_youtube_transcript_calls_total', 1, { status: 'rate_limited' });
+          return {
+            content: [{ type: 'text', text: tracker.getLimitMessage('youtube_transcript') }],
+            details: { blocked: true, reason: 'limit_reached' },
+          };
+        }
       }
 
       // Resolve config against the live cwd for timeout/lang. The video cap stays

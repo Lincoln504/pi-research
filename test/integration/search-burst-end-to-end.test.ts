@@ -95,30 +95,44 @@ describe('search burst end to end', () => {
     const results = await performSearch(queries, CFG, undefined, undefined, undefined, failures as any);
     const elapsed = Date.now() - started;
 
-    // Every query ran and returned. This is the whole point: the old build finished
-    // 22 of these and reported the other 78 as timeouts.
+    // Every query ran and returned, and none was reported to a researcher as a failure.
     expect(results.size).toBe(QUERIES);
     const delivered = [...results.values()].filter(r => r.length > 0).length;
     expect(delivered).toBe(QUERIES);
     expect(pool.executed).toBe(QUERIES);
-
-    // Nothing was reported to a researcher as a failure of any kind.
     expect([...failures.keys()]).toEqual([]);
 
-    // The burst took longer than one query's budget, by a wide margin — i.e. this
-    // genuinely exercised the condition rather than finishing before it could arise.
+    // The burst outlasts a single query's budget many times over, which is what used to
+    // be fatal at the whole-burst level.
     expect(elapsed).toBeGreaterThan(CFG.SEARCH_TIMEOUT_MS + CFG.BROWSER_TASK_TIMEOUT_MS);
+
+    // What this test does NOT establish, stated because an earlier version of this
+    // comment claimed it did ("the old build finished 22 of these and reported the other
+    // 78 as timeouts"): that is false for THIS configuration. `performSearch` sizes its
+    // lanes to `min(WORKER_THREADS, N)` and the queue's capacity is
+    // `WORKER_THREADS x WORKER_CONCURRENCY` — the same number — so a burst on its own
+    // never builds a backlog and no individual query waits. Reverting the deadline to
+    // enqueue time leaves this test green. The `elapsed` guard proves aggregate
+    // throughput, not any single query's wait, so it cannot rescue the claim either.
+    //
+    // The dispatch-armed deadline is exercised by the third test below, which contends
+    // the pool first. This one is a whole-pipeline smoke test: 100 queries in, 100
+    // results out, no failure entries, lanes and pool wired end to end.
   }, 120_000);
 
-  it('never exceeds the pool it was given, so the queue does not build a backlog', async () => {
+  it('dispatches through lanes rather than dumping the whole plan into the shared queue', async () => {
     const queries = Array.from({ length: QUERIES }, (_, i) => `bounded ${i}`);
 
     await performSearch(queries, CFG, undefined, undefined, undefined, new Map() as any);
 
-    // Lanes bound concurrency at the caller; the queue's own capacity bounds it again.
-    // Neither may be exceeded — a burst that dumps its whole plan into the shared queue
-    // delays the scrapes, healthchecks and other runs sharing that pool.
+    // This is the CALLER-side bound and only that. A burst that hands all 100 queries to
+    // the queue at once delays the scrapes, healthchecks and other runs sharing the same
+    // pool, so lanes matter on their own — but the queue's own capacity is not under
+    // test here, and an earlier version of this comment claimed both were: raising the
+    // priority queue's concurrency arbitrarily leaves this assertion untouched, because
+    // lanes alone already cap it.
     expect(pool.peakInFlight).toBeLessThanOrEqual(WORKERS);
+    // And they really do run in parallel, rather than the lane loop serialising to one.
     expect(pool.peakInFlight).toBeGreaterThan(1);
   }, 120_000);
 

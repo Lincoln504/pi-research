@@ -107,7 +107,10 @@ describe('lock acquisition waits on progress, not on the clock', () => {
 
     const started = Date.now();
     await expect(peer.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
-    expect(Date.now() - started).toBeLessThan(2_000);
+    // Tighter than the configured retry budget (24 x 50ms = 1.2s), so "immediately" is
+    // what is actually measured. A 2s bound sat comfortably ABOVE that budget and would
+    // have passed even if the try-take had exhausted every retry it owns.
+    expect(Date.now() - started).toBeLessThan(500);
     await holder.releaseLock();
   }, 20_000);
 
@@ -207,8 +210,11 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
     const started = Date.now();
     await expect(peer.acquireLock()).resolves.toBeUndefined();
     const waited = Date.now() - started;
-    expect(waited).toBeGreaterThan(500);  // it did NOT give up at the stall bound
-    expect(waited).toBeLessThan(15_000);  // and it did not just wait out the ceiling
+    // Bounded on BOTH sides against the 4s window, not merely "more than the stall
+    // bound, less than the ceiling" — that pair admits anything from 0.6s to 14s, so a
+    // window collapsed to a few hundred ms or inflated tenfold would both pass.
+    expect(waited).toBeGreaterThan(3_500);  // it did NOT give up at the 500ms stall bound
+    expect(waited).toBeLessThan(6_000);     // and it did not just wait out the ceiling
     await peer.releaseLock();
   }, 30_000);
 

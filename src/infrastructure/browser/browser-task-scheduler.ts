@@ -23,6 +23,7 @@ import type { IScheduler, TaskDispatchListener } from '../../core/interfaces/sch
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
 import { raceWithDeadline } from '../../utils/safe-unref.ts';
 import { PriorityTaskQueue } from './priority-task-queue.ts';
+import { getHealthCheckBudgetMs } from './config.ts';
 
 /**
  * Grace added to the worker's own task budget before the dead-worker backstop
@@ -507,11 +508,13 @@ export class BrowserTaskScheduler implements IScheduler {
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-        // The one task budget that is not config-derived. `budgetOverrideMs` exists so
-        // the saturated-vs-wedged verdict below is reachable from a test: at 105s it is
-        // not, which is exactly how a previous version of that verdict shipped
-        // unreachable and stayed that way.
-        const timeoutMs = budgetOverrideMs ?? (45000 + 60000) / (isMocking ? 4 : 1);
+        // Derived, not hardcoded — see getHealthCheckBudgetMs. The wait-phase verdict
+        // below rests on this budget out-waiting any task that can hold a slot, and a
+        // fixed 105s made that true only for the default timeouts. `budgetOverrideMs`
+        // exists so the verdict is reachable from a test at all: at 105s it is not,
+        // which is exactly how a previous version of it shipped unreachable and stayed
+        // that way.
+        const timeoutMs = budgetOverrideMs ?? getHealthCheckBudgetMs(config) / (isMocking ? 4 : 1);
 
         // A probe that never got a worker used to fail as "timed out (including queue
         // wait)", and the registry reported BrowserRuntime CRITICALLY UNHEALTHY —
@@ -568,12 +571,22 @@ export class BrowserTaskScheduler implements IScheduler {
                 if (dispatched) return;
                 const lastSuccessAt = healthQueue.getLastSuccessAt();
                 const sinceSuccess = lastSuccessAt > 0 ? Date.now() - lastSuccessAt : Number.POSITIVE_INFINITY;
-                // Diagnosis, not verdict — see the note above. These three numbers say
-                // which wedge this is: slots busy with nothing completing is a worker
-                // fault, slots free is a queue fault, and the last-success age separates
-                // "stopped just now" from "never started".
+                // The wording is load-bearing, not prose. isBusyPoolHealthFailure
+                // (src/healthcheck/index.ts) decides whether a failed probe aborts the
+                // run, and it decides by matching /tim(e|ed) out|timeout/ on this very
+                // string. An earlier rewrite of this message dropped the word entirely —
+                // so a probe that queued out under load stopped reading as a timeout, the
+                // tolerance gate rejected it, and a BUSY pool aborted the run at
+                // quick-research-orchestrator and research-health. The commit that did it
+                // was the one meant to stop a busy pool being reported as dead; it moved
+                // the abort one layer up. Pinned by a test that drives this exact string
+                // through that exact classifier.
+                //
+                // The rest is diagnosis: slots busy with nothing completing is a worker
+                // fault, slots free is a queue fault (the queue stopped dispatching), and
+                // the last-success age separates "stopped just now" from "never started".
                 reject(new Error(
-                    `Health check could not reach a worker within ${timeoutMs}ms — ${healthQueue.getActiveCount()} of ${healthQueue.getConcurrency()} slots busy, ` +
+                    `Health check timed out after ${timeoutMs}ms without reaching a worker — ${healthQueue.getActiveCount()} of ${healthQueue.getConcurrency()} slots busy, ` +
                     `${lastSuccessAt > 0 ? `last successful task ${sinceSuccess}ms ago` : 'no task has ever completed successfully'}.`,
                 ));
             };

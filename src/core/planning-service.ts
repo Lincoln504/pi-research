@@ -775,6 +775,22 @@ export class PlanningService implements IPlanningService {
         finalPlan.content = '';
       }
 
+      // `action` is OPTIONAL in the schema, and parseJsonPlan accepts a plan without one
+      // as long as it carries researchers — its own comment says such a plan "defaults to
+      // delegation downstream", which was true of generatePlan and never of this method.
+      // A router emitting `{"researchers":[...]}` therefore fell through every branch
+      // below and was returned verbatim: no team-size cap, no per-researcher query
+      // budget, no round hard cap, and no duplicate-id renumbering — and duplicate ids
+      // collide on the `${round}.${id}` report key, silently discarding one researcher's
+      // entire report. The orchestrator then matched none of its `action === 'delegate'`
+      // branches, so it announced no decision and never grew the progress bar, yet ran
+      // the researchers anyway and the bar visibly regressed.
+      //
+      // 'wait' is preserved: the orchestrator acts on it, and it is not a delegation.
+      if (finalPlan.action !== 'synthesize' && finalPlan.action !== 'wait') {
+          finalPlan.action = 'delegate';
+      }
+
       // Final safety cap if delegating
       if (finalPlan.action === 'delegate') {
           const capped = this.capResearcherQueries(finalPlan, complexity, this.name);
