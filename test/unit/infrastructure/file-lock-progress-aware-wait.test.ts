@@ -193,7 +193,16 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
     // on every lock class configured in this repo: knowledge-store init became
     // eligible at 60s and was abandoned at 20s.
     //
-    // These numbers are the same shape, scaled down: window 4s, stall bound 500ms.
+    // These numbers are the same shape, scaled down: window 4s, stall bound 2s.
+    //
+    // The stall bound is real wall-clock, not a fake timer (this file tests the
+    // interaction of a real heartbeat setInterval with real fs mtimes, which fake
+    // timers cannot stand in for) — CI'd real fs.readFile/fs.stat round-trips on a
+    // slow or antivirus-scanned Windows temp dir can plausibly exceed a couple
+    // hundred ms each. A 500ms bound left no margin for that and failed on CI (never
+    // locally): the very first inspection could consume the whole budget before
+    // establishing reclaim eligibility. 2s keeps the bound meaningfully shorter than
+    // the 4s window under test while giving real I/O jitter room to exist.
     const { lockPath } = await makeLock({ lockTimeout: 5_000 });
     await fs.writeFile(lockPath, '', 'utf-8'); // torn: no uuid, no pid, unparseable
     const now = new Date();
@@ -202,7 +211,7 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
     const peer = await peerOn(lockPath, {
       lockStaleThreshold: 1_000,
       liveOwnerStaleThreshold: 8_000, // heartbeat 2s → unidentified window 4s
-      lockTimeout: 500,               // stall bound, far shorter than that window
+      lockTimeout: 2_000,             // stall bound, still shorter than that window
       acquireCeilingMs: 20_000,
       lockRetryDelay: 25,
     });
