@@ -193,16 +193,21 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
     // on every lock class configured in this repo: knowledge-store init became
     // eligible at 60s and was abandoned at 20s.
     //
-    // These numbers are the same shape, scaled down: window 4s, stall bound 2s.
+    // These numbers are the same shape, scaled up: window 10s, stall bound 4s.
     //
     // The stall bound is real wall-clock, not a fake timer (this file tests the
     // interaction of a real heartbeat setInterval with real fs mtimes, which fake
-    // timers cannot stand in for) — CI'd real fs.readFile/fs.stat round-trips on a
-    // slow or antivirus-scanned Windows temp dir can plausibly exceed a couple
-    // hundred ms each. A 500ms bound left no margin for that and failed on CI (never
-    // locally): the very first inspection could consume the whole budget before
-    // establishing reclaim eligibility. 2s keeps the bound meaningfully shorter than
-    // the 4s window under test while giving real I/O jitter room to exist.
+    // timers cannot stand in for). Two prior, smaller values (500ms, then 2000ms)
+    // each failed on CI at that exact bound — never locally — on two DIFFERENT
+    // platforms/runtimes (windows-latest, then ubuntu-latest on Node 24), which rules
+    // out "slow Windows disk I/O specifically" as the mechanism: this is ordinary
+    // shared/virtualized CI scheduling jitter (a GC pause, a container CPU-throttle
+    // burst), which can hit any platform and can plausibly run into the
+    // low-single-digit-seconds on a loaded runner. A real fs.readFile/fs.stat
+    // round-trip taking that long is enough to consume the whole stall budget before
+    // the peer's very first inspection can establish reclaim eligibility. Scaled up
+    // 5x from the previous attempt for headroom against that, not against local jitter
+    // (which was never reproduced here in any of three attempts).
     const { lockPath } = await makeLock({ lockTimeout: 5_000 });
     await fs.writeFile(lockPath, '', 'utf-8'); // torn: no uuid, no pid, unparseable
     const now = new Date();
@@ -210,20 +215,20 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
 
     const peer = await peerOn(lockPath, {
       lockStaleThreshold: 1_000,
-      liveOwnerStaleThreshold: 8_000, // heartbeat 2s → unidentified window 4s
-      lockTimeout: 2_000,             // stall bound, still shorter than that window
+      liveOwnerStaleThreshold: 20_000, // heartbeat capped at 5s → unidentified window 10s
+      lockTimeout: 4_000,              // stall bound, still meaningfully shorter than that window
       acquireCeilingMs: 20_000,
-      lockRetryDelay: 25,
+      lockRetryDelay: 50,
     });
 
     const started = Date.now();
     await expect(peer.acquireLock()).resolves.toBeUndefined();
     const waited = Date.now() - started;
-    // Bounded on BOTH sides against the 4s window, not merely "more than the stall
-    // bound, less than the ceiling" — that pair admits anything from 0.6s to 14s, so a
-    // window collapsed to a few hundred ms or inflated tenfold would both pass.
-    expect(waited).toBeGreaterThan(3_500);  // it did NOT give up at the 500ms stall bound
-    expect(waited).toBeLessThan(6_000);     // and it did not just wait out the ceiling
+    // Bounded on BOTH sides against the 10s window, not merely "more than the stall
+    // bound, less than the ceiling" — that pair admits anything from 4s to 20s, so a
+    // window collapsed to a couple of seconds or inflated tenfold would both pass.
+    expect(waited).toBeGreaterThan(9_000);   // it did NOT give up at the 4s stall bound
+    expect(waited).toBeLessThan(15_000);     // and it did not just wait out the ceiling
     await peer.releaseLock();
   }, 30_000);
 
