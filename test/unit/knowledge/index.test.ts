@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 // Must mock all heavy dependencies before importing the module under test
 vi.mock('node:fs', async (importOriginal) => ({
@@ -137,7 +138,7 @@ describe('forceDeleteKnowledgeStore', () => {
 
     expect(fs.rmSync).toHaveBeenCalledTimes(1);
     const [deletedPath] = vi.mocked(fs.rmSync).mock.calls[0]!;
-    expect(deletedPath).toBe('/tmp/knowledge_db/knowledge_migration_123.lance');
+    expect(deletedPath).toBe(path.join('/tmp/knowledge_db', 'knowledge_migration_123.lance'));
     // The old behavior deleted the whole dbDir — assert this fix never does.
     expect(deletedPath).not.toBe('/tmp/knowledge_db');
   });
@@ -148,7 +149,7 @@ describe('forceDeleteKnowledgeStore', () => {
 
     await forceDeleteKnowledgeStore();
 
-    expect(fs.rmSync).toHaveBeenCalledWith('/tmp/knowledge_db/knowledge.lance', expect.any(Object));
+    expect(fs.rmSync).toHaveBeenCalledWith(path.join('/tmp/knowledge_db', 'knowledge.lance'), expect.any(Object));
   });
 });
 
