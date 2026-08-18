@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-17
+
+v1.4.0 was tagged and pushed but never published: CI failed on every commit from the
+moment `search-burst-end-to-end.test.ts` was added through the release commit itself —
+10 of 10 runs, all three platforms, over twelve hours — so the `require-ci-green` release
+gate never opened and `npm publish` never ran. An independent re-audit of the whole
+1.3.12..1.4.0 diff, distrusting the prior review, found the test failure's actual cause
+plus eight more defects.
+
+### Fixed
+
+- **The CI-only test failure was deterministic, not flaky.** The three failing tests in `search-burst-end-to-end.test.ts` fire a 120ms real-timer budget immediately after a hook/import boundary with zero settle time; ordinary CI-runner scheduling jitter at that boundary can consume the whole budget before a single query dispatches. The one test in the file that always passed happens to have an incidental 50ms warm-up delay before its own timing-critical section, for an unrelated reason (letting scrapes take the pool first) — added to the other three, since that is the actual difference between 0/10 and reliable passes. Never reproduced locally, including under heavy artificial CPU contention: the gap is specific to CI's virtualized/shared compute, not to load in general.
+- **A hardcoded 150s healthcheck timeout silently overrode this release's own dynamic budget.** `registerHealthChecks` wrapped the `BrowserRuntime` check in `Math.max(healthTimeoutMs, 150000)`, never consulting `getHealthCheckBudgetMs()` — the function 1.4.0 added specifically to out-wait the longest a task can legitimately hold a worker slot. At raised timeouts the derived budget legitimately exceeds 150s, so the registry-level race aborted the check ~95s before a merely-busy (not wedged) pool could ever answer, reintroducing 1.4.0's headline bug one call-frame further out. Now takes the max of both.
+- **The synthesizer's fixed overhead reserve didn't cover two unbounded inputs it claimed to.** `SYNTHESIS_OVERHEAD_TOKENS` documented itself as covering the system prompt, the global source list, and the run context, but only the first is actually fixed-size — the source list grows with every citation the run collected and the run context carries the entire cross-session query history, both uncapped, both riding along on every partial and merge pass. A large enough citation list or query history could reproduce the exact context-window overflow the 1.4.0 router/synthesizer split was built to eliminate, just via a different input. `synthesisCorpusBudgetChars` now takes their actual character length and subtracts it directly.
+- **A busy-but-alive embedding leader could stall for up to ten minutes.** The poll loop's "~25s before declaring a leader's registration stale" accounting assumed a 2s health-check timeout; `EmbeddingClient`'s actual default is 120s. A leader whose event loop was merely busy (not dead) could take the full 120s to answer a single poll, blowing the outer 120s wait long before the unreachable-poll counter ever incremented — turning "wait a poll, try again" into "give up and re-run the whole election," repeatedly, against a leader that was never actually down. `fetchHealth()` now takes an explicit timeout; the poll loop passes 2s.
+- **A live-but-CPU-busy lock holder could be falsely reported as wedged.** The knowledge-store init lock's `lockTimeout` (20s, class default) is the *waiting* side's own give-up bound — separate from, and far shorter than, `liveOwnerStaleThreshold` (120s), the bound that actually governs when a live holder's lock may be reclaimed. This lock protects a post-run FTS rebuild with no fixed duration; a single large synchronous call (e.g. better-sqlite3, which blocks the event loop for its whole duration) longer than 20s would starve the holder's heartbeat and make a waiting caller give up on a holder that was never wedged. Raised to match `liveOwnerStaleThreshold`'s own default.
+- **`tool_security_search_calls_total` was reported at exactly 2x the real count.** One unconditional increment at the top of `execute()` plus a second, labeled increment on every exit path — the same double-counting pattern this release fixed for `search_queries_total`, left uncaught in its sibling tool.
+- **A bolded coverage-digest header leaked its own markdown into the digest text.** The terminator side already consumed its whole delimiter line so a trailing `**` couldn't dangle into the report body; the header side had no equivalent handling, so `**COVERAGE DIGEST**` (bolded, as models routinely write section headers) left a stray `**` at the head of the digest.
+- **The prompt-cache/session-affinity passthrough this release added wasn't wired into `research_knowledge_search`'s LLM calls**, unlike the planning-service calls it was built for. No correctness impact — just an inconsistent rollout of a same-release feature.
+- **Stale doc comments describing the pre-restore, digest-only router protocol** survived in `planning-interfaces.ts` and two `deep-research-orchestrator.test.ts` comments — the exact staleness class 1.4.0's own release-diff audit had already hunted down and fixed elsewhere in this same diff.
+
+### Verified
+
+- Full suites green: 2710 unit tests, 57 + 103 integration (real browsers), typecheck.
+- Each production-code fix carries a regression test that fails against the pre-fix code.
+
 ## [1.4.0] - 2026-08-17
 
 Minor, because the research lead is now two roles rather than one call doing both jobs:
