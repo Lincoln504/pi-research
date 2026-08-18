@@ -12,22 +12,28 @@
  * per-query latency high enough that the burst cannot finish inside one budget. Under
  * the old enqueue-time deadlines that run completed 22 of 100 and returned 49 results.
  *
- * The per-query budget and mock latency below are deliberately NOT millisecond-scale.
- * They were originally 120ms/40ms — tight enough that this file failed on every CI run
- * since it was added (10/10, all three platforms), while always passing locally, even
- * under heavy artificial CPU contention. A CI runner's own scheduling jitter — a GC
- * pause, a container CPU-throttle burst, cold-fork module-import cost — can plausibly
- * exceed 120ms on its own, before a single query dispatches, which produces exactly the
- * observed CI failure signature: zero delivered, zero executed, zero peak-in-flight.
- * Scaled up by ~25x (to low-single-digit seconds) so the same relative margin the
- * original numbers established holds against real CI-scale stalls, not just against
- * local-machine jitter.
+ * This file failed on every CI run since it was added (10/10, all three platforms),
+ * while always passing locally — including under heavy artificial CPU contention, and
+ * under the exact Node version CI uses. THREE separate real-timer-margin theories were
+ * tried and each failed identically in CI (a settle delay, then a 5x, then a further ~4x
+ * widening of the per-query budget and mock latency), because none of them were the
+ * actual cause: `npm run test:integration:parallel` runs with
+ * `PI_RESEARCH_MOCK_SEARCH=true PI_RESEARCH_MOCK_SCRAPE=true` set (see ci.yml — this
+ * keeps every OTHER file in this group deterministic and fast), and `performSearch`'s
+ * `fullMockMode` branch short-circuits on exactly that pair, returning synthetic
+ * `Mock result for: <query>` content for every query WITHOUT ever calling the pool this
+ * file mocks — reproduced locally in under 5 seconds by setting the same two env vars.
+ * That is the whole signature: 100/100 "delivered" (the synthetic results), 0 executed,
+ * 0 peak-in-flight, and the "hung worker" query gets a mock result instead of the empty
+ * array the monkey-patched hang was supposed to produce, because the monkey-patch is on
+ * code fullMockMode never reaches. `vi.stubEnv` below unsets both for this file only, so
+ * it actually exercises the dispatch/scheduler/queue chain it exists to test.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 
 // The only thing replaced: the worker that would drive a real browser.
-const pool = vi.hoisted(() => ({ latencyMs: 500, scrapeLatencyMs: 500, inFlight: 0, peakInFlight: 0, executed: 0 }));
+const pool = vi.hoisted(() => ({ latencyMs: 40, scrapeLatencyMs: 40, inFlight: 0, peakInFlight: 0, executed: 0 }));
 
 vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/core/service-registry.ts')>();
@@ -74,22 +80,34 @@ import { performSearch } from '../../src/web-research/browser-search.ts';
 const WORKERS = 6;
 const QUERIES = 100;
 
-// Per-query budget = SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS = 3000ms.
-// 500ms of work x 100 queries / 6 workers is ~8.5s of wall clock — comfortably more
-// than twice a single query's 3000ms budget, which is the condition that used to be
-// fatal, while the 3000ms budget itself has real headroom against CI-scale stalls.
+// Per-query budget = SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS.
+// 40ms of work x 100 queries / 6 workers is ~670ms of wall clock — more than five
+// times a single query's 120ms budget, which is the condition that used to be fatal.
 const CFG = {
-  SEARCH_TIMEOUT_MS: 2_500,
-  BROWSER_TASK_TIMEOUT_MS: 500,
-  SCRAPE_TIMEOUT_MS: 2_500,
+  SEARCH_TIMEOUT_MS: 100,
+  BROWSER_TASK_TIMEOUT_MS: 20,
+  SCRAPE_TIMEOUT_MS: 100,
   WORKER_THREADS: WORKERS,
   WORKER_CONCURRENCY: 1,
 } as any;
 
 describe('search burst end to end', () => {
+  beforeAll(() => {
+    // The real fix (see the header comment): this file builds its own controlled fake
+    // pool specifically to exercise performSearch's real dispatch path, which the
+    // integration-parallel CI job's global mock-mode env vars would otherwise bypass
+    // entirely, for every test in this file, silently.
+    vi.stubEnv('PI_RESEARCH_MOCK_SEARCH', 'false');
+    vi.stubEnv('PI_RESEARCH_MOCK_SCRAPE', 'false');
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
-    pool.latencyMs = 500;
-    pool.scrapeLatencyMs = 500;
+    pool.latencyMs = 40;
+    pool.scrapeLatencyMs = 40;
     pool.inFlight = 0;
     pool.peakInFlight = 0;
     pool.executed = 0;
@@ -100,11 +118,6 @@ describe('search burst end to end', () => {
   });
 
   it('delivers all 100 queries through a pool of 6, none discarded for waiting', async () => {
-    // Belt-and-suspenders settle delay after the previous hook/import, on top of the
-    // budget itself now being scaled to tolerate real CI jitter (see the module-level
-    // comment on CFG). Cheap insurance, not the primary fix.
-    await new Promise(r => setTimeout(r, 50));
-
     const queries = Array.from({ length: QUERIES }, (_, i) => `query number ${i}`);
     const failures = new Map<string, { type: string; message: string }>();
 
@@ -138,10 +151,6 @@ describe('search burst end to end', () => {
   }, 120_000);
 
   it('dispatches through lanes rather than dumping the whole plan into the shared queue', async () => {
-    // See the settle-delay comment in the first test — same tight-budget-at-a-hook-
-    // boundary hazard applies here.
-    await new Promise(r => setTimeout(r, 50));
-
     const queries = Array.from({ length: QUERIES }, (_, i) => `bounded ${i}`);
 
     await performSearch(queries, CFG, undefined, undefined, undefined, new Map() as any);
@@ -171,10 +180,10 @@ describe('search burst end to end', () => {
     // coming, so the burst spends real time queued rather than running.
     // Only the SCRAPES are slow. The searches stay fast, so anything that fails here
     // failed while WAITING, which is precisely the distinction under test.
-    pool.scrapeLatencyMs = 4_000; // > a search's whole 3000ms budget
+    pool.scrapeLatencyMs = 400; // > a search's whole 120ms budget
     // The scrapes need a budget that OUTLASTS their own work, or their deadline fires,
     // the queue releases their slots early, and the searches never actually wait.
-    const SCRAPE_CFG = { ...CFG, SCRAPE_TIMEOUT_MS: 6_000 };
+    const SCRAPE_CFG = { ...CFG, SCRAPE_TIMEOUT_MS: 2_000 };
     let keepScraping = true;
     const scrapers = Array.from({ length: WORKERS }, async () => {
       while (keepScraping) {
@@ -210,10 +219,6 @@ describe('search burst end to end', () => {
   }, 120_000);
 
   it('still fails a query whose worker hangs, without taking the burst down', async () => {
-    // See the settle-delay comment in the first test — same tight-budget-at-a-hook-
-    // boundary hazard applies here.
-    await new Promise(r => setTimeout(r, 50));
-
     // The deadline must remain real once a query is running. One slow query, the rest
     // healthy: the slow one fails on its own merits and the other 99 are unaffected.
     const queries = Array.from({ length: QUERIES }, (_, i) => `mixed ${i}`);
