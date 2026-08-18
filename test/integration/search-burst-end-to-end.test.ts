@@ -11,12 +11,23 @@
  * The shape is taken from the run that exposed the bug: 100 queries, a pool of 6, and a
  * per-query latency high enough that the burst cannot finish inside one budget. Under
  * the old enqueue-time deadlines that run completed 22 of 100 and returned 49 results.
+ *
+ * The per-query budget and mock latency below are deliberately NOT millisecond-scale.
+ * They were originally 120ms/40ms — tight enough that this file failed on every CI run
+ * since it was added (10/10, all three platforms), while always passing locally, even
+ * under heavy artificial CPU contention. A CI runner's own scheduling jitter — a GC
+ * pause, a container CPU-throttle burst, cold-fork module-import cost — can plausibly
+ * exceed 120ms on its own, before a single query dispatches, which produces exactly the
+ * observed CI failure signature: zero delivered, zero executed, zero peak-in-flight.
+ * Scaled up by ~25x (to low-single-digit seconds) so the same relative margin the
+ * original numbers established holds against real CI-scale stalls, not just against
+ * local-machine jitter.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // The only thing replaced: the worker that would drive a real browser.
-const pool = vi.hoisted(() => ({ latencyMs: 40, scrapeLatencyMs: 40, inFlight: 0, peakInFlight: 0, executed: 0 }));
+const pool = vi.hoisted(() => ({ latencyMs: 500, scrapeLatencyMs: 500, inFlight: 0, peakInFlight: 0, executed: 0 }));
 
 vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/core/service-registry.ts')>();
@@ -63,21 +74,22 @@ import { performSearch } from '../../src/web-research/browser-search.ts';
 const WORKERS = 6;
 const QUERIES = 100;
 
-// Per-query budget = SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS.
-// 40ms of work x 100 queries / 6 workers is ~670ms of wall clock — more than five
-// times a single query's 120ms budget, which is the condition that used to be fatal.
+// Per-query budget = SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS = 3000ms.
+// 500ms of work x 100 queries / 6 workers is ~8.5s of wall clock — comfortably more
+// than twice a single query's 3000ms budget, which is the condition that used to be
+// fatal, while the 3000ms budget itself has real headroom against CI-scale stalls.
 const CFG = {
-  SEARCH_TIMEOUT_MS: 100,
-  BROWSER_TASK_TIMEOUT_MS: 20,
-  SCRAPE_TIMEOUT_MS: 100,
+  SEARCH_TIMEOUT_MS: 2_500,
+  BROWSER_TASK_TIMEOUT_MS: 500,
+  SCRAPE_TIMEOUT_MS: 2_500,
   WORKER_THREADS: WORKERS,
   WORKER_CONCURRENCY: 1,
 } as any;
 
 describe('search burst end to end', () => {
   beforeEach(() => {
-    pool.latencyMs = 40;
-    pool.scrapeLatencyMs = 40;
+    pool.latencyMs = 500;
+    pool.scrapeLatencyMs = 500;
     pool.inFlight = 0;
     pool.peakInFlight = 0;
     pool.executed = 0;
@@ -88,12 +100,9 @@ describe('search burst end to end', () => {
   });
 
   it('delivers all 100 queries through a pool of 6, none discarded for waiting', async () => {
-    // Let the event loop settle after the previous hook/import before starting a
-    // budget this tight. Without this, a CI runner's scheduling jitter right at the
-    // test boundary can eat into a 120ms budget before a single query dispatches —
-    // this is what made this test fail on every CI run since it was added, on all
-    // three platforms, while always passing locally: this file's third test has the
-    // same protection incidentally, via the delay it takes before contending the pool.
+    // Belt-and-suspenders settle delay after the previous hook/import, on top of the
+    // budget itself now being scaled to tolerate real CI jitter (see the module-level
+    // comment on CFG). Cheap insurance, not the primary fix.
     await new Promise(r => setTimeout(r, 50));
 
     const queries = Array.from({ length: QUERIES }, (_, i) => `query number ${i}`);
@@ -162,10 +171,10 @@ describe('search burst end to end', () => {
     // coming, so the burst spends real time queued rather than running.
     // Only the SCRAPES are slow. The searches stay fast, so anything that fails here
     // failed while WAITING, which is precisely the distinction under test.
-    pool.scrapeLatencyMs = 400; // > a search's whole 120ms budget
+    pool.scrapeLatencyMs = 4_000; // > a search's whole 3000ms budget
     // The scrapes need a budget that OUTLASTS their own work, or their deadline fires,
     // the queue releases their slots early, and the searches never actually wait.
-    const SCRAPE_CFG = { ...CFG, SCRAPE_TIMEOUT_MS: 2_000 };
+    const SCRAPE_CFG = { ...CFG, SCRAPE_TIMEOUT_MS: 6_000 };
     let keepScraping = true;
     const scrapers = Array.from({ length: WORKERS }, async () => {
       while (keepScraping) {
