@@ -26,13 +26,19 @@ vi.mock('../../../src/logger.ts', () => ({
   },
 }));
 
-vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
-  isBrowserAvailable: vi.fn(),
-  // resolveHeadlessMode is called inside checkBrowserCapability() to decide whether
-  // to gate on Xvfb. Default to returning true (non-virtual) so existing tests that
-  // don't care about Xvfb checking are not affected.
-  resolveHeadlessMode: vi.fn().mockReturnValue(true),
-}));
+vi.mock('../../../src/infrastructure/browser/config.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/infrastructure/browser/config.ts')>();
+  return {
+    ...actual,
+    isBrowserAvailable: vi.fn(),
+    // resolveHeadlessMode is called inside checkBrowserCapability() to decide whether
+    // to gate on Xvfb. Default to returning true (non-virtual) so existing tests that
+    // don't care about Xvfb checking are not affected.
+    resolveHeadlessMode: vi.fn().mockReturnValue(true),
+    // getHealthCheckBudgetMs is left as the REAL implementation — the new regression
+    // test below exercises registerHealthChecks' use of it against a real config.
+  };
+});
 
 vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => ({
   runBrowserHealthCheck: vi.fn(),
@@ -512,6 +518,49 @@ describe('healthcheck', () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe('unhealthy');
     expect(result.error).toContain('connection refused');
+  });
+
+  it('does not abort a slow-but-healthy probe at the old fixed 150s floor when raised timeouts derive a larger budget', async () => {
+    // Regression: registerHealthChecks wrapped BrowserRuntime in a hardcoded
+    // Math.max(healthTimeoutMs, 150000), ignoring getHealthCheckBudgetMs() entirely.
+    // At raised timeouts (legal up to 120_000 each per the config schema) the derived
+    // budget — the one runBrowserHealthCheck's own scheduler call is armed against —
+    // comfortably exceeds 150s, so a probe that is merely slow (a busy pool, not a
+    // wedge) used to be aborted by this OUTER race before the inner check could ever
+    // return, reporting a healthy pool as unhealthy one call-frame further out than
+    // the mechanism this release built to prevent exactly that.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 60000,
+      SEARCH_TIMEOUT_MS: 120000,
+      SCRAPE_TIMEOUT_MS: 120000,
+      BROWSER_TASK_TIMEOUT_MS: 20000,
+      KNOWLEDGE_STORE_MODE: 'none',
+    } as any);
+    // Derived budget here is 140_000 (longest slot hold) + 180_000 (3 nav attempts at
+    // max(10_000, 60_000)) = 320_000ms — comfortably past the old fixed 150_000 floor.
+    vi.mocked(runBrowserHealthCheck).mockImplementation(
+      () => new Promise(resolve => setTimeout(() => resolve({ success: true }), 200_000))
+    );
+
+    vi.useFakeTimers();
+    try {
+      const pending = runHealthCheck({ force: true });
+
+      // Past the old fixed floor: the buggy version rejects here with "Health check
+      // timed out after 150000ms", well before the probe (200_000ms) ever resolves.
+      await vi.advanceTimersByTimeAsync(150_001);
+
+      // Let the probe itself resolve.
+      await vi.advanceTimersByTimeAsync(50_000);
+      const result = await pending;
+
+      const runtime = result.components?.find(c => c.component === 'BrowserRuntime');
+      expect(runtime?.healthy).toBe(true);
+      expect(result.success).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

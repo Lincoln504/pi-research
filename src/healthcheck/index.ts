@@ -7,7 +7,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { getConfig } from '../config.ts';
-import { isBrowserAvailable, resolveHeadlessMode } from '../infrastructure/browser/config.ts';
+import { isBrowserAvailable, resolveHeadlessMode, getHealthCheckBudgetMs } from '../infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../infrastructure/browser/task-execution-service.ts';
 import { getService, tryGetServiceContainerFromCtx, getServiceContainer, ServiceLifecycle } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
@@ -78,7 +78,16 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     // launch (camoufox download/spawn) can legitimately take minutes, so we never
     // go below that, but a user who raises HEALTH_CHECK_TIMEOUT_MS past it is
     // respected (same pattern as the KnowledgeStore check's Math.max floor).
-  }, { timeoutMs: Math.max(healthTimeoutMs, 150000), critical: true });
+    //
+    // This must ALSO never be less than getHealthCheckBudgetMs(): that is the
+    // deadline runBrowserHealthCheck's own scheduler call arms internally (derived
+    // from SEARCH_TIMEOUT_MS/SCRAPE_TIMEOUT_MS/BROWSER_TASK_TIMEOUT_MS so it always
+    // out-waits the longest a task can legitimately hold a worker slot). A fixed
+    // 150s floor here can be smaller than that derived budget at raised timeouts,
+    // which would abort this registry-level race before the inner check ever gets
+    // to return — reporting a merely busy pool as unhealthy, the exact failure
+    // class the derived budget exists to prevent, one call-frame further out.
+  }, { timeoutMs: Math.max(healthTimeoutMs, 150000, getHealthCheckBudgetMs(config)), critical: true });
 
   // Register Knowledge Store Check — NON-critical: the store is the optional cache
   // research must run without (see the darwin-x64 comment below). A failure here

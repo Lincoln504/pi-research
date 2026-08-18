@@ -1316,6 +1316,26 @@ describe('synthesisCorpusBudgetChars', () => {
     // budget of zero — that would partition every report into its own pass forever.
     expect(synthesisCorpusBudgetChars({ contextWindow: 1_000 }, 32_768)).toBeGreaterThanOrEqual(40_000);
   });
+
+  it('shrinks proportionally to extraOverheadChars — the global source list and run context', () => {
+    // Regression: the global source list (every citation the run collected, each with a
+    // free-text description) and the run context (the run's full query history) both ride
+    // along on EVERY partial and merge pass, verbatim, uncapped — but until this argument
+    // existed, neither was ever subtracted from the corpus budget, so a run with enough
+    // citations or query history could overflow the window through an input the budget
+    // never counted, even though the report corpus itself fit comfortably.
+    const withoutExtra = synthesisCorpusBudgetChars({ contextWindow: 262_144 }, 32_768);
+    const bigSourceListAndRunContext = 100_000; // chars — plausible for a large steered run
+    const withExtra = synthesisCorpusBudgetChars({ contextWindow: 262_144 }, 32_768, bigSourceListAndRunContext);
+    expect(withExtra).toBeLessThan(withoutExtra);
+    // The shrink must be commensurate with the actual overhead (chars/4 token estimate),
+    // not just present — a token's worth of chars removed from a chars-denominated budget.
+    expect(withoutExtra - withExtra).toBeCloseTo(bigSourceListAndRunContext, -2);
+  });
+
+  it('still floors at MIN_SYNTHESIS_CORPUS_CHARS when extraOverheadChars alone would drive it negative', () => {
+    expect(synthesisCorpusBudgetChars({ contextWindow: 262_144 }, 32_768, 5_000_000)).toBeGreaterThanOrEqual(40_000);
+  });
 });
 
 describe('partitionCorpus', () => {

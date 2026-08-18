@@ -72,8 +72,19 @@ export class EmbeddingClient implements IEmbedder {
 
   // ---- Health ----
 
-  async fetchHealth(): Promise<void> {
-    const result = await this.getRequest<{ status: string; device: string; dimension: number | null }>('/health');
+  /**
+   * `timeoutMs` defaults to the general-purpose 120s used for real embed requests, but the
+   * embedding-leader poll loop (embedding-factory.ts) needs a much shorter deadline: it uses
+   * a failed health check as one "unreachable poll" toward declaring a leader's registration
+   * stale, on the documented assumption that each poll costs "the poll interval plus up to
+   * the [probe] timeout" (~2.5s). At the 120s default that assumption is off by 48x — a
+   * leader whose event loop is merely busy (not dead) can take the full 120s to answer, so
+   * the poll loop's outer wait times out and retries long before its own unreachable-poll
+   * counter would ever fire. Callers that need the fast-fail poll semantics must pass an
+   * explicit short timeout.
+   */
+  async fetchHealth(timeoutMs?: number): Promise<void> {
+    const result = await this.getRequest<{ status: string; device: string; dimension: number | null }>('/health', timeoutMs);
     this._device = result.device;
     if (result.dimension !== null) {
       this.dimension = result.dimension;
@@ -82,9 +93,8 @@ export class EmbeddingClient implements IEmbedder {
 
   // ---- Internal HTTP helpers ----
 
-  private getRequest<T>(path: string): Promise<T> {
+  private getRequest<T>(path: string, timeoutMs = 120_000): Promise<T> {
     return new Promise((resolve, reject) => {
-      const timeoutMs = 120_000;
       let resolved = false;
       let req: http.ClientRequest | undefined;
       const timer = setTimeout(() => {

@@ -243,8 +243,12 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
        * died while the process lives on leaves a registration nothing else collects,
        * and every later process then falls back to its own in-process embedder. So
        * the threshold is raised rather than removed. Each iteration costs the poll
-       * interval plus up to the 2s probe timeout, making this roughly 25s of
-       * uninterrupted unreachability — far past any blip, far short of the 120s wait.
+       * interval plus up to the 2s socket probe (isPortListening) plus up to a
+       * further 2s health-check probe (fetchHealth, called below with an explicit
+       * short timeout — NOT the client's 120s default, which would let a merely-busy
+       * leader blow the outer POLL_TIMEOUT_MS long before this counter ever fired),
+       * making this roughly 45s of uninterrupted unreachability — far past any blip,
+       * far short of the 120s wait.
        */
       const UNREACHABLE_POLLS_BEFORE_STALE = 10;
       let unreachablePolls = 0;
@@ -290,7 +294,13 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
             logger.info(`[EmbeddingFactory] Connecting to embedding server on port ${info.port}`);
             const client = new EmbeddingClient(info.port, cfg.EMBEDDING_DEVICE, info.authSecret);
             try {
-              await client.fetchHealth();
+              // A short, poll-scale timeout — NOT EmbeddingClient's 120s default. The
+              // unreachable-poll count above assumes each iteration costs roughly the poll
+              // interval plus this probe's timeout (~2.5s total); at the 120s default, a
+              // leader that is merely busy (not dead) can take the full 120s to answer,
+              // blowing the outer POLL_TIMEOUT_MS well before the stale-registration
+              // threshold below would ever fire. Matches isPortListening's own 2s probe.
+              await client.fetchHealth(2_000);
               _embeddingInstance = client;
               _cachedModel = cfg.EMBEDDING_MODEL;
               _cachedDevice = cfg.EMBEDDING_DEVICE;

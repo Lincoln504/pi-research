@@ -440,6 +440,7 @@ export async function runBackgroundExtraction(
   maxTokens: number,
   thinkingLevel: Config['LLM_THINKING_LEVEL'],
   signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<ResearchKnowledgeSynthesisResponse> {
   const promptTemplate = loadPrompt('research-knowledge-search-extractor');
   if (!promptTemplate) {
@@ -480,7 +481,8 @@ export async function runBackgroundExtraction(
         }, buildSafeOptions(model, {
           apiKey: auth.apiKey,
           headers: auth.headers,
-          signal
+          signal,
+          sessionId,
         }, maxTokens, thinkingLevel)),
         llmTimeout,
         'knowledge-search-extraction',
@@ -538,6 +540,7 @@ export async function runBackgroundExtraction(
       context: 'Knowledge search extraction — synthesizing answer from reference documents',
       serviceName: 'ResearchKnowledgeSearch',
       signal,
+      sessionId,
       // Match the budget of the call being repaired so a large synthesis is not re-truncated
       // at repairJsonWithLlm's smaller default (16384). Mirrors the planning-service repairs.
       maxTokens,
@@ -973,6 +976,11 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           config.SYNTHESIS_MAX_TOKENS,
           config.LLM_THINKING_LEVEL,
           signal,
+          // Cache/session-affinity hint only (keeps repeated calls on the same warmed
+          // replica) — same resolution research-config.ts uses, since this tool has no
+          // researchId of its own to key on. ctx.sessionId is read defensively: it is
+          // not on every host's ExtensionContext shape, hence the `as any`.
+          (ctx as any).sessionId || ctx.sessionManager?.getSessionId(),
         );
 
         const durationMs = Date.now() - startTime;

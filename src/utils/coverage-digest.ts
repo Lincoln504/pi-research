@@ -119,7 +119,13 @@ export function splitCoverageDigest(report: string): SplitReport {
 
   // Search for the terminator strictly AFTER the header line, so `END COVERAGE DIGEST`
   // cannot match the header's own trailing text.
-  const afterHeader = lineStart + headerMatch[2]!.length + COVERAGE_DIGEST_HEADER.length;
+  const afterHeaderWord = lineStart + headerMatch[2]!.length + COVERAGE_DIGEST_HEADER.length;
+  // Consume the header's WHOLE line, not just the matched word — mirrors the terminator
+  // handling below. A model that writes `**COVERAGE DIGEST**` matches on the leading
+  // marker; without this, the trailing `**` (or a closing `:`, `##`, etc.) would dangle
+  // at the head of the digest text instead of being discarded as delimiter.
+  const headerNewline = report.indexOf('\n', afterHeaderWord);
+  const afterHeader = headerNewline < 0 ? afterHeaderWord : headerNewline + 1;
   const rest = report.slice(afterHeader);
   const endMatch = delimiterRegex(COVERAGE_DIGEST_TERMINATOR).exec(rest);
   if (!endMatch) return { digest: '', body: report };

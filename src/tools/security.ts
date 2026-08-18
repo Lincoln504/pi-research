@@ -79,7 +79,12 @@ export function createSecuritySearchTool(options: {
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
-      metrics.increment('tool_security_search_calls_total', 1);
+
+      // Every exit path below increments `tool_security_search_calls_total` itself
+      // (labeled with its own status) — there is no separate unconditional increment
+      // here. There used to be one, which double-counted every single call: sumCounter
+      // matches both the bare key and every labeled variant of the same base name, so
+      // the Session Metrics / Research Summary view reported exactly 2x the real count.
 
       // Validate BEFORE spending the budget: a rejected call did no work, and charging
       // it against the shared MAX_GATHERING_CALLS allowance turns a malformed call into

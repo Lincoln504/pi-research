@@ -236,8 +236,9 @@ describe('DeepResearchOrchestrator', () => {
   /**
    * Routing and synthesis are separate calls.
    *
-   * The router decides from coverage digests and never reads a finding, so its "finish"
-   * decision carries no report. Reusing it as the final report — which is what the
+   * The router's decision is not a report (it reads the fresh round's findings in full for
+   * evidence-based routing, but its OUTPUT is a routing decision, not report prose), so its
+   * "finish" decision carries no report. Reusing it as the final report — which is what the
    * single-call evaluator did — would ship an empty or ungrounded document at the end of a
    * successful run. The coordinator's round-1 direct answer is the opposite case: that one
    * IS a real report and must not trigger a second, redundant synthesis.
@@ -312,8 +313,9 @@ describe('DeepResearchOrchestrator', () => {
 
     it('runs another round of researchers when the ROUTER delegates', async () => {
       // The evaluator's ability to ask for MORE research instead of finishing is the
-      // decision this whole split has to preserve. The router reads digests rather than
-      // findings, but its delegate contract is unchanged: the researchers it names must
+      // decision this whole split has to preserve. The router's INPUT changed (it reads
+      // the fresh round's findings in full, falling back to digests only for prior
+      // rounds), but its delegate contract is unchanged: the researchers it names must
       // actually be launched, not just recorded.
       // A DISTINCT prior agenda must exist, or "the router's researchers were silently
       // swapped for the previous round's" is indistinguishable from correct behaviour and

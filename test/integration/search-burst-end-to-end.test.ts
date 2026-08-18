@@ -88,6 +88,14 @@ describe('search burst end to end', () => {
   });
 
   it('delivers all 100 queries through a pool of 6, none discarded for waiting', async () => {
+    // Let the event loop settle after the previous hook/import before starting a
+    // budget this tight. Without this, a CI runner's scheduling jitter right at the
+    // test boundary can eat into a 120ms budget before a single query dispatches —
+    // this is what made this test fail on every CI run since it was added, on all
+    // three platforms, while always passing locally: this file's third test has the
+    // same protection incidentally, via the delay it takes before contending the pool.
+    await new Promise(r => setTimeout(r, 50));
+
     const queries = Array.from({ length: QUERIES }, (_, i) => `query number ${i}`);
     const failures = new Map<string, { type: string; message: string }>();
 
@@ -121,6 +129,10 @@ describe('search burst end to end', () => {
   }, 120_000);
 
   it('dispatches through lanes rather than dumping the whole plan into the shared queue', async () => {
+    // See the settle-delay comment in the first test — same tight-budget-at-a-hook-
+    // boundary hazard applies here.
+    await new Promise(r => setTimeout(r, 50));
+
     const queries = Array.from({ length: QUERIES }, (_, i) => `bounded ${i}`);
 
     await performSearch(queries, CFG, undefined, undefined, undefined, new Map() as any);
@@ -189,6 +201,10 @@ describe('search burst end to end', () => {
   }, 120_000);
 
   it('still fails a query whose worker hangs, without taking the burst down', async () => {
+    // See the settle-delay comment in the first test — same tight-budget-at-a-hook-
+    // boundary hazard applies here.
+    await new Promise(r => setTimeout(r, 50));
+
     // The deadline must remain real once a query is running. One slow query, the rest
     // healthy: the slow one fails on its own merits and the other 99 are unaffected.
     const queries = Array.from({ length: QUERIES }, (_, i) => `mixed ${i}`);

@@ -193,6 +193,20 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
           this._initLock = new FileLockService({
             lockFilePath: lockPath,
             lockStaleThreshold: 60000,
+            // The default lockTimeout (20s, class default) is the WAITING side's own
+            // "give up and throw" bound — separate from, and much shorter than, the
+            // liveOwnerStaleThreshold (120s default) that actually governs when a
+            // provably-alive holder's lock may be physically reclaimed. This lock
+            // protects a post-run FTS rebuild plus optimize with no fixed duration; if
+            // that holder has a stretch of non-yielding synchronous work (a single
+            // large better-sqlite3 call blocks the event loop for its full duration,
+            // during which the heartbeat literally cannot fire) longer than 20s, a
+            // waiting caller would abandon and throw "no sign of progress from its
+            // holder" against a holder that was never actually wedged — up to 100s
+            // before the lock would even become reclaim-eligible. Raised to match
+            // liveOwnerStaleThreshold's own default so a live holder is given the same
+            // grace period here that the reclaim logic itself already grants it.
+            lockTimeout: 120000,
             processLifecycle,
           });
           await this._initLock.initialize();

@@ -75,9 +75,16 @@ const CHARS_PER_TOKEN = 4;
 
 /**
  * Tokens held back from the context window, on top of the configured output ceiling, to
- * cover everything in a synthesis request that is not the corpus: the system prompt, the
- * global source list, the run context, and the slack between a chars/4 estimate and a real
- * tokenizer on prose that is heavy with URLs and citation markers.
+ * cover the system prompt and the slack between a chars/4 estimate and a real tokenizer on
+ * prose that is heavy with URLs and citation markers.
+ *
+ * This does NOT cover the global source list or the run context (previous-queries section):
+ * both ride along on every partial and merge pass verbatim, but neither has a fixed size —
+ * the source list grows with every citation the run collected (each with a free-text
+ * description) and the run context grows with the run's entire query history, uncapped. A
+ * fixed reserve here cannot bound either, so `synthesisCorpusBudgetChars` takes their actual
+ * character length as a separate argument and subtracts it directly, at the point where it
+ * is already known (see synthesizeCorpus).
  */
 const SYNTHESIS_OVERHEAD_TOKENS = 8000;
 
@@ -114,13 +121,21 @@ const MIN_PARTIAL_SYNTHESIS_TOKENS = 4096;
  * after the entire run has been paid for, and the orchestrator degrades to a mechanical
  * concatenation of the raw reports. Budgeting here converts that cliff into a bounded
  * two-pass reduce.
+ *
+ * `extraOverheadChars` is the actual character length of the OTHER unbounded things that
+ * ride along on every partial and merge pass — the global source list and the run context —
+ * measured by the caller before partitioning, since both are already built by then. Without
+ * this, a run with a large citation list or a long query history can overflow the window
+ * through an input the budget never counted, which is exactly the failure class this
+ * function exists to prevent for the report corpus itself.
  */
 export function synthesisCorpusBudgetChars(
   model: { contextWindow?: number },
   outputTokens: number,
+  extraOverheadChars = 0,
 ): number {
   const window = model.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
-  const usable = window - outputTokens - SYNTHESIS_OVERHEAD_TOKENS;
+  const usable = window - outputTokens - SYNTHESIS_OVERHEAD_TOKENS - extraOverheadChars / CHARS_PER_TOKEN;
   return Math.max(MIN_SYNTHESIS_CORPUS_CHARS, usable * CHARS_PER_TOKEN);
 }
 
@@ -1040,7 +1055,11 @@ export class PlanningService implements IPlanningService {
           .join('\n')
       : '';
 
-    const budgetChars = synthesisCorpusBudgetChars(args.model, config.SYNTHESIS_MAX_TOKENS);
+    const budgetChars = synthesisCorpusBudgetChars(
+      args.model,
+      config.SYNTHESIS_MAX_TOKENS,
+      globalSourceList.length + runContext.length,
+    );
 
     let entries: Array<[string, string]> = Array.from(normalizedReports.entries())
       .map(([id, report]) => [`Researcher ${id}`, truncateToBudget(report, budgetChars, id)] as [string, string]);

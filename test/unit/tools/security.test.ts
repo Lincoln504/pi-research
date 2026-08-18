@@ -7,6 +7,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSecuritySearchTool } from '../../../src/tools/security.ts';
 import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
+import { sumCounter } from '../../../src/utils/metrics-summary.ts';
 
 // Mock security search function
 vi.mock('../../../src/security/index.ts', () => ({
@@ -19,6 +21,7 @@ describe('tools/security', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    metrics.clearSession();
   });
 
   describe('Tool Definition', () => {
@@ -46,6 +49,27 @@ describe('tools/security', () => {
       await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
 
       expect(spy).toHaveBeenCalledWith('security_search');
+    });
+
+    it('records tool_security_search_calls_total exactly ONCE per call, not twice', async () => {
+      // Regression: there used to be an unconditional bare increment at the top of
+      // execute() in addition to every exit path's own labeled increment. sumCounter
+      // matches both the bare key and every labeled variant of the same base name, so
+      // the reported call count was exactly 2x real — the same failure mode this
+      // release fixed for search_queries_total (metrics-summary.ts), left uncaught here.
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+      vi.mocked(searchSecurityDatabases).mockResolvedValue({
+        totalVulnerabilities: 0,
+        totalDatabases: 0,
+        results: {},
+        duration: 0,
+      });
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
+
+      const counters = metrics.getSessionSnapshot().counters;
+      expect(sumCounter(counters, 'tool_security_search_calls_total')).toBe(1);
     });
 
     it('should return limit reached message if budget exceeded', async () => {

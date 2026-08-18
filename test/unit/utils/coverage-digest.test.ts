@@ -44,6 +44,18 @@ describe('splitCoverageDigest', () => {
     expect(body).toBe(BODY);
   });
 
+  it('tolerates trailing markdown decoration on the HEADER line too, not just the terminator', () => {
+    // Regression: the terminator side consumed its whole line so a trailing `**` from
+    // `**END COVERAGE DIGEST**` couldn't dangle into the body, but the header side had no
+    // equivalent handling — `rest` started immediately after the matched header word, so a
+    // trailing `**` from a bolded `**COVERAGE DIGEST**` header became the first line of the
+    // digest text itself.
+    const decorated = `**COVERAGE DIGEST**\nCovered: things\nEND COVERAGE DIGEST\n\n${BODY}`;
+    const { digest, body } = splitCoverageDigest(decorated);
+    expect(digest).toBe('Covered: things');
+    expect(body).toBe(BODY);
+  });
+
   it('tolerates a short preamble before the digest and keeps it in the body', () => {
     // Models routinely open with "Here is my report:". Dropping that text would be a silent
     // content loss; the preamble belongs to the report.

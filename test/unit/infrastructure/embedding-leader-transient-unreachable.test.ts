@@ -31,11 +31,15 @@ vi.mock('../../../src/knowledge/embedder.ts', () => ({
 }));
 
 const clientInstances: any[] = [];
+const fetchHealthTimeouts: Array<number | undefined> = [];
 vi.mock('../../../src/infrastructure/embedding/embedding-client.ts', () => ({
   EmbeddingClient: class MockEmbeddingClient {
     port: number;
     constructor(port: number) { this.port = port; clientInstances.push(this); }
-    async fetchHealth() { if (healthShouldFail) throw new Error('health check failed'); }
+    async fetchHealth(timeoutMs?: number) {
+      fetchHealthTimeouts.push(timeoutMs);
+      if (healthShouldFail) throw new Error('health check failed');
+    }
     async dispose() {}
   },
 }));
@@ -119,6 +123,7 @@ describe('embedding follower — a live leader that fails a port probe', () => {
     vi.useFakeTimers();
     embedderInstances.length = 0;
     clientInstances.length = 0;
+    fetchHealthTimeouts.length = 0;
     probeCount = 0;
     portReachable = false;
     healthShouldFail = false;
@@ -181,5 +186,27 @@ describe('embedding follower — a live leader that fails a port probe', () => {
     await vi.advanceTimersByTimeAsync(0);
     await expect(pending).resolves.toBeDefined();
     expect(embedderInstances.length).toBeGreaterThan(0);
+  });
+
+  it('probes health with a short, poll-scale timeout — never the client default of 120s', async () => {
+    // Regression: the unreachable-poll counter above assumes each iteration costs
+    // roughly the poll interval plus a ~2s probe. Calling fetchHealth() with no
+    // timeout silently uses EmbeddingClient's general-purpose 120s default, so a
+    // leader that is merely busy (not dead) can take the full 120s to answer —
+    // blowing the outer 120s poll timeout long before this counter would ever fire,
+    // and turning "wait a poll, try again" into "give up and retry the whole
+    // election" against a leader that was never actually unreachable.
+    portReachable = true;
+
+    const pending = getEmbedder(config);
+    await stepPolls(2);
+    const embedder = await pending;
+
+    expect(embedder).toBe(clientInstances[0]);
+    expect(fetchHealthTimeouts.length).toBeGreaterThan(0);
+    for (const timeoutMs of fetchHealthTimeouts) {
+      expect(timeoutMs).toBeDefined();
+      expect(timeoutMs).toBeLessThanOrEqual(5_000);
+    }
   });
 });

@@ -56,9 +56,11 @@ export interface GenerateQueriesOptions {
 export interface UpdatePlanOptions {
   sessionId: string;
   reports: Map<string, string>;
-  /** Coverage digest per report id, for the ROUTING call — which reads these instead of
-   *  the reports. Optional: when omitted, digests are derived from the report bodies so a
-   *  caller that doesn't track them still routes on coverage rather than on nothing. */
+  /** Coverage digest per report id. The router reads the FRESH round's reports in full
+   *  (evidence-based routing) and falls back to these digests only for PRIOR rounds — it
+   *  does not read digests instead of the current round's reports. Optional: when omitted,
+   *  digests are derived from the report bodies so a caller that doesn't track them still
+   *  routes on coverage rather than on nothing. */
   digests?: Map<string, string>;
   round: number;
   query: string;
