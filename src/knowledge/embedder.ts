@@ -331,7 +331,8 @@ export class Embedder {
             this.gpuLockHeld,
             this.model,
             this.initializationTimeoutMs,
-            this.useCache
+            this.useCache,
+            this.poolingMode
           );
           if (!result.success) {
             throw result.error;

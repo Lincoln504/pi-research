@@ -109,7 +109,7 @@ export interface SplitReport {
  * better than one that reaches it short.
  */
 export function splitCoverageDigest(report: string): SplitReport {
-  if (!report) return { digest: '', body: report ?? '' };
+  if (!report) return { digest: '', body: report };
 
   const headerMatch = delimiterRegex(COVERAGE_DIGEST_HEADER).exec(report);
   if (!headerMatch) return { digest: '', body: report };

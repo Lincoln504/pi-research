@@ -13,7 +13,12 @@ import { FileLockService } from '../../../src/infrastructure/file-lock-service.t
 import { StateBackupManager } from '../../../src/infrastructure/state/state-backup-manager.ts';
 
 describe('StateManager Concurrency and Lock Resilience', () => {
-  const testDir = path.join(os.tmpdir(), `pi-concurrency-test-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  // mkdtemp, not a hand-built Date.now()/Math.random() suffix: a predictable path
+  // under the shared, world-writable OS temp dir lets another local user pre-create
+  // it (e.g. as a symlink) before this test ever creates it (CodeQL js/insecure-
+  // temporary-file, CWE-377/378). mkdtemp both picks an unguessable name and creates
+  // the directory atomically, so the fs.mkdir call this used to need is gone too.
+  let testDir: string;
   let manager: StateManager;
   let processLifecycle: ProcessLifecycleService;
   let fileLockService: FileLockService;
@@ -25,7 +30,7 @@ describe('StateManager Concurrency and Lock Resilience', () => {
   let validator: StateValidator;
 
   beforeEach(async () => {
-    await fs.mkdir(testDir, { recursive: true });
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-concurrency-test-'));
 
     // Create a process lifecycle service for tests
     processLifecycle = new ProcessLifecycleService();

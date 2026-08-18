@@ -59,7 +59,7 @@ describe('thread-worker-browser — deferred resetBrowser() instance identity', 
 
   it('does not tear down a later, healthy browser relaunched after a stale deferred reset', async () => {
     const mod = await import('../../../src/infrastructure/browser/thread-worker-browser.ts');
-    const { taskStarted, taskFinished, initBrowser, resetBrowser, getContext } = mod;
+    const { taskStarted, taskFinished, initBrowser, resetBrowser, acquireTaskContext } = mod;
 
     // Task A and Task B both active.
     taskStarted(); // A: count=1
@@ -78,15 +78,14 @@ describe('thread-worker-browser — deferred resetBrowser() instance identity', 
     // this takes the IMMEDIATE reset path, tearing down browser1 right now.
     resetBrowser();
     expect(browser1.close).toHaveBeenCalledTimes(1);
-    expect(browser1.__context.close).toHaveBeenCalledTimes(1);
-    expect(getContext()).toBeNull();
 
     // Task C starts, relaunches a fresh, healthy browser2.
     taskStarted(); // count=2
     await initBrowser();
     expect(createdInstances.length).toBe(2);
     const browser2 = createdInstances[1];
-    expect(getContext()).toBe(browser2.__context);
+    const ctxC = await acquireTaskContext();
+    expect(ctxC).toBe(browser2.__context);
 
     // Task C finishes successfully.
     taskFinished(); // count=1
@@ -98,13 +97,11 @@ describe('thread-worker-browser — deferred resetBrowser() instance identity', 
     // browser2 must be untouched — the deferred reset was stale and should
     // have been a no-op.
     expect(browser2.close).not.toHaveBeenCalled();
-    expect(browser2.__context.close).not.toHaveBeenCalled();
-    expect(getContext()).toBe(browser2.__context);
   });
 
   it('still applies a deferred reset when the browser instance is unchanged', async () => {
     const mod = await import('../../../src/infrastructure/browser/thread-worker-browser.ts');
-    const { taskStarted, taskFinished, initBrowser, resetBrowser, getContext } = mod;
+    const { taskStarted, taskFinished, initBrowser, resetBrowser } = mod;
 
     taskStarted(); // A: count=1
     taskStarted(); // B: count=2
@@ -117,6 +114,5 @@ describe('thread-worker-browser — deferred resetBrowser() instance identity', 
     taskFinished(); // B finishes normally, count=0 -> flush
 
     expect(browser1.close).toHaveBeenCalledTimes(1);
-    expect(getContext()).toBeNull();
   });
 });

@@ -37,7 +37,7 @@ const browserMod = vi.hoisted(() => ({ context: null as any }));
 vi.mock('../../../src/infrastructure/browser/thread-worker-browser.ts', () => ({
   setWorkerId: vi.fn(),
   initBrowser: vi.fn(async () => {}),
-  getContext: vi.fn(() => browserMod.context),
+  acquireTaskContext: vi.fn(async () => browserMod.context),
   resetBrowser: vi.fn(),
   cleanupBrowser: vi.fn(async () => {}),
   taskStarted: vi.fn(),

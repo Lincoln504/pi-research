@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
 import { Chunker } from './chunker.ts';
@@ -108,19 +109,44 @@ export async function createKnowledgeStoreComponents(
 }
 
 /**
- * Force delete the entire knowledge store directory.
- * Used for system-level clearing or recovery from corruption.
+ * Force delete the ACTIVE table's own directory, to recover from a corrupted
+ * LanceDB manifest. Scoped to that one table, not the whole dbDir: dbDir is a
+ * single unified store shared by every workspace and the global scope (rows
+ * are scoped by a `workspace` column, not by separate directories), and it
+ * also holds `_backup_*`/`_migration_*` sibling directories — the deliberate,
+ * user-recoverable safety net the 'backup' migration strategy creates. A
+ * directory-wide wipe here previously destroyed every other project's data
+ * and every backup the instant ANY workspace's session hit a corrupted
+ * manifest, on the one code path whose entire purpose is recovering from
+ * exactly that kind of damage.
  */
 export async function forceDeleteKnowledgeStore(config?: Config, workspace?: string): Promise<void> {
   const dbDir = getDbDir(config, workspace);
-  if (fs.existsSync(dbDir)) {
-    try {
-      fs.rmSync(dbDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-      fs.mkdirSync(dbDir, { recursive: true });
-      logger.info(`[knowledge] Knowledge store at ${dbDir} forcefully deleted and recreated.`);
-    } catch (err) {
-      logger.error(`[knowledge] Failed to forcefully delete directory ${dbDir}:`, err);
-      throw err;
+  if (!fs.existsSync(dbDir)) return;
+
+  // Mirrors KnowledgeStore's own manifest read (store.ts): the active table
+  // name defaults to 'knowledge' but can point elsewhere after a persisted
+  // rename failure. A missing or unreadable manifest is not itself a reason to
+  // widen the blast radius, so it falls back to the default rather than
+  // escalating to a dbDir-wide delete.
+  let tableName = 'knowledge';
+  const manifestPath = path.join(dbDir, 'store-manifest.json');
+  try {
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { activeTableName?: string };
+      if (manifest.activeTableName) tableName = manifest.activeTableName;
     }
+  } catch (err) {
+    logger.warn(`[knowledge] Failed to read manifest before forced delete, defaulting to table '${tableName}':`, err);
+  }
+
+  const tableDir = path.join(dbDir, `${tableName}.lance`);
+  if (!fs.existsSync(tableDir)) return;
+  try {
+    fs.rmSync(tableDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    logger.info(`[knowledge] Corrupted table directory ${tableDir} forcefully deleted; will be recreated on next init.`);
+  } catch (err) {
+    logger.error(`[knowledge] Failed to forcefully delete table directory ${tableDir}:`, err);
+    throw err;
   }
 }

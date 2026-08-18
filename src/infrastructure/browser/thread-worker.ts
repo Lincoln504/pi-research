@@ -23,7 +23,7 @@ import {
 import {
   setWorkerId,
   initBrowser,
-  getContext,
+  acquireTaskContext,
   resetBrowser,
   cleanupBrowser,
   taskStarted,
@@ -107,23 +107,28 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   // Registered around the whole browser-touching lifetime of this task so
   // resetBrowser() (below) can tell whether a sibling task dispatched to this
   // same worker process (WORKER_CONCURRENCY > 1) is still using the shared
-  // browser/context before tearing it down.
+  // browser before tearing it down.
   taskStarted();
+  // Task-owned, not module-owned: acquireTaskContext() below hands back a
+  // FRESH BrowserContext for this task alone, closed in the finally below —
+  // never shared with a concurrent or later sibling task.
+  let taskContext: any;
   try {
     await initBrowser();
     const initMs = Date.now() - startTime;
+    taskContext = await acquireTaskContext();
 
     let result: any;
     if (type === 'search') {
       if (!query) throw new Error('Search task requires a query');
-      const searchResult = await executeSearchTask(getContext(), query, abortController.signal);
+      const searchResult = await executeSearchTask(taskContext, query, abortController.signal);
       result = { results: searchResult.results, duration: Date.now() - startTime, jitter: searchResult.jitter };
     } else if (type === 'scrape') {
       if (!url) throw new Error('Scrape task requires a URL');
-      const scrapeResult = await executeScrapeTask(getContext(), url, abortController.signal);
+      const scrapeResult = await executeScrapeTask(taskContext, url, abortController.signal);
       result = { ...scrapeResult, duration: Date.now() - startTime };
     } else if (type === 'healthcheck') {
-      const healthResult = await executeHealthCheck(getContext(), initMs, abortController.signal);
+      const healthResult = await executeHealthCheck(taskContext, initMs, abortController.signal);
       result = { ...healthResult, duration: Date.now() - startTime };
     } else {
       result = { error: 'Unknown task type', duration: Date.now() - startTime };
@@ -156,6 +161,9 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     };
   } finally {
     if (taskTimer !== undefined) clearTimeout(taskTimer);
+    if (taskContext) {
+      Promise.resolve(taskContext.close()).catch(() => { /* task is already done; a close failure here is not actionable */ });
+    }
     taskFinished();
   }
 }

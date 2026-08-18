@@ -6,6 +6,7 @@ vi.mock('node:fs', async (importOriginal) => ({
   ...(await importOriginal<any>()),
   existsSync: vi.fn(),
   rmSync: vi.fn(),
+  readFileSync: vi.fn(),
 }));
 
 vi.mock('../../../src/knowledge/embedder.ts', () => ({
@@ -116,12 +117,38 @@ describe('forceDeleteKnowledgeStore', () => {
   afterEach(() => {
     vi.mocked(fs.existsSync).mockRestore();
     vi.mocked(fs.rmSync).mockRestore();
+    vi.mocked(fs.readFileSync).mockRestore();
   });
 
   it('should not throw if directory does not exist', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
     await expect(forceDeleteKnowledgeStore()).resolves.toBeUndefined();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+  });
+
+  it('deletes only the active table directory, never the shared dbDir itself — so sibling backups and other workspaces survive', async () => {
+    // dbDir exists, manifest exists, manifest names a non-default active table
+    // (the persisted-rename-failure case store.ts documents).
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ activeTableName: 'knowledge_migration_123' }));
+
+    await forceDeleteKnowledgeStore();
+
+    expect(fs.rmSync).toHaveBeenCalledTimes(1);
+    const [deletedPath] = vi.mocked(fs.rmSync).mock.calls[0]!;
+    expect(deletedPath).toBe('/tmp/knowledge_db/knowledge_migration_123.lance');
+    // The old behavior deleted the whole dbDir — assert this fix never does.
+    expect(deletedPath).not.toBe('/tmp/knowledge_db');
+  });
+
+  it('falls back to the default table name when the manifest is missing or unreadable, without widening the delete to the whole dbDir', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation(() => { throw new Error('ENOENT'); });
+
+    await forceDeleteKnowledgeStore();
+
+    expect(fs.rmSync).toHaveBeenCalledWith('/tmp/knowledge_db/knowledge.lance', expect.any(Object));
   });
 });
 

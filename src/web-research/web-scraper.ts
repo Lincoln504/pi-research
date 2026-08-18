@@ -123,23 +123,34 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
 
   try {
     const doc = new WasmPdfDocument(bytes);
-    const pageCount = doc.pageCount();
-    
-    let markdown = `# PDF Document\n\n**Pages:** ${pageCount}\n\n`;
-    
+    // free() is native/WASM-side memory, not GC-reclaimed — it must run on
+    // every exit, including the case toMarkdownAll() AND the per-page fallback
+    // both throw (a malformed/encrypted PDF the codebase already treats as
+    // routine on the open web, so this path fires regularly). It used to sit
+    // after the fallback loop, reachable only when nothing below it threw —
+    // the one case that needed the fallback landing squarely on the one case
+    // that skipped the free(), leaking one WasmPdfDocument per occurrence in a
+    // browser-server process that stays warm across many research sessions.
     try {
-      markdown += doc.toMarkdownAll();
-    } catch {
-      for (let i = 0; i < pageCount; i++) {
-        markdown += `## Page ${i + 1}\n\n${doc.toMarkdown(i)}\n\n`;
+      const pageCount = doc.pageCount();
+
+      let markdown = `# PDF Document\n\n**Pages:** ${pageCount}\n\n`;
+
+      try {
+        markdown += doc.toMarkdownAll();
+      } catch {
+        for (let i = 0; i < pageCount; i++) {
+          markdown += `## Page ${i + 1}\n\n${doc.toMarkdown(i)}\n\n`;
+        }
       }
+
+      const pdfExtractionDuration = Date.now() - pdfExtractionStart;
+      metrics.observe('scrape_pdf_conversion_ms', pdfExtractionDuration);
+      metrics.increment('scrape_pdf_conversions_total', 1, { status: 'success', pages: String(pageCount) });
+      return markdown;
+    } finally {
+      doc.free();
     }
-    
-    doc.free();
-    const pdfExtractionDuration = Date.now() - pdfExtractionStart;
-    metrics.observe('scrape_pdf_conversion_ms', pdfExtractionDuration);
-    metrics.increment('scrape_pdf_conversions_total', 1, { status: 'success', pages: String(pageCount) });
-    return markdown;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // debug, not error: a malformed/encrypted/scanned-image-only PDF is an

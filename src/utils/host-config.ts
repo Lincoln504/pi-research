@@ -27,11 +27,22 @@ let _configDirName: string | undefined;
  * Resolution order: explicit env override (`PI_RESEARCH_CONFIG_DIR_NAME`) →
  * the host `@earendil-works/pi-coding-agent` package (only where it is actually
  * resolvable, i.e. the main pi process) → the stable default `.pi`.
+ *
+ * The override is a directory NAME, not a path: it is joined onto
+ * `os.homedir()` by every caller (getGlobalConfigDir() in config.ts), which in
+ * turn is the base for config.env (API keys, chmod 0600), the state dir
+ * (locks, run semaphores), and the knowledge_db. A value containing a path
+ * separator or `..` traverses out of HOME entirely — scripts/cleanup.cjs
+ * already rejects exactly that in its own copy of this resolution (see its
+ * `rawDirName`/`dirName` guard); this must reject it the same way, since this
+ * is the copy every actual run resolves secrets and state through.
  */
 export function getConfigDirName(): string {
   if (_configDirName !== undefined) return _configDirName;
   const override = process.env['PI_RESEARCH_CONFIG_DIR_NAME'];
-  if (override) return (_configDirName = override);
+  if (override && !override.includes('/') && !override.includes('\\') && override !== '.' && override !== '..') {
+    return (_configDirName = override);
+  }
   try {
     const require = createRequire(import.meta.url);
     const host = require('@earendil-works/pi-coding-agent') as { CONFIG_DIR_NAME?: string };

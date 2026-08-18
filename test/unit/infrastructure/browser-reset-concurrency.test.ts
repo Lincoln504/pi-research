@@ -1,20 +1,26 @@
 /**
- * Unit Tests: resetBrowser() vs concurrently-dispatched sibling tasks
+ * Unit Tests: resetBrowser() vs concurrently-dispatched sibling tasks, and
+ * acquireTaskContext() vs concurrent tasks on the shared browser.
  *
  * Regression: poolifier's tasksQueueOptions.concurrency (WORKER_CONCURRENCY,
  * default 2 — worker-pool-manager.ts) dispatches more than one task at a time
- * to the SAME cluster worker process. Every dispatched task shares this
- * module's browser/context singletons. resetBrowser() used to close/null them
- * unconditionally whenever a task's error matched shouldResetBrowser() (e.g. a
- * page-scoped Playwright "Protocol error" from ONE crashed tab) — tearing the
- * shared browser/context down out from under a perfectly healthy sibling task
- * still using it, which then failed with a spurious, un-retried "browser
- * closed" error.
+ * to the SAME cluster worker process. resetBrowser() used to close/null the
+ * shared browser AND its one shared BrowserContext unconditionally whenever a
+ * task's error matched shouldResetBrowser() (e.g. a page-scoped Playwright
+ * "Protocol error" from ONE crashed tab) — tearing them down out from under a
+ * perfectly healthy sibling task still using that same context, which then
+ * failed with a spurious, un-retried "browser closed" error.
  *
- * taskStarted()/taskFinished() now let resetBrowser() defer the actual
+ * taskStarted()/taskFinished() let resetBrowser() defer the actual browser
  * teardown while sibling tasks are still active, applying it once the last
- * one finishes. These tests drive the REAL exported functions (not a
- * reimplementation) against a mocked camoufox-js.
+ * one finishes — unchanged by the context fix below, and still covered here.
+ *
+ * Separately: BrowserContext is no longer shared at all. acquireTaskContext()
+ * now hands each task its OWN fresh context (cookies/storage/mocking do not
+ * bleed between concurrent or sequential tasks on the same worker) — only the
+ * underlying browser PROCESS stays shared, which is what these tests exercise
+ * against the REAL exported functions (not a reimplementation) with a mocked
+ * camoufox-js.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -31,23 +37,25 @@ vi.mock('node:os', async (importOriginal) => {
 
 import {
   initBrowser,
-  getContext,
+  acquireTaskContext,
   resetBrowser,
   taskStarted,
   taskFinished,
 } from '../../../src/infrastructure/browser/thread-worker-browser.ts';
 
 function fakeBrowser() {
-  const fakeContext = {
-    close: vi.fn().mockResolvedValue(undefined),
-    route: vi.fn().mockResolvedValue(undefined),
-  };
-  return {
+  const contexts: any[] = [];
+  const browser: any = {
     isConnected: () => true,
-    newContext: vi.fn().mockResolvedValue(fakeContext),
+    newContext: vi.fn().mockImplementation(async () => {
+      const ctx = { close: vi.fn().mockResolvedValue(undefined), route: vi.fn().mockResolvedValue(undefined) };
+      contexts.push(ctx);
+      return ctx;
+    }),
     close: vi.fn().mockResolvedValue(undefined),
-    _fakeContext: fakeContext,
+    _contexts: contexts,
   };
+  return browser;
 }
 
 describe('resetBrowser() vs concurrent sibling tasks', () => {
@@ -57,36 +65,33 @@ describe('resetBrowser() vs concurrent sibling tasks', () => {
     resetBrowser();
   });
 
-  it('defers the reset while a sibling task is still active, and applies it once the last one finishes', async () => {
+  it('defers the browser reset while a sibling task is still active, and applies it once the last one finishes', async () => {
     const browser = fakeBrowser();
     mockCamoufox.mockResolvedValueOnce(browser);
     await initBrowser();
-    const context = getContext();
-    expect(context).toBe(browser._fakeContext);
 
-    // Two sibling tasks dispatched concurrently to this worker.
+    // Two sibling tasks dispatched concurrently to this worker, each with its
+    // own context.
     taskStarted();
+    const ctxA = await acquireTaskContext();
     taskStarted();
+    const ctxB = await acquireTaskContext();
+    expect(ctxA).not.toBe(ctxB);
 
     // Task A hits a page-scoped error and calls resetBrowser() — task B is
-    // still active, so this must NOT close the shared browser/context yet.
+    // still active, so this must NOT close the shared browser yet.
     resetBrowser();
-    expect(browser._fakeContext.close).not.toHaveBeenCalled();
     expect(browser.close).not.toHaveBeenCalled();
-    expect(getContext()).toBe(context);
 
     // Task A finishes — task B is still active, so the deferred reset still
     // must not have fired.
     taskFinished();
-    expect(browser._fakeContext.close).not.toHaveBeenCalled();
-    expect(getContext()).toBe(context);
+    expect(browser.close).not.toHaveBeenCalled();
 
     // Task B finishes — it was the last active task, so the deferred reset
     // now applies.
     taskFinished();
-    expect(browser._fakeContext.close).toHaveBeenCalledTimes(1);
     expect(browser.close).toHaveBeenCalledTimes(1);
-    expect(getContext()).toBeNull();
   });
 
   it('resets immediately when no sibling task is active', async () => {
@@ -97,9 +102,7 @@ describe('resetBrowser() vs concurrent sibling tasks', () => {
     taskStarted();
     resetBrowser();
 
-    expect(browser._fakeContext.close).toHaveBeenCalledTimes(1);
     expect(browser.close).toHaveBeenCalledTimes(1);
-    expect(getContext()).toBeNull();
 
     taskFinished();
   });
@@ -124,8 +127,30 @@ describe('resetBrowser() vs concurrent sibling tasks', () => {
     const secondBrowser = fakeBrowser();
     mockCamoufox.mockResolvedValueOnce(secondBrowser);
     await initBrowser();
-    expect(getContext()).toBe(secondBrowser._fakeContext);
+    const ctx = await acquireTaskContext();
+    expect(secondBrowser.newContext).toHaveBeenCalledTimes(1);
+    expect(ctx).toBe(secondBrowser._contexts[0]);
 
     taskFinished();
+  });
+});
+
+describe('acquireTaskContext() — per-task isolation', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    resetBrowser();
+  });
+
+  it('hands each task a FRESH context, never a shared one — the cookie/storage-bleed fix', async () => {
+    const browser = fakeBrowser();
+    mockCamoufox.mockResolvedValueOnce(browser);
+    await initBrowser();
+
+    const ctx1 = await acquireTaskContext();
+    const ctx2 = await acquireTaskContext();
+    const ctx3 = await acquireTaskContext();
+
+    expect(new Set([ctx1, ctx2, ctx3]).size).toBe(3);
+    expect(browser.newContext).toHaveBeenCalledTimes(3);
   });
 });

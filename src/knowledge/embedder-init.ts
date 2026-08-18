@@ -417,7 +417,8 @@ export async function handleWebGPUWarmupError(
   gpuLockHeld: boolean,
   model: string,
   initializationTimeoutMs: number,
-  useCache: boolean
+  useCache: boolean,
+  poolingMode: 'mean' | 'cls' | 'last_token' = 'mean'
 ): Promise<{ success: boolean; pipeline?: FeatureExtractionPipeline; error?: Error; dummy?: any }> {
   markWebGpuFallback();
 
@@ -451,7 +452,7 @@ export async function handleWebGPUWarmupError(
     logger.info('[embedder] CPU pipeline loaded successfully');
     
     // Warmup CPU pipeline
-    const { dummy, success, error: cpuWarmupErr } = await warmupPipeline(cpuPipeline, 'mean', useCache);
+    const { dummy, success, error: cpuWarmupErr } = await warmupPipeline(cpuPipeline, poolingMode, useCache);
     if (!success || cpuWarmupErr) {
       logger.error('[embedder] CPU fallback pipeline warmup failed:', cpuWarmupErr);
       if (cpuPipeline) {

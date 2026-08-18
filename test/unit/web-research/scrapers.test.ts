@@ -40,7 +40,7 @@ vi.mock('../../../src/logger.ts', () => ({
 // Mock PDF extraction. Records the exact bytes handed to the parser (so tests can
 // assert the IPC-safe base64 round-trip delivered real bytes) and throws on an
 // empty input, mirroring the real WASM parser — zero bytes cannot be a PDF.
-const pdfMockState = vi.hoisted(() => ({ lastBytes: null as Uint8Array | null }));
+const pdfMockState = vi.hoisted(() => ({ lastBytes: null as Uint8Array | null, freeCalls: 0 }));
 vi.mock('pdf-oxide-wasm', () => {
   return {
     WasmPdfDocument: class {
@@ -55,9 +55,19 @@ vi.mock('pdf-oxide-wasm', () => {
         }
       }
       pageCount = () => 1;
-      toMarkdown = () => 'PDF content';
-      toMarkdownAll = () => 'Full PDF content ' + 'word '.repeat(100);
-      free = () => {};
+      toMarkdown = () => {
+        if (pdfMockState.lastBytes && Buffer.from(pdfMockState.lastBytes).toString().startsWith('%PDF-DOUBLEFAIL')) {
+          throw new Error('per-page decode also failed');
+        }
+        return 'PDF content';
+      };
+      toMarkdownAll = () => {
+        if (pdfMockState.lastBytes && Buffer.from(pdfMockState.lastBytes).toString().startsWith('%PDF-DOUBLEFAIL')) {
+          throw new Error('whole-document extraction failed');
+        }
+        return 'Full PDF content ' + 'word '.repeat(100);
+      };
+      free = () => { pdfMockState.freeCalls++; };
     }
   };
 });
@@ -346,6 +356,7 @@ describe('scrapers', () => {
 
     beforeEach(() => {
       pdfMockState.lastBytes = null;
+      pdfMockState.freeCalls = 0;
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch layer down')));
     });
 
@@ -411,6 +422,26 @@ describe('scrapers', () => {
 
       expect(result.success).toBe(false);
       expect(vi.mocked(logger.error)).not.toHaveBeenCalled();
+    });
+
+    it('frees the native WASM document even when BOTH toMarkdownAll and the per-page fallback throw', async () => {
+      // Regression: doc.free() previously sat after the fallback loop, so it
+      // was only reached when nothing above it threw — meaning the ONE case
+      // that needed the fallback (toMarkdownAll failed) landed squarely on
+      // the ONE case that could skip the free() (the fallback also failed),
+      // leaking one native WasmPdfDocument every time. The browser-server
+      // leader process stays warm across many research sessions, so this is
+      // unbounded native-memory growth, not a one-off.
+      mockRunBrowserTask.mockResolvedValue({
+        contentType: 'application/pdf',
+        bufferB64: Buffer.from('%PDF-DOUBLEFAIL both extraction paths fail').toString('base64'),
+      });
+
+      const result = await scrapeSingle('https://some-site.org/doublefail.pdf');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Could not extract content from PDF');
+      expect(pdfMockState.freeCalls).toBe(1);
     });
 
     it('reports FAILURE when PDF extraction yields an error string (never a cached success)', async () => {

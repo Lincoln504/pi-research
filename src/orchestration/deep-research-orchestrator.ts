@@ -517,7 +517,9 @@ export class DeepResearchOrchestrator {
         // Guarded so a one-round budget cannot announce the same round twice.
         if (this.currentRound > lastAnnouncedRound) {
           observer?.onRoundStart?.(this.currentRound);
-          lastAnnouncedRound = this.currentRound;
+          // No assignment to lastAnnouncedRound here: this is the last place in the
+          // function that reads it — final synthesis proceeds unconditionally right
+          // after, nothing downstream checks it again.
         }
         // The round this synthesis actually happens at, not the budget. They coincide on
         // the round-cap exit but not on the wait-exhaustion one, which breaks out early —

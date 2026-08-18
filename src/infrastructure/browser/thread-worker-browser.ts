@@ -14,18 +14,20 @@ import { redactSecrets } from '../../utils/log-utils.ts';
 import { resolveHeadlessMode } from './config.ts';
 
 let browser: any = null;
-let context: any = null;
 let initPromise: Promise<void> | null = null;
 let workerId: string = '';
 
 // How many tasks this worker process currently has in flight. poolifier's
 // tasksQueueOptions.concurrency (WORKER_CONCURRENCY, default 2 — see
 // worker-pool-manager.ts) dispatches more than one task at a time to the SAME
-// worker process, and every dispatched task shares this module's browser/
-// context singletons (each gets its own page via createPageSafe(context), but
-// the context/browser themselves are one shared instance). resetBrowser()
-// uses this to avoid tearing that shared instance down out from under a
-// sibling task that is still actively using it — see resetBrowser() below.
+// worker process, and every dispatched task shares this module's browser
+// singleton (each gets its own FRESH BrowserContext via acquireTaskContext()
+// below — a real Firefox process is too expensive to launch per task, but a
+// context is cheap, and per-task contexts keep cookies/storage/route-mocking
+// from one task bleeding into a concurrent or later, unrelated one).
+// resetBrowser() uses this to avoid tearing the shared BROWSER down out from
+// under a sibling task that is still actively using it — see resetBrowser()
+// below.
 let activeTaskCount = 0;
 // A reset that resetBrowser() deferred because sibling tasks were still
 // active, to be applied once the last one finishes.
@@ -119,12 +121,12 @@ function logToDebugFile(level: string, ...args: any[]): void {
  * Initialize the browser instance
  */
 export async function initBrowser(): Promise<void> {
-  if (isBrowserConnected() && context) return;
+  if (isBrowserConnected()) return;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      if (!isBrowserConnected() || !context) {
+      if (!isBrowserConnected()) {
         logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
 
         // ---------------------------------------------------------------------
@@ -295,35 +297,6 @@ export async function initBrowser(): Promise<void> {
         }
 
         browser = launchedBrowser;
-        // newContext() can hang if the browser process becomes unresponsive immediately
-        // after launch (e.g. OOM, GPU crash). Guard with a hard timeout.
-        const contextPromise = browser.newContext();
-        contextPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser context rejection: ${err.message}`));
-        let contextTimeoutId: NodeJS.Timeout | undefined;
-        let contextRaceLost = false;
-        // Same adoption as the launch above. Here the catch below CAN close the
-        // browser (it is assigned by now), which disposes the stray context with it —
-        // but only when initBrowser is entered with a dead browser, and it leaves the
-        // context open for the window in between. Closing it directly is unconditional.
-        contextPromise.then((c: any) => {
-          if (!contextRaceLost) return;
-          logToDebugFile('WARN', `[Worker-${workerId}] Browser context creation completed after its deadline; closing the orphaned context.`);
-          try { c?.close?.(); } catch { /* already gone */ }
-        }).catch(() => { /* rejection already logged above */ });
-        context = await Promise.race([
-          contextPromise,
-          new Promise<never>((_, reject) => {
-            contextTimeoutId = setTimeout(() => {
-              contextRaceLost = true;
-              reject(new Error('Browser context creation timed out after 30000ms'));
-            }, 30000);
-          })
-        ]);
-        if (contextTimeoutId) clearTimeout(contextTimeoutId);
-        
-        // Setup mocking for CI if enabled
-        await setupMocking(context);
-        
         logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
       }
     } catch (e: unknown) {
@@ -334,7 +307,6 @@ export async function initBrowser(): Promise<void> {
         Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during failed init: ${err.message}`));
       }
       browser = null;
-      context = null;
       const msg = e instanceof Error ? e.message : String(e);
 
       if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
@@ -361,16 +333,60 @@ export async function initBrowser(): Promise<void> {
 }
 
 /**
- * Get the current browser context
+ * Create a FRESH BrowserContext for one task, against the shared browser
+ * process. Call once per task, right after initBrowser() resolves; the
+ * caller owns the returned context and must close it itself (in a `finally`,
+ * covering the success, error, AND timeout-abort paths) once the task ends.
+ *
+ * Never reused across tasks — that was the bug this replaced. Two tasks
+ * dispatched concurrently to the same worker (WORKER_CONCURRENCY > 1, the
+ * default) used to share one BrowserContext, so cookies/storage a site set
+ * for one task's request were visible to a different, unrelated task's later
+ * request to the same site — a content-consistency gap with no counterpart
+ * anywhere else in this codebase, which scopes browser-adjacent state
+ * (circuit breakers, scrape caches) per session deliberately.
+ *
+ * The launch race/timeout/orphan-adoption pattern below is the exact one
+ * initBrowser() used when context creation lived there (moved here wholesale,
+ * not reinvented): newContext() can hang if the browser process is
+ * unresponsive (OOM, GPU crash), so it is guarded with a hard timeout, and a
+ * context that finishes creating AFTER that timeout is adopted and closed
+ * rather than left to leak.
  */
-export function getContext(): any {
-  return context;
+export async function acquireTaskContext(): Promise<any> {
+  const contextPromise = browser.newContext();
+  contextPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser context rejection: ${err.message}`));
+  let contextTimeoutId: NodeJS.Timeout | undefined;
+  let contextRaceLost = false;
+  contextPromise.then((c: any) => {
+    if (!contextRaceLost) return;
+    logToDebugFile('WARN', `[Worker-${workerId}] Browser context creation completed after its deadline; closing the orphaned context.`);
+    try { c?.close?.(); } catch { /* already gone */ }
+  }).catch(() => { /* rejection already logged above */ });
+  let newContext: any;
+  try {
+    newContext = await Promise.race([
+      contextPromise,
+      new Promise<never>((_, reject) => {
+        contextTimeoutId = setTimeout(() => {
+          contextRaceLost = true;
+          reject(new Error('Browser context creation timed out after 30000ms'));
+        }, 30000);
+      })
+    ]);
+  } finally {
+    if (contextTimeoutId) clearTimeout(contextTimeoutId);
+  }
+
+  // Route interception is per-context, so mocking must be (re-)applied to
+  // every fresh context, not just the first one ever created.
+  await setupMocking(newContext);
+
+  return newContext;
 }
 
 function doResetBrowser(): void {
-  if (context) Promise.resolve(context.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during reset: ${err.message}`));
   if (browser) Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during reset: ${err.message}`));
-  context = null;
   browser = null;
 }
 
@@ -407,7 +423,9 @@ export async function cleanupBrowser(): Promise<void> {
   const timeoutMs = 2000;
   
   const cleanup = async () => {
-    if (context) await Promise.resolve(context.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during cleanup: ${err.message}`));
+    // Closes every context still open under it (any task whose own close()
+    // hasn't run yet) as a side effect — no separate context bookkeeping
+    // needed here now that contexts are task-owned, not module-owned.
     if (browser) await Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during cleanup: ${err.message}`));
   };
 
@@ -419,7 +437,6 @@ export async function cleanupBrowser(): Promise<void> {
   } catch {
     // Ignore timeout — we just want to ensure cleanup doesn't hang indefinitely
   } finally {
-    context = null;
     browser = null;
   }
 }
