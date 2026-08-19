@@ -86,6 +86,7 @@ jobs:
   test-install:
     name: Test packed tarball install
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: require-ci-green
     # No id-token here: this job only checks out, builds, packs, and installs the
     # tarball — it never publishes and has no legitimate use for the OIDC
@@ -163,6 +164,7 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: test-install
     # id-token is scoped to ONLY this job — it's the sole step in this workflow that
     # legitimately needs the OIDC trusted-publishing credential (see the top-level
@@ -215,6 +217,7 @@ jobs:
       # ripgrep: mirror the CI unit-test environment (the SDK grep tool shells out to
       # rg) so the unit suite runs identically here — no environment-driven flake.
       - name: Install ripgrep
+        timeout-minutes: 5
         run: sudo apt-get install -y ripgrep
       # This publish gate re-runs the SAME fast, deterministic blocking checks CI
       # runs on every push to main (lint, prod-dep audit, both type-checks,

@@ -19,6 +19,18 @@ vi.mock('../../../src/youtube/potoken.ts', () => ({
   mintPoTokens: (...args: unknown[]) => mintPoTokens(...args),
   DEFAULT_REQUEST_KEY: 'test-key',
 }));
+// The timedtext fetch goes through the connect-time-SSRF-pinned fetcher (undici's
+// own fetch, not the global one — see getSsrfSafeFetcher's doc comment), so a
+// bare vi.stubGlobal('fetch', ...) below would otherwise never be hit. Defer to
+// the global stub, matching the established pattern in web-research's own tests
+// (see scrape-redirect-user-agent.test.ts).
+vi.mock('../../../src/web-research/scraper-utils.ts', () => ({
+  getSsrfSafeFetcher: async () => ({
+    fetch: (url: string, init: Record<string, unknown>) =>
+      (globalThis.fetch as unknown as (u: string, i: unknown) => Promise<Response>)(url, init),
+    dispatcher: {},
+  }),
+}));
 
 import { fetchVideoTranscripts } from '../../../src/youtube/transcript-client.ts';
 

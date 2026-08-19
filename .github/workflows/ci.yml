@@ -33,6 +33,7 @@ jobs:
   analyze:
     name: Analyze (CodeQL)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: read
@@ -101,6 +102,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -172,6 +174,7 @@ jobs:
 
   type-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -257,12 +260,15 @@ jobs:
       - run: npm run build:worker
       - name: Install ripgrep (Linux)
         if: runner.os == 'Linux'
+        timeout-minutes: 5
         run: sudo apt-get install -y ripgrep
       - name: Install ripgrep (macOS)
         if: runner.os == 'macOS'
+        timeout-minutes: 5
         run: brew install ripgrep
       - name: Install ripgrep (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         run: choco install ripgrep -y
       - run: npm run test:unit
 
@@ -324,17 +330,25 @@ jobs:
         run: node scripts/ensure-native-deps.cjs
       - name: Install ripgrep (Linux)
         if: runner.os == 'Linux'
+        timeout-minutes: 5
         run: sudo apt-get install -y ripgrep
       - name: Install ripgrep (macOS)
         if: runner.os == 'macOS'
+        timeout-minutes: 5
         run: brew install ripgrep
       - name: Install ripgrep (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         run: choco install ripgrep -y
       - name: Install Firefox system dependencies (Linux)
         # apt-based; only needed/available on Linux. macOS/Windows ship the
         # libraries Camoufox needs.
+        # Bounded: an apt-get hang here (e.g. an interactive debconf/needrestart
+        # prompt or a stuck lock on the runner) would otherwise silently burn
+        # the whole 60-minute job timeout with no diagnosable failure — as
+        # happened on 2026-08-19 (run 32216809563, hung the full 60 min here).
         if: runner.os == 'Linux'
+        timeout-minutes: 5
         run: npx playwright install-deps firefox
       # Cache the Camoufox binary on Linux only: its install dir is well-known
       # there (~/.cache/camoufox). On macOS the binary lives under
@@ -351,6 +365,7 @@ jobs:
         # Always fetch on macOS/Windows (not Linux-cached); on Linux only on a
         # cache miss. Idempotent — skips if the binary is already present.
         if: runner.os != 'Linux' || steps.cache-camoufox.outputs.cache-hit != 'true'
+        timeout-minutes: 5
         run: npx camoufox-js fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -485,7 +500,8 @@ jobs:
       - name: Check dependency rules
         run: npm run deps:check
       # Regenerate the detailed dependency SVG and commit only if it changed
-      - run: sudo apt-get install -y graphviz
+      - timeout-minutes: 5
+        run: sudo apt-get install -y graphviz
       - run: npm run deps:generate
       - name: Commit and push docs/deps.svg
         # Push events only. PR runs — same-repo included — check out a detached
@@ -511,7 +527,12 @@ jobs:
     # Linux alone meant the npm-generated Windows `.cmd`/`.ps1` bin shim was never
     # generated or invoked anywhere in CI, and `verify-package.cjs installed` never ran
     # off-Linux — for a package whose whole delivery contract is cross-platform.
+    # Gated on lint/type-check like integration-test and dep-graph below (see
+    # their comments): without it, this job's full 3-OS pack+install+execute
+    # cycle burns runner minutes in parallel with a build that may already be red.
+    needs: [lint, type-check]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

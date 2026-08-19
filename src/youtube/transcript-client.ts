@@ -18,6 +18,7 @@
  */
 
 import { withTimeout, retryWithBackoff, createTimeoutSignal } from '../web-research/retry-utils.ts';
+import { getSsrfSafeFetcher } from '../web-research/scraper-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
 import { redactSecrets } from '../utils/log-utils.ts';
@@ -109,7 +110,31 @@ export async function fetchVideoTranscripts(
   } catch {
     // non-fatal: logging stays at default if the API ever changes
   }
-  const fetchImpl: typeof fetch = (input, init) => fetch(input, init);
+  // Connect-time SSRF pin (see scraper-utils.ts's getSsrfSafeFetcher): closes the
+  // gap between assertTrustedTimedtextUrl's host check below and fetch's own
+  // re-resolution at connect time. The host allowlist only constrains WHICH
+  // hostname a redirect can name; it says nothing about what that hostname
+  // resolves to at the moment the socket opens, and this codebase already
+  // treats a resolver answering differently between validation and connect as
+  // a real threat elsewhere (thread-worker-messaging.ts's DNS-rebinding
+  // backstop applies even to already-trusted hosts). One fetchImpl closure
+  // covers every network call in this batch: the BotGuard/attestation fetches
+  // inside mintPoTokens() and the timedtext fetch below. Falls back to the
+  // plain global fetch for non-string/URL input (never seen in practice here)
+  // since the dispatcher pairing requires a URL string; see getSsrfSafeFetcher's
+  // own doc comment for why the fetch and its dispatcher must travel together.
+  const ssrfFetcher = await getSsrfSafeFetcher();
+  const fetchImpl: typeof fetch = ssrfFetcher
+    ? (input, init) => {
+        if (typeof input === 'string' || input instanceof URL) {
+          return ssrfFetcher.fetch(String(input), {
+            ...(init ?? {}),
+            dispatcher: ssrfFetcher.dispatcher,
+          }) as unknown as Promise<Response>;
+        }
+        return fetch(input, init);
+      }
+    : (input, init) => fetch(input, init);
 
   // 1) Throwaway session to obtain stable visitor data for the PoToken binding.
   let visitorData: string;
@@ -249,12 +274,10 @@ async function fetchOne(
           // trusted-host allowlist as the first hop. `redirect: 'follow' (the
           // default) would carry the PoToken-bearing request to whatever host a
           // 3xx Location header names with no revalidation — assertTrustedTimedtextUrl
-          // above only ever checked base_url, the pre-redirect URL. Connect-time IP
-          // pinning (getSsrfSafeFetcher's dispatcher, used by web-scraper.ts) is
-          // deliberately not wired in here: the host is Google-controlled, not
-          // attacker-supplied, so the exploitable gap is only which HOST the
-          // request lands on, not DNS-rebinding to a private IP on an
-          // already-trusted host.
+          // above only ever checked base_url, the pre-redirect URL. fetchImpl
+          // carries the connect-time IP pin (see its construction above), so each
+          // hop is also protected against a resolver answering differently
+          // between this host check and the moment the socket actually opens.
           const MAX_REDIRECTS = 5;
           let currentUrl = url;
           let response!: Response;
