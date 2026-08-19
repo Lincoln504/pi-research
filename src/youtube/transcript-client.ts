@@ -245,10 +245,38 @@ async function fetchOne(
           // response headers AND the body read are bounded and tear the socket
           // down on timeout/cancellation (withTimeout alone would not bound text()).
           const fetchSignal = createTimeoutSignal(timeoutMs, signal);
-          const response = await fetchImpl(url, {
-            signal: fetchSignal,
-            headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': lang },
-          });
+          // Manual redirect following, re-validating each hop against the same
+          // trusted-host allowlist as the first hop. `redirect: 'follow' (the
+          // default) would carry the PoToken-bearing request to whatever host a
+          // 3xx Location header names with no revalidation — assertTrustedTimedtextUrl
+          // above only ever checked base_url, the pre-redirect URL. Connect-time IP
+          // pinning (getSsrfSafeFetcher's dispatcher, used by web-scraper.ts) is
+          // deliberately not wired in here: the host is Google-controlled, not
+          // attacker-supplied, so the exploitable gap is only which HOST the
+          // request lands on, not DNS-rebinding to a private IP on an
+          // already-trusted host.
+          const MAX_REDIRECTS = 5;
+          let currentUrl = url;
+          let response!: Response;
+          for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+            response = await fetchImpl(currentUrl, {
+              signal: fetchSignal,
+              redirect: 'manual',
+              headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': lang },
+            });
+            if (response.status >= 300 && response.status < 400) {
+              const location = response.headers.get('location');
+              if (!location) break; // No Location header — treat as final response
+              const resolved = new URL(location, currentUrl).href;
+              assertTrustedTimedtextUrl(resolved);
+              // Drain the redirect response before following: an unconsumed body
+              // pins its socket (undici keeps it open until read/cancelled or GC).
+              void response.body?.cancel()?.catch(() => { /* best-effort */ });
+              currentUrl = resolved;
+              continue;
+            }
+            break; // Non-redirect response
+          }
           // Surface the real HTTP status. Without this, a 403 (age-restricted) or
           // 404 (removed) returns HTML that parseJson3 yields '' for, which would
           // be misreported below as a bot-protection/PoToken failure.

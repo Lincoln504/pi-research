@@ -88,6 +88,51 @@ describe('youtube/transcript-client', () => {
     vi.unstubAllGlobals();
   });
 
+  it('rejects a timedtext redirect to an untrusted host instead of following it', async () => {
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    const redirectFetch = vi.fn(async () => ({
+      status: 302,
+      ok: false,
+      headers: { get: (name: string) => (name.toLowerCase() === 'location' ? 'https://evil.example.com/steal' : null) },
+      body: { cancel: async () => {} },
+      text: async () => '',
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', redirectFetch);
+
+    const [res] = await fetchVideoTranscripts(['vid00000001']);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/not trusted/i);
+    // The redirect must never be followed: exactly the first hop was fetched.
+    expect(redirectFetch).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('follows a timedtext redirect to another trusted Google host', async () => {
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    const body = json3('hi ', 'there');
+    const trustedRedirectFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 302,
+        ok: false,
+        headers: { get: (name: string) => (name.toLowerCase() === 'location' ? 'https://redirector.googlevideo.com/timedtext?x=1' : null) },
+        body: { cancel: async () => {} },
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({ status: 200, ok: true, text: async () => body }) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', trustedRedirectFetch);
+
+    const [res] = await fetchVideoTranscripts(['vid00000001']);
+
+    expect(res.success).toBe(true);
+    expect(res.text).toBe('hi there');
+    expect(trustedRedirectFetch).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
   it('reports videos with no caption tracks as unavailable', async () => {
     const getInfo = vi.fn(async () => infoWith([])); // no captions
     innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));

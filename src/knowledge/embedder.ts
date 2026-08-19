@@ -405,9 +405,16 @@ export class Embedder {
       // the VECTOR — the full text is still stored verbatim and covered by FTS — but the
       // truncation is otherwise silent, so surface it: a spike here means chunks are
       // arriving larger than the embed cap and vector recall on their tail is degraded.
+      let keep = maxChars;
+      // slice() counts UTF-16 code units, so the cut can land between the halves of
+      // a surrogate pair (emoji, rare CJK) — same guard as truncateWithMarker
+      // (utils/text-utils.ts): a lone high surrogate is invalid text some
+      // tokenizers/providers choke on. Back off one unit to restore well-formed text.
+      const lastKeptUnit = text.charCodeAt(keep - 1);
+      if (lastKeptUnit >= 0xd800 && lastKeptUnit <= 0xdbff) keep -= 1;
       metrics.increment('embedder_truncations_total', 1, { model: this.model });
-      logger.debug(`[embedder] Truncated input for embedding: ${text.length} -> ${maxChars} chars (model=${this.model})`);
-      return text.slice(0, maxChars);
+      logger.debug(`[embedder] Truncated input for embedding: ${text.length} -> ${keep} chars (model=${this.model})`);
+      return text.slice(0, keep);
     }
     return text;
   }

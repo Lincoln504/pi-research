@@ -369,6 +369,16 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
  * Public initialization. Guarantees the SDK is ready for use.
  */
 export async function initResearchSDK(options: ResearchSDKOptions = {}): Promise<void> {
+  // A shutdown may be in flight: isInitialized only flips to false near the END
+  // of _doShutdown (after container disposal), so without this a caller racing a
+  // shutdown would hit the isInitialized branch below, log its "already
+  // initialized" warning, and return believing the SDK is ready — while the
+  // container it would use is mid-teardown or about to be nulled out from under
+  // it. Wait the shutdown out first so this call observes the real post-shutdown
+  // state, mirroring shutdownResearchSDK's symmetric wait on _initPromise.
+  if (_shutdownPromise) {
+    await _shutdownPromise.catch(() => { /* a failed shutdown must not block a fresh init */ });
+  }
   if (isInitialized) {
     logger.warn('[SDK] Research SDK already initialized. Call shutdownResearchSDK() first if you want to re-initialize with new options.');
     return;

@@ -706,6 +706,23 @@ describe('input truncation (OOM guard)', () => {
     expect(batchArg[1]).toBe('ok'); // untouched — already within the cap
   });
 
+  it('backs off one unit instead of splitting a surrogate pair at the truncation boundary', async () => {
+    const e = new Embedder({ model: 'trunc-model', maxTokens: 10, charsPerToken: 2 }); // cap 20
+    await e.initialize();
+    mockPipelineFn.mockClear();
+
+    // An astral character (2 UTF-16 code units) straddles the raw index-20 cut:
+    // its high surrogate lands at index 19 (kept), low surrogate at index 20
+    // (dropped) — a naive slice(0, 20) would emit a lone high surrogate.
+    const text = `${'x'.repeat(19)}\u{1F600}${'y'.repeat(79)}`;
+    await e.embed(text);
+
+    const passedInput = mockPipelineFn.mock.calls[0]![0] as string;
+    const lastUnit = passedInput.charCodeAt(passedInput.length - 1);
+    expect(lastUnit < 0xd800 || lastUnit > 0xdbff).toBe(true); // never ends on a lone high surrogate
+    expect(passedInput).toBe('x'.repeat(19)); // backed off past the whole pair, not just one unit short
+  });
+
   it('truncates AFTER the query prefix is prepended (the prefix counts toward the cap)', async () => {
     const incSpy = vi.spyOn(metrics, 'increment');
     const e = new Embedder({ model: 'trunc-model', maxTokens: 10, charsPerToken: 2, queryPrefix: 'PFX:' });

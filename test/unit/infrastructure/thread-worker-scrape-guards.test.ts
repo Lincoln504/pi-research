@@ -208,4 +208,21 @@ describe('executeScrapeTask — worker-side size caps', () => {
     const result = await executeScrapeTask(context, 'https://size-d.example.com/ok.pdf');
     expect(result.bufferB64).toBe(bytes.toString('base64'));
   });
+
+  it('takes the PDF branch off the URL extension even when the server mislabels content-type', async () => {
+    // Regression: a server that omits or mislabels content-type (application/octet-stream
+    // is common for misconfigured static hosting) used to fall into the HTML branch, whose
+    // page.content() would serialize Firefox's PDF-viewer chrome instead of the document —
+    // silent content loss for exactly the URLs this feature advertises as supported. The
+    // fetch layer (web-scraper.ts) already trusts a `.pdf` URL extension as an equally
+    // valid signal; the browser worker must match it.
+    const bytes = Buffer.from('%PDF-1.7 mislabeled payload');
+    const { context, bodySpy } = makeHarness({
+      contentType: 'application/octet-stream',
+      body: async () => bytes,
+    });
+    const result = await executeScrapeTask(context, 'https://mislabeled.example.com/report.pdf');
+    expect(result.bufferB64).toBe(bytes.toString('base64'));
+    expect(bodySpy).toHaveBeenCalled();
+  });
 });

@@ -22,7 +22,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -88,6 +87,17 @@ jobs:
     name: Test packed tarball install
     runs-on: ubuntu-latest
     needs: require-ci-green
+    # No id-token here: this job only checks out, builds, packs, and installs the
+    # tarball — it never publishes and has no legitimate use for the OIDC
+    # trusted-publishing credential. It DOES run `npm ci` with full lifecycle
+    # scripts (no --ignore-scripts) against the same lockfile CI already
+    # validated, so scoping this down matters: without it, a malicious
+    # postinstall/prepare script in any dependency could request an OIDC token via
+    # ACTIONS_ID_TOKEN_REQUEST_TOKEN/URL and exchange it for a scoped npm publish
+    # credential — bypassing lint/audit-gate/type-check/tests entirely, since npm's
+    # trusted-publishing verification is keyed to repo+workflow file, not job name.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
@@ -154,6 +164,15 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     needs: test-install
+    # id-token is scoped to ONLY this job — it's the sole step in this workflow that
+    # legitimately needs the OIDC trusted-publishing credential (see the top-level
+    # permissions block and test-install's comment for why granting it any wider is
+    # a real supply-chain risk, not a theoretical one: this job's own `npm ci`
+    # below runs full lifecycle scripts against every dependency BEFORE any of this
+    # job's own lint/audit-gate/type-check/test steps execute).
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 

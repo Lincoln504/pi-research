@@ -44,6 +44,7 @@
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
+import { readJsonCapped } from '../utils/http-body.ts';
 
 /**
  * Well-known request key for the YouTube web PoToken program. This is a public
@@ -229,7 +230,13 @@ async function doMint(
       body: JSON.stringify([requestKey, botguardResponse]),
       signal: opts.signal,
     });
-    const integrityJson = (await integrityResponse.json()) as unknown[];
+    if (!integrityResponse.ok) {
+      throw new Error(`HTTP ${integrityResponse.status} from attestation server`);
+    }
+    // The attestation response is a short JSON array; readJsonCapped bounds it the
+    // same way as every other externally-controlled body this codebase reads (the
+    // default 32MB cap is already generous for this endpoint).
+    const integrityJson = await readJsonCapped<unknown[]>(integrityResponse);
     const integrityToken = integrityJson?.[0] as string | undefined;
     if (!integrityToken) {
       throw new Error('Integrity token rejected by attestation server (likely a non-residential IP)');

@@ -270,6 +270,33 @@ describe('SDK Lifecycle', () => {
       const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
       expect(ctx.cwd).toBe('/custom/path');
     });
+
+    it('waits out an in-flight shutdown instead of silently no-oping on the stale isInitialized=true window', async () => {
+      // Regression: isInitialized only flips to false near the END of
+      // _doShutdown (after container disposal), so a call landing while a
+      // shutdown was still mid-teardown hit the "already initialized" branch,
+      // warned, and returned — believing the SDK was ready while its container
+      // was being disposed out from under it.
+      await initSDK();
+      vi.mocked(registerCoreServices).mockClear();
+      vi.mocked(logger.warn).mockClear();
+
+      let releaseDispose!: () => void;
+      vi.mocked(disposeCoreServices).mockImplementationOnce(() => new Promise<void>((res) => { releaseDispose = res; }));
+      const shutdownPromise = shutdownResearchSDK();
+      await new Promise((r) => setImmediate(r)); // shutdown wedged inside disposeCoreServices; isInitialized still true here
+
+      const initPromise = initResearchSDK({ model: STUB_MODEL as any });
+      await new Promise((r) => setImmediate(r)); // give the racing init a chance to take the stale branch if unfixed
+      releaseDispose();
+      await shutdownPromise;
+      await initPromise;
+
+      // A genuine re-init happened — services were registered again, not
+      // skipped via the "already initialized" no-op.
+      expect(registerCoreServices).toHaveBeenCalledOnce();
+      expect(vi.mocked(logger.warn)).not.toHaveBeenCalledWith(expect.stringContaining('already initialized'));
+    });
   });
 
   describe('runDeepResearch', () => {

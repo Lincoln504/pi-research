@@ -433,6 +433,13 @@ export async function executeScrapeTask(
   let poisonedError: Error | null = null;
   const pendingAddrChecks: Array<Promise<void>> = [];
 
+  // Set by the response-side early-abort check (see page.on('response') below) when the
+  // main-frame document's OWN headers already declare a PDF larger than MAX_PDF_SIZE.
+  // Declared outside the try for the same reason as poisonedError: the catch below needs
+  // to surface this instead of the secondary 'Target closed' error the triggering
+  // page.close() produces.
+  let oversizedPdfError: Error | null = null;
+
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
 
@@ -511,6 +518,42 @@ export async function executeScrapeTask(
       try {
         if (resp.request().resourceType() === 'document' && resp.frame() === page.mainFrame()) {
           finalMainFrameAddr = resp.serverAddr().catch(() => null);
+
+          // Early-abort a declared-oversized PDF as soon as its headers arrive, rather
+          // than waiting for page.goto() to finish downloading the whole thing first.
+          // 'response' fires on headers-received, well before the body is fully
+          // transferred — for a direct navigation to a PDF URL, Playwright's goto()
+          // does not resolve until the download completes, so without this the full
+          // (possibly multi-hundred-MB) body is pulled into the browser process before
+          // the PDF branch below ever gets to check Content-Length.
+          //
+          // This closes the gap only for a server that HONESTLY declares an oversized
+          // Content-Length up front. A chunked-transfer response (no Content-Length) or
+          // one that understates its length and then sends far more cannot be caught
+          // this way — Playwright's public API exposes no incremental
+          // bytes-received/streaming hook to abort mid-body on either engine. That
+          // residual case is bounded instead by the task's own SCRAPE_TIMEOUT_MS +
+          // BROWSER_TASK_TIMEOUT_MS deadline (see the onAbort/page.close() wiring
+          // above), which forcibly closes the page — and with it any in-flight
+          // download — once the task's time budget is exhausted, converting an
+          // otherwise-unbounded read into one bounded by (bandwidth x that budget).
+          const check2: Promise<void> = Promise.resolve(resp.headerValue('content-type'))
+            .then(async (ct: string | null) => {
+              // Matches the PDF branch below AND the fetch layer's own detection
+              // (web-scraper.ts): a server can mislabel or omit content-type, so a
+              // `.pdf` URL extension is an equally-trusted signal, not just the header.
+              const looksLikePdf = ct?.includes('application/pdf') || url.toLowerCase().endsWith('.pdf');
+              if (!looksLikePdf || oversizedPdfError || poisonedError) return;
+              const declared = parseInt((await resp.headerValue('content-length').catch(() => null)) || '', 10);
+              if (Number.isFinite(declared) && declared > MAX_PDF_SIZE) {
+                const sizeMB = Math.round(declared / 1024 / 1024);
+                oversizedPdfError = new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+                logToDebugFile('DEBUG', `[Worker-${workerId}] Aborting oversized PDF (${sizeMB}MB declared) before download completes: ${url}`);
+                page.close().catch(() => {});
+              }
+            })
+            .catch(() => {});
+          pendingAddrChecks.push(check2);
         }
         const check: Promise<void> = Promise.resolve(resp.serverAddr())
           .then((addr: { ipAddress?: string } | null) => {
@@ -562,7 +605,14 @@ export async function executeScrapeTask(
     // 403/503 — the HTML branch defers to the challenge wait below for that.
     const status = response?.status?.() ?? 0;
 
-    if (contentType.includes('application/pdf')) {
+    // `.pdf` extension is an equally-trusted signal alongside the header (matches
+    // the fetch layer's own detection in web-scraper.ts): a server that mislabels
+    // or omits content-type would otherwise fall into the HTML branch below, whose
+    // page.content() would serialize Firefox's PDF-viewer chrome instead of
+    // extracting the document — a silent content loss for exactly the URLs this
+    // feature advertises as supported, and specifically for the malformed/oddly-
+    // served PDFs most likely to reach this browser fallback in the first place.
+    if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
       if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
       // An errored "PDF" is an error page: fail BEFORE buffering its body.
       if (status >= 400) throw new Error(`HTTP ${status}`);
@@ -576,6 +626,10 @@ export async function executeScrapeTask(
         const sizeMB = Math.round(declaredLength / 1024 / 1024);
         throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
       }
+      // The response-side early-abort check above (page.on('response')) may already have
+      // decided this and be in the middle of closing the page — skip the (redundant,
+      // about-to-fail) download attempt rather than race it.
+      if (oversizedPdfError) throw oversizedPdfError;
       const buffer = await response.body();
       // ...then the actual bytes: the header is advisory and absent on chunked
       // responses, so the byte count is the check that actually bounds memory.
@@ -692,9 +746,12 @@ export async function executeScrapeTask(
     return { contentType, html, jitter };
   } catch (error) {
     await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
-    // A poison-triggered page.close() makes the in-flight goto/content() reject
-    // with 'Target closed'; report the SSRF poisoning (a benign-classified
-    // 'Fetch blocked:' failure), not the secondary teardown error.
+    // An early-abort-triggered page.close() (oversized PDF, or SSRF poisoning) makes
+    // the in-flight goto/content()/body() reject with 'Target closed'; report the
+    // actual reason (a benign-classified failure) instead of that secondary teardown
+    // error. oversizedPdfError takes priority since it can only be set on the PDF path,
+    // where poisonedError (an HTML-only DOM-exfil concern) is not meaningful.
+    if (oversizedPdfError) throw oversizedPdfError;
     if (poisonedError) throw poisonedError;
     throw error;
   } finally {

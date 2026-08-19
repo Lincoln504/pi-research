@@ -57,7 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   challengeCreate.mockResolvedValue(okChallenge);
   // Integrity-token POST returns [integrityToken, ttl, ...]
-  vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ['integrity-token-abc', 43200] })));
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ['integrity-token-abc', 43200] })));
 });
 
 describe('youtube/potoken', () => {
@@ -94,8 +94,16 @@ describe('youtube/potoken', () => {
   });
 
   it('rejects when the attestation server returns no integrity token', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => [undefined, 0] })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => [undefined, 0] })));
     await expect(mintPoTokens(['VISITOR'])).rejects.toThrow(/integrity token/i);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects an HTTP-error attestation response without reading its body as JSON', async () => {
+    const jsonSpy = vi.fn(async () => { throw new Error('should never be parsed'); });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: jsonSpy })));
+    await expect(mintPoTokens(['VISITOR'])).rejects.toThrow(/HTTP 503/);
+    expect(jsonSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
