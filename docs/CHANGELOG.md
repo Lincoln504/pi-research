@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Two further fresh-eyes audit rounds on top of 1.4.1, covering subsystems the
+1.4.1 audit hadn't reached (orchestration router/synthesizer, locks/scheduler,
+tools, repo hygiene, then knowledge/embedding, CLI/SDK, security/YouTube
+internals, web-scraper/PDF, and CI/release scripts). Not yet published.
+
+### Fixed
+
+- **Browser task deadlines never budgeted for a worker's first real Camoufox launch.** Search/scrape/healthcheck timeouts assumed a warm worker, but eager warmup is deliberately disabled, so a normal cold start (up to 120s combined launch + context creation) on a fresh or just-reset worker could be misreported as "worker likely died mid-task", cascading toward unnecessary pool teardown. Added `COLD_START_ALLOWANCE_MS` as a single source of truth, folded into the scheduler's task ceilings, the healthcheck budget, and `browser-search.ts`'s mirrored per-query timeout.
+- **The synthesizer's and router's overflow warnings only checked the reduced corpus against its own budget.** Below `MIN_SYNTHESIS_CORPUS_CHARS` that budget is a fixed floor, not a value derived from the model's context window, so a large global source list or run context could still overflow the real window with no warning. Both now also check the total against the real window directly.
+- **`stackexchange_quota_low_total`/`_exhausted_total` were incremented as a side effect of `getQuotaInfo()`**, a method called up to three times per tool invocation for display — recording one real event as 2-3x the count. Moved the increments to the single gate check that actually observes each event.
+- **The release workflow granted `id-token: write` (the npm OIDC trusted-publishing credential) to the whole workflow**, not just the job that publishes. Every job runs `npm ci` with full lifecycle scripts before its own lint/audit/test steps execute, so a malicious postinstall/prepare script in any dependency could have requested and exchanged that credential from a job that never legitimately needed it. Scoped to only the `publish` job.
+- **A direct browser navigation to an oversized PDF downloaded the whole body before the size cap ever ran.** Playwright's `page.goto()` does not resolve until the full response finishes downloading, so a multi-hundred-MB PDF was pulled entirely into the worker process — risking an OOM kill that strands sibling tasks — before the existing post-goto size check could reject it. `executeScrapeTask` now inspects the main-frame response's Content-Length as soon as headers arrive and closes the page immediately when it already declares an oversized PDF, cutting the download off in flight rather than letting it finish first. A chunked or dishonestly-labelled response still falls through to the existing post-download byte check. The browser scrape layer also now falls back to a `.pdf` URL extension when content-type is missing or mislabelled (e.g. `application/octet-stream`), matching the fetch layer — previously such a response was serialized as HTML, silently losing the document.
+- **The YouTube timedtext fetch validated only the first-hop URL against its trusted-host allowlist**, then followed redirects with default (`follow`) semantics and no revalidation — a 3xx `Location` header could have carried the PoToken-bearing request to an untrusted host. Now follows redirects manually, re-validating each hop against the same allowlist, mirroring `web-scraper.ts`'s existing SSRF redirect pattern. Connect-time IP pinning was deliberately not added here: the host is Google-controlled, not attacker-supplied, so the gap was only which host the request could land on.
+- **The YouTube BotGuard attestation-server response was read with a bare `.json()` call** — no `.ok` check and no size cap on an externally-controlled body. Now checks the response status and reads through the codebase's existing `readJsonCapped`.
+- **The embedder's input-truncation guard could split a UTF-16 surrogate pair at the cut boundary**, emitting an invalid lone high surrogate into the tokenizer for text containing an astral character (emoji, rare CJK) near the cap. Backs off one unit, matching the equivalent guard already in `truncateWithMarker`.
+- **`initResearchSDK()` called while a shutdown was still in flight silently no-op'd, believing the SDK was ready.** `isInitialized` only flips to `false` near the end of `_doShutdown()` (after container disposal), so a caller landing in that window hit the "already initialized" branch and returned immediately while the container was still mid-teardown. `initResearchSDK()` now waits out any in-flight shutdown first, mirroring `shutdownResearchSDK()`'s existing symmetric wait on an in-flight init.
+
+### Deferred
+
+- A CLI SIGINT-during-init race — already closed in practice by the `initResearchSDK()` fix above, since `shutdownResearchSDK()` already awaits an in-flight init before tearing down.
+- `scripts/cleanup.cjs`'s hardcoded `.pi` config-dir fallback (vs. the runtime's `getConfigDirName()`, which additionally consults the host `pi` package) — latent, since it only diverges if pi itself ever renames its config directory, and requiring the host package from an uninstall-time script that must never fail was judged not worth the risk for a currently-inert gap.
+- A knowledge-store migration-vs-concurrent-write race (`addDocuments()` not covered by the same cross-process lock `open()` uses) — architecturally complex, needs a dedicated pass.
+
+### Verified
+
+- Every fix carries a regression test proven to fail against the pre-fix code and pass after (stash-and-rerun discipline).
+- Full suites green: 2740 unit tests, 57 + 103 integration (real browsers, including a live YouTube network fetch), lint, both type-checks, `deps:check`, the production audit gate, and the build.
+
 ## [1.4.1] - 2026-08-17
 
 v1.4.0 was tagged and pushed but never published: CI failed on every commit from the
