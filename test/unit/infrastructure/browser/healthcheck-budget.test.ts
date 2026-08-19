@@ -23,11 +23,18 @@ import { describe, it, expect } from 'vitest';
 import {
   getHealthCheckBudgetMs,
   HEALTHCHECK_MIN_BUDGET_MS,
+  COLD_START_ALLOWANCE_MS,
 } from '../../../../src/infrastructure/browser/config.ts';
 
-/** The longest a single task may legally hold a worker slot. */
+/**
+ * The longest a single task may legally hold a worker slot: its own nav budget plus
+ * overhead, plus COLD_START_ALLOWANCE_MS — a task dispatched to a freshly created or
+ * just-reset worker pays a real browser launch + context creation inline before any
+ * navigation starts (eager warmup is deliberately disabled), so that cost is part of
+ * "how long a task may legitimately hold a slot" too, not just its own timeout knobs.
+ */
 const longestSlotHold = (c: { SEARCH_TIMEOUT_MS: number; SCRAPE_TIMEOUT_MS: number; BROWSER_TASK_TIMEOUT_MS: number }) =>
-  Math.max(c.SEARCH_TIMEOUT_MS, c.SCRAPE_TIMEOUT_MS) + c.BROWSER_TASK_TIMEOUT_MS;
+  Math.max(c.SEARCH_TIMEOUT_MS, c.SCRAPE_TIMEOUT_MS) + c.BROWSER_TASK_TIMEOUT_MS + COLD_START_ALLOWANCE_MS;
 
 const DEFAULTS = {
   SEARCH_TIMEOUT_MS: 45_000,
@@ -37,8 +44,15 @@ const DEFAULTS = {
 };
 
 describe('health probe budget', () => {
-  it('is unchanged from the historical constant on a default install', () => {
-    expect(getHealthCheckBudgetMs(DEFAULTS as any)).toBe(HEALTHCHECK_MIN_BUDGET_MS);
+  it('exceeds the historical floor at default settings, once cold-start is accounted for', () => {
+    // A cold Firefox launch was always able to hold a slot for close to the historical
+    // 105s floor on its own — the floor just did not know it. Folding
+    // COLD_START_ALLOWANCE_MS into longestSlotHold makes the derived budget the binding
+    // constraint even at default timeouts; the floor now only matters for a
+    // hypothetical config where the derived value would land below it.
+    const budget = getHealthCheckBudgetMs(DEFAULTS as any);
+    expect(budget).toBeGreaterThan(HEALTHCHECK_MIN_BUDGET_MS);
+    expect(budget).toBeGreaterThan(longestSlotHold(DEFAULTS));
   });
 
   it('out-waits the longest slot hold at the schema maximum, where the fixed value did not', () => {
@@ -74,8 +88,10 @@ describe('health probe budget', () => {
 
   it('falls back to defaults rather than producing NaN from a partial config', () => {
     // setTimeout coerces NaN to 1ms, which would invert the bound into an instant
-    // failure — the one outcome worse than a budget that is too short.
-    expect(getHealthCheckBudgetMs({} as any)).toBe(HEALTHCHECK_MIN_BUDGET_MS);
+    // failure — the one outcome worse than a budget that is too short. An empty
+    // config falls back to the same schema defaults as DEFAULTS above, so it produces
+    // the same (floor-exceeding) budget, not the historical floor itself.
+    expect(getHealthCheckBudgetMs({} as any)).toBe(getHealthCheckBudgetMs(DEFAULTS as any));
     expect(Number.isFinite(getHealthCheckBudgetMs({ SEARCH_TIMEOUT_MS: undefined } as any))).toBe(true);
   });
 });

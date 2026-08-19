@@ -346,12 +346,49 @@ function isFullMockMode(): boolean {
  *     and a budget below that sum makes the fallback ladder unreachable — so raising
  *     HEALTH_CHECK_TIMEOUT_MS used to make the health check strictly worse.
  *
- * Floored at the historical 105s so default installs are unchanged.
+ * Floored at the historical 105s, kept as a floor rather than a default: the
+ * derived value now exceeds it even at default timeouts once COLD_START_ALLOWANCE_MS
+ * (below) is folded into `longestSlotHold` — a cold Firefox launch was always able to
+ * hold a slot for close to that long, the 105s floor just didn't know it. The floor
+ * still matters for a hypothetical config where the derived value would otherwise land
+ * below it.
  */
 export const HEALTHCHECK_MIN_BUDGET_MS = 45_000 + 60_000;
 
 /** Navigation attempts executeHealthCheck makes: primary, retry, fallback endpoint. */
 const HEALTHCHECK_NAV_ATTEMPTS = 3;
+
+/**
+ * Hard ceiling on a single Camoufox browser launch (see launchOnce() in
+ * thread-worker-browser.ts, the single source of truth this mirrors — CI runners
+ * (2 vCPU) can take up to ~60s to start Firefox under load, floored generously
+ * above that).
+ */
+export const BROWSER_LAUNCH_TIMEOUT_MS = 90_000;
+
+/**
+ * Hard ceiling on creating one BrowserContext against an already-launched browser
+ * (see acquireTaskContext() in thread-worker-browser.ts, the single source of
+ * truth this mirrors).
+ */
+export const CONTEXT_CREATION_TIMEOUT_MS = 30_000;
+
+/**
+ * Worst-case time a worker can spend getting a browser+context ready before it
+ * starts a task's actual work. Eager warmup is deliberately disabled (thundering-
+ * herd avoidance — see thread-worker.ts), so the first task dispatched to a
+ * freshly created or just-reset worker pays this in full, inline with the task
+ * itself. Every deadline that bounds how long a task may legitimately hold a
+ * worker slot has to include this on top of its own nav budget, or a completely
+ * normal cold start on a fresh pool reads as a dead/wedged worker — the false
+ * positive `runSearch`/`runScrape`'s task-timeout ceiling and this budget were
+ * both built to eliminate, just triggered by a different clock.
+ *
+ * Deliberately NOT part of BROWSER_TASK_TIMEOUT_MS: that value is user-tunable
+ * overhead for per-task work, and cold-start cost isn't something a user should
+ * need to account for by hand when adjusting it.
+ */
+export const COLD_START_ALLOWANCE_MS = BROWSER_LAUNCH_TIMEOUT_MS + CONTEXT_CREATION_TIMEOUT_MS;
 
 export function getHealthCheckBudgetMs(config?: Config): number {
     const c = (config || getConfig()) as Partial<Config>;
@@ -363,7 +400,8 @@ export function getHealthCheckBudgetMs(config?: Config): number {
         typeof value === 'number' && Number.isFinite(value) ? value : fallback;
     const longestSlotHold =
         Math.max(ms(c.SEARCH_TIMEOUT_MS, 45_000), ms(c.SCRAPE_TIMEOUT_MS, 15_000))
-        + ms(c.BROWSER_TASK_TIMEOUT_MS, 10_000);
+        + ms(c.BROWSER_TASK_TIMEOUT_MS, 10_000)
+        + COLD_START_ALLOWANCE_MS;
     // Mirrors the worker's own floor in executeHealthCheck.
     const probeWork = HEALTHCHECK_NAV_ATTEMPTS * Math.max(10_000, ms(c.HEALTH_CHECK_TIMEOUT_MS, 10_000));
     return Math.max(HEALTHCHECK_MIN_BUDGET_MS, longestSlotHold + probeWork);

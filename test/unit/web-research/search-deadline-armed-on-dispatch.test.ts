@@ -26,6 +26,11 @@ vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   isBrowserAvailable: vi.fn(() => true),
   getSchedulerVersion: vi.fn(() => '1.0.0'),
   generateSchedulerVersion: vi.fn(() => '1.0.0'),
+  // Zeroed so these ms-scale deadline assertions stay exact — the real cold-start
+  // allowance (browser launch + context creation) is covered separately by
+  // healthcheck-budget.test.ts and scheduler-deadline-excludes-queue-wait.test.ts's
+  // own real-config sibling tests, not this file's fast, mocked-config unit tests.
+  COLD_START_ALLOWANCE_MS: 0,
 }));
 
 vi.mock('../../../src/logger.ts', () => ({

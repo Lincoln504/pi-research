@@ -19,6 +19,9 @@ vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => (
 
 vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   getMaxWorkers: () => 2,
+  // Zeroed so this file's ms-scale deadline/timeout assertions stay exact — see
+  // search-deadline-armed-on-dispatch.test.ts for why.
+  COLD_START_ALLOWANCE_MS: 0,
 }));
 
 import { search } from '../../../src/web-research/search.ts';

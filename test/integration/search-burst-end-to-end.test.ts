@@ -75,6 +75,17 @@ vi.mock('../../src/infrastructure/browser/scheduler-factory.ts', async () => {
   };
 });
 
+// Zeroed so this file's ms-scale per-query budget stays exact; everything else in
+// config.ts stays real. The real cold-start allowance (a worker's first real Camoufox
+// launch + context creation) is out of scope here — this file replaces the worker pool
+// entirely with a synthetic one that never touches a browser, so there is nothing for
+// it to cover, and the file's whole point is dispatch/scheduler/queue timing at a
+// millisecond scale.
+vi.mock('../../src/infrastructure/browser/config.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/infrastructure/browser/config.ts')>();
+  return { ...actual, COLD_START_ALLOWANCE_MS: 0 };
+});
+
 import { performSearch } from '../../src/web-research/browser-search.ts';
 
 const WORKERS = 6;

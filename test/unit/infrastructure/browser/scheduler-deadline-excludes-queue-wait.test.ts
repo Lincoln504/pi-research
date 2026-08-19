@@ -24,6 +24,13 @@ vi.mock('../../../../src/utils/error-tracker.ts', () => ({
 vi.mock('../../../../src/utils/metrics.ts', () => ({
   metrics: { increment: vi.fn(), observe: vi.fn(), setGauge: vi.fn(), session: { increment: vi.fn(), setGauge: vi.fn(), observe: vi.fn() }, },
 }));
+// Zeroed so this file's ms-scale deadline assertions stay exact; everything else
+// (getHealthCheckBudgetMs, etc.) stays real. The real cold-start allowance itself is
+// covered by healthcheck-budget.test.ts.
+vi.mock('../../../../src/infrastructure/browser/config.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../src/infrastructure/browser/config.ts')>();
+  return { ...actual, COLD_START_ALLOWANCE_MS: 0 };
+});
 
 // One worker slot, so the second and later tasks genuinely queue behind the first.
 const poolState = vi.hoisted(() => ({ workMs: 0 }));

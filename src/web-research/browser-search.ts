@@ -5,7 +5,7 @@
  */
 
 import { runWorkerSearch } from '../infrastructure/browser/task-execution-service.ts';
-import { getMaxWorkers } from '../infrastructure/browser/config.ts';
+import { getMaxWorkers, COLD_START_ALLOWANCE_MS } from '../infrastructure/browser/config.ts';
 import { isTaskTimeoutError } from '../infrastructure/browser/browser-error-utils.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
@@ -82,8 +82,9 @@ export async function performSearch(
     // cannot stall the entire Promise.all burst.
     //
     // The budget mirrors the scheduler's own task ceiling in
-    // BrowserTaskScheduler.runSearch (= SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS)
-    // so this layer never preempts the worker's deadline with a shorter one.
+    // BrowserTaskScheduler.runSearch (= SEARCH_TIMEOUT_MS + BROWSER_TASK_TIMEOUT_MS +
+    // COLD_START_ALLOWANCE_MS) so this layer never preempts the worker's deadline with
+    // a shorter one.
     //
     // Both clocks now start at DISPATCH (see startQueryDeadline below), which is
     // what makes mirroring the value correct. While this one started at enqueue,
@@ -95,7 +96,13 @@ export async function performSearch(
     // query's worth of wait, and a burst four times the pool's reach exhausts any
     // constant. Measuring execution instead of waiting is the fix; the sum
     // survives as the budget because a search legitimately costs nav plus overhead.
-    const QUERY_TIMEOUT_MS = (config?.SEARCH_TIMEOUT_MS ?? 45_000) + (config?.BROWSER_TASK_TIMEOUT_MS ?? 10_000);
+    //
+    // COLD_START_ALLOWANCE_MS is part of the sum for the same reason it is part of
+    // the scheduler's own ceiling: the first query dispatched to a freshly created or
+    // just-reset worker pays a real browser launch + context creation inline before
+    // any navigation starts, and this layer's budget must not fire before the
+    // scheduler's own (correct, larger) deadline gets a chance to.
+    const QUERY_TIMEOUT_MS = (config?.SEARCH_TIMEOUT_MS ?? 45_000) + (config?.BROWSER_TASK_TIMEOUT_MS ?? 10_000) + COLD_START_ALLOWANCE_MS;
 
     // Deduplicated: resultMap and the failures map are both keyed by the query
     // string, so two tasks for the same string race last-writer-wins — instance A

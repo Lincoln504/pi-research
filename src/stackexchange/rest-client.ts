@@ -193,24 +193,19 @@ export class StackExchangeClient {
     });
   }
 
+  // Pure accessor — no metrics side effects. `stackexchangeCommand()` calls this
+  // repeatedly per invocation (pre-request gate checks, success footer, error
+  // footer) purely to read current state for display; incrementing counters here
+  // used to record 2-3x the real number of quota-low/exhausted events per call.
+  // The counters are incremented once, at the single gate check that actually
+  // observes each event (see stackexchange/index.ts).
   getQuotaInfo(): { remaining: number; max: number; requestCount: number; lastBackoff: number | null } {
-    const info = {
+    return {
       remaining: this.quotaRemaining,
       max: this.quotaMax,
       requestCount: this.requestCount,
       lastBackoff: this.lastBackoff,
     };
-    
-    // Track quota exhaustion events
-    if (this.isQuotaExhausted()) {
-      metrics.increment('stackexchange_quota_exhausted_total', 1);
-    }
-    
-    if (this.isQuotaLow()) {
-      metrics.increment('stackexchange_quota_low_total', 1);
-    }
-    
-    return info;
   }
 
   isQuotaExhausted(): boolean {

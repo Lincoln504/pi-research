@@ -1150,6 +1150,39 @@ describe('PlanningService', () => {
         const opts = vi.mocked(completeSimple).mock.calls.at(-1)![2] as { maxTokens?: number };
         expect(opts.maxTokens).toBeLessThanOrEqual(8192);
       });
+
+      it('warns when a round\'s fresh reports alone overflow the window — the router has no reduce path', async () => {
+        // Regression: unlike the synthesizer, the router has NO budget/partition/reduce
+        // mechanism at all — its input is bounded by team size in the common case, but
+        // nothing caps an individual researcher's fresh report body. A round with even one
+        // unusually long report can overflow a small model's window with no fallback,
+        // and previously nothing said so before the provider's own rejection.
+        const hugeFreshReport = `Topic line.\n\n${'A dense finding sentence. '.repeat(5000)}`;
+        const TINY_WINDOW_MODEL = { id: 'tiny-window-router-model', contextWindow: 20_000 } as any;
+        await svc.updatePlanForRound({
+          sessionId: 'cache-session',
+          reports: new Map([['1.1', hugeFreshReport]]),
+          round: 1,
+          maxRounds: 3,
+          query: 'test query',
+          complexity: 2 as const,
+          model: TINY_WINDOW_MODEL,
+          modelRegistry: MOCK_MODEL_REGISTRY,
+          cwd: '/test/cwd',
+        } as any);
+        const warned = vi.mocked(logger.warn).mock.calls
+          .map(c => c.map(String).join(' '))
+          .some(m => m.includes('has no reduce path for an over-budget round'));
+        expect(warned).toBe(true);
+      });
+
+      it('does not warn when a round\'s evidence comfortably fits the window', async () => {
+        await route(2, round2Reports, new Map([['1.1', D1], ['2.1', D2]]));
+        const warned = vi.mocked(logger.warn).mock.calls
+          .map(c => c.map(String).join(' '))
+          .some(m => m.includes('has no reduce path for an over-budget round'));
+        expect(warned).toBe(false);
+      });
     });
 
     describe('synthesis', () => {
@@ -1571,6 +1604,29 @@ describe('PlanningService — synthesis over an oversized corpus', () => {
     const warned = vi.mocked(logger.warn).mock.calls
       .map(c => c.map(String).join(' '))
       .some(m => m.includes('Sending it anyway'));
+    expect(warned).toBe(true);
+  });
+
+  it('warns when the source list/run context alone overflow the window, even though the reduced corpus fits its budget', async () => {
+    // Regression: below MIN_SYNTHESIS_CORPUS_CHARS, budgetChars is a fixed floor, not a
+    // value derived from the window — so a corpus that fits comfortably under the floor
+    // (finalSize <= budgetChars) never tripped the old check, even when the global source
+    // list (every citation the run collected, each with a free-text description) is large
+    // enough on its own to overflow the real context window. A CITED LINKS section is
+    // stripped from the corpus by normalizeCitations, so a report can carry hundreds of
+    // citations while contributing almost nothing to `finalSize`.
+    const manyCitations = Array.from({ length: 2000 }, (_, i) =>
+      `[${i + 1}] https://example.com/page-${i + 1} — ${'finding detail '.repeat(6)}`).join('\n');
+    const reportWithHugeCitationList = `Topic line.\n\nOne short finding.\n\nCITED LINKS\n${manyCitations}`;
+    const TINY_WINDOW_MODEL = { id: 'tiny-window-model', contextWindow: 30_000 } as any;
+
+    await synthesize(new Map([['1.1', reportWithHugeCitationList]]), TINY_WINDOW_MODEL);
+
+    // Single pass — the corpus itself never triggered the reduce loop.
+    expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1);
+    const warned = vi.mocked(logger.warn).mock.calls
+      .map(c => c.map(String).join(' '))
+      .some(m => m.includes('large enough on their own to overflow the window'));
     expect(warned).toBe(true);
   });
 

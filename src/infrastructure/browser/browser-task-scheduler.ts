@@ -23,7 +23,7 @@ import type { IScheduler, TaskDispatchListener } from '../../core/interfaces/sch
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
 import { raceWithDeadline } from '../../utils/safe-unref.ts';
 import { PriorityTaskQueue } from './priority-task-queue.ts';
-import { getHealthCheckBudgetMs } from './config.ts';
+import { getHealthCheckBudgetMs, COLD_START_ALLOWANCE_MS } from './config.ts';
 
 /**
  * Grace added to the worker's own task budget before the dead-worker backstop
@@ -273,12 +273,17 @@ export class BrowserTaskScheduler implements IScheduler {
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
 
-        // Task timeout = the search nav budget (SEARCH_TIMEOUT_MS) + a queue-wait/overhead
-        // margin (BROWSER_TASK_TIMEOUT_MS). Deriving from SEARCH_TIMEOUT_MS keeps the task
-        // ceiling coherent with the worker's own nav timeout — using a flat base here would
-        // kill a search before it had used its full nav budget.
+        // Task timeout = the search nav budget (SEARCH_TIMEOUT_MS) + an overhead margin
+        // (BROWSER_TASK_TIMEOUT_MS) + a cold-start allowance (COLD_START_ALLOWANCE_MS).
+        // Deriving from SEARCH_TIMEOUT_MS keeps the task ceiling coherent with the
+        // worker's own nav timeout — using a flat base here would kill a search before
+        // it had used its full nav budget. The cold-start term matters because eager
+        // browser warmup is deliberately disabled: the first search dispatched to a
+        // freshly created or just-reset worker pays a real Camoufox launch + context
+        // creation inline, before any navigation even starts — without this term that
+        // legitimate cold start reads as a dead/wedged worker (see COLD_START_ALLOWANCE_MS).
         const cfg = config || getConfig();
-        const timeoutMs = cfg.SEARCH_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
+        const timeoutMs = cfg.SEARCH_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS + COLD_START_ALLOWANCE_MS;
 
         // The deadline measures EXECUTION, not queue wait: the timer is armed by
         // `startDeadline()` from inside the enqueued callback, i.e. once the queue has
@@ -413,11 +418,13 @@ export class BrowserTaskScheduler implements IScheduler {
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        // Task timeout = the scrape nav budget (SCRAPE_TIMEOUT_MS) + the queue-wait/overhead
-        // margin (BROWSER_TASK_TIMEOUT_MS), mirroring the search path so both stay coherent.
+        // Task timeout = the scrape nav budget (SCRAPE_TIMEOUT_MS) + an overhead margin,
+        // mirroring the search path so both stay coherent. The mocked branch skips the
+        // cold-start allowance deliberately: PI_RESEARCH_MOCK_SCRAPE implies no real
+        // Camoufox launch is expected for scrape tasks, so there is nothing to budget for.
         const cfg = config || getConfig();
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-        const timeoutMs = cfg.SCRAPE_TIMEOUT_MS + (isMocking ? 5000 : cfg.BROWSER_TASK_TIMEOUT_MS);
+        const timeoutMs = cfg.SCRAPE_TIMEOUT_MS + (isMocking ? 5000 : cfg.BROWSER_TASK_TIMEOUT_MS + COLD_START_ALLOWANCE_MS);
 
         // Armed on dispatch, not on enqueue — see runSearch for why.
         // See runSearch: dispatch time is tracked for measurement, not for the deadline.

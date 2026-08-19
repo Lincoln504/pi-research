@@ -82,10 +82,16 @@ export const ConfigSchema = Type.Object({
   SEARCH_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 45000 }),
   /** TUI refresh debounce in milliseconds (default: 100ms) */
   TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
-  /** Queue-wait / overhead margin (ms) added on top of each browser operation's own nav
-   *  timeout to form its scheduler task-timeout ceiling: a search task times out after
-   *  SEARCH_TIMEOUT_MS + this, a scrape after SCRAPE_TIMEOUT_MS + this. Sized so a task is
-   *  never killed before it has used its full nav budget plus time waiting in the queue.
+  /** Overhead margin (ms) added on top of each browser operation's own nav timeout to
+   *  form its scheduler task-timeout ceiling: a search task times out after
+   *  SEARCH_TIMEOUT_MS + this, a scrape after SCRAPE_TIMEOUT_MS + this — covering
+   *  per-task work beyond raw navigation (page setup, result parsing). Queue wait is
+   *  NOT part of this margin: the deadline is armed on dispatch, not on enqueue, so
+   *  time spent waiting for a free worker never counts against it (see
+   *  browser-task-scheduler.ts). Cold browser-launch/context-creation time is also
+   *  separate from this margin — COLD_START_ALLOWANCE_MS
+   *  (infrastructure/browser/config.ts) covers that unconditionally on top of it,
+   *  since it isn't something a user should need to tune.
    *  (default: 10000) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** Timeout for coordinator/research-lead/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-30min).

@@ -717,14 +717,38 @@ export class PlanningService implements IPlanningService {
       };
 
       const responseText = isRouter
-        ? await this.callLead({
-            ...callOptions,
-            systemPrompt: populate(''),
-            userMessage: buildRouterMessage(...this.buildRouterEvidence(options, round), runContext),
-            maxTokens: ROUTER_MAX_TOKENS,
-            component: 'router',
-            label: 'router-updatePlanForRound',
-          })
+        ? await (() => {
+            const routerMessage = buildRouterMessage(...this.buildRouterEvidence(options, round), runContext);
+            // The router carries no reduce mechanism the way synthesizeCorpus does — a
+            // routing decision made from PARTITIONED evidence isn't naturally mergeable
+            // the way synthesis prose is, and this call's output is a structured JSON
+            // delegate plan, not free text. Its input is bounded by team size in the
+            // common case (digests for earlier rounds are already capped — see
+            // MAX_DIGEST_CHARS), but nothing caps an individual researcher's fresh report
+            // body, so a round with a few unusually long reports can still overflow the
+            // window with no reduce path to fall back on. Warn rather than fail silently;
+            // the provider's own rejection is still the actual backstop, same as the
+            // synthesizer's over-budget-after-every-pass case above.
+            const window = model.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
+            const estimatedTokens = routerMessage.length / CHARS_PER_TOKEN + ROUTER_MAX_TOKENS + SYNTHESIS_OVERHEAD_TOKENS;
+            if (estimatedTokens > window) {
+              logger.warn(
+                `[PlanningService] Router request for ${model.id} is an estimated ` +
+                `${Math.round(estimatedTokens)} tokens against a ${window}-token context window ` +
+                `(evidence ${routerMessage.length} chars, output ceiling ${ROUTER_MAX_TOKENS} tokens). ` +
+                `Unlike the synthesizer, the router has no reduce path for an over-budget round — ` +
+                `sending it anyway, the provider may reject this request.`,
+              );
+            }
+            return this.callLead({
+              ...callOptions,
+              systemPrompt: populate(''),
+              userMessage: routerMessage,
+              maxTokens: ROUTER_MAX_TOKENS,
+              component: 'router',
+              label: 'router-updatePlanForRound',
+            });
+          })()
         : await this.synthesizeCorpus({ ...callOptions, reports, runContext, populate });
 
       // Extract and validate JSON
@@ -1112,6 +1136,29 @@ export class PlanningService implements IPlanningService {
         `[PlanningService] Synthesis corpus is still ${finalSize} chars after ` +
         `${MAX_SYNTHESIS_REDUCE_PASSES} reduce pass(es), over the ${budgetChars}-char budget for ` +
         `${args.model.id}. Sending it anyway — the provider may reject this request.`,
+      );
+    }
+
+    // budgetChars alone can UNDER-report overflow risk once it hits MIN_SYNTHESIS_CORPUS_CHARS:
+    // below that point it is a fixed floor, not a value derived from the window, so a reduced
+    // corpus that fits comfortably under the floor can still combine with a large global source
+    // list and/or run context (neither bounded, both already subtracted from budgetChars but not
+    // from THIS check) to overflow the real window — the same failure class the budget exists to
+    // prevent, just triggered by those two inputs growing instead of the corpus. Check the actual
+    // total request against the actual window directly, independent of any floor.
+    const window = args.model.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
+    const estimatedTotalTokens =
+      (finalSize + globalSourceList.length + runContext.length) / CHARS_PER_TOKEN +
+      config.SYNTHESIS_MAX_TOKENS + SYNTHESIS_OVERHEAD_TOKENS;
+    if (estimatedTotalTokens > window) {
+      logger.warn(
+        `[PlanningService] Synthesis request for ${args.model.id} is an estimated ` +
+        `${Math.round(estimatedTotalTokens)} tokens against a ${window}-token context window ` +
+        `(corpus ${finalSize} chars, source list ${globalSourceList.length} chars, run context ` +
+        `${runContext.length} chars, output ceiling ${config.SYNTHESIS_MAX_TOKENS} tokens) — the ` +
+        `source list and/or run context are large enough on their own to overflow the window even ` +
+        `though the reduced corpus fits its budget. Sending it anyway — the provider may reject ` +
+        `this request.`,
       );
     }
 

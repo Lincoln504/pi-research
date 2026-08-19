@@ -11,7 +11,7 @@
 import { platform } from 'node:os';
 import { setupMocking } from './thread-worker-messaging.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
-import { resolveHeadlessMode } from './config.ts';
+import { resolveHeadlessMode, BROWSER_LAUNCH_TIMEOUT_MS, CONTEXT_CREATION_TIMEOUT_MS } from './config.ts';
 
 let browser: any = null;
 let initPromise: Promise<void> | null = null;
@@ -198,8 +198,12 @@ export async function initBrowser(): Promise<void> {
         //
         // 90s launch timeout: CI runners (2 vCPU) need up to 60s to start Firefox
         // when it has both CPUs. The old 45s limit was too tight and caused silent
-        // init failures under resource pressure.
-        const launchTimeoutMs = 90000;
+        // init failures under resource pressure. Imported from config.ts (single
+        // source of truth) rather than a local literal — the scheduler's task
+        // deadlines (browser-task-scheduler.ts) and the healthcheck budget
+        // (getHealthCheckBudgetMs) both have to budget for this exact worst case,
+        // via COLD_START_ALLOWANCE_MS.
+        const launchTimeoutMs = BROWSER_LAUNCH_TIMEOUT_MS;
         const launchOnce = async (headless: boolean | 'virtual') => {
           const launchPromise = Camoufox({
             headless,
@@ -370,8 +374,8 @@ export async function acquireTaskContext(): Promise<any> {
       new Promise<never>((_, reject) => {
         contextTimeoutId = setTimeout(() => {
           contextRaceLost = true;
-          reject(new Error('Browser context creation timed out after 30000ms'));
-        }, 30000);
+          reject(new Error(`Browser context creation timed out after ${CONTEXT_CREATION_TIMEOUT_MS}ms`));
+        }, CONTEXT_CREATION_TIMEOUT_MS);
       })
     ]);
   } finally {

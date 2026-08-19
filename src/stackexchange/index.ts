@@ -27,6 +27,7 @@ import {
 } from './output/compact.ts';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
 
 function notify(
   ctx: ExtensionContext,
@@ -86,6 +87,7 @@ export async function stackexchangeCommand(options: {
   try {
     // Check quota before making requests
     if (client.isQuotaExhausted()) {
+      metrics.increment('stackexchange_quota_exhausted_total', 1);
       const quota = client.getQuotaInfo();
       notify(
         ctx,
@@ -103,6 +105,7 @@ export async function stackexchangeCommand(options: {
 
     // Warn if quota is low
     if (client.isQuotaLow()) {
+      metrics.increment('stackexchange_quota_low_total', 1);
       const quota = client.getQuotaInfo();
       notify(
         ctx,

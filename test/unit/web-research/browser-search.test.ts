@@ -21,6 +21,9 @@ vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   isBrowserAvailable: vi.fn(() => true),
   getSchedulerVersion: vi.fn(() => '1.0.0'),
   generateSchedulerVersion: vi.fn(() => '1.0.0'),
+  // Zeroed so this file's ms-scale deadline assertions stay exact — see
+  // search-deadline-armed-on-dispatch.test.ts for why.
+  COLD_START_ALLOWANCE_MS: 0,
 }));
 
 // Mock the logger
