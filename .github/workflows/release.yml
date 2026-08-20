@@ -230,9 +230,17 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # No actions/checkout: this job never reads repository source, only the
-      # vetted tarball artifact — smaller footprint, nothing here for a
-      # compromised action or workflow-file edit downstream of checkout to target.
+      # Checkout is only for .nvmrc (setup-node's node-version-file needs it on
+      # disk) — this job still never reads repository source for anything else,
+      # and never runs a step that executes a dependency's lifecycle scripts.
+      # persist-credentials: false since this job has no reason to write to git.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .nvmrc
+          sparse-checkout-cone-mode: false
+
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
