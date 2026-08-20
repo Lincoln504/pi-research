@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.2] - 2026-08-19
+## [1.4.3] - 2026-08-19
+
+v1.4.2 was tagged and pushed but never published: the release workflow's
+`publish` job restructuring below (removing `actions/checkout` entirely, to
+close the OIDC-exposure gap) also removed `.nvmrc`, which `actions/setup-node`
+needs on disk — the job failed at the very first step, before ever reaching
+`npm publish`. No package was published under 1.4.2; this is that fix,
+re-tagged as 1.4.3.
+
+### Fixed
+
+- **The `publish` job failed immediately: `actions/setup-node`'s `node-version-file: '.nvmrc'` requires that file on disk, and the job no longer checked out the repository at all.** Restored via a minimal sparse checkout of just `.nvmrc` — checkout itself executes no dependency code, so the actual guarantee the OIDC-exposure fix established (no `npm ci`/`install`, hence no untrusted lifecycle scripts, in the credential-holding job) is unaffected.
+
+## [1.4.2] - 2026-08-19 (tagged, never published — see 1.4.3)
 
 Five further fresh-eyes audit rounds on top of 1.4.1, covering subsystems the
 1.4.1 audit hadn't reached: scripts/config/CLI, knowledge-store/embedding, and
