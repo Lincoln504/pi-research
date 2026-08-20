@@ -1,17 +1,28 @@
 /**
- * research tool — run-failure rate-limit classification
+ * research tool — own-schema parameter validation, and headless steering-clear
+ * concurrency guard.
  *
- * The outer catch of the research tool reports a graceful "halted due to rate
- * limit" message when the error looks like a provider throttle. "429" must match
- * on a word boundary (mirroring messageIsTransient in web-research/retry-utils.ts):
- * a plain substring test also matched digits embedded in larger numbers — e.g. a
- * context-overflow error quoting "you requested 142935 tokens" — misreporting the
- * run as rate-limited and telling the user to simply wait and retry.
+ * Regression 1: unlike every sibling tool (search, scrape, security_search,
+ * stackexchange, youtube_transcript, research_knowledge_search), the `research`
+ * tool's execute() cast `params as ResearchParams` with no runtime Value.Check —
+ * a malformed tool call (e.g. a non-string query from a weak model or a
+ * non-schema-respecting SDK caller) reached orch.runResearch() relying entirely
+ * on incidental downstream checks instead of a guaranteed up-front rejection.
+ *
+ * Regression 2: the headless cleanup() closure used to call
+ * clearSteeringMessages(piSessionId) unconditionally, AFTER teardownUi() had
+ * already made its own (headless-blind, since getPiActivePanels never sees a
+ * headless run) decision about whether to clear. A finishing headless run could
+ * wipe a concurrent sibling headless run's queued/active steering with no error
+ * or indication to either caller. getActiveResearchRunCount (backed by the
+ * `aborts` map, populated by BOTH the TUI and headless branches) fixes the
+ * blind guard; removing the second unconditional clear closes the bypass.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createResearchTool } from '../../../src/tools/research-tool-definition.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import { getService } from '../../../src/core/service-registry.ts';
+import { clearSteeringMessages, getActiveResearchRunCount } from '../../../src/orchestration/session-state.ts';
 
 vi.mock('../../../src/config.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/config.ts')>();
@@ -80,6 +91,7 @@ vi.mock('../../../src/utils/input-validation.ts', () => ({
 
 vi.mock('../../../src/orchestration/session-state.ts', () => ({
   startResearchSession: vi.fn(() => 'session-123'),
+  endResearchSession: vi.fn(),
   registerSessionAbort: vi.fn(),
   clearSteeringMessages: vi.fn(),
   getActiveResearchRunCount: vi.fn(() => 0),
@@ -126,41 +138,68 @@ function mockRunResearchRejection(error: Error): void {
   });
 }
 
-describe('research tool — rate-limit classification of run failures', () => {
+describe('research tool — own parameter schema validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('classifies a standalone 429 status as a rate limit (graceful halt message)', async () => {
-    mockRunResearchRejection(new Error('Request failed with status code 429'));
-
+  it('rejects a non-string query without ever calling the orchestrator', async () => {
     const tool = createResearchTool();
-    const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
-    const text = (result.content[0] as any).text as string;
+    const result = await tool.execute('call-1', { query: 12345 as unknown as string }, undefined, () => {}, makeCtx());
 
-    expect(text).toContain('halted gracefully');
-    expect(text).toContain('rate limit');
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+    expect(getService).not.toHaveBeenCalled();
   });
 
-  it('does NOT classify a context-overflow error quoting a token count containing "429" as a rate limit', async () => {
-    mockRunResearchRejection(new Error("This model's maximum context length is 131072 tokens, however you requested 142935 tokens"));
-
+  it('rejects a non-array excludeTools without ever calling the orchestrator', async () => {
     const tool = createResearchTool();
-    const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
-    const text = (result.content[0] as any).text as string;
+    const result = await tool.execute(
+      'call-1',
+      { query: 'test', excludeTools: 'search' as unknown as string[] },
+      undefined,
+      () => {},
+      makeCtx()
+    );
 
-    expect(text).toContain('Research failed:');
-    expect(text).toContain('142935 tokens');
-    expect(text.toLowerCase()).not.toContain('rate limit');
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+    expect(getService).not.toHaveBeenCalled();
   });
 
-  it('still classifies provider quota wording as a rate limit', async () => {
-    mockRunResearchRejection(new Error('insufficient_quota: You exceeded your current quota'));
+  it('still accepts a well-formed call (schema check is not over-strict)', async () => {
+    mockRunResearchRejection(new Error('irrelevant failure, just proving we got past validation'));
 
     const tool = createResearchTool();
-    const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
-    const text = (result.content[0] as any).text as string;
+    const result = await tool.execute('call-1', { query: 'test query' }, undefined, () => {}, makeCtx());
 
-    expect(text).toContain('halted gracefully');
+    expect(result.details).not.toMatchObject({ error: 'invalid_parameters' });
+    expect(getService).toHaveBeenCalled();
+  });
+});
+
+describe('research tool — headless steering-clear concurrency guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does NOT clear steering when another run is still active in the session', async () => {
+    vi.mocked(getActiveResearchRunCount).mockReturnValue(2);
+    mockRunResearchRejection(new Error('run failure, unrelated to steering'));
+
+    const tool = createResearchTool();
+    await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
+
+    expect(clearSteeringMessages).not.toHaveBeenCalled();
+  });
+
+  it('clears steering exactly once when this is the last active run', async () => {
+    vi.mocked(getActiveResearchRunCount).mockReturnValue(1);
+    mockRunResearchRejection(new Error('run failure, unrelated to steering'));
+
+    const tool = createResearchTool();
+    await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
+
+    // Pre-fix this was 2: once from teardownUi's own guarded call, once more
+    // unconditionally from inside the headless cleanup() closure.
+    expect(clearSteeringMessages).toHaveBeenCalledTimes(1);
   });
 });

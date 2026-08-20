@@ -480,7 +480,11 @@ export function uninstallSkill(toolIds?: string[], opts: InstallOptions = {}): U
   }
 
   for (const { tool, path: skillPath } of targets.values()) {
-    if (toolIds && toolIds.length && !toolIds.includes(tool)) {
+    // undefined = every manifest entry; an explicit (including empty) list means
+    // exactly those tools. `toolIds.length` used to gate this, so `[]` was
+    // indistinguishable from `undefined` and silently uninstalled everything —
+    // inconsistent with this file's other list params, where empty means none.
+    if (toolIds !== undefined && !toolIds.includes(tool)) {
       const e = manifest.entries.find(x => x.path === skillPath);
       if (e) keep.push(e);
       continue;

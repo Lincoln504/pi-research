@@ -98,16 +98,6 @@ export function createSecuritySearchTool(options: {
           };
       }
 
-      // Record call in tracker - returns false if limit reached
-      const allowed = options.tracker.recordCall('security_search');
-      if (!allowed) {
-          metrics.increment('tool_security_search_calls_total', 1, { status: 'rate_limited' });
-          return {
-            content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
-            details: { blocked: true, reason: 'limit_reached' },
-          };
-      }
-
       const p = params as SecuritySearchParamsType;
 
       const terms = p.terms;
@@ -159,6 +149,19 @@ export function createSecuritySearchTool(options: {
         }
       }
       const maxResults = p.maxResults ?? 20;
+
+      // Record call in tracker - returns false if limit reached. Deliberately AFTER
+      // every semantic-validation reject above (terms/databases/severity), same
+      // reasoning as the schema check: a rejected call did no work and must not
+      // permanently consume one of the researcher's shared MAX_GATHERING_CALLS slots.
+      const allowed = options.tracker.recordCall('security_search');
+      if (!allowed) {
+          metrics.increment('tool_security_search_calls_total', 1, { status: 'rate_limited' });
+          return {
+            content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
+            details: { blocked: true, reason: 'limit_reached' },
+          };
+      }
 
       metrics.increment('tool_security_search_terms_total', terms.length);
       metrics.increment('tool_security_search_databases_total', databases.length);

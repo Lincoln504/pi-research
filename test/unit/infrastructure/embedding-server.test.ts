@@ -337,5 +337,42 @@ describe('EmbeddingServer', () => {
       expect(embedSpy).not.toHaveBeenCalled();
       expect(embedManySpy).not.toHaveBeenCalled();
     });
+
+    it('does not dispose the embedder while a legitimately slow (not hung) embed is still in flight', async () => {
+      // shutdown() runs on ORDINARY leadership loss too, not just the poison path.
+      // A large embedMany batch can legitimately still be executing (well within
+      // the SerialQueue's own 120s soft timeout) when a leadership-check tick fires
+      // shutdown() concurrently. Pre-fix, disposeEmbedder's only guard was
+      // Embedder.dispose()'s own 5s drain — an order of magnitude under what the
+      // queue itself considers "still healthy work" — so dispose() could run
+      // concurrently with this still-executing native call.
+      let resolveEmbed!: () => void;
+      const embedPromise = new Promise<Float32Array>((resolve) => {
+        resolveEmbed = () => resolve(new Float32Array([1]));
+      });
+      const disposeSpy = vi.fn().mockResolvedValue(undefined);
+      const embedder = { embed: vi.fn().mockReturnValue(embedPromise), dispose: disposeSpy } as any;
+      const sm = {
+        getEmbeddingServer: vi.fn().mockResolvedValue(null),
+        clearEmbeddingServer: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      const s = new EmbeddingServer(embedder, sm, 'inflight-dispose-test');
+
+      const embedCall = s.embed('slow query');
+      // Let the queue actually start the work before shutdown races it.
+      await new Promise((r) => setTimeout(r, 0));
+
+      const shutdownPromise = s.shutdown();
+      // Several more macrotask ticks pass with the embed still unsettled — dispose
+      // must not have run yet.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(disposeSpy).not.toHaveBeenCalled();
+
+      resolveEmbed();
+      await embedCall;
+      await shutdownPromise;
+
+      expect(disposeSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });

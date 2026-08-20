@@ -482,7 +482,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      # persist-credentials: false — this job's own `npm ci` below runs full
+      # lifecycle scripts (on any cache miss) against every dependency. The
+      # default persist-credentials: true would write the write-scoped
+      # GITHUB_TOKEN into .git/config on disk before that untrusted code runs,
+      # letting a compromised postinstall/prepare script push directly to the
+      # branch (or read the token out of git config) with no review — on any
+      # branch push, not just main. The token is instead materialized only
+      # in-memory, only in the push step below, only after every other step
+      # (including npm ci) has already run.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
@@ -510,6 +521,8 @@ jobs:
         # contents:write. The dep-graph rules check and SVG regeneration above
         # still run on PRs — we just don't commit the result back.
         if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -518,7 +531,7 @@ jobs:
             echo "docs/deps.svg unchanged, nothing to commit"
           else
             git commit -m "chore(ci): regenerate docs/deps.svg (detailed module graph) [skip ci]"
-            git push
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${{ github.ref_name }}"
           fi
 
   validate:
@@ -557,13 +570,13 @@ jobs:
           key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         # Skip the ~100MB camoufox fetch: this job's own tree never launches a
-        # browser, and the unauthenticated GitHub-releases query is rate-limited
-        # on shared macOS/Windows runner IPs — the fetch then fails (harmlessly,
-        # exit 0) after burning up to the full spawn timeout on all three legs.
-        # The token matches the integration job for anything that still asks.
+        # browser. No GITHUB_TOKEN here (unlike the integration job's equivalent
+        # step): setup.cjs checks PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD first and
+        # returns before ever reaching the GitHub-releases fetch the token would
+        # authenticate, so passing it only handed a live token to every other
+        # dependency's postinstall/prepare script for no functional reason.
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm ci --legacy-peer-deps
       - name: Validate package.json
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('OK',p.name+'@'+p.version)"

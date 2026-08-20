@@ -84,21 +84,27 @@ jobs:
           done
 
   test-install:
-    name: Test packed tarball install
+    name: Build, verify, and test packed tarball install
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: require-ci-green
-    # No id-token here: this job only checks out, builds, packs, and installs the
-    # tarball — it never publishes and has no legitimate use for the OIDC
-    # trusted-publishing credential. It DOES run `npm ci` with full lifecycle
-    # scripts (no --ignore-scripts) against the same lockfile CI already
-    # validated, so scoping this down matters: without it, a malicious
-    # postinstall/prepare script in any dependency could request an OIDC token via
-    # ACTIONS_ID_TOKEN_REQUEST_TOKEN/URL and exchange it for a scoped npm publish
-    # credential — bypassing lint/audit-gate/type-check/tests entirely, since npm's
-    # trusted-publishing verification is keyed to repo+workflow file, not job name.
+    # No id-token here: this job runs `npm ci` with full lifecycle scripts (no
+    # --ignore-scripts) against every dependency, so it must never hold the OIDC
+    # trusted-publishing credential — a malicious postinstall/prepare script could
+    # otherwise request one via ACTIONS_ID_TOKEN_REQUEST_TOKEN/URL and exchange it
+    # for a scoped npm publish credential, bypassing every check below entirely
+    # (npm's trusted-publishing verification is keyed to repo+workflow file, not
+    # job name). This job now ALSO runs the full check suite (lint/audit-gate/
+    # type-check/deps:check/test:unit) that used to live in `publish` — moved here
+    # for the same reason: `publish` must never run `npm ci` at all (see its
+    # comment), so every check that depends on node_modules has to happen in a job
+    # where the credential-minting capability isn't present. The resulting tarball
+    # is uploaded as an artifact; `publish` downloads and ships that exact,
+    # already-vetted file without ever installing a dependency itself.
     permissions:
       contents: read
+    outputs:
+      tar_file: ${{ steps.pack.outputs.tar_file }}
     steps:
       - uses: actions/checkout@v7
 
@@ -113,20 +119,57 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           test "$TAG" = "$VERSION" || { echo "ERROR: Tag $TAG != package.json v$VERSION"; exit 1; }
 
-      - name: Build and pack
-        # Skip the camoufox/native downloads during install — the release jobs
-        # never launch a browser, so a live fetch only adds latency and flake.
-        env:
+      - name: Verify version sync across artifacts
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          grep -q "\"version\": \"$VERSION\"" skills/pi-research/SKILL.md || { echo "ERROR: skills/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
+          echo "OK: package.json and SKILL.md both at v$VERSION"
+
+      # Skip the camoufox/native downloads during install — the release jobs
+      # never launch a browser, so a live fetch only adds latency and flake.
+      - env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
+        run: npm ci --legacy-peer-deps
+      # Self-heal the @lancedb/lancedb native binding (npm/cli#4828 can drop it),
+      # mirroring the CI unit-test job. test:unit loads the binding via
+      # store.initialize(), so without this a dropped binding would flake the release.
+      - name: Ensure native bindings
+        run: node scripts/ensure-native-deps.cjs
+      # ripgrep: mirror the CI unit-test environment (the SDK grep tool shells out to
+      # rg) so the unit suite runs identically here — no environment-driven flake.
+      - name: Install ripgrep
+        timeout-minutes: 5
+        run: sudo apt-get install -y ripgrep
+      # This publish gate re-runs the SAME fast, deterministic blocking checks CI
+      # runs on every push to main (lint, prod-dep audit, both type-checks,
+      # architectural dep rules, unit suite, tarball manifest). The heavyweight
+      # cross-OS unit/integration matrix and the real-browser (Camoufox) suites live
+      # in ci.yml; the require-ci-green job above BLOCKS this whole release until that
+      # workflow has succeeded for the tagged commit, so the two no longer race.
+      - run: npm run lint
+      # Production-dependency security gate — identical to the CI lint job. Blocks the
+      # publish on any moderate+ advisory in the SHIPPED tree that is not explicitly
+      # allowlisted (with a reviewed upstream-blocked justification) in
+      # config/tooling/audit-exceptions.json. See scripts/audit-gate.cjs.
+      - name: Audit production dependencies
+        run: node scripts/audit-gate.cjs
+      - run: npm run type-check
+      - run: npm run type-check:tests
+      # Architectural dependency rules — mirrors the CI dep-graph job's gate.
+      - run: npm run deps:check
+      - run: npm run test:unit
+
+      - name: Build and pack
+        id: pack
         run: |
-          npm ci --legacy-peer-deps
           npm run build:worker
           npm run build:cli
           npm run build:skill
           npm pack
           TAR_FILE="$(ls *.tgz)"
           echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
+          echo "tar_file=$TAR_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Verify tarball manifest (required files present, no junk)
         run: node scripts/verify-package.cjs manifest
@@ -161,85 +204,43 @@ jobs:
           node node_modules/@lincoln504/pi-research/skills/pi-research/scripts/run.mjs --help > /dev/null
           echo "OK: Install smoke-test passed (files present AND the installed CLI runs)"
 
+      - name: Upload vetted tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: ${{ env.TAR_FILE }}
+          retention-days: 1
+
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     needs: test-install
-    # id-token is scoped to ONLY this job — it's the sole step in this workflow that
-    # legitimately needs the OIDC trusted-publishing credential (see the top-level
-    # permissions block and test-install's comment for why granting it any wider is
-    # a real supply-chain risk, not a theoretical one: this job's own `npm ci`
-    # below runs full lifecycle scripts against every dependency BEFORE any of this
-    # job's own lint/audit-gate/type-check/test steps execute).
+    # id-token is scoped to ONLY this job — the sole job in this workflow that
+    # legitimately needs the OIDC trusted-publishing credential — and this job
+    # deliberately does NOT run `npm ci`, `npm install`, or any other step that
+    # executes a dependency's lifecycle scripts. It only downloads the exact
+    # tarball `test-install` already built, checked, and smoke-tested from a
+    # trusted lockfile, and uploads that unmodified file. Publishing a tarball
+    # path (rather than a package directory) does not run prepublishOnly/prepare/
+    # prepack — there is no package.json lifecycle to trigger. This closes the gap
+    # where the credential used to be live in the same job as an untrusted `npm
+    # ci` (see the removed comment in git history / CHANGELOG for the prior shape).
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
-
-      # NOTE: registry-url is intentionally OMITTED here. We publish via npm
-      # OIDC "Trusted Publishing" (GA since npm v11.5.1), which exchanges a
-      # short-lived GitHub OIDC token for a scoped publish credential and needs
-      # NO long-lived NPM_TOKEN. Crucially, passing `registry-url` to
-      # actions/setup-node makes it write `_authToken=${NODE_AUTH_TOKEN}` into
-      # .npmrc using the (npm-invalid) GITHUB_TOKEN — and npm only takes the
-      # OIDC path when it finds NO other auth, so that injected token would
-      # suppress the OIDC exchange and the publish would fail with ENEEDAUTH.
-      # The `cache: 'npm'` input works without registry-url; npmjs.org is the
-      # default registry, so neither `npm ci` nor `npm publish` needs it here.
+      # No actions/checkout: this job never reads repository source, only the
+      # vetted tarball artifact — smaller footprint, nothing here for a
+      # compromised action or workflow-file edit downstream of checkout to target.
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
 
-      - name: Verify tag matches version
-        run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          TAG="${GITHUB_REF_NAME#v}"
-          test "$TAG" = "$VERSION" || { echo "ERROR: Tag $TAG != package.json v$VERSION"; exit 1; }
-
-      - name: Verify version sync across artifacts
-        run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          grep -q "\"version\": \"$VERSION\"" skills/pi-research/SKILL.md || { echo "ERROR: skills/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
-          echo "OK: package.json and SKILL.md both at v$VERSION"
-
-      - env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-          ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
-        run: npm ci --legacy-peer-deps
-      # Self-heal the @lancedb/lancedb native binding (npm/cli#4828 can drop it),
-      # mirroring the CI unit-test job. test:unit loads the binding via
-      # store.initialize(), so without this a dropped binding would flake the release.
-      - name: Ensure native bindings
-        run: node scripts/ensure-native-deps.cjs
-      # ripgrep: mirror the CI unit-test environment (the SDK grep tool shells out to
-      # rg) so the unit suite runs identically here — no environment-driven flake.
-      - name: Install ripgrep
-        timeout-minutes: 5
-        run: sudo apt-get install -y ripgrep
-      # This publish gate re-runs the SAME fast, deterministic blocking checks CI
-      # runs on every push to main (lint, prod-dep audit, both type-checks,
-      # architectural dep rules, unit suite, tarball manifest). The heavyweight
-      # cross-OS unit/integration matrix and the real-browser (Camoufox) suites live
-      # in ci.yml; the require-ci-green job above BLOCKS this whole release until that
-      # workflow has succeeded for the tagged commit, so the two no longer race. The
-      # test-install job additionally packs and installs the real tarball in a clean
-      # project (mirrors CI's validate job).
-      - run: npm run lint
-      # Production-dependency security gate — identical to the CI lint job. Blocks the
-      # publish on any moderate+ advisory in the SHIPPED tree that is not explicitly
-      # allowlisted (with a reviewed upstream-blocked justification) in
-      # config/tooling/audit-exceptions.json. See scripts/audit-gate.cjs.
-      - name: Audit production dependencies
-        run: node scripts/audit-gate.cjs
-      - run: npm run type-check
-      - run: npm run type-check:tests
-      # Architectural dependency rules — mirrors the CI dep-graph job's gate.
-      - run: npm run deps:check
-      - run: npm run test:unit
-      - run: node scripts/verify-package.cjs manifest
+      - name: Download vetted tarball
+        uses: actions/download-artifact@v6
+        with:
+          name: npm-tarball
 
       # npm >=11.5.1 ships the OIDC trusted-publishing exchange (Node 22 in
       # .nvmrc bundles npm 10, which lacks it and would hit ENEEDAUTH).
@@ -248,6 +249,8 @@ jobs:
 
       # No NODE_AUTH_TOKEN: trusted publishing authenticates via OIDC and emits
       # provenance automatically (the --provenance flag is now redundant but kept
-      # to state intent explicitly).
+      # to state intent explicitly). Publishing the tarball file directly (not
+      # `.`) means no lifecycle scripts run and no node_modules is ever installed
+      # in this credentialed job.
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: npm publish "${{ needs.test-install.outputs.tar_file }}" --provenance --access public

@@ -10,6 +10,7 @@ vi.mock('node:fs/promises', async () => {
   return {
     ...actual,
     rename: vi.fn().mockImplementation(actual.rename),
+    writeFile: vi.fn().mockImplementation(actual.writeFile),
   };
 });
 
@@ -150,6 +151,56 @@ describe('KnowledgeStore Migration Error Paths', () => {
       vi.mocked(fsPromises.rename).mockImplementation(actual);
       fs.rmSync(crashDir, { recursive: true, force: true });
     }
+  });
+
+  it('migrationReEmbed reverts the canonical rename (not a data-losing backup fallback) when the POST-rename manifest save fails', async () => {
+    // The dir rename to 'knowledge.lance' succeeds — only the manifest write
+    // that persists the new canonical name afterward fails. Pre-fix, this
+    // return value was discarded: the manifest kept pointing at the temp
+    // migration name while the directory had already moved to the canonical
+    // one, so the NEXT process start would silently create an empty table
+    // under the stale temp name and strand the re-embedded data.
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-b',
+      migrationStrategy: 're-embed' });
+
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store1.initialize();
+    await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+    await store1.close();
+
+    const actualWriteFile = (await vi.importActual('node:fs/promises') as any).writeFile;
+    vi.mocked(fsPromises.writeFile).mockImplementation(async (file: any, data: any, opts: any) => {
+      // Only the canonical-name manifest write fails — the earlier pre-drop
+      // save (pointing at the temp migration name) must still succeed, or the
+      // scenario under test (rename succeeded, only the SECOND save failed)
+      // never arises.
+      if (typeof data === 'string' && JSON.parse(data).activeTableName === 'knowledge') {
+        throw new Error('Disk write failed');
+      }
+      return actualWriteFile(file, data, opts);
+    });
+
+    // Must NOT throw, and must NOT fall back to the data-relocating backup
+    // strategy — the migration itself fully succeeded.
+    await store.initialize();
+
+    expect(await store.count()).toBe(1);
+    const backupDirs = fs.readdirSync(testDbDir).filter((d) => d.includes('_backup_'));
+    expect(backupDirs).toHaveLength(0);
+
+    // Directory layout and manifest must agree: back under the temp name, NOT
+    // a renamed 'knowledge.lance' the manifest doesn't know about.
+    expect(fs.existsSync(path.join(testDbDir, 'knowledge.lance'))).toBe(false);
+    const manifestPath = path.join(testDbDir, 'store-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    expect(manifest.activeTableName).toMatch(/^knowledge_migration_/);
+    expect(fs.existsSync(path.join(testDbDir, `${manifest.activeTableName}.lance`))).toBe(true);
+
+    vi.mocked(fsPromises.writeFile).mockImplementation(actualWriteFile);
   });
 
   it('migrationReEmbed failure falls back to BACKUP strategy (fresh table; old data preserved in backup dir)', async () => {

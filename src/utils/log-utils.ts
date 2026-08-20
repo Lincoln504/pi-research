@@ -255,6 +255,16 @@ export function redactSecrets(message: string): string {
     // never negative; it still prefers the larger rawLength when the
     // REDACT_SCAN_LENGTH cut discarded raw content redaction then shrank.
     out = `${out.slice(0, keep)}…[truncated ${Math.max(rawLength, out.length) - keep} chars]`;
+  } else if (rawLength > scanEnd) {
+    // The scanEnd cut (line 220) already dropped `rawLength - scanEnd` raw
+    // chars before redaction ever ran. If redaction then net-shrinks the
+    // scanned prefix enough that `out.length` no longer exceeds
+    // MAX_LOG_MESSAGE_LENGTH (e.g. many long hex/JWT runs each collapsed to
+    // the short literal '[REDACTED]'), the branch above never fires and this
+    // message would otherwise read as complete — silently hiding the tail of
+    // a large scraped page or provider error body with no indication
+    // anything was cut.
+    out = `${out}…[truncated ${rawLength - scanEnd} chars]`;
   }
   return out;
 }

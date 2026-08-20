@@ -311,7 +311,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     const contentLength = response.headers.get('content-length');
     if (contentLength) {
       const size = parseInt(contentLength, 10);
-      if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
+      if (contentType.includes('application/pdf') || currentUrl.toLowerCase().endsWith('.pdf')) {
         if (size > MAX_PDF_SIZE) {
           const sizeMB = Math.round(size / 1024 / 1024);
           logger.warn(`[Scrapers] PDF too large (Content-Length: ${sizeMB}MB, max 100MB), skipping`);
@@ -330,7 +330,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       }
     }
     
-    if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
+    if (contentType.includes('application/pdf') || currentUrl.toLowerCase().endsWith('.pdf')) {
       let pdfBytes: Uint8Array;
       try {
         pdfBytes = await readBodyCapped(response, MAX_PDF_SIZE);

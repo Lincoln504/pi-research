@@ -502,12 +502,36 @@ export class KnowledgeStore implements IKnowledgeStore {
         // If canonical name was already something else and it still exists, 
         // we might need to handle it. But we just dropped it above.
         await fsPromises.rename(tempDir, canonicalDir);
-        
+
         this.tableName = canonicalName;
-        await this.saveManifest();
-        
-        // Reopen the canonical table so this.table reflects the renamed path
-        this.table = await this.db.openTable(this.tableName);
+        if (await this.saveManifest()) {
+          // Reopen the canonical table so this.table reflects the renamed path
+          this.table = await this.db.openTable(this.tableName);
+        } else {
+          // The directory rename to the canonical name already happened on disk,
+          // but the manifest still says tempTableName (persisted successfully
+          // above, before the old table was dropped). Left as-is, the next
+          // process start would read that stale name, find no such directory
+          // (renamed away), and silently CREATE A NEW EMPTY TABLE under it —
+          // stranding every re-embedded document in the now-unreferenced
+          // canonical directory with no recovery path (pruneOrphanedMigrationDirs
+          // doesn't recognize a bare 'knowledge.lance' as orphaned migration
+          // material). Revert the rename so the manifest (still correctly
+          // pointing at tempTableName, from the pre-drop save above) and the
+          // on-disk layout agree again — the data stays fully intact and
+          // accessible under its temp name either way. Deliberately NOT thrown:
+          // the migration itself fully succeeded and the in-memory handle is
+          // fine, so surfacing this as a migration failure would trip the
+          // caller's re-embed-failed fallback to the 'backup' strategy, which
+          // would needlessly rename this perfectly good, fully re-embedded data
+          // out of the way and start a fresh empty table over one manifest
+          // write hiccup.
+          logger.error('[store] Failed to persist canonical table name after rename — reverting to keep manifest and disk in sync.');
+          await fsPromises.rename(canonicalDir, tempDir);
+          this.tableName = tempTableName;
+          this.table = await this.db.openTable(this.tableName);
+          logger.info(`[store] Migrated data remains safe and accessible as ${tempTableName}; canonical rename deferred to a future successful manifest save.`);
+        }
       } catch (renameErr) {
         // If rename fails (cross-device, permissions, etc.) we keep the temp name
         // but CRITICALLY we now persist it in the manifest so future sessions

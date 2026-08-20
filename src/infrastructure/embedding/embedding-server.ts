@@ -80,6 +80,11 @@ class SerialQueue {
   private readonly hardDeadlineMs: number;
   private readonly onPoison?: (err: Error) => void;
   private poisoned: Error | null = null;
+  // The currently-executing task's real work promise (not the soft-timeout race) —
+  // set only while a native call is actually in flight. Lets a caller that needs
+  // to dispose the underlying pipeline (EmbeddingServer.shutdown) wait for true
+  // idleness instead of racing disposal against a still-running inference.
+  private currentWork: Promise<unknown> | null = null;
 
   constructor(
     maxDepth = 200,
@@ -132,6 +137,7 @@ class SerialQueue {
         let hardTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           work = fn();
+          this.currentWork = work;
           // Arm the hard-deadline watchdog from the moment the real GPU work starts, so
           // the cap is an honest wall-clock deadline measured from work-start rather than
           // (soft-timeout + hardDeadlineMs). A single inference still unsettled after
@@ -162,12 +168,30 @@ class SerialQueue {
           } finally {
             settled = true;
             if (hardTimer !== undefined) clearTimeout(hardTimer);
+            if (this.currentWork === work) this.currentWork = null;
           }
         }
       };
       this.tasks.push({ run, fail: reject });
       if (!this.running) void this.pump();
     });
+  }
+
+  /**
+   * Resolve once no native call is in flight. Used by EmbeddingServer.shutdown()
+   * to wait out a still-running inference before disposing the pipeline —
+   * without this, disposal could run concurrently with a legitimately slow (not
+   * hung) embed/embedMany call on the same re-entrant-locked GPU context, the
+   * exact native-segfault class this queue exists to prevent. No timeout: a
+   * promise that truly never settles is already an accepted, pre-existing
+   * leak-to-process-exit scenario elsewhere in this class (see the poison path's
+   * disposeEmbedder=false handling) — better to leak than risk concurrent
+   * native access.
+   */
+  async waitForIdle(): Promise<void> {
+    while (this.currentWork) {
+      await this.currentWork.catch(() => {});
+    }
   }
 
   private poison(err: Error): void {
@@ -414,6 +438,16 @@ export class EmbeddingServer implements IEmbedder {
     // is enough for another process to re-elect; the leaked native resources die with
     // eventual process exit.
     if (disposeEmbedder) {
+      // Wait for the SerialQueue to go idle BEFORE disposing. This shutdown() path
+      // also runs on ordinary leadership loss — not just the poison path above — and
+      // a legitimately slow (not hung) embed/embedMany can still be mid-flight on
+      // this same GPU context. Embedder.dispose()'s own drainActiveEmbeddings only
+      // waits 5s, an order of magnitude under the queue's own 120s soft timeout, so
+      // without this a normal large batch could have its pipeline disposed out from
+      // under it — the same concurrent-native-call hazard the queue exists to
+      // prevent, just triggered by disposal racing a live call instead of two calls
+      // racing each other.
+      await this.queue.waitForIdle();
       await this.embedder.dispose().catch((err) => {
         if (this.isShuttingDown) {
           logger.debug('[EmbeddingServer] Error disposing embedder during shutdown (expected):', err);

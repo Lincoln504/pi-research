@@ -88,7 +88,7 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   startResearchSession: vi.fn(() => 'session-123'),
   registerSessionAbort: vi.fn(),
   clearSteeringMessages: vi.fn(),
-  getPiActivePanels: vi.fn(() => []),
+  getActiveResearchRunCount: vi.fn(() => 0),
 }));
 
 vi.mock('../../../src/observers/research-observer-impl.ts', () => ({

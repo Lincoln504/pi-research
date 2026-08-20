@@ -79,8 +79,19 @@ describe('BrowserServer — headers-sent guard in the catch path', () => {
       expect(health.status).toBe(200);
       expect(JSON.parse(health.data ?? '')).toEqual({ success: true });
 
-      // Give any pending rejection a tick to surface, then assert none did.
-      await new Promise((r) => setTimeout(r, 25));
+      // Give any pending rejection a chance to surface, then assert none did.
+      // Node fires 'unhandledRejection' on the next microtask-queue drain after a
+      // promise is left unhandled, but a fixed short wait fails OPEN on a slow/
+      // contended CI runner: the listener is removed in `finally` right after this
+      // check, so a rejection that surfaces even slightly late is silently missed
+      // rather than failing the test. Flush several real event-loop turns
+      // (setImmediate runs after I/O callbacks, unlike a bare microtask) before
+      // the final timeout backstop, so this holds under load rather than merely
+      // under this suite's current speed.
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setImmediate(r));
+      }
+      await new Promise((r) => setTimeout(r, 100));
       expect(rejections).toEqual([]);
     } finally {
       process.removeListener('unhandledRejection', onRejection);

@@ -704,6 +704,22 @@ export function getPiActivePanels(piSessionId: string | undefined): ResearchPane
 }
 
 /**
+ * Count of research runs currently active in a Pi session, TUI or headless.
+ *
+ * Unlike getPiActivePanels (populated only by registerSessionPanel, which the
+ * TUI path alone calls), `aborts` is registered by registerSessionAbort on
+ * EVERY run — headless included — and removed only by endResearchSession. Use
+ * this wherever "am I the last/only active run in this session" must hold for
+ * headless callers too (e.g. gating a shared-state clear like steering
+ * messages so a finishing run doesn't wipe a concurrent sibling's).
+ */
+export function getActiveResearchRunCount(piSessionId: string | undefined): number {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  return state ? state.aborts.size : 0;
+}
+
+/**
  * Get the ordered list of active research run IDs in a Pi session.
  * Returns IDs in chronological order (oldest first, newest last).
  */

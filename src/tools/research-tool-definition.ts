@@ -17,6 +17,7 @@ import type {
 import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { validateConfig, getConfig, type ConfigInterface } from '../config.ts';
 import { tryGetServiceContainerFromCtx, getService } from '../core/service-registry.ts';
 
@@ -28,7 +29,7 @@ import { redactSecrets } from '../utils/log-utils.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { validateInitialLinks, MAX_INITIAL_LINKS, MAX_INITIAL_LINK_CHARS } from '../utils/url-utils.ts';
-import { startResearchSession, endResearchSession, registerSessionAbort, clearSteeringMessages, getPiActivePanels } from '../orchestration/session-state.ts';
+import { startResearchSession, endResearchSession, registerSessionAbort, clearSteeringMessages, getActiveResearchRunCount } from '../orchestration/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
@@ -118,6 +119,21 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
 
   type ResearchParams = Static<typeof parameters>;
 
+  // Same field shapes as `parameters`, but WITHOUT the initialLinks count/length
+  // bounds — used only for the runtime execute() gate below. validateInitialLinks
+  // already enforces those same two bounds with a specific, friendly message
+  // ("at most N URLs...", "at most N characters..."); checking them again here
+  // would just produce the generic 'invalid_parameters' rejection first and mask
+  // that better message. Structural type-checking (initialLinks must still be an
+  // array of strings) is kept, since validateInitialLinks assumes that shape.
+  const executeShapeCheck = Type.Object({
+    query: Type.String(),
+    depth: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
+    model: Type.Optional(Type.String()),
+    excludeTools: Type.Optional(Type.Array(Type.String())),
+    initialLinks: Type.Optional(Type.Array(Type.String())),
+  });
+
   return {
     name: 'research',
     label: 'Research',
@@ -166,6 +182,17 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
             text: '**Research system is not ready.**\n\nOne or more critical services failed to initialize during startup. Please check the logs for error details or try restarting the extension.\n\nYou can also run `/research-config health` to diagnose the issue.'
           }],
           details: { error: 'system_not_ready' }
+        };
+      }
+
+      // Every other tool in this codebase re-validates params against its own
+      // schema before trusting it (the host does not enforce this) — this was the
+      // one exception, relying entirely on incidental downstream checks (a
+      // typeof on query, a warn-gate on excludeTools) for fields that skip both.
+      if (!Value.Check(executeShapeCheck, params)) {
+        return {
+          content: [{ type: 'text', text: 'Error: invalid parameters for research tool.' }],
+          details: { error: 'invalid_parameters' },
         };
       }
 
@@ -227,11 +254,13 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         }
         // Steering messages are shared per pi-session. Only reset them when THIS is
         // the last active run — otherwise a finishing run wipes a concurrent sibling
-        // run's queued/active steering mid-flight. This run's panel is still
-        // registered here (endResearchSession runs later in cleanup()), so a count
-        // of <= 1 means no other run is active.
+        // run's queued/active steering mid-flight. This run's abort registration is
+        // still in place here (endResearchSession runs later in cleanup()), so a
+        // count of <= 1 means no other run is active. getActiveResearchRunCount
+        // (not getPiActivePanels) because headless runs never register a panel —
+        // a panel-based check here was always a no-op for headless callers.
         try {
-          if (getPiActivePanels(piSessionId).length <= 1) clearSteeringMessages(piSessionId);
+          if (getActiveResearchRunCount(piSessionId) <= 1) clearSteeringMessages(piSessionId);
         } catch (e) { logger.error('[research] Clear steering messages failed:', e); }
         if (detachAbortListener) {
           try { detachAbortListener(); } catch { /* best-effort */ } finally { detachAbortListener = undefined; }
@@ -344,9 +373,11 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               // module-level piSessions map keyed by the STABLE pi session id, so
               // without this every headless run leaked them for the process
               // lifetime (the TUI branch frees them via createCleanupFunction, the
-              // SDK in its own finally; this branch freed only steering).
+              // SDK in its own finally). Steering is NOT cleared here — teardownUi()
+              // already does that, gated on getActiveResearchRunCount so a finishing
+              // run doesn't wipe a concurrent sibling headless run's steering; an
+              // unconditional clear here bypassed that guard entirely.
               endResearchSession(piSessionId, sessionResearchId);
-              clearSteeringMessages(piSessionId);
             };
             
             // Minimal stub — only stopObserverWaveAnimation touches panelState in the
