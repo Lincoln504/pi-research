@@ -374,5 +374,107 @@ describe('EmbeddingServer', () => {
 
       expect(disposeSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('does not dispose while a SECOND, already-queued call starts during shutdown() (adversarial re-check of the single-in-flight case above)', async () => {
+      // The single-in-flight test above only ever has ONE task in the queue, so
+      // it can't exercise the compound case: waitForIdle()'s while-loop rechecks
+      // `currentWork` after each settle, and pump() only advances to the NEXT
+      // queued task once the current one's run() fully unwinds — both driven by
+      // the same underlying settlement of the in-flight native call. If
+      // waitForIdle() could ever observe `currentWork === null` in the gap AFTER
+      // task A clears it but BEFORE pump() advances and task B's run() resets it,
+      // shutdown() would dispose the embedder while B's native call was starting
+      // against it — the exact class of native-GPU-concurrency bug this queue
+      // exists to prevent. Racing shutdown() against A's settlement with B
+      // already queued directly probes that gap.
+      let resolveA!: () => void;
+      let resolveB!: () => void;
+      const embedA = new Promise<Float32Array>((resolve) => { resolveA = () => resolve(new Float32Array([1])); });
+      const embedB = new Promise<Float32Array>((resolve) => { resolveB = () => resolve(new Float32Array([2])); });
+      const disposeSpy = vi.fn().mockResolvedValue(undefined);
+      const embedSpy = vi.fn().mockReturnValueOnce(embedA).mockReturnValueOnce(embedB);
+      const embedder = { embed: embedSpy, dispose: disposeSpy } as any;
+      const sm = {
+        getEmbeddingServer: vi.fn().mockResolvedValue(null),
+        clearEmbeddingServer: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      const s = new EmbeddingServer(embedder, sm, 'compound-race-test');
+
+      const callA = s.embed('a');
+      // Let the queue actually start A before B is enqueued behind it.
+      await new Promise((r) => setTimeout(r, 0));
+      const callB = s.embed('b');
+
+      // Resolve A and start shutdown() in the same synchronous tick — the
+      // tightest possible race between A's settlement and shutdown()'s
+      // waitForIdle() check.
+      resolveA();
+      const shutdownPromise = s.shutdown();
+
+      await callA;
+      // Several more macrotask ticks: B's native call must have started, and
+      // dispose() must NOT have run while it's still in flight.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(embedSpy).toHaveBeenCalledTimes(2);
+      expect(disposeSpy).not.toHaveBeenCalled();
+
+      resolveB();
+      await callB;
+      await shutdownPromise;
+
+      expect(disposeSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('SerialQueue — waitForIdle() ordering vs. the next queued task', () => {
+    it('never resolves in the gap between one task clearing currentWork and the next task claiming it', async () => {
+      // Lower-level version of the compound-race test above, direct against
+      // SerialQueue rather than through EmbeddingServer.shutdown() — pins down
+      // the exact event ORDER (not just the eventual dispose-call count) so a
+      // future refactor that shifts the number of microtask hops in run() or
+      // waitForIdle() and reopens this gap fails a test immediately. B is
+      // deliberately left unsettled through several idle-check windows: the
+      // FIXED waitForIdle() must not resolve until B is also done, not merely
+      // started, so this also proves it isn't just "started" that matters.
+      const q = new _SerialQueue(200, 120000, 600000);
+      let resolveA!: (v: string) => void;
+      let resolveB!: (v: string) => void;
+      const a = new Promise<string>((r) => { resolveA = r; });
+      const b = new Promise<string>((r) => { resolveB = r; });
+      const events: string[] = [];
+
+      const pA = q.enqueue(() => a);
+      const pB = q.enqueue(() => { events.push('b-fn-invoked'); return b; });
+
+      // Let pump() actually start task A.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      resolveA('A-result');
+
+      // Call waitForIdle() as early as possible — the same instant a shutdown()
+      // racing task A's settlement would.
+      let idleResolved = false;
+      q.waitForIdle().then(() => { events.push('waitForIdle-resolved'); idleResolved = true; });
+
+      await pA;
+      // B must have started by now, but with B's own promise still
+      // unsettled, waitForIdle() must NOT have resolved yet.
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(events).toContain('b-fn-invoked');
+      expect(idleResolved).toBe(false);
+
+      resolveB('B-result');
+      await pB;
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+
+      const idleIdx = events.indexOf('waitForIdle-resolved');
+      const bIdx = events.indexOf('b-fn-invoked');
+      expect(bIdx).toBeGreaterThan(-1);
+      expect(idleIdx).toBeGreaterThan(-1);
+      // Safe order: B must have started before waitForIdle() reports idle.
+      expect(bIdx).toBeLessThan(idleIdx);
+    });
   });
 });

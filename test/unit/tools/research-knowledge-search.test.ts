@@ -28,6 +28,7 @@ import {
   assembleReferenceDocuments,
   collectCandidateUrls,
   triageRelevantUrls,
+  splitPromptAtUserTurn,
   buildSteeringResult,
   isTransientSynthesisError,
   MAX_DOCUMENTS,
@@ -394,16 +395,22 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
     expect(mockCompleteSimple).not.toHaveBeenCalled();
   });
 
+  // Dynamic content (queries, history, candidates) is delivered in the USER
+  // message; the system prompt carries only the static rules so it stays
+  // byte-identical across calls (prompt-cache prefix invariance).
+  const userTextOf = (call: any[]): string =>
+    call[1].messages.map((m: any) => m.content.map((c: any) => c.text).join('\n')).join('\n');
+
   it('truncates an over-long candidate description to TRIAGE_DESCRIPTION_MAX_CHARS in the prompt', async () => {
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
     const longDesc = 'x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 500);
     const candidate: KnowledgeCandidate = { url: 'https://long.com', description: longDesc, provenance: 'p' };
     await triageRelevantUrls(model, auth, 'history', ['test query'],[candidate], 30000, 'off');
-    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
+    const userText = userTextOf(mockCompleteSimple.mock.calls[0]);
     // The full description must not appear; the truncated slice must.
-    expect(systemPrompt).not.toContain(longDesc);
-    expect(systemPrompt).toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS));
-    expect(systemPrompt).not.toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 1));
+    expect(userText).not.toContain(longDesc);
+    expect(userText).toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS));
+    expect(userText).not.toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 1));
   });
 
   it('surfaces the explicit search query in the triage prompt so triage is not blind to the question', async () => {
@@ -413,17 +420,29 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
     // The query must always reach the prompt.
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[0]}'));
     await triageRelevantUrls(model, auth, 'No previous context available.', ['who created the Rust language'], cands(2), 30000, 'off');
-    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
-    expect(systemPrompt).toContain("USER'S SEARCH QUERY");
-    expect(systemPrompt).toContain('who created the Rust language');
+    const userText = userTextOf(mockCompleteSimple.mock.calls[0]);
+    expect(userText).toContain("USER'S SEARCH QUERY");
+    expect(userText).toContain('who created the Rust language');
   });
 
   it('renders multiple queries and neutralizes regex-special `$` sequences in the query', async () => {
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
     await triageRelevantUrls(model, auth, 'history', ['price of $100 item', 'cost $& fees'], cands(1), 30000, 'off');
-    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
-    expect(systemPrompt).toContain('- price of $100 item');
-    expect(systemPrompt).toContain('- cost $& fees'); // literal, not a regex replacement artifact
+    const userText = userTextOf(mockCompleteSimple.mock.calls[0]);
+    expect(userText).toContain('- price of $100 item');
+    expect(userText).toContain('- cost $& fees'); // literal, not a regex replacement artifact
+  });
+
+  it('keeps the system prompt byte-identical across triage calls with different queries and candidates (prompt-cache prefix invariance)', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
+    await triageRelevantUrls(model, auth, 'history A', ['query alpha'], cands(2), 30000, 'off');
+    await triageRelevantUrls(model, auth, 'history B', ['query beta'], cands(3), 30000, 'off');
+    const [sys1, sys2] = mockCompleteSimple.mock.calls.map((c: any[]) => c[1].systemPrompt as string);
+    expect(sys1).toBe(sys2);
+    // The rules stay in the system prompt; the per-call data must not leak in.
+    expect(sys1).toContain('relevance triage engine');
+    expect(sys1).not.toContain('query alpha');
+    expect(sys1).not.toContain('history A');
   });
 
   it('fails open (null) on malformed model output so real knowledge is never hidden', async () => {
@@ -635,6 +654,42 @@ describe('Tool metadata and registration shape', () => {
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
     expect(typeof tool.execute).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splitPromptAtUserTurn — template split for prompt-cache prefix invariance
+// ---------------------------------------------------------------------------
+describe('splitPromptAtUserTurn', () => {
+  it('splits at the USER_TURN marker, dropping the marker itself', () => {
+    const { system, user } = splitPromptAtUserTurn('RULES here.\n<!-- USER_TURN: note -->\nQUERY {{queries}}');
+    expect(system).toBe('RULES here.');
+    expect(user).toBe('QUERY {{queries}}');
+  });
+
+  it('falls back to user:null when the marker is missing (legacy all-in-system shape)', () => {
+    const { system, user } = splitPromptAtUserTurn('RULES only, no marker. {{queries}}');
+    expect(system).toBe('RULES only, no marker. {{queries}}');
+    expect(user).toBeNull();
+  });
+
+  it('falls back to user:null on an unterminated marker rather than corrupting the template', () => {
+    const template = 'RULES.\n<!-- USER_TURN with no close\nQUERY';
+    expect(splitPromptAtUserTurn(template)).toEqual({ system: template, user: null });
+  });
+
+  it('the SHIPPED extractor and triage templates both carry the marker with rules above and every placeholder below', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts');
+    for (const name of ['research-knowledge-search-extractor.md', 'research-knowledge-relevance-triage.md']) {
+      const { system, user } = splitPromptAtUserTurn(readFileSync(path.join(dir, name), 'utf-8'));
+      expect(user, `${name} lost its USER_TURN marker`).not.toBeNull();
+      // Placeholders (per-call data) must all be on the user side; none in the rules.
+      expect(system).not.toMatch(/\{\{[a-z_0-9]+\}\}/i);
+      expect(user!).toMatch(/\{\{queries\}\}/);
+    }
   });
 });
 

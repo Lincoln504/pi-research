@@ -96,6 +96,53 @@ describe('youtube/command', () => {
     expect(text).not.toContain("**Cite as:** https://youtu.be/aaaaaaaaaaa —");
   });
 
+  it('caps a single video transcript in the tool response (parity with the scrape tool — used to be unbounded)', async () => {
+    // Regression: formatResults() concatenated r.text straight into the
+    // returned markdown with no cap of its own — unlike scrape.ts, which
+    // explicitly caps every document at MAX_SCRAPE_CONTENT_CHARS_PER_DOC to
+    // stop a single huge document from overflowing the researcher's context
+    // window. A long/dense-captioned video (a multi-hour livestream VOD)
+    // could inject an unbounded, multi-megabyte payload directly into the
+    // tool's own response.
+    const hugeTranscript = 'x'.repeat(600_000); // over the 500_000-char cap
+    fetchVideoTranscripts.mockResolvedValueOnce([
+      { videoId: 'aaaaaaaaaaa', url: 'https://youtu.be/aaaaaaaaaaa', success: true, title: 'Long Video', text: hugeTranscript, charCount: hugeTranscript.length },
+    ]);
+
+    const res = await youtubeTranscriptCommand({
+      urls: ['https://youtu.be/aaaaaaaaaaa'],
+      maxVideos: 1,
+      timeoutMs: 20000,
+      lang: 'en',
+    });
+
+    const text = (res.content[0] as any).text as string;
+    expect(text.length).toBeLessThan(hugeTranscript.length);
+    expect(text).toContain('content truncated');
+    expect(text).toContain(`showing`);
+    // The metadata line above the transcript still reports the TRUE char
+    // count — only the tool-response body is capped, not the reported stats.
+    expect(text).toContain(`${hugeTranscript.length.toLocaleString()} chars`);
+  });
+
+  it('does not truncate a transcript at or under the cap (no marker on ordinary-length content)', async () => {
+    const normalTranscript = 'a normal, short transcript';
+    fetchVideoTranscripts.mockResolvedValueOnce([
+      { videoId: 'aaaaaaaaaaa', url: 'https://youtu.be/aaaaaaaaaaa', success: true, title: 'Short Video', text: normalTranscript, charCount: normalTranscript.length },
+    ]);
+
+    const res = await youtubeTranscriptCommand({
+      urls: ['https://youtu.be/aaaaaaaaaaa'],
+      maxVideos: 1,
+      timeoutMs: 20000,
+      lang: 'en',
+    });
+
+    const text = (res.content[0] as any).text as string;
+    expect(text).toContain(normalTranscript);
+    expect(text).not.toContain('content truncated');
+  });
+
   it('emits a knowledge-store document only for successful transcripts', async () => {
     fetchVideoTranscripts.mockResolvedValueOnce([
       { videoId: 'aaaaaaaaaaa', url: 'https://youtu.be/aaaaaaaaaaa', success: true, title: 'Good Video', author: 'Chan', durationSeconds: 65, text: 'the full transcript', charCount: 19 },

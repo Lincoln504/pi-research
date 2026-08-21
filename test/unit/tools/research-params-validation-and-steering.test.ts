@@ -1,6 +1,5 @@
 /**
- * research tool — own-schema parameter validation, and headless steering-clear
- * concurrency guard.
+ * research tool — own-schema parameter validation, and headless teardown.
  *
  * Regression 1: unlike every sibling tool (search, scrape, security_search,
  * stackexchange, youtube_transcript, research_knowledge_search), the `research`
@@ -9,20 +8,24 @@
  * non-schema-respecting SDK caller) reached orch.runResearch() relying entirely
  * on incidental downstream checks instead of a guaranteed up-front rejection.
  *
- * Regression 2: the headless cleanup() closure used to call
- * clearSteeringMessages(piSessionId) unconditionally, AFTER teardownUi() had
- * already made its own (headless-blind, since getPiActivePanels never sees a
- * headless run) decision about whether to clear. A finishing headless run could
- * wipe a concurrent sibling headless run's queued/active steering with no error
- * or indication to either caller. getActiveResearchRunCount (backed by the
- * `aborts` map, populated by BOTH the TUI and headless branches) fixes the
- * blind guard; removing the second unconditional clear closes the bypass.
+ * Regression 2 (historical, now superseded): the headless cleanup() closure
+ * used to call clearSteeringMessages(piSessionId) unconditionally, AFTER
+ * teardownUi() had already made its own (headless-blind) decision about
+ * whether to clear. That was fixed by adding a getActiveResearchRunCount-gated
+ * check in teardownUi — which itself turned out to race two sibling runs
+ * finishing close together, and later (once reordered to close that race) to
+ * fight with endResearchSession's own preserve-on-last-run logic and wipe a
+ * message endResearchSession had just decided to keep. The actual fix now
+ * lives entirely in endResearchSession (session-state.ts), which deregisters
+ * this run and decides last-run/preserve atomically in one synchronous call;
+ * teardownUi no longer duplicates any of that decision. See
+ * test/unit/utils/session-state.test.ts for the behavioral coverage.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createResearchTool } from '../../../src/tools/research-tool-definition.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import { getService } from '../../../src/core/service-registry.ts';
-import { clearSteeringMessages, getActiveResearchRunCount } from '../../../src/orchestration/session-state.ts';
+import { endResearchSession } from '../../../src/orchestration/session-state.ts';
 
 vi.mock('../../../src/config.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/config.ts')>();
@@ -93,8 +96,6 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   startResearchSession: vi.fn(() => 'session-123'),
   endResearchSession: vi.fn(),
   registerSessionAbort: vi.fn(),
-  clearSteeringMessages: vi.fn(),
-  getActiveResearchRunCount: vi.fn(() => 0),
 }));
 
 vi.mock('../../../src/observers/research-observer-impl.ts', () => ({
@@ -176,30 +177,27 @@ describe('research tool — own parameter schema validation', () => {
   });
 });
 
-describe('research tool — headless steering-clear concurrency guard', () => {
+describe('research tool — headless teardown deregisters via endResearchSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('does NOT clear steering when another run is still active in the session', async () => {
-    vi.mocked(getActiveResearchRunCount).mockReturnValue(2);
+  it('calls endResearchSession exactly once on teardown, and does not import a separate steering-clear guard', async () => {
+    // Regression (structural half): an earlier version of this fix added a
+    // SEPARATE getActiveResearchRunCount/clearSteeringMessages check in
+    // teardownUi, checked after cleanup(). That interacted badly with
+    // endResearchSession's own last-run/preserve logic (see session-state.ts
+    // and its tests for the real behavioral coverage): it could unconditionally
+    // wipe a steering message endResearchSession had just decided to preserve.
+    // The fix is for endResearchSession alone (a single synchronous function)
+    // to own this decision — teardownUi must not duplicate it. This is a
+    // deliberately narrow, structural guard against reintroducing that second
+    // check; it doesn't re-derive the state-mutation behavior itself.
     mockRunResearchRejection(new Error('run failure, unrelated to steering'));
 
     const tool = createResearchTool();
     await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
 
-    expect(clearSteeringMessages).not.toHaveBeenCalled();
-  });
-
-  it('clears steering exactly once when this is the last active run', async () => {
-    vi.mocked(getActiveResearchRunCount).mockReturnValue(1);
-    mockRunResearchRejection(new Error('run failure, unrelated to steering'));
-
-    const tool = createResearchTool();
-    await tool.execute('call-1', { query: 'test' }, undefined, () => {}, makeCtx());
-
-    // Pre-fix this was 2: once from teardownUi's own guarded call, once more
-    // unconditionally from inside the headless cleanup() closure.
-    expect(clearSteeringMessages).toHaveBeenCalledTimes(1);
+    expect(endResearchSession).toHaveBeenCalledTimes(1);
   });
 });

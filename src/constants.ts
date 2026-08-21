@@ -46,11 +46,26 @@ export function getMaxGatheringCalls(config?: Config): number {
 /**
  * Get the maximum scrape batches from config.
  * This function should be used instead of MAX_SCRAPE_CALLS to support dynamic configuration.
+ *
+ * @param cachingActive - Pass `true` when prompt caching is active for this
+ * run's resolved model (see isPromptCachingActiveForModel in
+ * core/llm/research-model-resolver.ts). With caching active, the EFFECTIVE
+ * maximum is the configured value plus one: a cached run's system-prompt/
+ * tool-definition prefix is cheap to re-send, so the same token budget
+ * covers one more scrape batch per researcher. Every consumer of the batch
+ * count (tracker enforcement, prompt text, progress units) must go through
+ * this function with the same cachingActive value so they all agree on the
+ * effective number. The "unlimited" sentinel (0 or >99) is unchanged —
+ * adding one to unlimited is meaningless.
  */
-export function getMaxScrapeBatches(config?: Config): number {
+export function getMaxScrapeBatches(config?: Config, cachingActive = false): number {
   try {
     const batches = (config || getConfig()).MAX_SCRAPE_BATCHES;
-    return batches === 0 || batches > 99 ? 999999 : batches;
+    if (batches === 0 || batches > 99) return 999999;
+    // Cap at 99: a configured 99 (the documented max) plus one would land in the
+    // >99 "unlimited" band that every renderer checks — the prompt would say
+    // "unlimited batches" while enforcement actually blocked at 100.
+    return cachingActive ? Math.min(batches + 1, 99) : batches;
   } catch {
     return 2; // Fallback to default
   }
@@ -63,9 +78,13 @@ export const MAX_SCRAPE_URLS = 6;
  * Get the units per researcher for the progress bar.
  * Units = 1 (for start/search) + number of scrape batches.
  * When batches are unlimited (MAX_SCRAPE_BATCHES=0), caps at 4 for a sane progress estimate.
+ *
+ * Relative to the EFFECTIVE batch count: pass the run's cachingActive (from
+ * isPromptCachingActiveForModel over the resolved model) so progress units
+ * agree with the limit the tracker actually enforces.
  */
-export function getUnitsPerResearcher(config?: Config): number {
-  const batches = getMaxScrapeBatches(config);
+export function getUnitsPerResearcher(config?: Config, cachingActive = false): number {
+  const batches = getMaxScrapeBatches(config, cachingActive);
   return 1 + Math.min(batches, 4);
 }
 

@@ -42,6 +42,7 @@ vi.mock('../../../src/utils/tool-usage-tracker.ts', () => ({
 
 vi.mock('../../../src/core/llm/research-model-resolver.ts', () => ({
   resolveResearchModel: vi.fn(() => ({ id: 'test-model', provider: 'test-provider', contextWindow: 100_000 })),
+  isPromptCachingActiveForModel: vi.fn(() => false),
 }));
 
 vi.mock('../../../src/core/llm/model-registry-factory.ts', () => ({

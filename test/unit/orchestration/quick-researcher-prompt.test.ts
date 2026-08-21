@@ -47,7 +47,7 @@ vi.mock('../../../src/core/llm/inject-date.ts', () => ({
 
 // The capture point: the prompt is fully rendered by the time this is called, so
 // throwing here ends the run without needing a whole session lifecycle stubbed out.
-const createResearcherSession = vi.fn(async () => { throw new Error(SENTINEL); });
+const createResearcherSession = vi.fn(async (): Promise<any> => { throw new Error(SENTINEL); });
 vi.mock('../../../src/orchestration/researcher.ts', () => ({
   createResearcherSession: (...args: unknown[]) => createResearcherSession(...(args as [])),
 }));
@@ -103,13 +103,57 @@ describe('quick research renders the shipped researcher template', () => {
     expect(prompt).not.toContain('research lead');
   });
 
-  it('still substitutes the values the quick path does supply', async () => {
+  it('still substitutes the values the quick path does supply, and keeps per-run data OUT', async () => {
     // Guards the inverse failure of the two above: a chain that replaced everything with
     // '' would satisfy "no placeholder left behind" while shipping an empty prompt.
     const prompt = await renderQuickPrompt();
 
-    expect(prompt).toContain('what is a coverage digest');   // {{goal}}
-    expect(prompt).toContain('scrape');                       // {{evidence_section}}
     expect(prompt).toContain('Round 1 only');                 // {{extra_tool_guidelines}}
+    // Prompt-cache prefix invariance: the goal is per-run data and belongs in the
+    // initial USER message, never the system prompt — any per-run byte here would
+    // bust the cacheable system+tools prefix across back-to-back quick runs.
+    expect(prompt).not.toContain('what is a coverage digest');
+  });
+
+  it('delivers the goal and quick-mode workflow instructions in the initial USER message', async () => {
+    // The capture point moves one step later than renderQuickPrompt's: the session is
+    // created successfully and session.prompt() (the user message) throws instead.
+    const captured: string[] = [];
+    createResearcherSession.mockImplementationOnce(async () => ({
+      session: {
+        prompt: vi.fn(async (msg: string) => { captured.push(msg); throw new Error(SENTINEL); }),
+        abort: vi.fn(async () => {}),
+        subscribe: vi.fn(() => vi.fn()),
+        steer: vi.fn(async () => {}),
+      },
+      resolvedModel: { id: 'test-model' },
+    }));
+    const { getService } = await import('../../../src/core/service-registry.ts');
+    const { ServiceNames } = await import('../../../src/core/service-interfaces.ts');
+    vi.mocked(getService).mockImplementation(async (name: unknown) => {
+      if (name === ServiceNames.RESEARCH_SESSION_SERVICE) {
+        return { registerSession: vi.fn(), unregisterSession: vi.fn() } as any;
+      }
+      return undefined;
+    });
+
+    const orchestrator = new QuickResearchOrchestrator({
+      ctx: { cwd: '/test/cwd' } as any,
+      model: { id: 'test-model', contextWindow: 128_000 } as any,
+      query: 'what is a coverage digest',
+      sessionId: 'quick-prompt-session',
+      researchId: 'quick-prompt-research',
+      config: { ...getConfig('/test/cwd'), KNOWLEDGE_STORE_MODE: 'none' } as any,
+    });
+    await expect(orchestrator.run()).rejects.toThrow();
+    // vi.clearAllMocks() clears calls, not implementations — restore the module-scope
+    // default so a test added after this one doesn't inherit the session service.
+    vi.mocked(getService).mockImplementation(async () => undefined as any);
+
+    expect(captured.length, 'session.prompt was never reached').toBeGreaterThan(0);
+    const userMessage = captured[0]!;
+    expect(userMessage).toContain('Goal: what is a coverage digest');
+    expect(userMessage).toContain('EXACTLY ONE search call');   // quick evidence section
+    expect(userMessage).toContain('Perform your research and submit your full report now.');
   });
 });

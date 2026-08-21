@@ -195,12 +195,15 @@ export class ToolUsageTracker {
 }
 
 /**
- * Create default tool limits for a researcher
+ * Create default tool limits for a researcher.
+ *
+ * @param cachingActive - Whether prompt caching is active for this run's
+ * resolved model; see getMaxScrapeBatches in constants.ts.
  */
-export function createDefaultToolLimits(config?: Config): ToolLimits {
+export function createDefaultToolLimits(config?: Config, cachingActive = false): ToolLimits {
   return {
     gathering: getMaxGatheringCalls(config),
-    scrape: getMaxScrapeBatches(config),
+    scrape: getMaxScrapeBatches(config, cachingActive),
     search: 1,
     youtube_transcript: 1,
     grep: MAX_GREP_CALLS,

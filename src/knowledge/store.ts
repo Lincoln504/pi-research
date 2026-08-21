@@ -527,10 +527,66 @@ export class KnowledgeStore implements IKnowledgeStore {
           // out of the way and start a fresh empty table over one manifest
           // write hiccup.
           logger.error('[store] Failed to persist canonical table name after rename — reverting to keep manifest and disk in sync.');
-          await fsPromises.rename(canonicalDir, tempDir);
-          this.tableName = tempTableName;
-          this.table = await this.db.openTable(this.tableName);
-          logger.info(`[store] Migrated data remains safe and accessible as ${tempTableName}; canonical rename deferred to a future successful manifest save.`);
+          try {
+            await fsPromises.rename(canonicalDir, tempDir);
+            this.tableName = tempTableName;
+            this.table = await this.db.openTable(this.tableName);
+            logger.info(`[store] Migrated data remains safe and accessible as ${tempTableName}; canonical rename deferred to a future successful manifest save.`);
+          } catch (revertErr) {
+            // The revert itself failed too. fs.rename is atomic on a single
+            // filesystem — a failed rename never leaves data half-moved — so
+            // the data is still fully at canonicalDir, not tempDir. The outer
+            // catch below was written for a DIFFERENT case (the first rename
+            // never happening at all) and would wrongly point the manifest at
+            // tempTableName, whose directory no longer exists on disk. Instead,
+            // try to persist a manifest against the name that actually matches
+            // disk right now, so the mismatch this whole branch exists to avoid
+            // doesn't reappear one level deeper.
+            logger.error(`[store] Revert rename also failed; data remains on disk at ${canonicalDir}: ${revertErr}`);
+            // Everything from here on is wrapped in its OWN try/catch and never
+            // rethrows: a third compounding failure (e.g. openTable() itself
+            // throwing, on the same underlying disk fault that already broke
+            // two renames) must not escape to the outer catch (renameErr)
+            // either — that one assumes data is still at tempDir, which by
+            // this point is doubly false.
+            // The manifest repair is deliberately NOT gated behind the table
+            // reopen: saveManifest depends only on writeFile/rename, not on an
+            // open table, so a reopen-only failure (a LanceDB-level fault on an
+            // otherwise-writable filesystem) must not skip a repair the code can
+            // still make — a skipped repair leaves the persisted manifest
+            // pointing at the nonexistent temp name, which is the next-restart
+            // empty-table hazard this whole branch exists to prevent.
+            this.tableName = canonicalName;
+            let reopened = false;
+            try {
+              this.table = await this.db.openTable(this.tableName);
+              reopened = true;
+            } catch (openErr) {
+              // A third compounding failure: even reopening the table at its
+              // actual on-disk location failed. This process has no working
+              // table handle for it, but the data itself should still be
+              // physically intact at canonicalDir (only the rename and its
+              // revert have run, and neither drops data — they only move a
+              // directory or fail outright). The manifest repair below still
+              // proceeds, so a future restart can find the data even though
+              // this process cannot serve it.
+              logger.error(`[store] CRITICAL: could not reopen the table at '${canonicalName}' after a failed rename revert (${openErr}). Data should still be intact on disk at ${canonicalDir}, but this process has no working table handle for it. Attempting the manifest repair anyway so a restart can find the data; verify ${canonicalDir} exists if problems persist.`);
+            }
+            try {
+              if (await this.saveManifest()) {
+                logger.warn(`[store] Recovered: manifest now points at '${canonicalName}', matching the data's actual on-disk location${reopened ? '' : ' (this process still has no working table handle — restart to serve it)'}.`);
+              } else {
+                // Both the revert and this recovery manifest save failed. The
+                // on-disk manifest (last persisted pointing at tempTableName,
+                // before the old table was dropped) now disagrees with disk.
+                // Fail loud rather than let a future restart silently create
+                // an empty table under the stale name.
+                logger.error(`[store] CRITICAL: could not persist a manifest matching disk after a failed rename revert. Data is intact on disk at ${canonicalDir} (table '${canonicalName}'), but the persisted manifest is stale and points at '${tempTableName}', which no longer exists. If this process exits before a future successful manifest save, the next start will not find the data automatically — manually repair the manifest to point at '${canonicalName}' before restarting.`);
+              }
+            } catch (manifestErr) {
+              logger.error(`[store] CRITICAL: manifest repair threw after a failed rename revert (${manifestErr}). Data is intact on disk at ${canonicalDir} (table '${canonicalName}'), but the persisted manifest is stale and points at '${tempTableName}'. Manually repair the manifest to point at '${canonicalName}' before restarting.`);
+            }
+          }
         }
       } catch (renameErr) {
         // If rename fails (cross-device, permissions, etc.) we keep the temp name

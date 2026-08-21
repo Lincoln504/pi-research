@@ -24,6 +24,8 @@ Field definitions:
 - `synthesis` (string, optional): The synthesized answer if found. Use inline citation markers [1], [2], etc. that correspond to the citations array. Present when answer_status is "yes" or "maybe". Omit when answer_status is "no".
 - `citations` (array of strings, required): The source URLs from the reference documents that were used to construct the answer. Empty array if answer_status is "no".
 
+<!-- USER_TURN: everything below is delivered as the USER message of the stateless call, not the system prompt. The rules above stay byte-identical across calls so the provider can serve the system prefix from its prompt cache; the sections below vary per call. -->
+
 ## USER'S SEARCH QUERY
 
 Answer this search query from the reference documents. This is the PRIMARY signal for what the user wants; the conversation below is supplementary and may be absent for a direct (non-conversational) search:

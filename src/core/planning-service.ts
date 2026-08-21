@@ -220,8 +220,19 @@ function isDegradableLlmError(error: unknown, signal?: AbortSignal): boolean {
 export function salvageReportText(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.length <= 50) return '';
+  // Envelope sniff. Models routinely wrap the JSON envelope in a markdown code
+  // fence (```json … ```); a fenced envelope starts with backticks, not '{', so a
+  // bare startsWith('{') check shipped one verbatim as a user-facing report
+  // (observed in production 2026-08-20: a ```json-fenced {"action":"synthesize",…}
+  // blob, internal protocol fields included, published as the final report).
+  // Strip one leading fence line and a trailing fence before the shape check.
+  let sniff = trimmed;
+  const fence = sniff.match(/^```[a-zA-Z0-9_-]*[ \t]*\r?\n/);
+  if (fence) {
+    sniff = sniff.slice(fence[0].length).replace(/\r?\n```\s*$/, '').trim();
+  }
   // Looks like a (broken) JSON envelope rather than a report — suppress it.
-  if (trimmed.startsWith('{') && /"(?:action|content|researchers)"\s*:/.test(trimmed)) {
+  if (sniff.startsWith('{') && /"(?:action|content|researchers)"\s*:/.test(sniff)) {
     return '';
   }
   return raw;

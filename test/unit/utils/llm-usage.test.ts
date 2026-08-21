@@ -64,6 +64,44 @@ describe('recordLlmUsage', () => {
     expect(sumCounter(reg.getSnapshot().counters, 'llm_tokens_total')).toBe(150);
   });
 
+  describe('prompt-cache token counters', () => {
+    // llm_cache_read/write_tokens_total are the ONLY signal that prompt caching is
+    // working; a caching regression (volatile text pushed ahead of stable text)
+    // shows up as cache_read pinned at 0 while cache_write climbs.
+
+    it('records cacheRead and cacheWrite alongside the plain token counter when the provider reports them', async () => {
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(model, { input: 20, output: 50, cacheRead: 4000, cacheWrite: 800, totalTokens: 4870, cost: { total: 0.01 } }, { component: 'researcher' });
+      });
+      const counters = reg.getSnapshot().counters;
+      expect(sumCounter(counters, 'llm_cache_read_tokens_total')).toBe(4000);
+      expect(sumCounter(counters, 'llm_cache_write_tokens_total')).toBe(800);
+    });
+
+    it('still emits a ZERO-valued cache counter when the provider reported the field as 0 ("cache off" ≠ "not reported")', async () => {
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(model, { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 150, cost: { total: 0.01 } }, { component: 'researcher' });
+      });
+      const counters = reg.getSnapshot().counters;
+      // The counters exist (were emitted) even though their value is zero.
+      expect(Object.keys(counters).some((k) => k.startsWith('llm_cache_read_tokens_total'))).toBe(true);
+      expect(Object.keys(counters).some((k) => k.startsWith('llm_cache_write_tokens_total'))).toBe(true);
+      expect(sumCounter(counters, 'llm_cache_read_tokens_total')).toBe(0);
+    });
+
+    it('omits the cache counters entirely when the provider does not report the fields', async () => {
+      const reg = new MetricsRegistry();
+      await runWithRunRegistry(reg, async () => {
+        recordLlmUsage(model, usage, { component: 'researcher' });
+      });
+      const counters = reg.getSnapshot().counters;
+      expect(Object.keys(counters).some((k) => k.includes('llm_cache_read_tokens_total'))).toBe(false);
+      expect(Object.keys(counters).some((k) => k.includes('llm_cache_write_tokens_total'))).toBe(false);
+    });
+  });
+
   /**
    * Regression for c90d7f37: onPlanningTokens/onEvaluationTokens had ZERO emit sites —
    * coordinator/evaluator usage flowed only through onTokensConsumed, which the TUI

@@ -6,7 +6,8 @@
  *
  * NOTE: `research_knowledge_search` is NOT included here. It is a top-level tool
  * registered via pi.registerTool() in src/index.ts. Researcher sub-agents
- * already receive knowledge store data via the store_section prompt injection.
+ * already receive knowledge-store data in their initial user message (see
+ * researcher-executor.ts / quick-research-orchestrator.ts).
  */
 
 import type { ToolDefinition, ExtensionContext } from '@earendil-works/pi-coding-agent';

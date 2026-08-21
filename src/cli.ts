@@ -150,7 +150,7 @@ function pretty(obj: unknown): string {
  * lifecycle event to stderr. Keeps a long research run visible without spamming
  * stdout (the report goes to stdout, untouched).
  */
-function makeProgressObserver(): HeadlessObserverOptions {
+export function makeProgressObserver(): HeadlessObserverOptions {
   return {
     enableLogging: false,
     onProgress: (event: string, data?: any) => {
@@ -196,9 +196,24 @@ function makeProgressObserver(): HeadlessObserverOptions {
           }
           break;
         }
-        case 'complete':
+        case 'complete': {
           toStderr(`  • complete (${data?.result?.length ?? 0} chars)\n`);
+          // Degradation signal for callers that read stderr (the agent skill
+          // does): a run that completes but is weakly grounded or retrieved no
+          // sources at all looks identical to a healthy run on exit code and
+          // the "complete" line alone. Two real runs on 2026-08-20 shipped
+          // degraded reports (1 citation / 0 sources) with nothing on stderr to
+          // distinguish them. The markers are the synthesis service's own
+          // notices, appended by ensureCitedLinks.
+          const reportText = typeof data?.result === 'string' ? data.result : '';
+          if (reportText.includes('No web sources were successfully retrieved') ||
+              reportText.includes('None of the links above could be verified')) {
+            toStderr('  • WARNING: no web sources could be retrieved — the report is unverified\n');
+          } else if (reportText.includes('Grounding notice: only')) {
+            toStderr('  • WARNING: weakly grounded report (fewer than 3 verified sources) — treat unattributed claims as unverified\n');
+          }
           break;
+        }
         case 'error':
           toStderr(`  • error: ${data?.message}\n`);
           break;
@@ -738,7 +753,9 @@ export async function cmdKnowledge(queries: string[], json?: boolean): Promise<n
       config: getConfig(process.cwd(), 'cli'),
       ignoreGlobalConfig: true,
     });
-    toStderr(`[pi-research] searching knowledge store (${queries.length} query/${queries.length === 1 ? '' : 's'})…\n`);
+    // "N queries", not "N query/s" — same rationale as the search_start line above:
+    // the slash form reads as a rate and renders "1 query/" in the singular.
+    toStderr(`[pi-research] searching knowledge store (${queries.length} ${queries.length === 1 ? 'query' : 'queries'})…\n`);
     result = await searchKnowledge(queries, abortController.signal);
   } catch (err) {
     return reportError(err, 'knowledge search', json);
@@ -1660,8 +1677,32 @@ async function main(argv: string[]): Promise<number> {
   // left the SDK's handler to tear the container down underneath a live orchestrator
   // — exactly the race the CLI installs its own handlers to avoid.
   process.on('SIGHUP', () => onSignal('SIGHUP'));
+  // SIGQUIT: documented (see exitCodeForSignal's comment and the exit-code
+  // tables in docs/SDK.md and SKILL.md) as handled the same way as SIGHUP,
+  // but no listener was ever registered for it — an unhandled SIGQUIT hits
+  // Node's default disposition (immediate termination, no abort, no drain),
+  // silently breaking that documented guarantee. Has no Windows equivalent;
+  // registering the listener there is a documented no-op, so no guard needed.
+  process.on('SIGQUIT', () => onSignal('SIGQUIT'));
   if (process.platform === 'win32') {
     process.on('SIGBREAK', () => onSignal('SIGBREAK'));
+  }
+
+  // Test-only seam: idle here, right after every handler above is registered,
+  // instead of parsing argv/running a command. Lets a subprocess test deliver
+  // a real OS signal and observe THIS handler run (process.exit with the
+  // derived code) rather than Node's default disposition (process killed by
+  // the signal, no code) — the exact distinction that would have caught the
+  // missing SIGQUIT registration this seam was added for. Never set in
+  // production; see the SIGQUIT subprocess test in test/unit/cli.test.ts.
+  if (process.env['PI_RESEARCH_TEST_HANG_FOR_SIGNAL'] === '1') {
+    process.stdout.write('PI_RESEARCH_TEST_READY\n');
+    // A bare unresolved Promise does not keep the event loop alive by
+    // itself (only real libuv handles do — an installed signal listener
+    // isn't one either), so without a ref'd timer the process would exit 0
+    // on its own the instant this synchronous section finishes, before any
+    // signal could ever arrive.
+    await new Promise<never>(() => setInterval(() => {}, 1000));
   }
 
   let parsed: ParsedArgs;

@@ -427,6 +427,27 @@ export function isTransientSynthesisError(message: string): boolean {
   );
 }
 
+/**
+ * Split a knowledge-search prompt template at its USER_TURN marker into the
+ * static system-prompt part (the rules, byte-identical across calls so the
+ * provider can serve it from its prompt cache) and the per-call user-message
+ * part (where the {{...}} placeholders live). If the marker is absent —
+ * a shipped-file regression — returns the whole template as `system` and
+ * `user: null`, and the caller falls back to the legacy all-in-system shape,
+ * which is functionally correct (just uncacheable).
+ * Exported for unit testing.
+ */
+export function splitPromptAtUserTurn(template: string): { system: string; user: string | null } {
+  const open = template.indexOf('<!-- USER_TURN');
+  if (open < 0) return { system: template, user: null };
+  const close = template.indexOf('-->', open);
+  if (close < 0) return { system: template, user: null };
+  return {
+    system: template.slice(0, open).trimEnd(),
+    user: template.slice(close + '-->'.length).trimStart(),
+  };
+}
+
 /** Exported for unit testing of the transient-retry loop. */
 export async function runBackgroundExtraction(
   model: Model<any>,
@@ -452,13 +473,20 @@ export async function runBackgroundExtraction(
   // plain string replacement interprets `$&`, `` $` ``, `$'`, `$$` as substitution patterns and
   // corrupts the extractor prompt (duplicating/eating template text) → wrong yes/maybe/no
   // classification. A function replacer inserts the value literally. (Same class as commit 78c16f98.)
-  const systemPrompt = promptTemplate
+  //
+  // The template splits at USER_TURN: the static rules become the system prompt
+  // (byte-identical across calls → prompt-cache reads instead of a fresh cache
+  // write per call) and the per-call sections go in the user message.
+  const { system, user } = splitPromptAtUserTurn(promptTemplate);
+  const fill = (t: string): string => t
     .replace('{{queries}}', () => formatQueriesBlock(queries))
     .replace('{{conversation_history}}', () => conversationHistory)
     .replace('{{reference_documents}}', () => referenceDocuments);
 
-  const userMessage =
+  const finalInstruction =
     'Analyze the reference documents above and extract the answer using the required JSON format.';
+  const systemPrompt = user === null ? fill(system) : system;
+  const userMessage = user === null ? finalInstruction : `${fill(user)}\n\n${finalInstruction}`;
 
   // Phase 4a: Stateless LLM call — no AgentSession, no side-effects.
   // llmTimeout is resolved by the caller from the iface-aware Config so a
@@ -611,12 +639,17 @@ export async function triageRelevantUrls(
 
   // FUNCTION replacers so literal `$`/`$&` in queries, descriptions or history are not
   // treated as regex substitution patterns (same class as the synthesis prompt).
-  const systemPrompt = promptTemplate
+  // Split at USER_TURN like the extractor: static rules stay in the system prompt
+  // (cacheable across calls), per-call sections go in the user message.
+  const { system, user } = splitPromptAtUserTurn(promptTemplate);
+  const fill = (t: string): string => t
     .replace('{{queries}}', () => formatQueriesBlock(queries))
     .replace('{{conversation_history}}', () => conversationHistory)
     .replace('{{candidates}}', () => candidateBlock);
 
-  const userMessage = 'Return the JSON object listing the indices of the relevant candidates.';
+  const finalInstruction = 'Return the JSON object listing the indices of the relevant candidates.';
+  const systemPrompt = user === null ? fill(system) : system;
+  const userMessage = user === null ? finalInstruction : `${fill(user)}\n\n${finalInstruction}`;
 
   let responseText: string;
   let attempt = 0;

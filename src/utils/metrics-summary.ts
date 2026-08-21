@@ -48,6 +48,12 @@ export interface ResearchStats {
   errors: number;
   /** Total LLM tokens consumed. */
   tokens: number;
+  /** Prompt-cache READ tokens (prompt prefix served from the provider's cache at the
+   *  discounted rate). 0 when the provider reported none or does not report caching. */
+  cacheReadTokens: number;
+  /** Prompt-cache WRITE tokens (prefix stored into the provider's cache, billed at a
+   *  premium). Reads pinned at 0 while writes climb = a caching regression. */
+  cacheWriteTokens: number;
   /** Total cost in USD across all LLM calls. */
   cost: number;
   /** Tool usage counts. */
@@ -193,6 +199,12 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   // Tokens — sum all label variants
   const tokens = sumCounter(counters, 'llm_tokens_total');
 
+  // Prompt-cache split (recordLlmUsage emits these only when the provider reports
+  // the fields, so 0 here covers both "cache off" and "not reported" — the raw
+  // counters keep those distinguishable for anyone reading the snapshot directly).
+  const cacheReadTokens = sumCounter(counters, 'llm_cache_read_tokens_total');
+  const cacheWriteTokens = sumCounter(counters, 'llm_cache_write_tokens_total');
+
   // Cost — sum all label variants
   const cost = sumCounter(counters, 'llm_cost_total');
 
@@ -251,6 +263,8 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
     urlsFailed,
     errors,
     tokens,
+    cacheReadTokens,
+    cacheWriteTokens,
     cost,
     toolUsage,
   };
@@ -315,7 +329,13 @@ export function buildResearchSummary(stats: ResearchStats): string {
   // --- Resource line: tokens, cost, duration ---
   const resourceParts: string[] = [];
   if (stats.tokens > 0) {
-    resourceParts.push(`**${formatTokens(stats.tokens)}** tokens`);
+    // When prompt caching did real work, say so inline: cache reads are prompt
+    // tokens billed at the provider's discounted cached rate, and this is the
+    // only user-visible confirmation that caching is active for their model.
+    const cached = stats.cacheReadTokens > 0
+      ? ` (**${formatTokens(stats.cacheReadTokens)}** from cache)`
+      : '';
+    resourceParts.push(`**${formatTokens(stats.tokens)}** tokens${cached}`);
   }
   // Render the cost whenever tokens were actually billed-through, INCLUDING when it
   // is exactly zero. Gating on `cost > 0` hid a real defect for weeks: a model whose

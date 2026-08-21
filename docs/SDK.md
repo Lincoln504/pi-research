@@ -1,6 +1,6 @@
 ## SDK
 
-The programmatic SDK for scripts, CI, and custom tooling. For configuration (the
+A high-level research SDK for scripts, CI, and custom tooling. For configuration (the
 layering model, the TUI settings, and every environment variable) see
 [CONFIGURATION.md](CONFIGURATION.md).
 

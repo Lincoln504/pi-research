@@ -180,6 +180,20 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   const researcherExecutionStartMs = Date.now();
   const deliveredSteeringIds = new Set<string>();
 
+  // The system prompt is deliberately invariant across researchers, rounds, AND
+  // retry attempts: everything per-researcher (goal, knowledge-store results,
+  // initial evidence, sibling coordination, steering) is delivered in the initial
+  // USER message instead. A byte-identical system prompt + tool set is the
+  // cacheable prefix providers key on, so every researcher after the first gets a
+  // prompt-cache read on that prefix rather than a fresh write. Built once, out
+  // of the retry loop, because nothing in it varies per attempt.
+  const researcherSystemPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
+    .replace('{{extra_tool_guidelines}}', '')
+    // Function replacer so `$`-bearing content is inserted literally, not as a
+    // String.replace substitution pattern.
+    .replace('{{digest_section}}', () => RESEARCHER_DIGEST_SECTION)
+    .trim();
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Launch boundary: never build a session for a run that is already cancelled
     // or fast-stopped. The abort sentinel keeps the wrapper's clean-cancel
@@ -221,30 +235,31 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       }
     }
 
-    // Generate prompt for this attempt, incorporating ALL steering messages delivered so far
+    // Build this attempt's initial USER message: the researcher's assignment plus
+    // every per-researcher section that used to live in the system prompt (goal,
+    // knowledge-store results, initial evidence, sibling coordination), and ALL
+    // steering messages delivered so far. Rebuilt per attempt so a retry picks up
+    // steering that arrived between attempts; the system prompt above never changes.
     const allSteering = getSteeringMessages(sessionId);
     let steeringSection = '';
     if (allSteering.length > 0) {
-        steeringSection = '\n\n### ADDITIONAL USER GUIDANCE (Mandatory directional rules for your research)\n' +
+        steeringSection = '### ADDITIONAL USER GUIDANCE (Mandatory directional rules for your research)\n' +
             allSteering.map(m => {
                 deliveredSteeringIds.add(m.id);
                 return `- ${m.text}`;
             }).join('\n');
     }
 
-    const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-      // Function replacers so a `$`-bearing dynamic value (scraped evidence, store
-      // descriptions, or an LLM-authored goal containing $&, $$, $1, …) is inserted
-      // literally instead of being interpreted as a String.replace substitution pattern.
-      .replace('{{goal}}', () => researcherConfig.goal)
-      .replace('{{store_section}}', () => storeSection)
-      .replace('{{evidence_section}}', () => evidenceSection)
-      .replace('{{coordination_section}}', () => previousQueriesSection)
-      .replace('{{extra_tool_guidelines}}', '')
-      .replace('{{digest_section}}', () => RESEARCHER_DIGEST_SECTION)
-      .trim() + steeringSection;
+    const userMessage = [
+      `Topic: ${researcherConfig.name}\nGoal: ${researcherConfig.goal}`,
+      storeSection.trim(),
+      evidenceSection.trim(),
+      previousQueriesSection.trim(),
+      steeringSection,
+      'Perform your research and submit your full report now.',
+    ].filter(Boolean).join('\n\n');
 
-    logger.debug(`[ResearcherExecutor] Researcher ${id} attempt ${attempt} System Prompt:\n${prompt}`);
+    logger.debug(`[ResearcherExecutor] Researcher ${id} attempt ${attempt} System Prompt:\n${researcherSystemPrompt}\n\nUser Message:\n${userMessage}`);
 
     const workerExclude = ['search'];
     const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
@@ -275,7 +290,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
-      systemPrompt: prompt,
+      systemPrompt: researcherSystemPrompt,
       extensionCtx: ctx,
       excludeTools: mergedExclude,
       researcherId: id,
@@ -434,7 +449,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
       let abortCleanup: (() => void) | undefined;
       try {
-        const promptPromise = session.prompt(`Topic: ${researcherConfig.name}\nGoal: ${researcherConfig.goal}\n\nPerform your research and submit your full report now.`);
+        const promptPromise = session.prompt(userMessage);
         promptPromise.catch((err: Error) => logger.debug(`[ResearcherExecutor] Background session prompt rejection: ${err.message}`));
         await Promise.race([
           promptPromise,

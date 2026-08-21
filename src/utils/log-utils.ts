@@ -37,8 +37,11 @@ export function buildDefaultDebugLogPath(): string {
 /**
  * Check whether debug/verbose logging is enabled.
  *
- * Reads PI_RESEARCH_DEBUG env var. This env var is kept in sync with
- * config.DEBUG whenever the config is loaded or saved (see config.ts).
+ * Reads PI_RESEARCH_DEBUG env var. Config SAVES sync config.DEBUG into this
+ * env var (see config.ts buildEnvValues); plain config LOADS do not mutate
+ * process.env, so a DEBUG=true line in config.env enables verbose logging for
+ * a process only after a save has run in it — export PI_RESEARCH_DEBUG=true
+ * in the environment to guarantee it from process start.
  * Set to "true" to enable INFO+DEBUG logs.
  */
 export function isVerboseFromEnv(): boolean {

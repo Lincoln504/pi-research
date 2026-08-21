@@ -292,6 +292,21 @@ describe('uninstallSkill', () => {
     expect(readManifest(opts()).entries.map(e => e.tool)).toEqual(['pi']);
   });
 
+  it('uninstallSkill([]) removes NOTHING — an explicit empty list is not --all', () => {
+    // 1.4.2 fix, previously untested: the gate used `toolIds.length`, so an
+    // explicit empty list was indistinguishable from undefined and silently
+    // uninstalled everything. Empty must mean "none", matching this module's
+    // other list params.
+    installSkill(['claude', 'pi'], opts());
+    expect(readManifest(opts()).entries).toHaveLength(2);
+
+    const r = uninstallSkill([], opts());
+    expect(r.filter(x => x.status === 'removed')).toHaveLength(0);
+    expect(fs.existsSync(skillPathFor('claude'))).toBe(true);
+    expect(fs.existsSync(skillPathFor('pi'))).toBe(true);
+    expect(readManifest(opts()).entries).toHaveLength(2);
+  });
+
   it('does not delete a symlink that points outside our package (not owned)', () => {
     // Hand-craft a foreign symlink at the claude skill path, plus a manifest
     // entry claiming it — uninstall must refuse to remove it.

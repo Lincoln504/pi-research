@@ -178,19 +178,39 @@ class SerialQueue {
   }
 
   /**
-   * Resolve once no native call is in flight. Used by EmbeddingServer.shutdown()
-   * to wait out a still-running inference before disposing the pipeline —
-   * without this, disposal could run concurrently with a legitimately slow (not
-   * hung) embed/embedMany call on the same re-entrant-locked GPU context, the
-   * exact native-segfault class this queue exists to prevent. No timeout: a
-   * promise that truly never settles is already an accepted, pre-existing
-   * leak-to-process-exit scenario elsewhere in this class (see the poison path's
+   * Resolve once no native call is in flight AND no queued task is still due
+   * to run. Used by EmbeddingServer.shutdown() to wait out a still-running
+   * inference before disposing the pipeline — without this, disposal could
+   * run concurrently with a legitimately slow (not hung) embed/embedMany call
+   * on the same re-entrant-locked GPU context, the exact native-segfault
+   * class this queue exists to prevent. No timeout: a promise that truly
+   * never settles is already an accepted, pre-existing leak-to-process-exit
+   * scenario elsewhere in this class (see the poison path's
    * disposeEmbedder=false handling) — better to leak than risk concurrent
    * native access.
+   *
+   * Checking only `currentWork` is NOT enough with a second task already
+   * queued: a task's `run()` clears `currentWork` to null in its `finally`
+   * (once its native call has settled), and `pump()` only claims it again for
+   * the next task on a LATER microtask tick, once `run()` for the current
+   * task has fully unwound and `await entry.run()` resumes. If a caller's own
+   * check happens to land in that gap, `currentWork` reads as null even
+   * though a second native call is about to start (or a queue in the process
+   * of unwinding to its next task hasn't reached it yet) — exactly the window
+   * disposal must not run in. `running` stays true for the queue's entire
+   * drain, across every task in `tasks`, not just the current one, so it has
+   * no equivalent gap and closes this one.
    */
   async waitForIdle(): Promise<void> {
-    while (this.currentWork) {
-      await this.currentWork.catch(() => {});
+    while (this.currentWork || this.running) {
+      if (this.currentWork) {
+        await this.currentWork.catch(() => {});
+      } else {
+        // Nothing executing right now, but pump() is still mid-drain (about
+        // to claim the next queued task, or unwinding) — yield a microtask
+        // so it can advance instead of reporting idle into this exact gap.
+        await Promise.resolve();
+      }
     }
   }
 

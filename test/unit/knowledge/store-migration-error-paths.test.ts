@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KnowledgeStore } from '../../../src/knowledge/store.ts';
+import { logger } from '../../../src/logger.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
@@ -200,6 +201,234 @@ describe('KnowledgeStore Migration Error Paths', () => {
     expect(manifest.activeTableName).toMatch(/^knowledge_migration_/);
     expect(fs.existsSync(path.join(testDbDir, `${manifest.activeTableName}.lance`))).toBe(true);
 
+    vi.mocked(fsPromises.writeFile).mockImplementation(actualWriteFile);
+  });
+
+  it('migrationReEmbed recovers when the revert rename ALSO fails, by persisting a manifest that matches disk instead', async () => {
+    // Compound failure: dir rename to canonical succeeds, the post-rename
+    // manifest save fails (triggering a revert), and the revert rename ITSELF
+    // also fails. fs.rename is atomic — a failed revert leaves the data fully
+    // at the canonical dir, not back at the temp dir. Pre-fix, this fell into
+    // the catch block written for "the FIRST rename never happened", which
+    // unconditionally pointed the manifest and the in-memory table handle at
+    // the temp name — whose directory no longer existed on disk, since the
+    // first rename had already moved it to 'knowledge.lance'. The fix instead
+    // retries the manifest save against the canonical name, which matches
+    // where the data actually is.
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-b',
+      migrationStrategy: 're-embed' });
+
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store1.initialize();
+    await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+    await store1.close();
+
+    const actualRename = (await vi.importActual('node:fs/promises') as any).rename;
+    // Only the canonical->temp REVERT rename fails; the initial temp->canonical
+    // rename (same two paths, reversed direction) must still succeed.
+    vi.mocked(fsPromises.rename).mockImplementation(async (src: any, dest: any) => {
+      if (String(dest).includes('_migration_') && String(dest).endsWith('.lance')) {
+        throw new Error('Revert rename failed (simulated EBUSY)');
+      }
+      return actualRename(src, dest);
+    });
+
+    const actualWriteFile = (await vi.importActual('node:fs/promises') as any).writeFile;
+    let canonicalSaveAttempts = 0;
+    vi.mocked(fsPromises.writeFile).mockImplementation(async (file: any, data: any, opts: any) => {
+      if (typeof data === 'string' && JSON.parse(data).activeTableName === 'knowledge') {
+        canonicalSaveAttempts += 1;
+        // Fail only the FIRST save against the canonical name (the one that
+        // triggers the revert attempt); let the recovery retry succeed.
+        if (canonicalSaveAttempts === 1) {
+          throw new Error('Disk write failed');
+        }
+      }
+      return actualWriteFile(file, data, opts);
+    });
+
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    // Must not throw and must not fall back to the data-relocating backup
+    // strategy — the migration and the recovery both fully succeeded.
+    await store.initialize();
+
+    // At least two attempts against the canonical name: the post-rename save
+    // that fails (triggering the revert), and the recovery retry that
+    // succeeds. (initialize() also does one more unconditional safety save
+    // after a successful open, which is unrelated to the behavior under test.)
+    expect(canonicalSaveAttempts).toBeGreaterThanOrEqual(2);
+    expect(await store.count()).toBe(1);
+    const backupDirs = fs.readdirSync(testDbDir).filter((d) => d.includes('_backup_'));
+    expect(backupDirs).toHaveLength(0);
+
+    // Manifest and disk must agree on the CANONICAL name this time, since the
+    // data is physically at 'knowledge.lance' (the revert never moved it back).
+    expect(fs.existsSync(path.join(testDbDir, 'knowledge.lance'))).toBe(true);
+    const manifestPath = path.join(testDbDir, 'store-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    expect(manifest.activeTableName).toBe('knowledge');
+
+    // The pre-fix code path logged this scenario as an ordinary revert
+    // success; assert the new branch's distinct recovery log actually ran.
+    expect(errorSpy.mock.calls.some(call =>
+      String(call[0]).includes('Revert rename also failed'))).toBe(true);
+
+    vi.mocked(fsPromises.rename).mockImplementation(actualRename);
+    vi.mocked(fsPromises.writeFile).mockImplementation(actualWriteFile);
+  });
+
+  it('migrationReEmbed stays usable in-process when BOTH the revert rename and the recovery manifest save fail', async () => {
+    // Worst case in the same compound-failure family: the recovery manifest
+    // save (against the canonical name) fails too. Pre-fix this path opened a
+    // table handle for a directory that no longer existed; the fix opens the
+    // handle for the canonical name, which is where the data actually lives,
+    // so the current process keeps working even though the on-disk manifest
+    // is left stale until a future successful save.
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-b',
+      migrationStrategy: 're-embed' });
+
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store1.initialize();
+    await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+    await store1.close();
+
+    const actualRename = (await vi.importActual('node:fs/promises') as any).rename;
+    vi.mocked(fsPromises.rename).mockImplementation(async (src: any, dest: any) => {
+      if (String(dest).includes('_migration_') && String(dest).endsWith('.lance')) {
+        throw new Error('Revert rename failed (simulated EBUSY)');
+      }
+      return actualRename(src, dest);
+    });
+
+    const actualWriteFile = (await vi.importActual('node:fs/promises') as any).writeFile;
+    vi.mocked(fsPromises.writeFile).mockImplementation(async (file: any, data: any, opts: any) => {
+      // Every save against the canonical name fails — no successful recovery.
+      if (typeof data === 'string' && JSON.parse(data).activeTableName === 'knowledge') {
+        throw new Error('Disk write failed');
+      }
+      return actualWriteFile(file, data, opts);
+    });
+
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    // Must still not throw: the migration itself succeeded, and surfacing a
+    // manifest-persistence problem as a migration failure would trip the
+    // backup-strategy fallback and needlessly relocate perfectly good data.
+    await expect(store.initialize()).resolves.toBeUndefined();
+
+    // The in-memory handle must still work for the rest of this process's
+    // lifetime — this is the core regression check: pre-fix, count() here
+    // would either throw or silently report 0 against a handle pointed at a
+    // directory that no longer existed.
+    expect(await store.count()).toBe(1);
+    expect(fs.existsSync(path.join(testDbDir, 'knowledge.lance'))).toBe(true);
+
+    expect(errorSpy.mock.calls.some(call =>
+      String(call[0]).includes('CRITICAL'))).toBe(true);
+
+    vi.mocked(fsPromises.rename).mockImplementation(actualRename);
+    vi.mocked(fsPromises.writeFile).mockImplementation(actualWriteFile);
+  });
+
+  it('migrationReEmbed never falls through to the wrong recovery path when a THIRD failure (reopening the table) compounds the first two', async () => {
+    // Deepest case in the compound-failure family: even reopening the table
+    // at its actual on-disk location fails, after the revert-rename already
+    // failed too. Pre-fix, an exception thrown while reopening would
+    // propagate out of the revertErr catch block into the OUTER catch
+    // (renameErr) — written for a completely different scenario (the FIRST
+    // rename never happening at all) — which would wrongly set the manifest
+    // to point at tempTableName, whose directory no longer exists on disk
+    // (the first rename already moved it to canonicalDir). The fix wraps
+    // this third step in its own try/catch that never rethrows FROM
+    // migrationReEmbed itself.
+    //
+    // initialize() as a whole still legitimately rejects here: the canonical
+    // table is now genuinely unopenable (this test corrupts it on disk, not
+    // just mocks a rejection), and the LATER, unrelated evictOldRecords()
+    // step correctly refuses to serve a stale handle for a table it can no
+    // longer confirm exists — pre-existing, intentional fail-loud behavior
+    // (see openFreshTable's own "do NOT serve a stale handle" comment), not
+    // a gap this fix is responsible for closing. What THIS fix guarantees at
+    // this depth of failure is narrower and still fully checked below: the
+    // manifest is never corrupted to point at the wrong (temp) name, and the
+    // CRITICAL log fires so the failure is diagnosable rather than silent.
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-b',
+      migrationStrategy: 're-embed' });
+
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'model-a' });
+    await store1.initialize();
+    await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
+    await store1.close();
+
+    const actualRename = (await vi.importActual('node:fs/promises') as any).rename;
+    vi.mocked(fsPromises.rename).mockImplementation(async (src: any, dest: any) => {
+      if (String(dest).includes('_migration_') && String(dest).endsWith('.lance')) {
+        // Simulate the revert failing AND, as a side effect of the same
+        // underlying disk fault, corrupting the canonical directory (revert's
+        // src) so a subsequent REAL openTable() call against it also
+        // genuinely fails — not just a mocked rejection.
+        fs.rmSync(path.join(String(src), '_versions'), { recursive: true, force: true });
+        throw new Error('Revert rename failed (simulated EBUSY)');
+      }
+      return actualRename(src, dest);
+    });
+
+    const actualWriteFile = (await vi.importActual('node:fs/promises') as any).writeFile;
+    vi.mocked(fsPromises.writeFile).mockImplementation(async (file: any, data: any, opts: any) => {
+      if (typeof data === 'string' && JSON.parse(data).activeTableName === 'knowledge') {
+        throw new Error('Disk write failed');
+      }
+      return actualWriteFile(file, data, opts);
+    });
+
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    // The table is genuinely broken at this point (this test corrupted it on
+    // disk), so initialize() legitimately rejects once the later, unrelated
+    // evictOldRecords() step tries to use it — that is pre-existing,
+    // intentional fail-loud behavior, not something this fix changes.
+    await expect(store.initialize()).rejects.toThrow();
+
+    // What this fix DOES guarantee held: migrationReEmbed's own three-deep
+    // catch logged the CRITICAL diagnosis instead of silently swallowing or
+    // mis-attributing the failure...
+    expect(errorSpy.mock.calls.some(call =>
+      String(call[0]).includes('could not reopen the table'))).toBe(true);
+
+    // ...and the manifest repair was still ATTEMPTED despite the reopen
+    // failure (it is deliberately not gated behind openTable — saveManifest
+    // needs only writeFile/rename): this test's writeFile mock makes that
+    // attempt fail too, which must surface as its own CRITICAL, not be
+    // silently skipped.
+    expect(errorSpy.mock.calls.some(call =>
+      String(call[0]).includes('could not persist a manifest matching disk'))).toBe(true);
+
+    // ...and no further, WRONG write happened after that: the on-disk
+    // manifest still shows the temp name from the pre-drop save (the last
+    // write that actually succeeded — every save attempted afterward, in
+    // both the revert-fail and this reopen-fail branch, was made to fail by
+    // this test's own mock). It still matches the temp-name PATTERN, proving
+    // the outer catch (renameErr) — which would have re-saved that same
+    // shape of value but via a completely different, wrong code path
+    // assuming data never left tempDir — never ran on top of it.
+    const manifestPath = path.join(testDbDir, 'store-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    expect(manifest.activeTableName).toMatch(/^knowledge_migration_/);
+
+    vi.mocked(fsPromises.rename).mockImplementation(actualRename);
     vi.mocked(fsPromises.writeFile).mockImplementation(actualWriteFile);
   });
 

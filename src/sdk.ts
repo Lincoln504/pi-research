@@ -111,6 +111,7 @@ let _onSignal: ((signal: string) => void) | null = null;
 let _sigintHandler: (() => void) | null = null;
 let _sigtermHandler: (() => void) | null = null;
 let _sighupHandler: (() => void) | null = null;
+let _sigquitHandler: (() => void) | null = null;
 let _sigbreakHandler: (() => void) | null = null;
 let _shuttingDown = false;
 // In-flight shutdown guard. A cooperative shutdownResearchSDK() can race a
@@ -147,9 +148,13 @@ function _registerSignalHandlers(): void {
   _sigintHandler  = () => _onSignal?.('SIGINT');
   _sigtermHandler = () => _onSignal?.('SIGTERM');
   _sighupHandler  = () => _onSignal?.('SIGHUP');
+  _sigquitHandler = () => _onSignal?.('SIGQUIT');
   process.on('SIGINT',  _sigintHandler);
   process.on('SIGTERM', _sigtermHandler);
   process.on('SIGHUP',  _sighupHandler);
+  // SIGQUIT has no Windows equivalent; registering the listener there is a
+  // documented no-op (Node never delivers it), so no platform guard is needed.
+  process.on('SIGQUIT', _sigquitHandler);
   if (process.platform === 'win32') {
     _sigbreakHandler = () => _onSignal?.('SIGBREAK');
     process.on('SIGBREAK', _sigbreakHandler);
@@ -160,6 +165,7 @@ function _removeSignalHandlers(): void {
   if (_sigintHandler)   { process.removeListener('SIGINT',   _sigintHandler);   _sigintHandler   = null; }
   if (_sigtermHandler)  { process.removeListener('SIGTERM',  _sigtermHandler);  _sigtermHandler  = null; }
   if (_sighupHandler)   { process.removeListener('SIGHUP',   _sighupHandler);   _sighupHandler   = null; }
+  if (_sigquitHandler)  { process.removeListener('SIGQUIT',  _sigquitHandler);  _sigquitHandler  = null; }
   if (_sigbreakHandler) { process.removeListener('SIGBREAK', _sigbreakHandler); _sigbreakHandler = null; }
   _onSignal = null;
 }

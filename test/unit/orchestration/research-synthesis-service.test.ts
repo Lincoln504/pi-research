@@ -253,6 +253,67 @@ describe('ResearchSynthesisService', () => {
     });
   });
 
+  // ─── ensureCitedLinks: weak-grounding notice ────────────────────────────────
+
+  describe('ensureCitedLinks — weak-grounding notice', () => {
+    // Production incident (Aug 20): a depth-1 run whose researchers retrieved almost
+    // nothing shipped a fully sourced-LOOKING report with exactly one citation and
+    // fabricated most of its specifics. The calling agent had to detect the
+    // degradation itself. Below 3 verified sources the report must carry an explicit
+    // grounding notice so readers (human or agent) get that signal from the engine.
+
+    it('appends a grounding notice when only ONE source could be verified (replace path)', () => {
+      service.storeReport('test-session', '1.A', reportWithCitations([
+        { url: 'https://lonely-source.org/page', desc: 'the only page that scraped' },
+      ]));
+      const synthesis = 'Findings. [1]\n\nCITED LINKS\n[1] https://lonely-source.org/page - the only page';
+      const result = service.ensureCitedLinks('test-session', synthesis);
+      expect(result).toContain('Grounding notice: only 1 source could be verified');
+      // The notice sits BEFORE the CITED LINKS header: anything after the last
+      // citation entry is absorbed into that entry's Description by
+      // parseCitations, which quick mode re-parses to build knowledge-store
+      // entries — a trailing notice polluted the stored description of the
+      // final source on exactly the degraded runs it exists to flag.
+      expect(result).toContain('CITED LINKS');
+      expect(result.indexOf('Grounding notice')).toBeLessThan(result.indexOf('CITED LINKS'));
+    });
+
+    it('never leaks the notice into a citation description when the report is re-parsed (knowledge-store path)', async () => {
+      const { parseCitations } = await import('../../../src/utils/text-utils.ts');
+      service.storeReport('test-session', '1.A', reportWithCitations([
+        { url: 'https://lonely-source.org/page', desc: 'the only page that scraped' },
+      ]));
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      const reparsed = parseCitations(result);
+      expect(reparsed.length).toBeGreaterThan(0);
+      for (const cit of reparsed) {
+        expect(cit.description ?? '').not.toContain('Grounding notice');
+      }
+    });
+
+    it('appends a grounding notice on the append path (no CITED LINKS header) too', () => {
+      service.storeReport('test-session', '1.A', reportWithCitations([
+        { url: 'https://a.org/1' }, { url: 'https://a.org/2' },
+      ]));
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      expect(result).toContain('Grounding notice: only 2 sources could be verified');
+    });
+
+    it('does NOT append the notice when 3 or more sources are verified', () => {
+      service.storeReport('test-session', '1.A', reportWithCitations([
+        { url: 'https://a.org/1' }, { url: 'https://a.org/2' }, { url: 'https://a.org/3' },
+      ]));
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      expect(result).not.toContain('Grounding notice');
+    });
+
+    it('does NOT double-caveat the zero-source path (its own notes already cover it)', () => {
+      const result = service.ensureCitedLinks('test-session', 'Uncited findings.');
+      expect(result).toContain('No web sources were successfully retrieved');
+      expect(result).not.toContain('Grounding notice');
+    });
+  });
+
   // ─── ensureCitedLinks ────────────────────────────────────────────────────────
 
   describe('ensureCitedLinks', () => {

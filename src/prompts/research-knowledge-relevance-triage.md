@@ -18,6 +18,8 @@ Your ONLY job is to decide which candidates are genuinely relevant to the user's
 Field definitions:
 - `relevant_indices` (array of integers, required): the 0-based indices of the relevant candidates, in any order. Empty array `[]` if none are relevant.
 
+<!-- USER_TURN: everything below is delivered as the USER message of the stateless call, not the system prompt. The rules above stay byte-identical across calls so the provider can serve the system prefix from its prompt cache; the sections below vary per call. -->
+
 ## USER'S SEARCH QUERY
 
 Judge each candidate's relevance to this search query. This is the PRIMARY signal for what the user wants; the conversation below is supplementary and may be absent for a direct (non-conversational) search:

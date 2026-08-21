@@ -89,6 +89,55 @@ describe('Configuration Scoping', () => {
     expect(config.DEFAULT_RESEARCH_DEPTH).toBe(3);   // real project-scoped key still applies
   });
 
+  it('ignores a user-scoped key dropped in a legacy .pi-research.env file in the CWD, but still applies a genuinely local-scoped one', () => {
+    // Regression: the legacy .pi-research.env loader applied EVERY key from
+    // the file unconditionally to this run's resolved config, before only
+    // PERSISTING the LOCAL_SCOPE_KEYS subset to the registry — inconsistent
+    // with the registry itself (step 4, tested above), which the codebase's
+    // own comment explains was deliberately restricted because "the registry
+    // is project-scoped storage... never user-scoped keys." Since this tool
+    // is routinely invoked by a coding agent inside an arbitrary, potentially
+    // untrusted repository, a dropped-in .pi-research.env could silently
+    // control user-scoped settings (RESEARCH_MODEL, EMBEDDING_DEVICE,
+    // DISABLED_TOOLS, ...) for that run with no confirmation. The legacy
+    // predecessor must not be MORE permissive than its own successor.
+    delete process.env['PI_RESEARCH_MODEL'];
+    const globalEnvPath = path.join(os.homedir(), CONFIG_DIR_NAME, 'research', 'config.env');
+    const legacyEnvPath = path.resolve(mockCwd, '.pi-research.env');
+    vi.mocked(fs.existsSync).mockImplementation((p: any) => p === globalEnvPath || p === legacyEnvPath);
+    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+      if (p === globalEnvPath) return 'PI_RESEARCH_MODEL=env/model\n';
+      if (p === legacyEnvPath) {
+        return [
+          'PI_RESEARCH_MODEL=legacy-cwd/model',            // user-scoped — must be ignored
+          'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH=3',           // genuinely local-scoped — must apply
+        ].join('\n');
+      }
+      return '';
+    });
+
+    const config = getConfig(mockCwd);
+    expect(config.RESEARCH_MODEL).toBe('env/model'); // config.env wins, legacy CWD pollution ignored
+    expect(config.DEFAULT_RESEARCH_DEPTH).toBe(3);   // real local-scoped key still applies
+  });
+
+  it('falls back to the built-in default (not the legacy file) for a user-scoped key when no real config.env sets it either', () => {
+    // Stronger version of the above: with NO config.env at all, a user-scoped
+    // key from the legacy CWD file must still be ignored rather than winning
+    // by being the only source present.
+    delete process.env['PI_RESEARCH_MODEL'];
+    const legacyEnvPath = path.resolve(mockCwd, '.pi-research.env');
+    vi.mocked(fs.existsSync).mockImplementation((p: any) => p === legacyEnvPath);
+    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+      if (p === legacyEnvPath) return 'PI_RESEARCH_MODEL=legacy-cwd/model\n';
+      return '';
+    });
+
+    const config = getConfig(mockCwd);
+    expect(config.RESEARCH_MODEL).not.toBe('legacy-cwd/model');
+    expect(config.RESEARCH_MODEL).toBe(DEFAULTS.RESEARCH_MODEL);
+  });
+
   it('should fall back to user defaults when project settings are missing', () => {
     // Mock no project settings
     vi.mocked(fs.existsSync).mockReturnValue(false);

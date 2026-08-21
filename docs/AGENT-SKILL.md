@@ -77,9 +77,10 @@ One-click (recommended). From the `pi` extension, run `/research-config` →
 Install in External Agents. The installer:
 
 1. Detects which target agents are present under `$HOME` — currently Claude
-   (`~/.claude/skills`), OpenAI Codex CLI (`~/.codex/skills`), and OpenClaw
-   (`~/.openclaw/skills`, OpenClaw's managed skill root, which accepts symlinked
-   skill folders).
+   (`~/.claude/skills`), OpenClaw (`~/.openclaw/skills`, OpenClaw's managed
+   skill root, which accepts symlinked skill folders), and OpenAI Codex CLI
+   (`~/.codex/skills` — unlike the other two, this path is not confirmed by
+   Codex's official docs; Codex skills support is still emerging).
 2. Symlinks `skills/pi-research/` into each present agent, never overwriting an
    unrelated skill already in that slot.
 3. Records what it created in a manifest, so Remove from External Agents

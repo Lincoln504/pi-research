@@ -75,6 +75,15 @@ async function convertToMarkdown(html: string): Promise<string> {
   return converter(html);
 }
 
+// TODO(hardening, medium): this synchronous WASM parse runs on the MAIN
+// process's event loop — a large/complex PDF can block it for seconds,
+// starving every concurrent scrape, the TUI render loop, and timers. The
+// correct fix is a worker_threads-based extraction (mirroring the browser
+// pool's CPU isolation pattern), but it is deliberately NOT done in this
+// pass: pdf-oxide-wasm is dynamically imported here and unit tests mock the
+// module via vitest, which cannot reach into a real worker thread — moving
+// the parse requires a companion test-seam redesign first. Bounded today by
+// MAX_PDF_SIZE (100MB) and the scrape task's own deadline.
 async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
   if (bytes.length > MAX_PDF_SIZE) {
     const sizeMB = Math.round(bytes.length / 1024 / 1024);

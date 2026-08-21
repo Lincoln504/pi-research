@@ -43,6 +43,14 @@ export interface ObserverContext {
    */
   renderImmediate?: () => void;
   researchComplexity: number;
+  /**
+   * Whether prompt caching is active for the run's resolved model (see
+   * isPromptCachingActiveForModel). With caching active the effective
+   * per-researcher scrape-batch maximum is one higher, and progress units
+   * must be computed relative to that same effective count the tracker
+   * enforces — not the base configured value.
+   */
+  cachingActive?: boolean;
 }
 
 export interface ObserverState {
@@ -94,7 +102,7 @@ export function createResearchObserver(
         activateSlice(panelState, state.quickSliceLabel);
         updateSliceStatus(panelState, state.quickSliceLabel, 'starting...', debouncedRefresh);
 
-        const units = getUnitsPerResearcher();
+        const units = getUnitsPerResearcher(undefined, ctx.cachingActive);
         panelState.progress = { expected: units, made: 0 };
       }
       // Quick research: researcher is running → steering is acceptable
@@ -152,7 +160,7 @@ export function createResearchObserver(
     onPlanningSuccess: (plan) => {
       updateSliceStatus(panelState, 'coord', 'ready', debouncedRefresh);
       completeSlice(panelState, 'coord');
-      const unitsPerResearcher = getUnitsPerResearcher();
+      const unitsPerResearcher = getUnitsPerResearcher(undefined, ctx.cachingActive);
       const count = plan.researchers?.length || 0;
       const units = (count * unitsPerResearcher) + LEAD_EVAL_UNITS;
       panelState.progress = { expected: units, made: 0 };
@@ -319,7 +327,7 @@ export function createResearchObserver(
 
     onResearcherProgress: (id, status, tokens, cost) => {
       const sliceId = id === 'quick' ? state.quickSliceLabel : id;
-      const unitsPerResearcher = getUnitsPerResearcher();
+      const unitsPerResearcher = getUnitsPerResearcher(undefined, ctx.cachingActive);
       
       if (status !== undefined) {
         if (status.startsWith('done:')) {
@@ -350,7 +358,7 @@ export function createResearchObserver(
     onResearcherComplete: (id, _report) => {
       const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       if (panelState.progress) {
-        const unitsPerResearcher = getUnitsPerResearcher();
+        const unitsPerResearcher = getUnitsPerResearcher(undefined, ctx.cachingActive);
         const current = progressCredits.get(id) ?? 0;
         const remaining = unitsPerResearcher - current;
         if (remaining > 0) {
@@ -365,7 +373,7 @@ export function createResearchObserver(
     onResearcherFailure: (id, _error) => {
       const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       if (panelState.progress) {
-        const unitsPerResearcher = getUnitsPerResearcher();
+        const unitsPerResearcher = getUnitsPerResearcher(undefined, ctx.cachingActive);
         const current = progressCredits.get(id) ?? 0;
         const remaining = unitsPerResearcher - current;
         if (remaining > 0) {
@@ -430,7 +438,7 @@ export function createResearchObserver(
       } else {
         // Delegation: prepare for new round's search → researchers → steering acceptable
         if (plan?.researchers && plan.researchers.length > 0 && panelState.progress) {
-          const unitsPerResearcher = getUnitsPerResearcher();
+          const unitsPerResearcher = getUnitsPerResearcher(undefined, ctx.cachingActive);
           panelState.progress.expected += (plan.researchers.length * unitsPerResearcher) + LEAD_EVAL_UNITS;
         }
         panelState.steeringAcceptable = true;

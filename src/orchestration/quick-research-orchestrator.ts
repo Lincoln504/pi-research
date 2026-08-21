@@ -19,6 +19,7 @@ import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches, resolveExcludedTools } from '../constants.ts';
+import { resolveResearchModel, isPromptCachingActiveForModel } from '../core/llm/research-model-resolver.ts';
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
@@ -133,7 +134,15 @@ export class QuickResearchOrchestrator {
         }
 
         const researcherPromptTemplate = loadPrompt('researcher');
-        const maxScrapeBatches = getMaxScrapeBatches(this.config);
+        // Resolve the model here (same deterministic inputs createResearcherSession
+        // below will resolve again) purely to learn whether prompt caching will be
+        // active, so the batch count told to the model in the prompt below matches
+        // the limit ToolUsageTracker actually enforces — resolveResearchModel is a
+        // pure, cheap lookup over already-loaded registries, safe to call twice.
+        const cachingActiveForBudget = isPromptCachingActiveForModel(
+          resolveResearchModel({ modelRegistry: ctx.modelRegistry, config: this.config, hostModel: model, cwd: ctx.cwd })
+        );
+        const maxScrapeBatches = getMaxScrapeBatches(this.config, cachingActiveForBudget);
         const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
 
         const quickEvidenceSection =
@@ -162,19 +171,29 @@ export class QuickResearchOrchestrator {
         }
         evidenceLines.push(quickEvidenceSection);
 
+        // The system prompt carries only run-invariant instructions; the goal,
+        // knowledge-store results, evidence, and steering go in the initial USER
+        // message below. A byte-identical system prompt + tool set is the cacheable
+        // prefix providers key on, so back-to-back quick runs (and every follow-up
+        // turn within this session) reuse it via prompt-cache reads.
         const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-            // Function replacers: insert `$`-bearing dynamic content (scraped evidence,
-            // store descriptions, the user query) literally, not as a substitution pattern.
-            .replace('{{goal}}', () => query + steeringSection)
-            .replace('{{store_section}}', () => storeSection)
-            .replace('{{evidence_section}}', () => evidenceLines.join('\n\n'))
-            .replace('{{coordination_section}}', '')
             .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).')
             // Quick research has no research lead and no next round — see
             // RESEARCHER_DIGEST_SECTION. Its report IS the deliverable.
-            .replace('{{digest_section}}', '');
+            .replace('{{digest_section}}', '')
+            .trim();
 
-        logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
+        // `$`-bearing dynamic content (the user query, store descriptions, steering)
+        // is plain string concatenation here — no String.replace substitution risk.
+        const userMessage = [
+          `Goal: ${query}`,
+          storeSection.trim(),
+          evidenceLines.join('\n\n').trim(),
+          steeringSection.trim(),
+          'Perform your research and submit your full report now.',
+        ].filter(Boolean).join('\n\n');
+
+        logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}\n\nUser Message:\n${userMessage}`);
 
         let lastSeenSearchCount = 0;
         const { session, resolvedModel } = await createResearcherSession({
@@ -287,7 +306,7 @@ export class QuickResearchOrchestrator {
           // whether the race resolves via session.prompt, timeout, or abort.
           let abortCleanup: (() => void) | undefined;
           try {
-            const promptPromise = session.prompt(query);
+            const promptPromise = session.prompt(userMessage);
             promptPromise.catch((err: Error) => logger.debug(`[QuickOrchestrator] Background session prompt rejection: ${err.message}`));
             await Promise.race([
               promptPromise,

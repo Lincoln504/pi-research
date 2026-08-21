@@ -862,6 +862,21 @@ describe('PlanningService', () => {
       const prose = 'This is a legitimate research report written as prose, well over the fifty character floor.';
       expect(salvageReportText(prose)).toBe(prose);
     });
+
+    it('suppresses a ```json-FENCED envelope (production 2026-08-20: fenced blob shipped verbatim as the report)', () => {
+      // A fenced envelope starts with backticks, not '{' — the bare startsWith
+      // check let it through, publishing internal protocol fields to the user.
+      const fenced = '```json\n{\n  "action": "synthesize",\n  "content": "This report presents the findings ' + 'x'.repeat(80) + '\n```';
+      expect(salvageReportText(fenced)).toBe('');
+      // Bare fence with no language tag, and CRLF line endings, are envelopes too.
+      const bareFence = '```\r\n{"researchers":[{"name":"' + 'y'.repeat(80) + '"}]}\r\n```';
+      expect(salvageReportText(bareFence)).toBe('');
+    });
+
+    it('preserves prose that merely CONTAINS a fenced code block (fence is not the whole answer)', () => {
+      const proseWithFence = 'The benchmark results are summarized below, over the length floor.\n```json\n{"action": "example", "content": "sample"}\n```\nAnd further prose follows the code block here.';
+      expect(salvageReportText(proseWithFence)).toBe(proseWithFence);
+    });
   });
 
   /**

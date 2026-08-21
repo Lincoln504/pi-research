@@ -49,7 +49,14 @@ export function createScrapeTool(options: {
   config?: Config;
 }): ToolDefinition {
   const config = options.config || getConfig(options.ctx.cwd);
-  const maxScrapeBatches = getMaxScrapeBatches(config);
+  // Prefer the tracker's own scrape limit when one is present: it was built via
+  // createDefaultToolLimits(config, cachingActive) and so already reflects any
+  // prompt-caching batch bonus (see getMaxScrapeBatches in constants.ts). Without
+  // this, the tool's own description/promptSnippet/protocol text (below) told the
+  // model a lower, non-caching-aware batch count than the tracker actually
+  // enforced — a real, if harmless, missed-opportunity: the model would stop one
+  // batch short of what it was actually allowed to use.
+  const maxScrapeBatches = options.tracker?.getToolLimit('scrape') ?? getMaxScrapeBatches(config);
   const container = tryGetServiceContainerFromCtx(options.ctx);
 
   // Fallback global state when no orchestration context is provided

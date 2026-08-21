@@ -103,8 +103,11 @@ jobs:
     # already-vetted file without ever installing a dependency itself.
     permissions:
       contents: read
-    outputs:
-      tar_file: ${{ steps.pack.outputs.tar_file }}
+    # NOTE: deliberately NO `outputs:` here. `publish` derives the tarball name
+    # from the release tag instead of trusting anything this job emits — a
+    # needs-output interpolated into the credentialed job's shell would be a
+    # script-injection channel from the job that runs untrusted lifecycle
+    # scripts into the job that holds id-token: write (see publish's comment).
     steps:
       - uses: actions/checkout@v7
 
@@ -169,7 +172,6 @@ jobs:
           npm pack
           TAR_FILE="$(ls *.tgz)"
           echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
-          echo "tar_file=$TAR_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Verify tarball manifest (required files present, no junk)
         run: node scripts/verify-package.cjs manifest
@@ -252,13 +254,41 @@ jobs:
 
       # npm >=11.5.1 ships the OIDC trusted-publishing exchange (Node 22 in
       # .nvmrc bundles npm 10, which lacks it and would hit ENEEDAUTH).
+      # --ignore-scripts: this is the one command in this credentialed
+      # (id-token: write) job that installs a package at all. npm (the
+      # package) ships no install-time lifecycle scripts as of this writing,
+      # but the job's whole design is to never run installable code here on
+      # trust alone — --ignore-scripts makes that hold even if a future npm
+      # release, or a compromised one, added one.
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@11
+        run: npm install -g npm@11 --ignore-scripts
 
       # No NODE_AUTH_TOKEN: trusted publishing authenticates via OIDC and emits
       # provenance automatically (the --provenance flag is now redundant but kept
       # to state intent explicitly). Publishing the tarball file directly (not
       # `.`) means no lifecycle scripts run and no node_modules is ever installed
       # in this credentialed job.
+      #
+      # The filename is DERIVED FROM THE TAG here, not taken from test-install's
+      # job output: `needs.<job>.outputs.*` originates in the one job that runs
+      # untrusted dependency lifecycle scripts, and interpolating it with ${{ }}
+      # into this run: block would splice attacker-controllable text into the
+      # shell script of the only job holding id-token: write — re-opening the
+      # exact credential/untrusted-code separation this job structure exists to
+      # enforce (GitHub's hardening guide lists needs-outputs as an injection
+      # source). The tag (workflow trigger: v*.*.*, maintainer-pushed) fixes the
+      # npm-pack name deterministically: @lincoln504/pi-research vX.Y.Z packs as
+      # lincoln504-pi-research-X.Y.Z.tgz. The env: indirection keeps even the
+      # ref name out of shell parsing. If the artifact does not contain exactly
+      # that file, fail closed and show what it did contain.
       - name: Publish to npm
-        run: npm publish "${{ needs.test-install.outputs.tar_file }}" --provenance --access public
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          TAR_FILE="lincoln504-pi-research-${TAG#v}.tgz"
+          if [ ! -f "$TAR_FILE" ]; then
+            echo "Expected tarball $TAR_FILE not present in downloaded artifact; contents:" >&2
+            ls -la >&2
+            exit 1
+          fi
+          npm publish "$TAR_FILE" --provenance --access public

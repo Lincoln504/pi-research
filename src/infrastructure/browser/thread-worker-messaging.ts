@@ -542,7 +542,11 @@ export async function executeScrapeTask(
               // Matches the PDF branch below AND the fetch layer's own detection
               // (web-scraper.ts): a server can mislabel or omit content-type, so a
               // `.pdf` URL extension is an equally-trusted signal, not just the header.
-              const looksLikePdf = ct?.includes('application/pdf') || url.toLowerCase().endsWith('.pdf');
+              // resp.url() — THIS response's URL, not the original task URL: goto()
+              // follows redirects, and a download endpoint without `.pdf` that
+              // redirects to the real `.pdf` file must still arm the early abort
+              // (same redirect-aware fix the fetch layer got via currentUrl).
+              const looksLikePdf = ct?.includes('application/pdf') || String(resp.url()).toLowerCase().endsWith('.pdf');
               if (!looksLikePdf || oversizedPdfError || poisonedError) return;
               const declared = parseInt((await resp.headerValue('content-length').catch(() => null)) || '', 10);
               if (Number.isFinite(declared) && declared > MAX_PDF_SIZE) {

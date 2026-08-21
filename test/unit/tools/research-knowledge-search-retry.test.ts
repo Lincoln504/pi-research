@@ -25,9 +25,11 @@ vi.mock('../../../src/web-research/retry-utils.ts', () => ({
   abortableDelay: (...args: unknown[]) => mockAbortableDelay(...args),
 }));
 
-// Deterministic prompt template (avoids touching dist/prompts on disk).
+// Deterministic prompt template (avoids touching dist/prompts on disk). Mirrors the
+// shipped template's shape: static rules, then the USER_TURN marker, then the
+// per-call sections that are delivered as the user message.
 vi.mock('../../../src/core/llm/prompts.ts', () => ({
-  loadPrompt: () => "USER'S SEARCH QUERY\n{{queries}}\nhistory: {{conversation_history}}\ndocs: {{reference_documents}}",
+  loadPrompt: () => "You are a strict data extraction engine.\n<!-- USER_TURN -->\nUSER'S SEARCH QUERY\n{{queries}}\nhistory: {{conversation_history}}\ndocs: {{reference_documents}}",
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -119,11 +121,25 @@ describe('runBackgroundExtraction — synthesis transient-retry loop', () => {
   it('surfaces the search query in the synthesis prompt so it answers the actual question', async () => {
     // The synthesis LLM previously saw only the conversation history (empty in the
     // CLI/SDK/agent-skill paths), so its yes/maybe/no classification was blind to the
-    // question. The query must always reach the extractor prompt.
+    // question. The query must always reach the extractor prompt — now via the USER
+    // message (the system prompt stays static for prompt-cache prefix invariance).
     mockCompleteSimple.mockResolvedValueOnce(goodResponse());
     await runBackgroundExtraction(MODEL, AUTH, 'No previous context available.', ['who created the Rust language'], 'doc body', 5000, 2048, 'off');
-    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
-    expect(systemPrompt).toContain("USER'S SEARCH QUERY");
-    expect(systemPrompt).toContain('who created the Rust language');
+    const call = mockCompleteSimple.mock.calls[0];
+    const userText: string = call[1].messages.map((m: any) => m.content.map((c: any) => c.text).join('\n')).join('\n');
+    expect(userText).toContain("USER'S SEARCH QUERY");
+    expect(userText).toContain('who created the Rust language');
+  });
+
+  it('keeps the extractor system prompt byte-identical across calls with different queries and documents (prompt-cache prefix invariance)', async () => {
+    mockCompleteSimple.mockResolvedValueOnce(goodResponse());
+    await runBackgroundExtraction(MODEL, AUTH, 'history A', ['query alpha'], 'doc body A', 5000, 2048, 'off');
+    mockCompleteSimple.mockResolvedValueOnce(goodResponse());
+    await runBackgroundExtraction(MODEL, AUTH, 'history B', ['query beta'], 'doc body B', 5000, 2048, 'off');
+    const [sys1, sys2] = mockCompleteSimple.mock.calls.map((c: any[]) => c[1].systemPrompt as string);
+    expect(sys1).toBe(sys2);
+    expect(sys1).toContain('strict data extraction engine');
+    expect(sys1).not.toContain('query alpha');
+    expect(sys1).not.toContain('doc body A');
   });
 });

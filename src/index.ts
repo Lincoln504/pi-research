@@ -556,7 +556,9 @@ export default async function (pi: ExtensionAPI) {
 
     // Researcher sub-agent sessions already carry the authoritative steering copy:
     // the executor (deep) and quick orchestrator inject "ADDITIONAL USER GUIDANCE"/
-    // "ADDITIONAL CONSIDERATIONS" into the researcher system prompt themselves.
+    // "ADDITIONAL CONSIDERATIONS" into the researcher's initial user message themselves
+    // (kept OUT of the system prompt so its cacheable prefix stays byte-identical
+    // across researchers — see researcher-executor.ts).
     // Appending the same messages again here delivered every steering message
     // TWICE to every researcher — return the prompt untouched. (The coordinator and
     // the research lead never pass through this hook at all: they run via

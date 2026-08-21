@@ -751,16 +751,23 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
     try {
       logger.warn(`[config] WARNING: .pi-research.env files are deprecated. Settings will be auto-migrated to the centralized registry. Remove ${legacyPath} after migration.`);
       legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
-      Object.assign(merged, legacyEnv);
-      
-      // Auto-migrate legacy settings to the central registry — but only LOCAL_SCOPE_KEYS. The
-      // registry is project-scoped storage by design (saveConfig writes only these keys to it);
-      // persisting user-scoped legacy keys would freeze them per-workspace and silently override
-      // the user's global config.env forever. Non-local legacy keys still apply to THIS resolution
-      // via the Object.assign(merged, legacyEnv) above — they just aren't persisted.
+      // Only LOCAL_SCOPE_KEYS from this run's resolution too — same boundary
+      // step 4 below already enforces for the registry this file migrates
+      // into ("the registry is project-scoped storage... never user-scoped
+      // keys"). This file lives in the CWD, which for this tool is routinely
+      // an arbitrary, potentially untrusted repository a coding agent was
+      // just pointed at — applying every key unconditionally let a dropped-in
+      // .pi-research.env silently control user-scoped settings (RESEARCH_MODEL,
+      // EMBEDDING_DEVICE, DISABLED_TOOLS, export destinations, ...) for that
+      // run with no confirmation, for any setting the user hadn't already set
+      // via a real environment variable (which still wins over all of this).
+      // Non-local keys are ignored here exactly as they already are for the
+      // registry — this predecessor mechanism should not be MORE permissive
+      // than the successor it's migrating into.
       const legacyLocal = Object.fromEntries(
         Object.entries(legacyEnv).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
       );
+      Object.assign(merged, legacyLocal);
       const existingLocal = Object.fromEntries(
         Object.entries(findRegistryEntry(registry, normalizedCwd) ?? {}).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
       );
@@ -799,8 +806,14 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
       }
     }
   } else if (Object.keys(merged).length === 0 && !fs.existsSync(legacyPath) && !fs.existsSync(globalPath)) {
-    // 5. Warning for missing config
-    logger.warn(`[config] No configuration found for workspace: ${cwd}. Using code defaults. Run /research-config to configure.`);
+    // 5. Warning for missing config — once per workspace per process. getConfig
+    // is called on many hot paths (every tool invocation, health checks), and
+    // repeating this advisory each time made it the single most common line in
+    // the shared log (362 entries in one observed day), burying real warnings.
+    if (!warnedMissingConfigWorkspaces.has(normalizedCwd)) {
+      warnedMissingConfigWorkspaces.add(normalizedCwd);
+      logger.warn(`[config] No configuration found for workspace: ${cwd}. Using code defaults. Run /research-config to configure.`);
+    }
   }
 
   warnLegacyEnvVarsOnce(merged);
@@ -824,6 +837,10 @@ const LEGACY_ENV_VARS: Record<string, string> = {
 };
 
 let warnedLegacyEnvVars = false;
+
+// Workspaces already warned about having no configuration (see loadEnvFiles) —
+// per-process dedup so the advisory appears once, not on every getConfig call.
+const warnedMissingConfigWorkspaces = new Set<string>();
 
 /** Warn once per process about set-but-dead 0.1.x env vars (upgrade aid; never throws). */
 function warnLegacyEnvVarsOnce(merged: Record<string, string>): void {

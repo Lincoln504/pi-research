@@ -34,6 +34,22 @@ const NO_SOURCES_NOTE =
 const UNVERIFIED_LINKS_NOTE =
   '_None of the links above could be verified: no page fetch succeeded this session and no citation could be matched to retrieved content. They may be inaccurate or invented — check each one before relying on it._';
 
+// Below this many verified sources, a completed report is WEAKLY grounded: it will
+// still read as a fully sourced document, but almost none of its claims can trace to
+// retrieved content — exactly the shape of a run where scrapes mostly failed (bot
+// blocks, resource starvation) or the topic had little real coverage, and the model
+// filled the gaps from its own weights. Observed in production: a depth-1 run whose
+// report cited ONE page shipped with no caveat and fabricated most of its specifics;
+// the calling agent had to detect the degradation itself. The note gives readers
+// (human or agent) the machine-visible signal that was missing.
+const WEAK_GROUNDING_MIN_SOURCES = 3;
+
+function weakGroundingNote(count: number): string {
+  return `_Grounding notice: only ${count} source${count === 1 ? '' : 's'} could be verified for this report. ` +
+    'Claims not attributable to the cited source' + (count === 1 ? '' : 's') +
+    ' above should be treated as unverified — cross-check anything load-bearing before relying on it._';
+}
+
 
 /**
  * Redact inline `https?://` tokens in synthesis prose whose URL was NOT retrieved
@@ -382,6 +398,16 @@ export class ResearchSynthesisService implements IService {
         // fabricated source can still reach the user; inline URLs also violate the
         // required format. Verified inline references (in `trustedUrls`) are kept.
         body = redactUnverifiedProseUrls(body, trustedUrls);
+        if (globalCitations.length < WEAK_GROUNDING_MIN_SOURCES) {
+          // The notice goes BEFORE the CITED LINKS header, never after it: anything
+          // trailing the last citation entry is absorbed into that entry's
+          // Description by parseCitations, and quick mode re-parses this exact
+          // string to build knowledge-store entries — a notice placed after the
+          // list polluted the stored description of the final source on precisely
+          // the degraded runs the notice exists to flag.
+          logger.warn(`[ResearchSynthesisService] Report is weakly grounded: only ${globalCitations.length} verified source(s) — appending grounding notice.`);
+          return `${body}\n\n${weakGroundingNote(globalCitations.length)}\n\n${verifiedLinksSection}`;
+        }
         return `${body}\n\n${verifiedLinksSection}`;
       }
       logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
@@ -393,6 +419,12 @@ export class ResearchSynthesisService implements IService {
       const validIds = new Set(globalCitations.map((c) => c.id));
       let prose = rewriteCitationMarkers(synthesis.trim(), new Map(), (n) => !validIds.has(n));
       prose = redactUnverifiedProseUrls(prose, trustedUrls);
+      if (globalCitations.length < WEAK_GROUNDING_MIN_SOURCES) {
+        // Before the CITED LINKS header for the same parseCitations-absorption
+        // reason as the replace path above.
+        logger.warn(`[ResearchSynthesisService] Report is weakly grounded: only ${globalCitations.length} verified source(s) — appending grounding notice.`);
+        return `${prose}\n\n${weakGroundingNote(globalCitations.length)}\n\n${verifiedLinksSection}`;
+      }
       return `${prose}\n\n${verifiedLinksSection}`;
     }
 

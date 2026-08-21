@@ -113,6 +113,40 @@ describe('buildResearchSummary — footnote', () => {
   });
 });
 
+describe('extractRunStats / buildResearchSummary — prompt-cache token surfacing', () => {
+  it('sums the cache read/write counters into the stats', () => {
+    const stats = extractRunStats(snapshot({
+      'llm_tokens_total{component="researcher"}': 10_000,
+      'llm_cache_read_tokens_total{component="researcher"}': 6_000,
+      'llm_cache_read_tokens_total{component="synthesizer"}': 1_500,
+      'llm_cache_write_tokens_total{component="researcher"}': 900,
+    }))!;
+    expect(stats.cacheReadTokens).toBe(7_500);
+    expect(stats.cacheWriteTokens).toBe(900);
+  });
+
+  it('reports 0 (not NaN/undefined) when no cache counters were emitted', () => {
+    const stats = extractRunStats(snapshot({
+      'llm_tokens_total{component="researcher"}': 10_000,
+    }))!;
+    expect(stats.cacheReadTokens).toBe(0);
+    expect(stats.cacheWriteTokens).toBe(0);
+  });
+
+  it('renders "(N from cache)" beside the token count only when cache reads happened', () => {
+    const withCache = extractRunStats(snapshot({
+      'llm_tokens_total{component="researcher"}': 10_000,
+      'llm_cache_read_tokens_total{component="researcher"}': 6_000,
+    }))!;
+    expect(buildResearchSummary(withCache)).toContain('**6,000** from cache');
+
+    const withoutCache = extractRunStats(snapshot({
+      'llm_tokens_total{component="researcher"}': 10_000,
+    }))!;
+    expect(buildResearchSummary(withoutCache)).not.toContain('from cache');
+  });
+});
+
 describe('extractRunStats — counters that double-count or never fire', () => {
   it('counts each search query ONCE, not once per layer that observes it', () => {
     // `browser_search_queries_total` is incremented exactly once per query by

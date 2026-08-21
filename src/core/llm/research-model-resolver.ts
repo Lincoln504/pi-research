@@ -89,3 +89,41 @@ export function resolveResearchModel(options: {
 
   throw new Error(buildNoModelAvailableMessage());
 }
+
+/**
+ * Best-effort, CONSERVATIVE signal for "will pi-ai apply prompt caching for
+ * this resolved model." pi-ai owns all cache-mechanism logic internally (this
+ * codebase never constructs cache_control blocks itself) and exposes no
+ * public API to ask in advance for most providers, so this can only answer
+ * for the two client-visible cases:
+ *
+ * - `api === 'anthropic-messages'`: caching is native and on by default (no
+ *   capability gate at all — see pi-ai's anthropic-messages provider).
+ * - `api === 'openai-completions'` with `compat.cacheControlFormat ===
+ *   'anthropic'`: an explicit opt-in to Anthropic-style cache_control
+ *   emulation (e.g. an OpenRouter/gateway route to an Anthropic model
+ *   configured with this override).
+ *
+ * Every other case returns false even though caching may actually be
+ * active: pi's generated model catalog sets `cacheControlFormat` on zero
+ * models, so plain `openai-completions` traffic (this project's custom
+ * providers — glm-coding, cerebras, zai, OpenRouter, ...) has its cache
+ * compat auto-detected by pi-ai's own private, unexported heuristic INSIDE
+ * the live request — not knowable client-side, before or after model
+ * resolution. Providers with fully implicit/automatic caching
+ * (openai-responses family, google-generative-ai, google-vertex,
+ * mistral-conversations, bedrock-converse-stream) have no "will it be
+ * active" signal at all — it depends on provider-side runtime behavior
+ * (minimum prompt length, server cache state). Treat this as "caching is
+ * DEFINITELY active" — a false negative is expected and fine for providers
+ * outside these two cases, but a false positive would be a real bug.
+ */
+export function isPromptCachingActiveForModel(model: Model<any> | undefined): boolean {
+  if (!model) return false;
+  if (model.api === 'anthropic-messages') return true;
+  if (model.api === 'openai-completions') {
+    const compat = model.compat as { cacheControlFormat?: string } | undefined;
+    return compat?.cacheControlFormat === 'anthropic';
+  }
+  return false;
+}

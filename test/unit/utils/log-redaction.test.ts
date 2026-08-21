@@ -306,6 +306,28 @@ describe('redactSecrets', () => {
     expect(out).toContain('truncated');
     expect(out).not.toMatch(/truncated -\d+ chars/);
   });
+
+  it('still marks the scan-cut tail as truncated when redaction shrinks the scanned prefix under the cap', () => {
+    // 1.4.2 fix, previously untested: the REDACT_SCAN_LENGTH (4x cap = 40_000)
+    // cut drops the raw tail BEFORE redaction runs. If redaction then collapses
+    // the scanned prefix (many 64-hex secrets → short '[REDACTED]' literals) to
+    // under MAX_LOG_MESSAGE_LENGTH (10_000), the ordinary over-cap truncation
+    // branch never fires — pre-fix the message read as complete while silently
+    // missing its entire tail.
+    const secret = 'a1b2c3d4e5f60718'.repeat(4) + ' '; // 64 hex chars + space per token
+    const prefix = secret.repeat(Math.ceil(41_000 / secret.length)); // > scan length, shrinks massively
+    const tail = 'TAIL-CONTENT-'.repeat(500);
+    const message = prefix + tail;
+
+    const out = redactSecrets(message);
+
+    // Prefix collapsed below the cap (so the over-cap branch did not fire)...
+    expect(out.length).toBeLessThan(10_000 + 100);
+    expect(out).toContain('[REDACTED]');
+    // ...and the dropped tail is still explicitly marked, not silently absent.
+    expect(out).toMatch(/…\[truncated \d+ chars\]$/);
+    expect(out).not.toContain('TAIL-CONTENT');
+  });
 });
 
 describe('stripTerminalEscapes', () => {

@@ -10,6 +10,8 @@ import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { selectVideoIds } from './video-id.ts';
 import { fetchVideoTranscripts, type VideoTranscript } from './transcript-client.ts';
 import { metrics } from '../utils/metrics.ts';
+import { truncateWithMarker } from '../utils/text-utils.ts';
+import { MAX_SCRAPE_CONTENT_CHARS_PER_DOC } from '../constants.ts';
 
 export interface YoutubeTranscriptCommandOptions {
   urls: string[];
@@ -131,7 +133,15 @@ function formatResults(results: VideoTranscript[], rejected: string[]): string {
     // model can copy verbatim; omitting the line entirely for untitled videos
     // left them without any prompt-visible citation string to reuse.
     md += `**Cite as:** ${r.url}${r.title ? ` — '${r.title}'${r.author ? ` by ${r.author}` : ''}` : ''}\n`;
-    md += `\n${r.text}\n\n---\n\n`;
+    // Per-document cap on content entering LLM context — parity with the
+    // scrape tool's own MAX_SCRAPE_CONTENT_CHARS_PER_DOC guard. The raw HTTP
+    // body is capped at 32MB (readTextCapped) and the knowledge-store
+    // ingestion path truncates too, but this tool's direct response to the
+    // calling agent had no cap of its own: a single long/dense-captioned
+    // video (a multi-hour livestream VOD, worst case with maxVideos up to 5)
+    // could inject an unbounded, multi-megabyte payload straight into the
+    // researcher's context.
+    md += `\n${truncateWithMarker(r.text ?? '', MAX_SCRAPE_CONTENT_CHARS_PER_DOC)}\n\n---\n\n`;
   }
 
   if (failed.length > 0) {

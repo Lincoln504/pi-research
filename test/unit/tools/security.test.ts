@@ -51,6 +51,33 @@ describe('tools/security', () => {
       expect(spy).toHaveBeenCalledWith('security_search');
     });
 
+    it('does NOT charge the shared gathering budget when every requested database is unknown', async () => {
+      // 1.4.2 fix: recordCall used to run before the semantic checks, so a
+      // malformed call that queried zero databases still permanently consumed
+      // one of the researcher's shared MAX_GATHERING_CALLS slots.
+      const tracker = createMockTracker();
+      const spy = vi.spyOn(tracker, 'recordCall');
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker });
+
+      const result: any = await tool.execute('test-id', { terms: ['test'], databases: ['not-a-db'] }, undefined, undefined, undefined as any);
+
+      expect(result.details?.error).toBe('unknown_databases');
+      expect(spy).not.toHaveBeenCalled();
+      expect(tracker.getCallCount('security_search')).toBe(0);
+    });
+
+    it('does NOT charge the shared gathering budget on an unrecognized severity', async () => {
+      const tracker = createMockTracker();
+      const spy = vi.spyOn(tracker, 'recordCall');
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker });
+
+      const result: any = await tool.execute('test-id', { terms: ['test'], severity: 'apocalyptic' }, undefined, undefined, undefined as any);
+
+      expect(result.details?.error).toBe('invalid_severity');
+      expect(spy).not.toHaveBeenCalled();
+      expect(tracker.getCallCount('security_search')).toBe(0);
+    });
+
     it('records tool_security_search_calls_total exactly ONCE per call, not twice', async () => {
       // Regression: there used to be an unconditional bare increment at the top of
       // execute() in addition to every exit path's own labeled increment. sumCounter

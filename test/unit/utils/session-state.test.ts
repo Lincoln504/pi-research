@@ -22,6 +22,7 @@ import {
   addSteeringMessage,
   consumeQueuedMessages,
   getSteeringMessages,
+  getActiveResearchRunCount,
 } from '../../../src/orchestration/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
@@ -293,6 +294,70 @@ describe('utils/session-state', () => {
 
       const steeringForB = getSteeringMessages(psid);
       expect(steeringForB.map(m => m.text)).toContain('arrived in the gap, unconsumed');
+    });
+
+    it('does NOT treat ending one of several concurrent HEADLESS runs as the last run (order/panels are TUI-only and always empty for headless)', () => {
+      // Regression: the last-run gate used to be `order.length === 0 &&
+      // panels.size === 0` alone — both populated ONLY by the TUI path — so
+      // for a purely headless multi-run session this was trivially true on
+      // EVERY single run's end, treating each one as "the last," even with
+      // siblings still genuinely active. That cleared `aborts` for still-
+      // running siblings (corrupting getActiveResearchRunCount for any
+      // caller) and could wipe steering a genuinely-still-running sibling
+      // still needed. `aborts.size === 0` closes it.
+      const psid = 'headless-multi-run-test';
+      const runA = startResearchSession(psid);
+      const runB = startResearchSession(psid);
+      const cA = new AbortController();
+      const cB = new AbortController();
+      registerSessionAbort(psid, runA, cA);
+      registerSessionAbort(psid, runB, cB);
+
+      expect(getActiveResearchRunCount(psid)).toBe(2);
+
+      // Run A ends while run B is still active.
+      endResearchSession(psid, runA);
+
+      // B must still be counted as active — A's end must not have been
+      // mistaken for "the last run in the session."
+      expect(getActiveResearchRunCount(psid)).toBe(1);
+      // B's own abort controller must survive — a premature `aborts.clear()`
+      // here would silently strand it, breaking abortAllSessions for B.
+      expect(cB.signal.aborted).toBe(false);
+    });
+
+    it('preserves an unconsumed steering message across a headless run ending while a SIBLING headless run is still active, and does not touch it again on the sibling’s own end', () => {
+      // Reproduces the exact regression an adversarial review found in an
+      // earlier version of this fix: a steering message present when the
+      // (mistakenly-detected-as-last) run ended got preserved by the
+      // preserve-branch, but a SEPARATE caller-side check (since removed)
+      // immediately wiped it right after, because it read the freshly-
+      // cleared `aborts` as "count 0 → nobody left → safe to clear." With
+      // the gate now requiring `aborts.size === 0` itself, and with no
+      // second clear-call left anywhere, the preserve-branch simply does
+      // not fire at all until the TRUE last run ends.
+      const psid = 'headless-preserve-vs-sibling-test';
+      const runA = startResearchSession(psid);
+      const runB = startResearchSession(psid);
+      registerSessionAbort(psid, runA, new AbortController());
+      registerSessionAbort(psid, runB, new AbortController());
+
+      addSteeringMessage(psid, 'meant for whichever run reads it next');
+
+      // A ends first; B is still active, so this must NOT be treated as the
+      // last run — the message must survive untouched.
+      endResearchSession(psid, runA);
+      expect(getSteeringMessages(psid).map(m => m.text)).toContain('meant for whichever run reads it next');
+
+      // Now B ends too — genuinely the last run. The preserve-filter runs
+      // exactly once, here, and the still-queued message survives into a
+      // following run C.
+      endResearchSession(psid, runB);
+      expect(getActiveResearchRunCount(psid)).toBe(0);
+
+      const runC = startResearchSession(psid);
+      void runC;
+      expect(getSteeringMessages(psid).map(m => m.text)).toContain('meant for whichever run reads it next');
     });
   });
 });

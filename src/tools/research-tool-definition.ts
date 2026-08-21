@@ -29,11 +29,12 @@ import { redactSecrets } from '../utils/log-utils.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { validateInitialLinks, MAX_INITIAL_LINKS, MAX_INITIAL_LINK_CHARS } from '../utils/url-utils.ts';
-import { startResearchSession, endResearchSession, registerSessionAbort, clearSteeringMessages, getActiveResearchRunCount } from '../orchestration/session-state.ts';
+import { startResearchSession, endResearchSession, registerSessionAbort } from '../orchestration/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
 import { HeadlessObserver } from '../orchestration/headless-observer.ts';
+import { isPromptCachingActiveForModel } from '../core/llm/research-model-resolver.ts';
 
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
@@ -252,19 +253,21 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         if (observerState && panelState) {
           try { stopObserverWaveAnimation(observerState, panelState); } catch (e) { logger.error('[research] Stop wave animation failed:', e); }
         }
-        // Steering messages are shared per pi-session. Only reset them when THIS is
-        // the last active run — otherwise a finishing run wipes a concurrent sibling
-        // run's queued/active steering mid-flight. This run's abort registration is
-        // still in place here (endResearchSession runs later in cleanup()), so a
-        // count of <= 1 means no other run is active. getActiveResearchRunCount
-        // (not getPiActivePanels) because headless runs never register a panel —
-        // a panel-based check here was always a no-op for headless callers.
-        try {
-          if (getActiveResearchRunCount(piSessionId) <= 1) clearSteeringMessages(piSessionId);
-        } catch (e) { logger.error('[research] Clear steering messages failed:', e); }
         if (detachAbortListener) {
           try { detachAbortListener(); } catch { /* best-effort */ } finally { detachAbortListener = undefined; }
         }
+        // cleanup() calls endResearchSession (directly in the headless closure,
+        // or via createCleanupFunction for TUI), which deregisters this run and,
+        // in the same synchronous call, decides whether it was the last active
+        // run (TUI or headless) in the pi-session and — only then — resets
+        // steering messages (preserving any still-genuinely-queued ones for the
+        // next run, dropping only ones this run already consumed). That single
+        // synchronous function is the right place for this decision: a separate
+        // check-then-clear here, even ordered after cleanup(), raced ahead of or
+        // fought with endResearchSession's own last-run/preserve logic — either
+        // reading stale counts before two racing siblings had both deregistered,
+        // or unconditionally wiping a message endResearchSession had just decided
+        // to preserve. See endResearchSession in session-state.ts.
         if (cleanup) {
           try { await cleanup(); } catch (cleanupError) { logger.error('[research] Cleanup failed:', cleanupError); }
         }
@@ -357,7 +360,16 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
             // Setup TUI observer
             observerState = createObserverState();
             observer = createResearchObserver(
-              { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), renderImmediate: () => tuiManager?.renderImmediate(), researchComplexity: depth ?? 1 },
+              {
+                panelState,
+                debouncedRefresh: () => tuiManager?.debouncedRefresh(),
+                renderImmediate: () => tuiManager?.renderImmediate(),
+                researchComplexity: depth ?? 1,
+                // Progress units are relative to the EFFECTIVE scrape-batch count,
+                // which is one higher when prompt caching is active for the run's
+                // resolved model — same value the researchers' trackers enforce.
+                cachingActive: isPromptCachingActiveForModel(selectedModel),
+              },
               observerState
             );
           } else {
@@ -373,10 +385,9 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               // module-level piSessions map keyed by the STABLE pi session id, so
               // without this every headless run leaked them for the process
               // lifetime (the TUI branch frees them via createCleanupFunction, the
-              // SDK in its own finally). Steering is NOT cleared here — teardownUi()
-              // already does that, gated on getActiveResearchRunCount so a finishing
-              // run doesn't wipe a concurrent sibling headless run's steering; an
-              // unconditional clear here bypassed that guard entirely.
+              // SDK in its own finally). endResearchSession itself decides whether
+              // this was the last active run (TUI or headless) and, only then,
+              // resets steering messages — see its own comment in session-state.ts.
               endResearchSession(piSessionId, sessionResearchId);
             };
             

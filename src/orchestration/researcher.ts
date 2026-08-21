@@ -21,7 +21,7 @@ import type { SystemResearchState } from './deep-research-types.ts';
 import type { Config } from '../config.ts';
 import { logger } from '../logger.ts';
 
-import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
+import { resolveResearchModel, isPromptCachingActiveForModel } from '../core/llm/research-model-resolver.ts';
 import { getRuntimeForRegistry } from '../core/llm/model-registry-factory.ts';
 import { boundSessionAbort } from './abort-utils.ts';
 
@@ -86,7 +86,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   logger.info(`[Researcher] Using model for researcher ${researcherId}: ${modelToUse.provider}/${modelToUse.id}`);
 
   try {
-    const tracker = new ToolUsageTracker(createDefaultToolLimits(config));
+    const tracker = new ToolUsageTracker(createDefaultToolLimits(config, isPromptCachingActiveForModel(modelToUse)));
 
     // Use provided closures or fallback to safe dummies
     const globalLinks = updateGlobalLinks || (() => {});

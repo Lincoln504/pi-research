@@ -22,6 +22,20 @@ describe('ToolUsageTracker', () => {
       expect(limits.grep).toBe(30);
       expect(limits.read).toBeUndefined();
     });
+
+    it('threads cachingActive through to getMaxScrapeBatches so the scrape limit reflects the effective batch count', async () => {
+      // The real +1-when-caching arithmetic is covered in constants.test — here the
+      // contract under test is that createDefaultToolLimits passes the flag through
+      // rather than silently dropping it (which would let the prompt text and the
+      // enforced limit disagree).
+      const { getMaxScrapeBatches } = await import('../../../src/constants.ts');
+      vi.mocked(getMaxScrapeBatches).mockClear();
+      createDefaultToolLimits(undefined, true);
+      expect(getMaxScrapeBatches).toHaveBeenCalledWith(undefined, true);
+      vi.mocked(getMaxScrapeBatches).mockClear();
+      createDefaultToolLimits();
+      expect(getMaxScrapeBatches).toHaveBeenCalledWith(undefined, false);
+    });
   });
 
   describe('category grouping', () => {

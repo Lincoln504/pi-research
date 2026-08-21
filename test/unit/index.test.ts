@@ -172,8 +172,9 @@ describe('extension entrypoint', () => {
 
   it('does NOT append steering to researcher sub-agent prompts (executor copy is authoritative)', async () => {
     // Regression: every researcher received each steering message TWICE — once from
-    // the executor/quick-orchestrator system-prompt injection ("ADDITIONAL USER
-    // GUIDANCE") and once more from this hook ("ADDITIONAL CONSIDERATIONS").
+    // the executor/quick-orchestrator injection into the researcher's initial user
+    // message ("ADDITIONAL USER GUIDANCE") and once more from this hook
+    // ("ADDITIONAL CONSIDERATIONS").
     const { addSteeringMessage, registerSessionPanel, clearAllSessionState } =
       await import('../../src/orchestration/session-state.ts');
     const { pi, handlers } = createPiMock();

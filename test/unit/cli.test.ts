@@ -79,6 +79,7 @@ import {
   cmdResearch,
   cmdKnowledge,
   cmdKnowledgeConfig,
+  makeProgressObserver,
 } from '../../src/cli.ts';
 import { createResearchStopError } from '../../src/orchestration/session-state.ts';
 import { ResearchRunCapacityError } from '../../src/infrastructure/research-run-semaphore.ts';
@@ -461,6 +462,42 @@ describe('parseArgs — research', () => {
 // parseArgs — unknown command
 // ---------------------------------------------------------------------------
 
+describe('makeProgressObserver — degradation warnings on complete', () => {
+  // A run that completes but is weakly grounded (or retrieved nothing) must be
+  // distinguishable on stderr from a healthy run: two real 2026-08-20 runs
+  // shipped degraded reports (1 citation / 0 sources) that looked identical to
+  // healthy ones on exit code + the bare "complete" line.
+  function stderrFrom(result: string): string {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(((s: any) => {
+      chunks.push(String(s));
+      return true;
+    }) as any);
+    try {
+      makeProgressObserver().onProgress!('complete', { result });
+    } finally {
+      spy.mockRestore();
+    }
+    return chunks.join('');
+  }
+
+  it('warns on stderr when the report carries the weak-grounding notice', () => {
+    const out = stderrFrom('Report body.\n\n_Grounding notice: only 1 source could be verified for this report._\n\nCITED LINKS\n[1] https://a.org');
+    expect(out).toContain('WARNING: weakly grounded report');
+  });
+
+  it('warns on stderr when the report carries the no-sources note', () => {
+    const out = stderrFrom('Findings.\n\nCITED LINKS\n_No web sources were successfully retrieved for this report — treat the findings above as unverified._');
+    expect(out).toContain('WARNING: no web sources could be retrieved');
+  });
+
+  it('stays quiet for a healthy, well-cited report', () => {
+    const out = stderrFrom('Findings. [1]\n\nCITED LINKS\n[1] https://a.org\n[2] https://b.org\n[3] https://c.org');
+    expect(out).not.toContain('WARNING');
+    expect(out).toContain('complete (');
+  });
+});
+
 describe('parseArgs — unknown command', () => {
   it('throws UsageError', () => {
     expect(() => parseArgs(['node', 'cli.mjs', 'bogus'])).toThrow(UsageError);
@@ -674,6 +711,64 @@ describe('reportError — exit-code classification', () => {
         expect(code).toBeLessThanOrEqual(255);
       }
     });
+  });
+
+  // Regression: docs/SDK.md and SKILL.md document SIGQUIT as handled the same
+  // way as SIGHUP/SIGINT/SIGTERM ("the CLI installs handlers for these
+  // signals... it catches them and exits deliberately"), and the table above
+  // confirms exitCodeForSignal maps it to 131 — but no `process.on('SIGQUIT',
+  // ...)` was ever registered in main(), so a real SIGQUIT fell through to
+  // Node's default disposition: immediate termination, no abort of the
+  // in-flight run, no browser/embedder teardown. The pure exitCodeForSignal
+  // test above cannot catch this — it never registers a real listener. This
+  // spawns the actual built CLI, waits for it to have registered every signal
+  // handler, and sends a REAL SIGQUIT, distinguishing "our handler ran"
+  // (child reports an explicit exit code, no signal) from "the OS killed it"
+  // (child reports a signal, no code) — both of which a POSIX wait status
+  // reports as "131" to a caller, which is exactly why this can't be a
+  // unit-level check.
+  describe('CLI subprocess — signal handling', () => {
+    it('SIGQUIT is handled by our own listener, not left to the OS default disposition', async () => {
+      if (process.platform === 'win32') return; // SIGQUIT has no Windows equivalent
+      const child = spawn(process.execPath, [CLI, 'status'], {
+        env: hermeticEnv({ PI_RESEARCH_TEST_HANG_FOR_SIGNAL: '1' }),
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      try {
+        let readyOutput = '';
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('CLI never reached the signal-ready seam')), 10_000);
+          child.stdout!.on('data', (chunk: Buffer) => {
+            readyOutput += chunk.toString();
+            if (readyOutput.includes('PI_RESEARCH_TEST_READY')) {
+              clearTimeout(timer);
+              resolve();
+            }
+          });
+          child.on('error', reject);
+        });
+
+        const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+          child.on('exit', (code, signal) => resolve({ code, signal }));
+        });
+
+        child.kill('SIGQUIT');
+
+        const result = await Promise.race([
+          exited,
+          new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 10_000)),
+        ]);
+
+        expect(result).not.toBe('timeout');
+        // code === 131 / signal === null means our handler ran and called
+        // process.exit(131) deliberately. code === null / signal === 'SIGQUIT'
+        // (the pre-fix behavior) means no listener was registered and Node's
+        // default disposition killed the process outright.
+        expect(result).toEqual({ code: exitCodeForSignal('SIGQUIT'), signal: null });
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }
+    }, 25_000);
   });
 
   // The capacity message names PI_RESEARCH_MAX_CONCURRENT_RUNS; the config

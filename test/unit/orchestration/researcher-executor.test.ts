@@ -40,7 +40,7 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
 }));
 
 vi.mock('../../../src/core/llm/prompts.ts', () => ({
-  loadPrompt: vi.fn(() => 'researcher prompt {{goal}} {{store_section}} {{evidence_section}} {{coordination_section}} {{extra_tool_guidelines}} {{digest_section}}'),
+  loadPrompt: vi.fn(() => 'researcher prompt {{extra_tool_guidelines}} {{digest_section}}'),
 }));
 
 vi.mock('../../../src/core/llm/inject-date.ts', () => ({
@@ -573,12 +573,15 @@ describe('runResearcher', () => {
       expect(unsubscribe).toHaveBeenCalled();
     });
 
-    it('includes historical URLs in the prompt when provided', async () => {
+    it('includes historical URLs in the initial USER message (not the system prompt) when provided', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
       await runResearcher(makeOptions({ historicalUrls: [{ url: 'https://hist.example.com', description: 'Found info about XYZ here' }] }));
+      const userMessage = mockPrompt.mock.calls[0]![0] as string;
+      expect(userMessage).toContain('https://hist.example.com');
+      expect(userMessage).toContain('Found info about XYZ here');
+      // Cache invariance: per-researcher data must never leak into the system prompt.
       const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
-      expect(sessionCall.systemPrompt).toContain('https://hist.example.com');
-      expect(sessionCall.systemPrompt).toContain('Found info about XYZ here');
+      expect(sessionCall.systemPrompt).not.toContain('https://hist.example.com');
     });
 
     it('asks a DEEP researcher for a coverage digest, leaving no placeholder behind', async () => {
@@ -616,11 +619,64 @@ describe('runResearcher', () => {
       expect(sessionCall.systemPrompt.match(PLACEHOLDER) ?? []).toEqual([]);
     });
 
-    it('includes initial search result links in the prompt', async () => {
+    it('includes initial search result links in the initial USER message (not the system prompt)', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
       await runResearcher(makeOptions({ initialLinks: ['https://search-result.com'] }));
+      const userMessage = mockPrompt.mock.calls[0]![0] as string;
+      expect(userMessage).toContain('https://search-result.com');
       const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
-      expect(sessionCall.systemPrompt).toContain('https://search-result.com');
+      expect(sessionCall.systemPrompt).not.toContain('https://search-result.com');
+    });
+
+    it('keeps the system prompt byte-identical across researchers with different goals and evidence (prompt-cache prefix invariance)', async () => {
+      // The cacheable prefix providers key on is the system prompt + tool set.
+      // If ANY per-researcher data (goal, store, evidence, coordination) lands in
+      // the system prompt, every researcher after the first pays a fresh cache
+      // write instead of a read. Guard the invariant directly: two researchers
+      // with maximally different inputs must produce identical system prompts
+      // and different user messages.
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue({
+        action: 'delegate', researchers: [], allQueries: ['sibling query A'],
+      });
+      await runResearcher(makeOptions({
+        config: { id: '1', name: 'Alpha', goal: 'Investigate topic alpha', queries: ['q1'] },
+        initialLinks: ['https://alpha.example.com'],
+        historicalUrls: [{ url: 'https://hist-alpha.example.com', description: 'alpha history' }],
+      }));
+      STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue(null);
+      await runResearcher(makeOptions({
+        config: { id: '2', name: 'Beta', goal: 'Investigate topic beta', queries: ['q2'] },
+        initialLinks: ['https://beta.example.com'],
+        historicalUrls: [],
+      }));
+
+      const calls = vi.mocked(createResearcherSession).mock.calls;
+      expect(calls.length).toBe(2);
+      const [first, second] = calls.map(c => (c[0] as any).systemPrompt as string);
+      expect(first).toBe(second);
+
+      const [msg1, msg2] = mockPrompt.mock.calls.map(c => c[0] as string);
+      expect(msg1).toContain('Investigate topic alpha');
+      expect(msg1).toContain('sibling query A');
+      expect(msg1).toContain('https://hist-alpha.example.com');
+      expect(msg2).toContain('Investigate topic beta');
+      expect(msg1).not.toBe(msg2);
+    });
+
+    it('keeps the system prompt byte-identical across retry attempts of the same researcher', async () => {
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      mockPrompt
+        .mockRejectedValueOnce(new Error('transient failure'))
+        .mockResolvedValueOnce(undefined);
+
+      await runResearcher(makeOptions({
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 1 } as any,
+      }));
+
+      const calls = vi.mocked(createResearcherSession).mock.calls;
+      expect(calls.length).toBe(2);
+      expect((calls[0]![0] as any).systemPrompt).toBe((calls[1]![0] as any).systemPrompt);
     });
   });
 
@@ -967,7 +1023,7 @@ describe('runResearcher', () => {
   // ── previousQueriesSection ──────────────────────────────────────────────────
 
   describe('previous queries from current plan', () => {
-    it('includes sibling researcher queries in the system prompt when a current plan exists', async () => {
+    it('includes sibling researcher queries in the initial USER message when a current plan exists', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
       STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue({
         action: 'delegate',
@@ -977,21 +1033,23 @@ describe('runResearcher', () => {
 
       await runResearcher(makeOptions());
 
+      const userMessage = mockPrompt.mock.calls[0]![0] as string;
+      expect(userMessage).toContain('previous query 1');
+      expect(userMessage).toContain('previous query 2');
+      // Cache invariance: coordination data must not leak into the system prompt.
       const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
-      expect(sessionCall.systemPrompt).toContain('previous query 1');
-      expect(sessionCall.systemPrompt).toContain('previous query 2');
+      expect(sessionCall.systemPrompt).not.toContain('previous query 1');
     });
 
     it('omits the sibling section when currentPlan has no queries', async () => {
-      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
       STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue({
         action: 'delegate', researchers: [], allQueries: [],
       });
 
       await runResearcher(makeOptions());
 
-      const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
-      expect(sessionCall.systemPrompt).not.toContain('Previous Queries');
+      const userMessage = mockPrompt.mock.calls[0]![0] as string;
+      expect(userMessage).not.toContain('Previous Queries');
     });
   });
 });

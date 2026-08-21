@@ -518,8 +518,22 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
 
   // If this was the last research run in the Pi session, clean up the state
   // but preserve steering messages if any remain (they might arrive between
-  // the last research end and the next research start)
-  if (state.order.length === 0 && state.panels.size === 0) {
+  // the last research end and the next research start).
+  //
+  // `state.aborts` is included alongside `order`/`panels`: those two are
+  // populated ONLY by the TUI path (registerSessionPanel), so for a purely
+  // headless multi-run session they are always empty — including while
+  // OTHER headless runs are still genuinely active. Gating on order/panels
+  // alone made this block treat every single headless run's end as "the
+  // last one," which both cleared `aborts` for still-running siblings
+  // (corrupting getActiveResearchRunCount for any caller relying on it) and,
+  // combined with a caller that clears steering right after seeing count 0,
+  // could wipe a message this very block had just decided to preserve one
+  // statement earlier. `aborts.delete(researchId)` above already removed
+  // this run's own entry, so `aborts.size === 0` here means no run of any
+  // kind (TUI or headless) remains — the same atomic, single-synchronous-
+  // function guarantee `order`/`panels` already had for the TUI-only case.
+  if (state.order.length === 0 && state.panels.size === 0 && state.aborts.size === 0) {
     // Drop steering messages this run already consumed ('active') — and any
     // 'popped' remnants, which are likewise already resolved — before deciding
     // whether to keep the session alive. Without this, a message the run that
@@ -540,10 +554,11 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
       clearPendingRefresh(sid);
       piSessions.delete(sid);
     } else {
-      // Clear research-specific state but preserve the session and steering
+      // Clear research-specific state but preserve the session and steering.
+      // aborts is already empty (the outer gate above requires it), so no
+      // separate clear is needed for it here.
       state.failures.clear();
       state.failureReasons.clear();
-      state.aborts.clear();
     }
   }
 }
