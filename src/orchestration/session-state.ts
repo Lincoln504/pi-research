@@ -130,6 +130,23 @@ export function addSteeringMessage(piSessionId: string | undefined, message: str
       state.steeringMessages.splice(evictIdx, 1);
     }
   }
+
+  // 'popped' entries are otherwise pruned only in endResearchSession's
+  // last-run-out branch, which a long-lived pi session that always has at
+  // least one active run never reaches — every Alt+P pop then accumulated one
+  // array entry forever. Bound them to the same cap here; nothing reads a
+  // popped message once it is popped (dedup and eviction above both skip them).
+  const poppedCount = state.steeringMessages.filter(m => m.status === 'popped').length;
+  if (poppedCount > MAX_STEERING_MESSAGES) {
+    let toDrop = poppedCount - MAX_STEERING_MESSAGES;
+    state.steeringMessages = state.steeringMessages.filter(m => {
+      if (m.status === 'popped' && toDrop > 0) {
+        toDrop--;
+        return false;
+      }
+      return true;
+    });
+  }
     
     const steeringMsg: SteeringMessage = {
       id: randomUUID(),

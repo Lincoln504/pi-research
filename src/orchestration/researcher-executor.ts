@@ -130,7 +130,21 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         if (signal?.aborted || container?.isDisposing || stopRequested()) break;
         const delay = Math.min(1000 * Math.pow(2, linkAttempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
         logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results; retry ${linkAttempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
-        await new Promise(r => setTimeout(r, delay));
+        // Abortable, like every sibling sleep in this file (attempt backoff
+        // below, stagger in runResearchers): a plain setTimeout held a cancel
+        // hostage for up to RESEARCHER_MAX_RETRY_DELAY_MS. The loop-top
+        // abort/stop check right after this resolves handles the early wake.
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            if (signal) signal.removeEventListener('abort', onAbort);
+            resolve();
+          }, delay);
+          const onAbort = () => { clearTimeout(timer); resolve(); };
+          if (signal) {
+            if (signal.aborted) onAbort();
+            else signal.addEventListener('abort', onAbort, { once: true });
+          }
+        });
       }
       if (signal?.aborted || container?.isDisposing || stopRequested()) break;
       try {

@@ -209,8 +209,12 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       return result;
     } catch (error) {
       const researchDuration = Date.now() - researchStart;
-      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'error', source: 'extension' });
-      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'error', source: 'extension' });
+      // Label a user cancel 'cancelled', not 'error' — the orchestrators' own
+      // research_session_duration_ms one layer down already does, and a metrics
+      // consumer diffing the two layers read every quick-mode cancel as an error.
+      const status = signal?.aborted ? 'cancelled' : 'error';
+      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status, source: 'extension' });
+      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status, source: 'extension' });
       throw error;
     } finally {
       // Always release the run-cap slot — on success, error, or abort (the
@@ -366,6 +370,15 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
     const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
+    // Set just before each fast-stop throw below. A researcher wedged past the
+    // bounded abort/settle waits is ABANDONED by the stop — its promise settles
+    // later, after the run's single terminal callback has fired (and, on the
+    // tool path, after endResearchSession freed the session state). Its late
+    // failure must then be suppressed: recordResearcherFailure would re-create
+    // the just-freed session entry via getPiState's create-on-read (a
+    // process-lifetime leak on the SDK's random per-run sessionIds), and
+    // onResearcherFailure would violate the no-events-after-terminal contract.
+    let runTerminated = false;
     // Honour MAX_CONCURRENT_RESEARCHERS — prevents resource spikes when a plan has many researchers.
     const maxConcurrent: number = (orchestratorOptions.config as Config)?.MAX_CONCURRENT_RESEARCHERS ?? DEFAULTS.MAX_CONCURRENT_RESEARCHERS;
     const maxFailedResearchers: number = (orchestratorOptions.config as Config)?.MAX_FAILED_RESEARCHERS ?? DEFAULTS.MAX_FAILED_RESEARCHERS;
@@ -406,6 +419,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           Promise.allSettled(active).then(() => undefined),
           () => logger.debug('[ResearchOrchestrationService] Fast-stop: active researchers did not settle within bound; proceeding with stop'),
         );
+        runTerminated = true;
         throw createResearchStopError(sessionId, researchId);
       }
 
@@ -467,6 +481,10 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           // researcher-executor.ts.
           if (signal?.aborted || isAbortSentinel(errMsg) || container?.isDisposing || errMsg.includes('during container disposal')) {
             logger.debug(`[ResearchOrchestrationService] Researcher ${id} cancelled (aborted).`);
+          } else if (runTerminated) {
+            // Abandoned-by-fast-stop researcher settling AFTER the run's
+            // terminal error — see the runTerminated declaration above.
+            logger.debug(`[ResearchOrchestrationService] Researcher ${id} settled after the run's fast-stop terminal error; suppressing post-terminal failure recording (${errMsg}).`);
           } else {
             logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
             // Record failure (with its root cause) for stopping logic and for the
@@ -525,6 +543,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           () => logger.debug('[ResearchOrchestrationService] Fast-stop: active researchers did not settle within bound; proceeding with stop'),
         );
 
+        runTerminated = true;
         throw createResearchStopError(sessionId, researchId);
       }
     }

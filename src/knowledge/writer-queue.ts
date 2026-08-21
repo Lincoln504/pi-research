@@ -181,8 +181,10 @@ export class WriterQueue implements IWriterQueue {
     };
 
     // Dedup: check if we already have this exact URL+type with identical content.
-    // findByUrl applies scope filtering, so this only dedupes within the
-    // current project's visible scope (local workspace + global entries).
+    // findByUrl applies scope filtering, so this only dedupes within the current
+    // scope's VISIBLE rows — in project mode that is the workspace's own rows only
+    // (getScopeFilter('project') excludes global rows), which is correct because
+    // project mode doesn't serve global rows either.
     // Compared against the NEWEST generation, not row order: after a failed prune
     // two generations coexist and findByUrl's order is arbitrary — matching the
     // OLD generation's hash would skip the refresh with the duplicates in place.

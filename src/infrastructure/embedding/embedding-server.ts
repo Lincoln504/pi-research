@@ -350,6 +350,11 @@ export class EmbeddingServer implements IEmbedder {
     // stuck native thread (itself hanging) or touch a device-lost context. Clearing
     // the state registration + closing the HTTP server is enough for re-election;
     // the wedged native resources are abandoned to eventual process exit.
+    // Latch the wedge on the Embedder itself too: it stays registered for
+    // process-exit cleanup (registerGlobalEmbedder), and without the latch that
+    // exit task's dispose() would call pipeline.dispose() on the wedged session
+    // anyway — re-creating at teardown the exact hang this path avoids.
+    this.embedder.markPipelineWedged();
     void this.shutdown(false);
     this.externalOnPoison?.(err);
   }

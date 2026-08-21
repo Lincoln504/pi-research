@@ -259,7 +259,7 @@ describe('ResearchSynthesisService', () => {
     // Production incident (Aug 20): a depth-1 run whose researchers retrieved almost
     // nothing shipped a fully sourced-LOOKING report with exactly one citation and
     // fabricated most of its specifics. The calling agent had to detect the
-    // degradation itself. Below 3 verified sources the report must carry an explicit
+    // degradation itself. Below 3 cited sources the report must carry an explicit
     // grounding notice so readers (human or agent) get that signal from the engine.
 
     it('appends a grounding notice when only ONE source could be verified (replace path)', () => {
@@ -268,7 +268,7 @@ describe('ResearchSynthesisService', () => {
       ]));
       const synthesis = 'Findings. [1]\n\nCITED LINKS\n[1] https://lonely-source.org/page - the only page';
       const result = service.ensureCitedLinks('test-session', synthesis);
-      expect(result).toContain('Grounding notice: only 1 source could be verified');
+      expect(result).toContain('Grounding notice: only 1 source is cited');
       // The notice sits BEFORE the CITED LINKS header: anything after the last
       // citation entry is absorbed into that entry's Description by
       // parseCitations, which quick mode re-parses to build knowledge-store
@@ -296,7 +296,7 @@ describe('ResearchSynthesisService', () => {
         { url: 'https://a.org/1' }, { url: 'https://a.org/2' },
       ]));
       const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
-      expect(result).toContain('Grounding notice: only 2 sources could be verified');
+      expect(result).toContain('Grounding notice: only 2 sources are cited');
     });
 
     it('does NOT append the notice when 3 or more sources are verified', () => {

@@ -22,7 +22,7 @@ import * as path from 'node:path';
 import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
 import { createStoreTable, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
-import { addDocumentsToStore, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
+import { addDocumentsToStore, assertValidEmbeddingVectors, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
 import { isEmbedderUnreachable } from './embedder-utils.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -448,7 +448,16 @@ export class KnowledgeStore implements IKnowledgeStore {
         });
 
         const texts = batchDocs.map(d => d.text);
-        const vectors = await this.options.embedder.embedMany(texts);
+        // Reconnect-wrapped like the warm-up embed in openInternal: a re-embed
+        // migration is a LONG operation, exactly when a leader idle-dispose /
+        // step-down (ECONNREFUSED fast-fail) is most likely — and any throw
+        // here escalates through openInternal's fallback ladder to the 'backup'
+        // strategy, which replaces the fully-intact table with an EMPTY one.
+        // One transient blip must not convert "preserve my data" into that.
+        const vectors = await this.withEmbedderReconnect(embedder => embedder.embedMany(texts));
+        // Same last-gate integrity check as addDocumentsToStore: this path
+        // writes vectors through its own table handle and previously had none.
+        assertValidEmbeddingVectors(vectors, batchDocs.length, this.options.embedder.getDimension?.());
 
         const records = batchDocs.map((doc, idx) => ({
           vector: Array.from(vectors[idx]!),
@@ -1007,11 +1016,24 @@ export class KnowledgeStore implements IKnowledgeStore {
     // coexist, and LanceDB's fragment-scan order typically returns the OLDEST row
     // first — limit(1) would serve the superseded content (and feed its older
     // timestamp to the serve-age gate) until the next successful ingest.
-    const results = await table
+    const whereClause = `url = '${escapedUrl}' AND ingestion_type = 'synthesis-description' AND (${scopeFilter})`;
+    let results = await table
       .query()
-      .where(`url = '${escapedUrl}' AND ingestion_type = 'synthesis-description' AND (${scopeFilter})`)
+      .where(whereClause)
       .limit(16)
       .toArray();
+    if (results.length === 16) {
+      // Cap hit: the OLD generation alone may have filled all 16 slots (a long
+      // description chunks into many rows), leaving the newest generation
+      // entirely outside the fragment-scan window — the sort below would then
+      // pick "newest of the stale". Re-fetch with a bound two generations of
+      // one URL cannot plausibly reach.
+      results = await table
+        .query()
+        .where(whereClause)
+        .limit(1024)
+        .toArray();
+    }
 
     const duration = Date.now() - startTime;
     metrics.observe('knowledge_store_query_duration_ms', duration, { operation: 'rebuild_document' });

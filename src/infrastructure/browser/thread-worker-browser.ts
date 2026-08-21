@@ -243,6 +243,16 @@ export async function initBrowser(): Promise<void> {
             firefox_user_prefs: {
               'media.volume_scale': '0.0',
               'media.autoplay.default': 5,
+              // SSRF: WebSocket connections bypass BOTH layers of the browser
+              // scrape defense — page.route('**') intercepts HTTP(S) only, and
+              // the serverAddr() rebinding backstop hangs off page.on('response'),
+              // which a WS handshake never fires. A hostile scraped page could
+              // therefore `new WebSocket('ws://10.x.x.x/...')` to probe or reach
+              // internal hosts with no validation, and write any reply into the
+              // DOM that page.content() returns. The scraper extracts static
+              // content (domcontentloaded), so nothing it needs arrives over WS —
+              // disable the channel outright at the engine level.
+              'network.websocket.max-connections': 0,
             },
           });
           // Guard with a hard timeout. We catch the launchPromise rejection so it

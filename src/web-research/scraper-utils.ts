@@ -35,8 +35,10 @@ import { isCloudflareBlockError, isTaskTimeoutError, isPoolShutdownError } from 
  * and extractPdfToMarkdown (`Could not extract content from PDF`, `PDF too
  * large`) — a malformed/encrypted/scanned-image-only PDF, or one that simply
  * exceeds the deliberate 100MB policy cap, is routine on the open web and
- * just as non-actionable as a stub page or a 404; the remaining cases
- * delegate to the shared browser-layer predicates. Deliberately does NOT
+ * just as non-actionable as a stub page or a 404; the 25MB HTML policy caps
+ * (`HTML response too large` from the fetch layer, `Browser HTML too large`
+ * from the browser layer) are the same deliberate-cap class; the remaining
+ * cases delegate to the shared browser-layer predicates. Deliberately does NOT
  * match 'PDF extraction unavailable' (a pdf-oxide-wasm native-module load
  * failure) — that is an infrastructure fault affecting every URL, not a
  * routine per-PDF outcome, and must still surface at ERROR.
@@ -48,6 +50,8 @@ export function isBenignScrapeFailure(error: unknown): boolean {
     msg.startsWith('Fetch returned stub:') ||             // nav-only / near-empty page
     msg.startsWith('Could not extract content from PDF') || // malformed/encrypted/scanned-only PDF
     msg.startsWith('PDF too large') ||                    // exceeds the deliberate 100MB policy cap
+    msg.startsWith('HTML response too large') ||          // fetch-layer 25MB policy cap — same class as the PDF cap
+    msg.startsWith('Browser HTML too large') ||           // browser-layer 25MB policy cap
     /^HTTP \d{3}\b/.test(msg) ||                          // remote 4xx/5xx status
     isCloudflareBlockError(error) ||
     isTaskTimeoutError(error) ||

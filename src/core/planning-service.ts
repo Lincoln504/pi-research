@@ -648,7 +648,10 @@ export class PlanningService implements IPlanningService {
 
     // Both lead prompts are deliberately ROUND-INVARIANT: they interpolate only values
     // that are fixed for the whole run (complexity, team size, query budget, the
-    // disabled-tool list). Everything that changes between rounds — root query, round
+    // disabled-tool list). One deliberate exception: the total-rounds figure inside
+    // complexity_guidance moves if steering extends maxRounds mid-run — the evaluator
+    // must see the true budget, so that steer costs one cache-prefix invalidation.
+    // Everything that changes between rounds — root query, round
     // number, agenda, executed queries, steering, round-phase guidance — is appended to
     // the END of the user message instead (see runContext below).
     //
@@ -882,7 +885,15 @@ export class PlanningService implements IPlanningService {
           return capped;
       }
 
-      this.currentPlans.set(sessionId, finalPlan);
+      // A 'wait' plan is NOT stored: it carries no agenda (schema-legal with
+      // researchers: []), and storing it clobbered the last real delegate plan
+      // that the empty-after-cap fallback above and the retry's previousPlan /
+      // initialAgendaSection all read — so a rare 'wait' followed by one
+      // unparseable/transient retry degraded to an early empty synthesize
+      // instead of continuing the prior agenda.
+      if (finalPlan.action !== 'wait') {
+        this.currentPlans.set(sessionId, finalPlan);
+      }
       return finalPlan;
     } catch (err) {
       // A genuine cancellation must propagate so the orchestrator can abort cleanly.
@@ -1211,7 +1222,20 @@ function unwrapPartialSynthesis(text: string, service: { parseJsonPlan(t: string
       return content;
     }
   } catch {
-    // Not an envelope — it is prose that happens to mention "content". Use it as written.
+    // parseJsonPlan rejects a `{"content": "..."}` envelope with no "action"
+    // (its non-synthesize guard demands a researchers array) — but that is
+    // still an envelope, not prose, and returning it raw put the braces in the
+    // final report: the exact failure this unwrap exists to prevent. Try the
+    // action-less shape directly before giving up.
+    try {
+      const bare = JSON.parse(trimmed) as { content?: unknown };
+      if (bare && typeof bare === 'object' && typeof bare.content === 'string' && bare.content.trim()) {
+        logger.debug('[PlanningService] Partial synthesis returned an action-less JSON envelope; unwrapped its content');
+        return bare.content.trim();
+      }
+    } catch {
+      // Genuinely not JSON — prose that happens to mention "content". Use as written.
+    }
   }
   return trimmed;
 }

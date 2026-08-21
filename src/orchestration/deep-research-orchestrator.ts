@@ -226,13 +226,18 @@ export class DeepResearchOrchestrator {
         // to run the SAME round again. Announcing it each time emitted `round_start`
         // 1, 2, 2, 3 — a duplicate rather than the gap the post-loop guard was added for,
         // but the same broken contract for a consumer counting rounds.
-        if (this.currentRound > lastAnnouncedRound) {
+        const firstEntryThisRound = this.currentRound > lastAnnouncedRound;
+        if (firstEntryThisRound) {
           observer?.onRoundStart?.(this.currentRound);
           lastAnnouncedRound = this.currentRound;
         }
 
         // Check infrastructure health (advisory: logs status, never aborts the run).
-        await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
+        // Once per round, not per loop entry: a 'wait' retry re-enters the same
+        // round and must not re-probe the same infrastructure it just probed.
+        if (firstEntryThisRound) {
+          await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
+        }
 
         // 1. Update/Generate Plan
         let plan: ResearchPlan;
@@ -254,7 +259,14 @@ export class DeepResearchOrchestrator {
             });
         } else {
             const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-            observer?.onEvaluationStart?.(this.currentRound);
+            // Same once-per-round contract as round_start above: a 'wait' retry
+            // re-enters this branch for the SAME round, and re-emitting
+            // evaluation_start per retry gave consumers counting evaluations
+            // duplicates (2, 2, 2 for one round-2 evaluation). The progress
+            // pulse below is a status update and stays per-entry.
+            if (firstEntryThisRound) {
+              observer?.onEvaluationStart?.(this.currentRound);
+            }
             observer?.onEvaluationProgress?.('evaluating');
             plan = await planningService.updatePlanForRound({
                 sessionId: researchId,

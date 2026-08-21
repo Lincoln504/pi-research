@@ -20,10 +20,9 @@ concurrency:
 permissions:
   contents: read
 
-# TODO(hardening, low): pin actions (actions/checkout, actions/setup-node,
-# actions/cache, github/codeql-action/*) by full commit SHA instead of mutable
-# major tags — standard supply-chain hardening; keep in lockstep with the same
-# TODO in release.yml when addressing.
+# All actions are pinned by full commit SHA (supply-chain hardening); the
+# trailing `# vN` comment on each `uses:` records the tag the SHA resolved
+# from. Keep pins in lockstep with release.yml when bumping.
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -523,6 +522,10 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
+          # env indirection, not inline ${{ }} in run: — branch names may
+          # contain shell metacharacters and this step holds a write token.
+          PUSH_REF: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -531,7 +534,7 @@ jobs:
             echo "docs/deps.svg unchanged, nothing to commit"
           else
             git commit -m "chore(ci): regenerate docs/deps.svg (detailed module graph) [skip ci]"
-            git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${{ github.ref_name }}"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${PUSH_REF}"
           fi
 
   validate:

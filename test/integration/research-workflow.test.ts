@@ -232,8 +232,12 @@ describe('End-to-End Research Workflows', () => {
       const docCount = await store!.count();
       expect(docCount).toBeGreaterThanOrEqual(0);
       if (docCount > 0) {
+        // Inside this branch documents exist, so a real assertion IS possible:
+        // a populated store whose search returns nothing for the run's own
+        // topic is a broken index, not an acceptable outcome. (The >= 0 form
+        // this replaces could never fail.)
         const searchResults = await store!.search('TypeScript features');
-        expect(searchResults.length).toBeGreaterThanOrEqual(0);
+        expect(searchResults.length).toBeGreaterThan(0);
       }
     }, 60000);
 

@@ -245,67 +245,74 @@ export function getSDKContainer(): ServiceContainer | null {
  * unreachable through the public API, and it contradicted that idempotent contract.)
  */
 async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
-  const newCwd = options.cwd ? options.cwd : process.cwd();
-  globalCwd = newCwd;
-
-  // Verbose logging setup
-  if (options.verbose) {
-    setLogger(createLogger({ verbose: true }));
-  }
-
-  // Seed configuration. The SDK is a library: it reads the base global config
-  // file for convenience, but NEVER a per-interface overlay (those belong to the
-  // pi/cli front-ends). `ignoreGlobalConfig` drops the file entirely so
-  // the SDK runs purely from defaults + process.env + options.config — fully
-  // self-contained and reproducible from code.
-  const baseConfig = options.ignoreGlobalConfig
-    ? createConfig({}, process.env)
-    : getConfig(globalCwd);
-  globalConfig = { ...baseConfig };
-  if (options.config) {
-    globalConfig = { ...globalConfig, ...options.config };
-    validateConfig(globalConfig);
-  }
-
-  globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
-  let parsedProvider = options.provider || process.env['PI_RESEARCH_PROVIDER'];
-
-  // An EXPLICIT model option must govern the entire run — coordinator (via
-  // ctx.model) AND researchers/synthesis (which resolve through
-  // RESEARCH_MODEL, where config would otherwise outrank the option and split
-  // the run across two models, with the report metadata naming the wrong one).
-  // Pin the config to the explicit choice. No-op when the option was itself
-  // seeded from the config (the CLI does that).
-  if (options.model) {
-    const explicit = typeof options.model === 'string'
-      ? options.model
-      : `${(options.model as Model<any>).provider}/${(options.model as Model<any>).id}`;
-    globalConfig = { ...globalConfig, RESEARCH_MODEL: explicit };
-  }
-
-  // Infer provider from the effective model if not explicitly provided. The
-  // effective model is the explicit option first, else the configured
-  // RESEARCH_MODEL — the same precedence the resolve below uses.
-  const effectiveModel = options.model ?? globalConfig.RESEARCH_MODEL;
-  if (!parsedProvider && effectiveModel) {
-    if (typeof effectiveModel === 'string') {
-      const slashIdx = effectiveModel.indexOf('/');
-      if (slashIdx > 0) {
-        parsedProvider = effectiveModel.slice(0, slashIdx);
-      }
-    } else if ((effectiveModel as any).provider) {
-      parsedProvider = (effectiveModel as any).provider;
-    }
-  }
-
-  if (globalApiKey && !parsedProvider) {
-    throw new Error('Provider must be specified when using an explicit API key (set provider option or PI_RESEARCH_PROVIDER).');
-  }
-
-  // Build and cache the registry (one instance for the lifetime of this init cycle).
-  globalRegistry = await sharedBuildModelRegistry(globalApiKey, parsedProvider);
-
+  // ONE try for the whole body: config validation, the missing-provider check,
+  // and buildModelRegistry can all throw, and they must reach the same
+  // catch/finally as the service phase. When they escaped it, _initPromise was
+  // never cleared, so every later initResearchSDK() returned the same stale
+  // rejection (and the partially-set globals were never torn down) until a
+  // shutdown ran — a corrected retry after a bad `options.config` was
+  // permanently stuck on the original error.
   try {
+    const newCwd = options.cwd ? options.cwd : process.cwd();
+    globalCwd = newCwd;
+
+    // Verbose logging setup
+    if (options.verbose) {
+      setLogger(createLogger({ verbose: true }));
+    }
+
+    // Seed configuration. The SDK is a library: it reads the base global config
+    // file for convenience, but NEVER a per-interface overlay (those belong to the
+    // pi/cli front-ends). `ignoreGlobalConfig` drops the file entirely so
+    // the SDK runs purely from defaults + process.env + options.config — fully
+    // self-contained and reproducible from code.
+    const baseConfig = options.ignoreGlobalConfig
+      ? createConfig({}, process.env)
+      : getConfig(globalCwd);
+    globalConfig = { ...baseConfig };
+    if (options.config) {
+      globalConfig = { ...globalConfig, ...options.config };
+      validateConfig(globalConfig);
+    }
+
+    globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
+    let parsedProvider = options.provider || process.env['PI_RESEARCH_PROVIDER'];
+
+    // An EXPLICIT model option must govern the entire run — coordinator (via
+    // ctx.model) AND researchers/synthesis (which resolve through
+    // RESEARCH_MODEL, where config would otherwise outrank the option and split
+    // the run across two models, with the report metadata naming the wrong one).
+    // Pin the config to the explicit choice. No-op when the option was itself
+    // seeded from the config (the CLI does that).
+    if (options.model) {
+      const explicit = typeof options.model === 'string'
+        ? options.model
+        : `${(options.model as Model<any>).provider}/${(options.model as Model<any>).id}`;
+      globalConfig = { ...globalConfig, RESEARCH_MODEL: explicit };
+    }
+
+    // Infer provider from the effective model if not explicitly provided. The
+    // effective model is the explicit option first, else the configured
+    // RESEARCH_MODEL — the same precedence the resolve below uses.
+    const effectiveModel = options.model ?? globalConfig.RESEARCH_MODEL;
+    if (!parsedProvider && effectiveModel) {
+      if (typeof effectiveModel === 'string') {
+        const slashIdx = effectiveModel.indexOf('/');
+        if (slashIdx > 0) {
+          parsedProvider = effectiveModel.slice(0, slashIdx);
+        }
+      } else if ((effectiveModel as any).provider) {
+        parsedProvider = (effectiveModel as any).provider;
+      }
+    }
+
+    if (globalApiKey && !parsedProvider) {
+      throw new Error('Provider must be specified when using an explicit API key (set provider option or PI_RESEARCH_PROVIDER).');
+    }
+
+    // Build and cache the registry (one instance for the lifetime of this init cycle).
+    globalRegistry = await sharedBuildModelRegistry(globalApiKey, parsedProvider);
+
     // Resolve the model. Precedence: explicit option (a Model object is used
     // as-is; it need not exist in the registry) → configured RESEARCH_MODEL →
     // provider default → registry fallback. Seeding the resolver with the

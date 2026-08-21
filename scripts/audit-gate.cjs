@@ -133,7 +133,7 @@ function classifyAdvisories(auditJson, exceptions) {
   const stale = [];
   for (const e of exceptions) {
     if (typeof e.id === 'string') {
-      if (!advisories.has(e.id)) stale.push(`${e.id} (${e.package})`);
+      if (!advisories.has(e.id)) stale.push(e.package ? `${e.id} (${e.package})` : e.id);
     } else {
       const matched = Array.from(advisories.values()).some(
         (adv) => adv.packages.has(e.package) && adv.nodes.size > 0 && [...adv.nodes].every((n) => n.includes(e.locationContains)),

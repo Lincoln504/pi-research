@@ -14,6 +14,52 @@ import { metrics } from '../utils/metrics.ts';
 import { StoreDocument } from '../core/interfaces/knowledge-interfaces.ts';
 
 /**
+ * Guard against a broken embedder silently writing corrupt vectors: a
+ * wrong-count, empty, ragged, or NaN/Inf-poisoned result would otherwise land
+ * in the FixedSizeList column and surface only as an opaque Arrow error or,
+ * worse, as silently degraded search (NaN distances break ANN ordering). Fail
+ * loudly at the last gate before persistence instead. Shared by the normal
+ * addDocuments path and the re-embed migration (which writes vectors through
+ * its own table handle and previously had no guard at all).
+ */
+export function assertValidEmbeddingVectors(
+  vectors: (Float32Array | number[])[],
+  expectedCount: number,
+  declaredDim: number | null | undefined,
+): void {
+  if (vectors.length !== expectedCount) {
+    throw new Error(
+      `[store] embedder returned ${vectors.length} vectors for ${expectedCount} documents`,
+    );
+  }
+  // Expected width: the embedder's declared dimension, falling back to the
+  // first vector's width. Every vector must match it exactly — a uniformly
+  // wrong width is just as corrupting as a ragged one.
+  const dim = declaredDim && declaredDim > 0 ? declaredDim : (vectors[0]?.length ?? 0);
+  if (dim === 0) {
+    throw new Error('[store] embedder returned empty/zero-width vectors');
+  }
+  for (let i = 0; i < vectors.length; i++) {
+    const v = vectors[i];
+    if (!v || v.length !== dim) {
+      throw new Error(
+        `[store] embedder returned a wrong-width vector at index ${i} (got ${v?.length ?? 0}, expected ${dim})`,
+      );
+    }
+    // A correct-width vector can still be poisoned: a WebGPU device-lost
+    // mid-inference, or a truncated server response coerced through
+    // Float32Array, yields NaN/Inf entries that pass every length check.
+    for (let j = 0; j < v.length; j++) {
+      if (!Number.isFinite(v[j]!)) {
+        throw new Error(
+          `[store] embedder returned a non-finite value (${v[j]}) at vector ${i}, position ${j}`,
+        );
+      }
+    }
+  }
+}
+
+/**
  * Add documents to the store
  */
 export async function addDocumentsToStore(
@@ -35,44 +81,7 @@ export async function addDocumentsToStore(
 
   try {
     const vectors = await embedder.embedMany(docs.map(d => d.text));
-
-    // Guard against a broken embedder silently writing corrupt vectors: a
-    // wrong-count, empty, or ragged result would otherwise land in the
-    // FixedSizeList column and surface only as an opaque Arrow error or, worse,
-    // as silently degraded search. Fail loudly here instead.
-    if (vectors.length !== docs.length) {
-      throw new Error(
-        `[store] embedder returned ${vectors.length} vectors for ${docs.length} documents`,
-      );
-    }
-    // Expected width: the embedder's declared dimension, falling back to the
-    // first vector's width. Every vector must match it exactly — a uniformly
-    // wrong width is just as corrupting as a ragged one.
-    const declaredDim = embedder.getDimension?.();
-    const dim = declaredDim && declaredDim > 0 ? declaredDim : (vectors[0]?.length ?? 0);
-    if (dim === 0) {
-      throw new Error('[store] embedder returned empty/zero-width vectors');
-    }
-    for (let i = 0; i < vectors.length; i++) {
-      const v = vectors[i];
-      if (!v || v.length !== dim) {
-        throw new Error(
-          `[store] embedder returned a wrong-width vector at index ${i} (got ${v?.length ?? 0}, expected ${dim})`,
-        );
-      }
-      // A correct-width vector can still be poisoned: a WebGPU device-lost
-      // mid-inference, or a truncated server response coerced through
-      // Float32Array, yields NaN/Inf entries that pass every length check but
-      // silently corrupt the ANN index (NaN distances break ordering). Scan
-      // here — this is the last gate before the vector is persisted.
-      for (let j = 0; j < v.length; j++) {
-        if (!Number.isFinite(v[j]!)) {
-          throw new Error(
-            `[store] embedder returned a non-finite value (${v[j]}) at vector ${i}, position ${j}`,
-          );
-        }
-      }
-    }
+    assertValidEmbeddingVectors(vectors, docs.length, embedder.getDimension?.());
 
     const data = docs.map((doc, i) => ({
       vector: vectors[i]!,

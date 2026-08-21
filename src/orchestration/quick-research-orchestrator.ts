@@ -356,6 +356,13 @@ export class QuickResearchOrchestrator {
 
           // Ensure CITED LINKS section is accurate and consistent
           result = synthesisService.ensureCitedLinks(this.options.researchId, result);
+          // Snapshot BEFORE steering guidance is appended: parseCitations absorbs
+          // any text trailing the last CITED LINKS entry into that entry's
+          // Description (the same mechanism that forced the weak-grounding notice
+          // to sit BEFORE the header), so knowledge-store descriptions must be
+          // parsed from the pre-steering text or a steered quick run stores the
+          // steering block inside the final source's description.
+          const citationSource = result;
 
           // Append steering guidance — only active (consumed by orchestrator) messages
           const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
@@ -386,7 +393,7 @@ export class QuickResearchOrchestrator {
               if (!writer) {
                 logger.debug('[QuickOrchestrator] Writer queue unavailable, skipping link descriptions');
               } else {
-              const citations = parseCitations(result);
+              const citations = parseCitations(citationSource);
               if (citations.length === 0) {
                 logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
               }

@@ -241,8 +241,14 @@ async function extractSearchResults(page: any): Promise<any[]> {
       let url = link.href;
       try {
         const u = new URL(url);
+        // searchParams.get() already percent-decodes the redirect target once.
+        // A second decodeURIComponent here double-decoded targets whose
+        // canonical form itself contains escapes (%26/%3F in query values,
+        // %2F path slashes, %27 in titles) — structurally corrupting them so
+        // the later scrape fetched the wrong resource — and threw URIError on
+        // a lone `%`, silently dropping the result via the hostname filter.
         const uddg = u.searchParams.get('uddg');
-        if (uddg) url = decodeURIComponent(uddg || '');
+        if (uddg) url = uddg;
       } catch {
         // ignore
       }
@@ -616,7 +622,14 @@ export async function executeScrapeTask(
     // extracting the document — a silent content loss for exactly the URLs this
     // feature advertises as supported, and specifically for the malformed/oddly-
     // served PDFs most likely to reach this browser fallback in the first place.
-    if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
+    // response.url(), NOT the original task `url`: goto() follows redirects, so
+    // classification must use the URL that actually answered — a download
+    // endpoint without `.pdf` redirecting to the real `.pdf` file must take the
+    // PDF branch, and a `.pdf` task URL redirecting to an HTML page must NOT
+    // (same two-sided redirect-aware fix the fetch layer got via currentUrl,
+    // and the early-abort check above already applies via resp.url()).
+    const finalUrl = String(response?.url?.() ?? url);
+    if (contentType.includes('application/pdf') || finalUrl.toLowerCase().endsWith('.pdf')) {
       if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
       // An errored "PDF" is an error page: fail BEFORE buffering its body.
       if (status >= 400) throw new Error(`HTTP ${status}`);

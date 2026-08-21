@@ -110,7 +110,21 @@ export async function mintPoTokens(
     throw new Error('PoToken minter is wedged by a prior mint that never settled; refusing to start a new mint until it resolves.');
   }
   // Chain on the mutex so only one bridged section runs at a time.
-  const run = mintChain.then(() => doMint(identifiers, opts), () => doMint(identifiers, opts));
+  // Re-check `wedged` at DEQUEUE time, not only at the entry check above: a
+  // caller already queued on the chain when the hard release fires would
+  // otherwise start its own doMint() while the abandoned mint may still be
+  // mid-bridge — the exact double-bridge globalThis corruption the flag
+  // exists to prevent. (No false positive in the normal path: the
+  // `settled.then(() => { wedged = false; })` handler below is registered on
+  // `settled` BEFORE the race that dequeues the next caller, so a clean
+  // settle clears the flag first.)
+  const startIfSafe = () => {
+    if (wedged) {
+      throw new Error('PoToken minter is wedged by a prior mint that never settled; refusing to start a queued mint until it resolves.');
+    }
+    return doMint(identifiers, opts);
+  };
+  const run = mintChain.then(startIfSafe, startIfSafe);
   // Keep the chain alive regardless of this call's success/failure, but bound
   // how long the NEXT caller waits on it: if `run` never settles, force the
   // chain open after the hard timeout rather than wedging every future

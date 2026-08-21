@@ -63,7 +63,10 @@ function warnIfUnpriced(model: Model<any>, tokens: number, cost: number): void {
  *
  * Zero-valued counters are still emitted (when the provider reported the field at all)
  * so "cache is off" and "provider does not report caching" stay distinguishable: the
- * first shows the counter at 0, the second omits it.
+ * first shows the counter at 0, the second omits it. Caveat: the caller gates on
+ * `tokens > 0 || cost > 0`, so a response whose usage is all-zero across the board
+ * emits nothing — harmless in practice because cache fields are summed into `tokens`,
+ * so a reported cache split implies a nonzero total.
  */
 function recordCacheTokens(parsed: Partial<TokenUsage>, labels: Record<string, string>): void {
   if (typeof parsed.cacheRead === 'number') {

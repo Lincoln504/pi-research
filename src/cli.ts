@@ -210,7 +210,7 @@ export function makeProgressObserver(): HeadlessObserverOptions {
               reportText.includes('None of the links above could be verified')) {
             toStderr('  • WARNING: no web sources could be retrieved — the report is unverified\n');
           } else if (reportText.includes('Grounding notice: only')) {
-            toStderr('  • WARNING: weakly grounded report (fewer than 3 verified sources) — treat unattributed claims as unverified\n');
+            toStderr('  • WARNING: weakly grounded report (fewer than 3 cited sources) — treat unattributed claims as unverified\n');
           }
           break;
         }

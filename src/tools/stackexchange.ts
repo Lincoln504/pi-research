@@ -84,6 +84,20 @@ export function createStackexchangeTool(options: {
           };
       }
 
+      const p = params as StackExchangeParams;
+      const command = p.command;
+
+      // Command-name validation is part of validate-BEFORE-charge too: the schema
+      // types `command` as free-text, so an unknown name used to pass Value.Check,
+      // spend a MAX_GATHERING_CALLS slot, and then die in the dispatch switch with
+      // zero work done — the error message even blamed rate limiting.
+      if (!command || typeof command !== 'string' || !['search', 'get', 'user', 'site'].includes(command)) {
+        return {
+          content: [{ type: 'text', text: `Invalid stackexchange command: ${String(command)}. Valid commands: search, get, user, site.` }],
+          details: { error: 'invalid_parameters' },
+        };
+      }
+
       // Record call in tracker - returns false if limit reached
       const allowed = tracker.recordCall('stackexchange');
       if (!allowed) {
@@ -91,13 +105,6 @@ export function createStackexchangeTool(options: {
             content: [{ type: 'text', text: tracker.getLimitMessage('stackexchange') }],
             details: { blocked: true, reason: 'limit_reached' },
           };
-      }
-
-      const p = params as StackExchangeParams;
-      const command = p.command;
-
-      if (!command || typeof command !== 'string') {
-        throw new Error('Stack Exchange command is required and must be a string');
       }
 
       try {

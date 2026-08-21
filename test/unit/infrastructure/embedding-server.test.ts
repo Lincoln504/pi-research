@@ -296,7 +296,8 @@ describe('EmbeddingServer', () => {
           getEmbeddingServer: vi.fn().mockResolvedValue(null),
           clearEmbeddingServer: vi.fn().mockResolvedValue(undefined),
         } as any;
-        const s = new EmbeddingServer({} as any, sm, 'poison-latch-test', onPoison);
+        const mockEmbedder = { markPipelineWedged: vi.fn() } as any;
+        const s = new EmbeddingServer(mockEmbedder, sm, 'poison-latch-test', onPoison);
 
         expect(hasWebGpuFallback()).toBe(false);
         (s as any).handleQueuePoisoned(new Error('SerialQueue: embed permanently hung — embedder poisoned; leader stepping down'));
@@ -304,6 +305,10 @@ describe('EmbeddingServer', () => {
         // The hung native inference still holds the same-PID re-entrant GPU lock;
         // the next getEmbedder() in THIS process must build on CPU, never WebGPU.
         expect(hasWebGpuFallback()).toBe(true);
+        // And the wedge is latched on the Embedder itself, so the process-exit
+        // cleanup task's dispose() will abandon the pipeline instead of calling
+        // pipeline.dispose() on the wedged ORT session (joining the stuck thread).
+        expect(mockEmbedder.markPipelineWedged).toHaveBeenCalledOnce();
         expect(onPoison).toHaveBeenCalledOnce();
         // Existing step-down semantics kept: registration cleared, serving refused.
         await vi.waitFor(() => expect(sm.clearEmbeddingServer).toHaveBeenCalled());

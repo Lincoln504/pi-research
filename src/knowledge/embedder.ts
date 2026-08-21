@@ -50,6 +50,14 @@ export class Embedder {
   private initializingPromise: Promise<void> | null = null;
   private disposePromise: Promise<void> | null = null;
   private recoveryPromise: Promise<void> | null = null;
+  // Latched by the SerialQueue poison path (via EmbeddingServer): a native
+  // inference is permanently hung inside this pipeline. dispose() must then
+  // never call pipeline.dispose() — it would join the stuck native thread, the
+  // exact hazard the poison path's shutdown(false) avoided — yet this instance
+  // stays registered for process-exit cleanup (registerGlobalEmbedder), whose
+  // task calls dispose() unconditionally. Without the latch the teardown path
+  // re-created the hang the step-down deliberately abandoned.
+  private pipelineWedged = false;
 
   private model: string;
   private poolingMode: 'mean' | 'cls' | 'last_token';
@@ -657,6 +665,15 @@ export class Embedder {
   }
 
   /**
+   * Mark this embedder's pipeline as permanently wedged (a native inference hung
+   * past the SerialQueue hard deadline). From here on, dispose() abandons the
+   * pipeline instead of calling pipeline.dispose() — see pipelineWedged.
+   */
+  markPipelineWedged(): void {
+    this.pipelineWedged = true;
+  }
+
+  /**
    * @param reason `'idle'` for the memory-reclaim pause driven by the idle timer —
    *   a later embed is allowed to revive the embedder. Anything else is terminal
    *   (shutdown, config change, explicit disposal) and must never be revived, so
@@ -678,9 +695,13 @@ export class Embedder {
     this.disposeReason = reason;
     this.state = 'disposing';
     this.disposePromise = (async () => {
-      // Wait for all active embeddings to complete
+      // Wait for all active embeddings to complete. Pointless when the pipeline
+      // is wedged: the hung call holds its activeEmbeddings slot forever, so the
+      // drain can only time out — skip straight to the (dispose-skipping)
+      // teardown below instead of burning the wait twice at process exit.
       const maxWaitMs = 5000;
       const drainActiveEmbeddings = async (): Promise<void> => {
+        if (this.pipelineWedged) return;
         const startTime = Date.now();
         while (this.activeEmbeddings > 0 && (Date.now() - startTime) < maxWaitMs) {
           await new Promise(resolve => setTimeout(resolve, 50));
@@ -709,14 +730,22 @@ export class Embedder {
       }
 
       if (this.pipeline) {
-        try {
-          if (typeof (this.pipeline as any).dispose === 'function') {
-            await (this.pipeline as DisposablePipeline).dispose();
+        if (this.pipelineWedged) {
+          // See pipelineWedged's declaration: disposing a wedged ORT session
+          // joins the permanently hung native thread. Abandon it — the native
+          // resources die with process exit, which is where this path runs.
+          logger.warn('[embedder] Skipping pipeline.dispose(): pipeline wedged by a permanently hung inference; abandoning native resources to process exit.');
+          this.pipeline = null;
+        } else {
+          try {
+            if (typeof (this.pipeline as any).dispose === 'function') {
+              await (this.pipeline as DisposablePipeline).dispose();
+            }
+          } catch (err) {
+            logger.warn('[embedder] Error during pipeline dispose:', err);
           }
-        } catch (err) {
-          logger.warn('[embedder] Error during pipeline dispose:', err);
+          this.pipeline = null;
         }
-        this.pipeline = null;
       }
 
       // Always release the GPU lock once on dispose (defensive: the gpuLockHeld flag

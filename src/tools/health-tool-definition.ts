@@ -11,6 +11,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { healthRegistry } from '../healthcheck/index.ts';
 
 /**
@@ -45,7 +46,16 @@ export function createHealthTool(): ToolDefinition {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { verbose = true, probe = false } = params as HealthParams;
+      // The host does not enforce parameter schemas (same invariant as the research
+      // tool's gate): a null/malformed params object would make the bare destructure
+      // throw a raw TypeError out of execute() instead of a structured result.
+      if (!Value.Check(parameters, params ?? {})) {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameters for health tool.' }],
+          details: { error: 'invalid_parameters' },
+        };
+      }
+      const { verbose = true, probe = false } = (params ?? {}) as HealthParams;
 
       const outputLines: string[] = [];
 

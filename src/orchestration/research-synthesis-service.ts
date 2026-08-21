@@ -34,7 +34,7 @@ const NO_SOURCES_NOTE =
 const UNVERIFIED_LINKS_NOTE =
   '_None of the links above could be verified: no page fetch succeeded this session and no citation could be matched to retrieved content. They may be inaccurate or invented — check each one before relying on it._';
 
-// Below this many verified sources, a completed report is WEAKLY grounded: it will
+// Below this many cited sources, a completed report is WEAKLY grounded: it will
 // still read as a fully sourced document, but almost none of its claims can trace to
 // retrieved content — exactly the shape of a run where scrapes mostly failed (bot
 // blocks, resource starvation) or the topic had little real coverage, and the model
@@ -45,7 +45,11 @@ const UNVERIFIED_LINKS_NOTE =
 const WEAK_GROUNDING_MIN_SOURCES = 3;
 
 function weakGroundingNote(count: number): string {
-  return `_Grounding notice: only ${count} source${count === 1 ? '' : 's'} could be verified for this report. ` +
+  // "cited", not "verified": since the provenance gate was removed (see the
+  // comment in extractGlobalCitations' caller), this count includes citations
+  // the model wrote whose pages were never successfully retrieved — claiming
+  // they were "verified" overstated what the pipeline checked.
+  return `_Grounding notice: only ${count} source${count === 1 ? ' is' : 's are'} cited in this report. ` +
     'Claims not attributable to the cited source' + (count === 1 ? '' : 's') +
     ' above should be treated as unverified — cross-check anything load-bearing before relying on it._';
 }
@@ -405,7 +409,7 @@ export class ResearchSynthesisService implements IService {
           // string to build knowledge-store entries — a notice placed after the
           // list polluted the stored description of the final source on precisely
           // the degraded runs the notice exists to flag.
-          logger.warn(`[ResearchSynthesisService] Report is weakly grounded: only ${globalCitations.length} verified source(s) — appending grounding notice.`);
+          logger.warn(`[ResearchSynthesisService] Report is weakly grounded: only ${globalCitations.length} cited source(s) — appending grounding notice.`);
           return `${body}\n\n${weakGroundingNote(globalCitations.length)}\n\n${verifiedLinksSection}`;
         }
         return `${body}\n\n${verifiedLinksSection}`;
@@ -422,7 +426,7 @@ export class ResearchSynthesisService implements IService {
       if (globalCitations.length < WEAK_GROUNDING_MIN_SOURCES) {
         // Before the CITED LINKS header for the same parseCitations-absorption
         // reason as the replace path above.
-        logger.warn(`[ResearchSynthesisService] Report is weakly grounded: only ${globalCitations.length} verified source(s) — appending grounding notice.`);
+        logger.warn(`[ResearchSynthesisService] Report is weakly grounded: only ${globalCitations.length} cited source(s) — appending grounding notice.`);
         return `${prose}\n\n${weakGroundingNote(globalCitations.length)}\n\n${verifiedLinksSection}`;
       }
       return `${prose}\n\n${verifiedLinksSection}`;

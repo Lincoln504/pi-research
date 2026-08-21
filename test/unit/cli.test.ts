@@ -482,7 +482,7 @@ describe('makeProgressObserver — degradation warnings on complete', () => {
   }
 
   it('warns on stderr when the report carries the weak-grounding notice', () => {
-    const out = stderrFrom('Report body.\n\n_Grounding notice: only 1 source could be verified for this report._\n\nCITED LINKS\n[1] https://a.org');
+    const out = stderrFrom('Report body.\n\n_Grounding notice: only 1 source is cited in this report._\n\nCITED LINKS\n[1] https://a.org');
     expect(out).toContain('WARNING: weakly grounded report');
   });
 
@@ -1118,7 +1118,11 @@ function hermeticEnv(extra?: Record<string, string>): Record<string, string> {
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
   }
-  return { ...base, HOME: SUBPROCESS_HOME, USERPROFILE: SUBPROCESS_HOME, ...extra };
+  // Pin the subprocess log too: scrubbing PI_RESEARCH_* also scrubbed the
+  // unit-env.ts log redirect, so every spawned CLI fell back to the REAL
+  // shared {tmpdir}/pi-research.log and `npm test` appended WARN noise to the
+  // user's live log (same pin as run-semaphore-multiprocess.test.ts).
+  return { ...base, HOME: SUBPROCESS_HOME, USERPROFILE: SUBPROCESS_HOME, PI_RESEARCH_LOG_PATH: path.join(SUBPROCESS_HOME, 'pi-research-test.log'), ...extra };
 }
 
 function runCli(args: string[], env?: Record<string, string>) {
@@ -1129,12 +1133,14 @@ function runCli(args: string[], env?: Record<string, string>) {
   });
 }
 
-// NOTE for all "CLI subprocess" suites below: these spawn the real built CLI,
-// which shares the REAL machine-wide research-run semaphore (default cap 3)
-// with any production runs active on this machine. A run-adjacent test that
-// fails with "Maximum concurrent research runs (3) reached" while other
-// agents/sessions are researching is environmental contention, not a code
-// defect — re-run once slots free before diagnosing (observed 2026-08-20).
+// NOTE for all "CLI subprocess" suites below: these spawn the real built CLI.
+// The research-run semaphore is NOT actually shared with the machine: its slot
+// dir lives under getStateDir() → HOME, and every suite here pins HOME to a
+// throwaway dir — and no test below reaches slot acquisition anyway (research
+// invocations fail arg validation first). If machine contention symptoms recur
+// (observed 2026-08-20), look at genuinely tmpdir-scoped shared surfaces (the
+// default {tmpdir}/pi-research.log, now pinned per-suite below), not this
+// semaphore.
 describe('CLI subprocess — help / version', () => {
   it('--help exits 0 and prints usage', () => {
     const r = runCli(['--help']);
@@ -1274,7 +1280,8 @@ describe('CLI subprocess — model required with pi credentials', () => {
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
     }
-    return { ...base, HOME: home, USERPROFILE: home, ...extra };
+    // Log pinned under the sandbox HOME — see hermeticEnv's note.
+    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_LOG_PATH: path.join(home, 'pi-research-test.log'), ...extra };
   };
   const run = (args: string[], extra?: Record<string, string>) =>
     spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf-8', env: env(extra), timeout: 20_000 });
@@ -1370,7 +1377,8 @@ describe('CLI subprocess — pi key detection by content', () => {
       // machine would make the empty-auth case falsely "available".
       if (v !== undefined && !k.startsWith('PI_RESEARCH_') && !/_API_KEY$/.test(k) && !/_TOKEN$/.test(k)) base[k] = v;
     }
-    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_MODEL: 'some-provider/some-model' };
+    // Log pinned under the sandbox HOME — see hermeticEnv's note.
+    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_MODEL: 'some-provider/some-model', PI_RESEARCH_LOG_PATH: path.join(home, 'pi-research-test.log') };
   };
   const status = (home: string) =>
     JSON.parse(spawnSync(process.execPath, [CLI, 'status', '--json'], { encoding: 'utf-8', env: env(home), timeout: 20_000 }).stdout);
@@ -1459,7 +1467,8 @@ describe('CLI subprocess — skill (hermetic agent-skill install)', () => {
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
     }
-    return { ...base, HOME: home, USERPROFILE: home };
+    // Log pinned under the sandbox HOME — see hermeticEnv's note.
+    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_LOG_PATH: path.join(home, 'pi-research-test.log') };
   };
   const run = (args: string[], extra?: Record<string, string>) =>
     spawnSync(process.execPath, [CLI, ...args], { cwd: work, encoding: 'utf-8', env: { ...env(), ...extra }, timeout: 20_000 });
@@ -1561,7 +1570,8 @@ describe('CLI subprocess — knowledge-config (hermetic per-directory scoping)',
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined && !k.startsWith('PI_RESEARCH_')) base[k] = v;
     }
-    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_STATE_DIR: stateDir, ...extra };
+    // Log pinned under the sandbox HOME — see hermeticEnv's note.
+    return { ...base, HOME: home, USERPROFILE: home, PI_RESEARCH_STATE_DIR: stateDir, PI_RESEARCH_LOG_PATH: path.join(home, 'pi-research-test.log'), ...extra };
   };
   const runIn = (dir: string, args: string[], extra?: Record<string, string>) =>
     spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: 'utf-8', env: hermeticEnv(extra), timeout: 20_000 });

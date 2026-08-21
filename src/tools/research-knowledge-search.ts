@@ -478,10 +478,19 @@ export async function runBackgroundExtraction(
   // (byte-identical across calls → prompt-cache reads instead of a fresh cache
   // write per call) and the per-call sections go in the user message.
   const { system, user } = splitPromptAtUserTurn(promptTemplate);
-  const fill = (t: string): string => t
-    .replace('{{queries}}', () => formatQueriesBlock(queries))
-    .replace('{{conversation_history}}', () => conversationHistory)
-    .replace('{{reference_documents}}', () => referenceDocuments);
+  // Single left-to-right pass over the TEMPLATE only: sequential replace()
+  // calls re-scan the accumulated string, so a literal `{{reference_documents}}`
+  // typed inside a query would be expanded by the later replace (injected
+  // occurrence sits above the real placeholder), dumping the documents into the
+  // query section and leaving the real placeholder verbatim. A /g pass never
+  // re-scans replacement values.
+  const fill = (t: string): string => t.replace(
+    /\{\{(queries|conversation_history|reference_documents)\}\}/g,
+    (_m, key: string) =>
+      key === 'queries' ? formatQueriesBlock(queries)
+      : key === 'conversation_history' ? conversationHistory
+      : referenceDocuments,
+  );
 
   const finalInstruction =
     'Analyze the reference documents above and extract the answer using the required JSON format.';
@@ -642,10 +651,16 @@ export async function triageRelevantUrls(
   // Split at USER_TURN like the extractor: static rules stay in the system prompt
   // (cacheable across calls), per-call sections go in the user message.
   const { system, user } = splitPromptAtUserTurn(promptTemplate);
-  const fill = (t: string): string => t
-    .replace('{{queries}}', () => formatQueriesBlock(queries))
-    .replace('{{conversation_history}}', () => conversationHistory)
-    .replace('{{candidates}}', () => candidateBlock);
+  // Single /g pass, not sequential replace() calls — see runBackgroundExtraction's
+  // fill(): re-scanning the accumulated string lets a literal placeholder token
+  // inside a query hijack a later replacement.
+  const fill = (t: string): string => t.replace(
+    /\{\{(queries|conversation_history|candidates)\}\}/g,
+    (_m, key: string) =>
+      key === 'queries' ? formatQueriesBlock(queries)
+      : key === 'conversation_history' ? conversationHistory
+      : candidateBlock,
+  );
 
   const finalInstruction = 'Return the JSON object listing the indices of the relevant candidates.';
   const systemPrompt = user === null ? fill(system) : system;
