@@ -144,7 +144,7 @@ Diagnostics & platform
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_DEBUG` (TUI) | `false` | Verbose INFO+DEBUG logging to the log file. |
+| `PI_RESEARCH_DEBUG` (TUI) | `false` | Verbose INFO+DEBUG logging to the log file. Note: a `DEBUG=true` line saved in `config.env` reliably takes effect only for processes where a config *save* has run (saves sync it into the environment; plain loads do not) — to guarantee verbose logging from process start, export `PI_RESEARCH_DEBUG=true` in the environment. |
 | `PI_RESEARCH_CONSOLE_LOG` | `false` | Mirror logs to stdout/stderr (useful in CI / headless). |
 | `PI_RESEARCH_LOG_PATH` | _(OS temp)_ | Override the verbose log file path. Browser workers inherit it automatically. |
 | `PI_RESEARCH_LOG_FILE` | _(unset)_ | Send browser worker-thread logs to a separate file. If unset, workers log to `PI_RESEARCH_LOG_PATH`. |

@@ -180,3 +180,38 @@ describe('npm pack', () => {
   });
 });
 
+describe('package-lock.json — phantom-optional stubs survive regeneration', () => {
+  // @kreuzberg/html-to-markdown-node@3.7.x lists linux-{x64,arm64}-musl in its
+  // optionalDependencies, but those packages were NEVER PUBLISHED to the
+  // registry (404). `npm ci`'s sync check demands a lock entry for every
+  // referenced optional, and the only entry that can exist for a phantom
+  // package is a bare {"optional": true} stub — NESTED under the parent
+  // (node_modules/<parent>/node_modules/<musl-pkg>); a hoisted stub does NOT
+  // satisfy the check (verified empirically both ways with `npm ci --dry-run`).
+  //
+  // Every plain lockfile regeneration (`npm install`, `--package-lock-only`;
+  // npm 11.19 included) silently DROPS these stubs and breaks `npm ci` on CI
+  // with `Missing: @kreuzberg/...-musl@ from lock file`. This has now happened
+  // twice (2026-06-24, 2026-08-20). This test makes the constraint enforced
+  // in-repo: if you regenerated the lock and landed here, re-add the two
+  // nested stubs (and re-run `npm ci --dry-run` to confirm sync) before
+  // pushing. Clears when kreuzberg publishes the musl variants or drops the
+  // references — at that point delete this test along with the stubs.
+  it('keeps the nested {"optional": true} stubs for kreuzberg\'s unpublished musl variants', () => {
+    const lock = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '../../package-lock.json'), 'utf-8'),
+    ) as { packages: Record<string, { optional?: boolean }> };
+
+    const parent = 'node_modules/@kreuzberg/html-to-markdown-node';
+    for (const variant of ['linux-arm64-musl', 'linux-x64-musl']) {
+      const key = `${parent}/node_modules/@kreuzberg/html-to-markdown-node-${variant}`;
+      expect(
+        lock.packages[key],
+        `package-lock.json lost the nested stub for the UNPUBLISHED ${variant} platform package — ` +
+        `npm ci will fail on CI. Re-add "${key}": {"optional": true} (see this test's comment).`,
+      ).toBeDefined();
+      expect(lock.packages[key]!.optional).toBe(true);
+    }
+  });
+});
+

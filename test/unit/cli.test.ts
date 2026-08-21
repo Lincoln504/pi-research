@@ -1129,6 +1129,12 @@ function runCli(args: string[], env?: Record<string, string>) {
   });
 }
 
+// NOTE for all "CLI subprocess" suites below: these spawn the real built CLI,
+// which shares the REAL machine-wide research-run semaphore (default cap 3)
+// with any production runs active on this machine. A run-adjacent test that
+// fails with "Maximum concurrent research runs (3) reached" while other
+// agents/sessions are researching is environmental contention, not a code
+// defect — re-run once slots free before diagnosing (observed 2026-08-20).
 describe('CLI subprocess — help / version', () => {
   it('--help exits 0 and prints usage', () => {
     const r = runCli(['--help']);

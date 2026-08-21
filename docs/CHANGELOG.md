@@ -18,6 +18,10 @@ registry.
 - **Every GitHub Action in both workflows is now pinned by full commit SHA** (tag noted beside each pin), closing the long-standing TODO: the release workflow holds `id-token: write`, so a repointed mutable tag on a compromised action would otherwise run inside the trusted-publishing job (`.github/workflows/ci.yml`, `.github/workflows/release.yml`).
 - Fixed the three remaining shellcheck notes actionlint reported in the workflows (unquoted `$GITHUB_ENV`/exit-status expansions, unanchored `ls *.tgz` glob); both workflows now lint completely clean.
 
+### Fixed
+
+- **`npm ci` broke on CI after the lockfile was regenerated for the sharp override.** `@kreuzberg/html-to-markdown-node@3.7.2` lists `linux-x64-musl`/`linux-arm64-musl` in its optionalDependencies, but those packages were never published to the registry (404) — the only lock entry that can exist for a phantom optional is a bare `{"optional": true}` stub, and npm's sync check requires it NESTED under the parent (hoisted stubs fail; verified empirically both ways). Every lock regeneration silently drops the stubs — second occurrence of this drift class (first: 2026-06-24). Restored the nested stubs, and added a unit test that reads `package-lock.json` and fails with a self-explanatory message the moment a future regeneration drops them again, so the constraint is enforced in-repo rather than remembered (`package-lock.json`, `test/unit/package.test.ts`).
+
 ## [1.5.0] - 2026-08-20
 
 Whole-project audit (release integrity, CI/test health, SSRF consistency,
