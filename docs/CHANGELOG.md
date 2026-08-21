@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Post-1.5.0 hardening pass driven by a full static-analysis battery (npm audit,
+dependency-cruiser, madge, actionlint/shellcheck, license audit, CodeQL state,
+ts-prune triage) plus verification of the published 1.5.0 artifact from the
+registry.
+
+### Changed
+
+- **`sharp` overridden to `^0.35.0`, clearing the last outstanding production advisory** (GHSA-f88m-g3jw-g9cj, libvips CVEs). The prior allowlist entry argued an override was riskier than the unreachable advisory; that assessment is now superseded by direct evidence — the override installs cleanly, lancedb's native binding survives, and the full unit suite (2799 tests, including every embedding/knowledge-store suite) passes against the new tree. `npm audit --omit=dev` now reports zero vulnerabilities and the audit-gate allowlist is empty (`package.json`, `config/tooling/audit-exceptions.json`).
+- **Every GitHub Action in both workflows is now pinned by full commit SHA** (tag noted beside each pin), closing the long-standing TODO: the release workflow holds `id-token: write`, so a repointed mutable tag on a compromised action would otherwise run inside the trusted-publishing job (`.github/workflows/ci.yml`, `.github/workflows/release.yml`).
+- Fixed the three remaining shellcheck notes actionlint reported in the workflows (unquoted `$GITHUB_ENV`/exit-status expansions, unanchored `ls *.tgz` glob); both workflows now lint completely clean.
+
 ## [1.5.0] - 2026-08-20
 
 Whole-project audit (release integrity, CI/test health, SSRF consistency,

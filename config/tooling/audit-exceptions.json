@@ -1,13 +1,4 @@
 {
-  "comment": "Documented exceptions for the production npm-audit release gate (scripts/audit-gate.cjs). Two shapes: (1) per-GHSA {id,...} allowlists ONE advisory; (2) location-scoped {package, locationContains,...} allowlists ANY advisory for `package` whose EVERY affected install path contains `locationContains` — for a transitive pinned inside an upstream npm-shrinkwrap.json (unfixable downstream), so each new disclosure for that frozen copy need not be re-listed. The 'every node in scope' rule keeps location-scoping precise: it fires only when no remediable copy is affected. Any advisory NOT matched (per-id or location) still fails the gate at moderate+. Every entry must carry reason, clearsWhen, reviewed. Re-verify at every release; the gate warns on stale entries.",
-  "exceptions": [
-    {
-      "id": "GHSA-f88m-g3jw-g9cj",
-      "package": "sharp",
-      "severity": "high",
-      "reason": "sharp <0.35.0 (libvips CVEs) is a direct dependency of @huggingface/transformers, which pi-research uses exclusively for TEXT embeddings (knowledge store); the sharp image-processing pipeline is never invoked, so the vulnerable code path is unreachable in this package. Forcing sharp 0.35 via an override would deviate a native module from the upstream-tested combination on a code path our test suite cannot exercise — higher regression risk than the unreachable advisory.",
-      "clearsWhen": "@huggingface/transformers publishes a release depending on sharp >=0.35.0 (transformers is deliberately pinned at 4.2.x in this repo; re-evaluate at the next planned transformers bump).",
-      "reviewed": "2026-07-28"
-    }
-  ]
+  "comment": "Documented exceptions for the production npm-audit release gate (scripts/audit-gate.cjs). Two shapes: (1) per-GHSA {id,...} allowlists ONE advisory; (2) location-scoped {package, locationContains,...} allowlists ANY advisory for `package` whose EVERY affected install path contains `locationContains` \u2014 for a transitive pinned inside an upstream npm-shrinkwrap.json (unfixable downstream), so each new disclosure for that frozen copy need not be re-listed. The 'every node in scope' rule keeps location-scoping precise: it fires only when no remediable copy is affected. Any advisory NOT matched (per-id or location) still fails the gate at moderate+. Every entry must carry reason, clearsWhen, reviewed. Re-verify at every release; the gate warns on stale entries.",
+  "exceptions": []
 }

@@ -15,10 +15,10 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-# TODO(hardening, low): pin third-/first-party actions (actions/checkout,
-# actions/setup-node, actions/upload-artifact) by full commit SHA instead of
-# mutable major tags. This workflow holds `id-token: write` and publishes to npm,
-# so a compromised action tag would run inside the trusted-publishing job.
+# Actions are pinned by full commit SHA (tag noted beside each pin): this
+# workflow holds `id-token: write` and publishes to npm, so a repointed mutable
+# tag on a compromised action would otherwise run inside the trusted-publishing
+# job. Update pins by resolving the new tag to its commit SHA deliberately.
 
 permissions:
   contents: read
@@ -109,9 +109,9 @@ jobs:
     # script-injection channel from the job that runs untrusted lifecycle
     # scripts into the job that holds id-token: write (see publish's comment).
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -170,8 +170,8 @@ jobs:
           npm run build:cli
           npm run build:skill
           npm pack
-          TAR_FILE="$(ls *.tgz)"
-          echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
+          TAR_FILE="$(ls ./*.tgz)"
+          echo "TAR_FILE=$TAR_FILE" >> "$GITHUB_ENV"
 
       - name: Verify tarball manifest (required files present, no junk)
         run: node scripts/verify-package.cjs manifest
@@ -207,7 +207,7 @@ jobs:
           echo "OK: Install smoke-test passed (files present AND the installed CLI runs)"
 
       - name: Upload vetted tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: npm-tarball
           path: ${{ env.TAR_FILE }}
@@ -236,19 +236,19 @@ jobs:
       # disk) — this job still never reads repository source for anything else,
       # and never runs a step that executes a dependency's lifecycle scripts.
       # persist-credentials: false since this job has no reason to write to git.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           sparse-checkout: |
             .nvmrc
           sparse-checkout-cone-mode: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
 
       - name: Download vetted tarball
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: npm-tarball
 

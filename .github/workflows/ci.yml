@@ -41,10 +41,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           languages: javascript-typescript
           # security-and-quality includes all security-extended checks plus
@@ -54,7 +54,7 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           category: "/language:javascript-typescript"
           # Write SARIF locally so the summary step can count findings.
@@ -104,11 +104,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
           path: node_modules
@@ -170,17 +170,17 @@ jobs:
               }
             " 2>/dev/null || echo "_Audit summary unavailable — see job log._"
           } >> "$GITHUB_STEP_SUMMARY"
-          exit ${AUDIT_FAILED:-0}
+          exit "${AUDIT_FAILED:-0}"
 
   type-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
           path: node_modules
@@ -223,13 +223,13 @@ jobs:
     # bound is generous relative to the sub-minute Linux runtime.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           # matrix.node is empty for the standard legs → fall back to .nvmrc.
           node-version: ${{ matrix.node }}
           node-version-file: ${{ matrix.node == '' && '.nvmrc' || '' }}
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
           path: node_modules
@@ -297,11 +297,11 @@ jobs:
     # sequential execution and retries across the slower macOS/Windows runners.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
           path: node_modules
@@ -355,7 +355,7 @@ jobs:
       # ~/Library/Caches/camoufox and on Windows under
       # %USERPROFILE%/AppData/Local/camoufox/camoufox/Cache; both are fetched
       # fresh (setup.cjs during npm ci, plus the prefetch step below).
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-camoufox
         if: runner.os == 'Linux'
         with:
@@ -469,7 +469,7 @@ jobs:
           PI_RESEARCH_EMBEDDING_DEVICE: "cpu"
       - name: Upload worker diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: worker-logs-${{ github.run_id }}-${{ matrix.os }}
           path: ${{ runner.temp }}/pi-workers-serial.log
@@ -491,13 +491,13 @@ jobs:
       # branch push, not just main. The token is instead materialized only
       # in-memory, only in the push step below, only after every other step
       # (including npm ci) has already run.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
           path: node_modules
@@ -556,11 +556,11 @@ jobs:
         # instead of needing a PowerShell transliteration that could drift from it.
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
           path: node_modules
