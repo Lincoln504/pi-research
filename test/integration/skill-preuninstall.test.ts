@@ -55,7 +55,7 @@ describe('preuninstall (scripts/cleanup.cjs) parity with npm uninstall', () => {
     expect(fs.existsSync(manifest())).toBe(true);
 
     // A foreign skill in a different harness dir must survive.
-    const foreign = path.join(HOME, '.cursor', 'skills', 'pi-research');
+    const foreign = path.join(HOME, '.someagent', 'skills', 'pi-research');
     fs.mkdirSync(foreign, { recursive: true });
     fs.writeFileSync(path.join(foreign, 'SKILL.md'), '# foreign', 'utf-8');
 

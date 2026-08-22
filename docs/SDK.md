@@ -141,7 +141,7 @@ exit code is the part you can rely on.
 
 Treat any code ≥ 128 as a cancellation; `pi-research --help` lists the full set, and
 the agent-facing contract is the exit-code table in
-[`SKILL.md`](../skills/pi-research/SKILL.md).
+[`SKILL.md`](../agent-skill/pi-research/SKILL.md).
 
 These are deliberately not the `70` runtime-error code and never carry
 `retryable: true` — a cancel is a completed intention, not a fault to retry. The

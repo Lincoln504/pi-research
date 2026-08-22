@@ -8,9 +8,10 @@ allowed-tools: Bash(node:*)
 
 # pi-research skill
 
-Run via your shell tool — the **Bash** tool in Claude Code, the **`exec`** tool in
-OpenClaw. `<SKILL_DIR>` is this skill's own directory: substitute the absolute path
-your harness reports for this skill (in OpenClaw, `{baseDir}` resolves to it).
+Run via your shell tool — the **Bash** tool in Claude Code, whatever equivalent
+your harness exposes elsewhere. `<SKILL_DIR>` is this skill's own directory:
+substitute the absolute path your harness reports for this skill (some harnesses
+expose it as `{baseDir}`).
 
 ```
 node "<SKILL_DIR>/scripts/run.mjs" research  "<query>" --depth 1

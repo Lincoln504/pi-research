@@ -78,7 +78,7 @@ environment-variable list live in [CONFIGURATION.md](CONFIGURATION.md).
 ### Coding-agent skill installer
 
 The `/research-config` menu can install the `pi-research` skill into your other
-coding agents (Claude, Codex, OpenClaw) so they can run web research through the
+coding agents detected on this machine so they can run web research through the
 CLI, and remove it again — with exact, manifest-tracked cleanup. See
 [AGENT-SKILL.md](AGENT-SKILL.md) for the full installation flow.
 

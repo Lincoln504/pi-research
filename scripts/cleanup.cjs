@@ -28,9 +28,14 @@ const projectRoot = path.join(__dirname, '..');
  * coding-agent harnesses, so `npm uninstall` is symmetric with the in-app
  * installer (the /research-config "Install Skill in Coding Agents" action).
  * Reads the manifest written by the installer and removes ONLY entries we still
- * own (a symlink pointing into a pi-research skills dir, or a copy carrying our
- * package marker). Foreign directories are never touched. Best-effort; never
+ * own (a symlink pointing into a pi-research skill source dir, or a copy carrying
+ * our package marker). Foreign directories are never touched. Best-effort; never
  * throws (preuninstall must not fail the uninstall).
+ *
+ * The ownership regex below duplicates src/skill-install/skill-installer.ts's:
+ * preuninstall runs as a plain CJS script with no access to the built module.
+ * Both accept the current `agent-skill/` source dir AND the pre-1.5.3 `skills/`
+ * one, so a link created by an older version is still recognised and removed.
  */
 function removeInstalledSkills() {
   const manifestPath = path.join(os.homedir(), '.pi', 'research', 'installed-skills.json');
@@ -58,7 +63,7 @@ function removeInstalledSkills() {
     try {
       if (lst.isSymbolicLink()) {
         const dest = path.resolve(path.dirname(p), readlinkSync(p));
-        owned = /[/\\]pi-research[/\\]skills[/\\]pi-research$/.test(dest);
+        owned = /[/\\]pi-research[/\\](?:agent-skill|skills)[/\\]pi-research$/.test(dest);
       } else {
         const md = readFileSync(path.join(p, 'SKILL.md'), 'utf-8');
         owned = md.includes('@lincoln504/pi-research');

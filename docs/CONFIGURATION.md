@@ -1,6 +1,6 @@
 ## Configuration
 
-Every front-end (the pi extension, the standalone CLI / agent skill that OpenClaw
+Every front-end (the pi extension, the standalone CLI / agent skill that Claude Code
 and other skills-aware hosts run, and the SDK) shares one configuration
 model. This document covers the
 settings exposed in the `/research-config` TUI first, then the complete
@@ -159,7 +159,7 @@ Diagnostics & platform
 | `CAMOUFOX_INSTALL_DIR` | _(user cache)_ | camoufox-js's own variable, and the only one that can relocate the browser. Sets where pi-research looks the binary up, and is exported to the postinstall fetch and to browser workers. **Not effective on the currently pinned camoufox-js (0.10.x), which hardcodes its cache directory and honours no variable** — so relocating the browser is unsupported until that pin can advance (see ARCHITECTURE.md). |
 | `PLAYWRIGHT_BROWSERS_PATH` | _(user cache)_ | Alias for the above, accepted for compatibility and exported onward as `CAMOUFOX_INSTALL_DIR`. Same caveat: on the pinned camoufox-js it moves only where pi-research looks, not where the download lands, so setting it reports the browser missing from the custom path after a successful install. |
 | `XDG_CACHE_HOME` | `~/.cache` | Standard XDG variable. When set, every `~/.cache/pi-research/...` path below is rooted at `$XDG_CACHE_HOME/pi-research/...` instead. |
-| `PI_RESEARCH_BIN` (alias `PI_RESEARCH_PATH`) | _(auto)_ | Agent-skill launcher only: explicit path to the pi-research engine binary when auto-resolution (PATH → local install → npx) should be bypassed. See [skills/pi-research/references/configuration.md](../skills/pi-research/references/configuration.md). |
+| `PI_RESEARCH_BIN` (alias `PI_RESEARCH_PATH`) | _(auto)_ | Agent-skill launcher only: explicit path to the pi-research engine binary when auto-resolution (PATH → local install → npx) should be bypassed. See [agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md). |
 | `PLAYWRIGHT_INSTALL_DEPS` | _(unset)_ | Linux only. Set `true` during `npm install` to also install system libraries via `npx playwright install-deps` (same as `npm run install:system-deps`). |
 | `PI_RESEARCH_STRICT_SETUP` | _(unset)_ | Read by the bundled `scripts/setup.cjs` during `npm install`. Set `1`/`true` to make a failed browser download fail the install instead of deferring it to first use. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
@@ -196,8 +196,8 @@ layered over the shared base, so they can be configured independently. Exactly t
 exist:
 
 - `~/.pi/research/pi.env` — the pi extension
-- `~/.pi/research/cli.env` — the standalone CLI / agent skill (the surface OpenClaw
-  and other skills-aware hosts run)
+- `~/.pi/research/cli.env` — the standalone CLI / agent skill (the surface
+  skills-aware hosts run)
 
 The overlay files do not exist by default; create the one you need by hand. There is
 intentionally no `sdk.env`: the SDK is a library configured from code (see

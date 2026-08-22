@@ -94,4 +94,4 @@ integration-test-run.log
 
 
 # Generated skill launcher (built by scripts/build.cjs skill on prepare)
-skills/pi-research/scripts/run.mjs
+agent-skill/pi-research/scripts/run.mjs

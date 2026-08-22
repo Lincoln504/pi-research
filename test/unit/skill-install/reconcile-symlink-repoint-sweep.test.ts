@@ -71,10 +71,10 @@ describe('reconcileSkillInstalls — symlink re-point copy-fallback staging swee
   it('sweeps a `.new-*` leftover from a previous crashed re-point attempt before staging a new one', () => {
     // reconcileSkillInstalls' ownership check calls isOwnedSymlink(e.path)
     // with NO expectedSource, so it falls back to matching the dest path
-    // shape (…/pi-research/skills/pi-research) rather than an exact-source
+    // shape (…/pi-research/agent-skill/pi-research) rather than an exact-source
     // comparison — the source dirs must have that exact layout for the
     // symlink to be recognized as ours at all.
-    const packagedSourceDir = path.join(sourceDir, 'pi-research', 'skills', 'pi-research');
+    const packagedSourceDir = path.join(sourceDir, 'pi-research', 'agent-skill', 'pi-research');
     writeSource(packagedSourceDir, '1.0.0', 'ORIGINAL');
     installSkill(['claude'], { home, skillSourceDir: packagedSourceDir }); // symlink mode
 
@@ -89,7 +89,7 @@ describe('reconcileSkillInstalls — symlink re-point copy-fallback staging swee
 
     // Package relocated (e.g. by an update) — the link is now stale.
     const movedBase = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-skill-moved-'));
-    const movedSource = path.join(movedBase, 'pi-research', 'skills', 'pi-research');
+    const movedSource = path.join(movedBase, 'pi-research', 'agent-skill', 'pi-research');
     try {
       writeSource(movedSource, '1.1.0', 'RELOCATED');
 

@@ -47,10 +47,10 @@ const REQUIRED = [
   // Out-of-process WebGPU viability probe (cli.mjs spawns it; shipped via files[])
   'dist/webgpu-probe.mjs',
   // Agent skill — the launcher + definition that coding agents load
-  'skills/pi-research/SKILL.md',
-  'skills/pi-research/scripts/run.mjs',
+  'agent-skill/pi-research/SKILL.md',
+  'agent-skill/pi-research/scripts/run.mjs',
   // Referenced by SKILL.md ("Full reference: references/configuration.md")
-  'skills/pi-research/references/configuration.md',
+  'agent-skill/pi-research/references/configuration.md',
   // Install/uninstall lifecycle scripts
   'scripts/setup.cjs',
   'scripts/cleanup.cjs',
@@ -138,12 +138,12 @@ function exportsTargets() {
 // fails the publish gate instead of reaching users.
 function verifyVersionSync() {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  const skillMd = fs.readFileSync(path.join(ROOT, 'skills/pi-research/SKILL.md'), 'utf8');
+  const skillMd = fs.readFileSync(path.join(ROOT, 'agent-skill/pi-research/SKILL.md'), 'utf8');
   const skillMatch = skillMd.match(/"version":\s*"([^"]+)"/);
   const skillVersion = skillMatch ? skillMatch[1] : null;
 
   if (skillVersion !== pkg.version) {
-    fail(`skills/pi-research/SKILL.md version (${skillVersion}) != package.json version (${pkg.version}). Run \`npm version\` or sync manually.`);
+    fail(`agent-skill/pi-research/SKILL.md version (${skillVersion}) != package.json version (${pkg.version}). Run \`npm version\` or sync manually.`);
   }
   if (!process.exitCode) {
     console.log(`OK: version ${pkg.version} consistent across package.json and SKILL.md.`);
@@ -242,7 +242,7 @@ function verifyInstalled(pkgDir) {
   // error on Unix, while Windows' generated shims hide the breakage — so assert
   // it here where the file content is on disk.
   const SHEBANG = '#!/usr/bin/env node';
-  for (const rel of ['dist/cli.mjs', 'skills/pi-research/scripts/run.mjs']) {
+  for (const rel of ['dist/cli.mjs', 'agent-skill/pi-research/scripts/run.mjs']) {
     const full = path.join(pkgDir, rel);
     if (!fs.existsSync(full)) continue; // already reported missing above
     // Strip a trailing \r: a CRLF checkout (or a Windows-side pack) would otherwise fail

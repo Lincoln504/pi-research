@@ -4,7 +4,7 @@ pi-research is a pi TUI extension for multi-agent web research. It runs inside t
 process, registers its tools and commands, and manages its own browser worker pool,
 service registry, and local knowledge store. One engine backs every front-end: besides
 the pi extension it is exposed as a standalone CLI, a portable agent skill (the same
-skill any skills-aware host runs, including OpenClaw) and a programmatic SDK
+skill any skills-aware host runs) and a programmatic SDK
 (`src/sdk.ts`).
 
 ```

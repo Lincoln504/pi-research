@@ -87,7 +87,7 @@ import { resetConfig } from '../../src/config.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(ROOT, 'dist', 'cli.mjs');
-const SKILL_LAUNCHER = path.join(ROOT, 'skills', 'pi-research', 'scripts', 'run.mjs');
+const SKILL_LAUNCHER = path.join(ROOT, 'agent-skill', 'pi-research', 'scripts', 'run.mjs');
 
 // The subprocess suites below spawn the BUILT artifacts (dist/cli.mjs and the
 // skill launcher run.mjs). These are produced by `npm run prepare` on install,
@@ -1454,7 +1454,7 @@ describe('CLI subprocess — pi key detection by content', () => {
 // Subprocess — skill install/uninstall end-to-end against an isolated HOME.
 // Exercises the real installer through the CLI (dynamic import + manifest +
 // symlink), never touching the developer's ~/.claude or ~/.pi. The symlink
-// target is the repo's own skills/ dir; uninstall removes only the link.
+// target is the repo's own agent-skill/ dir; uninstall removes only the link.
 // ---------------------------------------------------------------------------
 
 describe('CLI subprocess — skill (hermetic agent-skill install)', () => {

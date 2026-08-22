@@ -12,7 +12,7 @@
  * Targets (dispatch by argv, or build all when no/`all` arg):
  *   worker   -> src/infrastructure/browser/thread-worker.mjs  (browser worker)
  *   cli      -> dist/cli.mjs (+ dist/prompts, dist/thread-worker.mjs, dist/webgpu-probe.mjs)
- *   skill    -> skills/pi-research/scripts/run.mjs  (skill launcher, shebang)
+ *   skill    -> agent-skill/pi-research/scripts/run.mjs  (skill launcher, shebang)
  *
  * Note: `packages: 'external'` already externalizes every bare/`node:` import,
  * so the old `--external:node:*` flag was redundant — output is identical.
@@ -114,10 +114,10 @@ const TARGETS = {
     copyPrompts();
   },
   skill: () => {
-    const entry = p('skills', 'pi-research', 'scripts', 'run.ts');
-    const outfile = p('skills', 'pi-research', 'scripts', 'run.mjs');
+    const entry = p('agent-skill', 'pi-research', 'scripts', 'run.ts');
+    const outfile = p('agent-skill', 'pi-research', 'scripts', 'run.mjs');
     // The published package ships the BUILT run.mjs and deliberately excludes its
-    // run.ts source (package.json "files": "!skills/pi-research/scripts/run.ts"),
+    // run.ts source (package.json "files": "!agent-skill/pi-research/scripts/run.ts"),
     // yet it also ships prepare.cjs + build.cjs — and `prepare` runs `build.cjs all`.
     // On any install that executes prepare against the shipped tree (npm install
     // <dir>, file:, npm link, pi install <dir>) this target had no entry point and

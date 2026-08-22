@@ -2,7 +2,7 @@
  * Skill installer unit tests.
  *
  * Hermetic: every test runs against a throwaway HOME (opts.home) and points at
- * the real bundled skills/pi-research as the source, so nothing touches the
+ * the real bundled agent-skill/pi-research as the source, so nothing touches the
  * developer's actual ~/.claude etc. The suite asserts the safety-critical
  * invariants — never clobber a foreign skill, never delete what we don't own,
  * symmetric install→uninstall, and an accurate manifest — not just happy paths.
@@ -28,7 +28,7 @@ import {
 } from '../../src/skill-install/skill-installer.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const SKILL_SRC = path.join(ROOT, 'skills', 'pi-research');
+const SKILL_SRC = path.join(ROOT, 'agent-skill', 'pi-research');
 
 let HOME: string;
 const opts = () => ({ home: HOME, skillSourceDir: SKILL_SRC });
@@ -74,9 +74,8 @@ function skillPathFor(id: string): string {
 }
 
 describe('SKILL_AGENT_TARGETS (in-app installer scope)', () => {
-  it('targets Claude, Codex, and OpenClaw — never Cursor (project-only, no global dir), pi, or ~/.agents', () => {
+  it('targets Claude, Codex, and OpenClaw — never pi (native tool already) or ~/.agents', () => {
     expect([...SKILL_AGENT_TARGETS]).toEqual(['claude', 'codex', 'openclaw']);
-    expect(SKILL_AGENT_TARGETS).not.toContain('cursor');
     expect(SKILL_AGENT_TARGETS).not.toContain('pi');
     expect(SKILL_AGENT_TARGETS).not.toContain('agents');
   });
@@ -229,18 +228,18 @@ describe('installSkill — copy', () => {
 
 describe('installSkill — foreign safety', () => {
   it('never clobbers a non-pi-research research/ directory', () => {
-    const sp = skillPathFor('cursor');
+    const sp = skillPathFor('agents');
     fs.mkdirSync(sp, { recursive: true });
     fs.writeFileSync(path.join(sp, 'SKILL.md'), 'name: research\n# someone elses skill', 'utf-8');
 
-    const r = installSkill(['cursor'], opts());
+    const r = installSkill(['agents'], opts());
     expect(r[0]!.status).toBe('skipped-foreign');
     // Untouched.
     expect(fs.readFileSync(path.join(sp, 'SKILL.md'), 'utf-8')).toContain('someone elses skill');
     expect(fs.lstatSync(sp).isSymbolicLink()).toBe(false);
     // No manifest entry created for a foreign skip.
-    expect(readManifest(opts()).entries.find(e => e.tool === 'cursor')).toBeUndefined();
-    expect(detectHarnesses(opts()).find(d => d.id === 'cursor')!.installed).toBe('foreign');
+    expect(readManifest(opts()).entries.find(e => e.tool === 'agents')).toBeUndefined();
+    expect(detectHarnesses(opts()).find(d => d.id === 'agents')!.installed).toBe('foreign');
   });
 });
 
@@ -266,8 +265,8 @@ describe('uninstallSkill', () => {
     mkHarnessBase('claude');
     installSkill(['claude'], opts());
 
-    // A foreign cursor skill must survive uninstall.
-    const foreign = skillPathFor('cursor');
+    // A foreign skill in a non-target harness must survive uninstall.
+    const foreign = skillPathFor('agents');
     fs.mkdirSync(foreign, { recursive: true });
     fs.writeFileSync(path.join(foreign, 'SKILL.md'), '# foreign', 'utf-8');
 
@@ -337,9 +336,9 @@ describe('uninstallSkill', () => {
 
 describe('reconcileSkillInstalls (startup self-heal)', () => {
   // Build a fake "old package" whose path matches the owned-symlink layout
-  // (…/pi-research/skills/pi-research), so an owned link can point at it.
+  // (…/pi-research/agent-skill/pi-research), so an owned link can point at it.
   function fakeOldSource(): string {
-    const src = path.join(HOME, 'oldpkg', 'pi-research', 'skills', 'pi-research');
+    const src = path.join(HOME, 'oldpkg', 'pi-research', 'agent-skill', 'pi-research');
     fs.mkdirSync(src, { recursive: true });
     fs.writeFileSync(path.join(src, 'SKILL.md'), '# old\n');
     return src;

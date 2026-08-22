@@ -37,7 +37,7 @@ As a [Pi](https://github.com/earendil-works/pi) Coding Agent extension:
 pi install npm:@lincoln504/pi-research
 ```
 
-Standalone, as an [agent skill](docs/AGENT-SKILL.md) for Claude Code, Codex, and OpenClaw:
+Standalone, as an [agent skill](docs/AGENT-SKILL.md) for Claude Code, Codex, and other skills-compatible agents:
 
 ```bash
 npm install -g @lincoln504/pi-research
@@ -57,7 +57,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 ### Use cases
 
 - Researching for your pi. Plug and play with no API key needed.
-- Researching from Claude Code, Codex, OpenClaw, or another coding agent while a cheaper or local model drives the run so it doesn't spend your main agent's budget.
+- Researching from Claude Code, Codex, or another coding agent while a cheaper or local model drives the run so it doesn't spend your main agent's budget.
 - Keeping a persistent and searchable knowledge store of findings, scoped globally or per project.
 - Building agent systems that find and read web content or populating a dataset of web sources.
 

@@ -625,7 +625,7 @@ jobs:
         run: |
           node "$INSTALLED_DIR/dist/cli.mjs" --version
           node "$INSTALLED_DIR/dist/cli.mjs" --help > /dev/null
-          node "$INSTALLED_DIR/skills/pi-research/scripts/run.mjs" --help > /dev/null
+          node "$INSTALLED_DIR/agent-skill/pi-research/scripts/run.mjs" --help > /dev/null
           echo "OK: installed CLI and skill launcher both execute"
       - name: Run the generated bin shim (the path a real user invokes)
         # `node dist/cli.mjs` bypasses the shim npm writes for the "bin" field. On

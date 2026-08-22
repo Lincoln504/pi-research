@@ -125,7 +125,7 @@ jobs:
       - name: Verify version sync across artifacts
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          grep -q "\"version\": \"$VERSION\"" skills/pi-research/SKILL.md || { echo "ERROR: skills/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
+          grep -q "\"version\": \"$VERSION\"" agent-skill/pi-research/SKILL.md || { echo "ERROR: agent-skill/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
           echo "OK: package.json and SKILL.md both at v$VERSION"
 
       # Skip the camoufox/native downloads during install — the release jobs
@@ -203,7 +203,7 @@ jobs:
           node node_modules/@lincoln504/pi-research/dist/cli.mjs --help > /dev/null
           # The agent-skill launcher is the entry point coding agents actually
           # invoke, and it is a separate bundle with its own resolution logic.
-          node node_modules/@lincoln504/pi-research/skills/pi-research/scripts/run.mjs --help > /dev/null
+          node node_modules/@lincoln504/pi-research/agent-skill/pi-research/scripts/run.mjs --help > /dev/null
           echo "OK: Install smoke-test passed (files present AND the installed CLI runs)"
 
       - name: Upload vetted tarball

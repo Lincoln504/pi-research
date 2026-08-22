@@ -2,7 +2,7 @@
  * pi-research — standalone CLI
  *
  * A thin, dependency-free command line over the pi-research programmatic SDK
- * (src/sdk.ts). It lets any tool — Claude, Cursor, a shell script, CI — run
+ * (src/sdk.ts). It lets any tool — Claude, Codex, a shell script, CI — run
  * multi-agent web research without the pi CLI or TUI.
  *
  *   pi-research research "<query>" [--depth N] [--model provider/id]

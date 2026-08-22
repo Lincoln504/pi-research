@@ -178,6 +178,40 @@ describe('npm pack', () => {
   it('should NOT include .nvmrc', () => {
     expect(packFiles.includes('.nvmrc')).toBe(false);
   });
+
+  /**
+   * The shipped agent skill must NOT sit at a package-root `skills/` directory.
+   *
+   * `pi` reserves four package-root resource names (extensions, skills, prompts,
+   * themes) and convention-scans any of them the package's `pi` manifest does not
+   * explicitly declare. Because this package declares `extensions` only, a
+   * root-level `skills/` was scanned and its SKILL.md loaded as a pi agent skill —
+   * shadowing the extension's own native research tool with a slower subprocess
+   * duplicate. It fired whenever anything rewrote the package's settings entry
+   * into object form, which `pi config` does on ANY toggle of the package,
+   * including merely disabling the extension.
+   *
+   * The skill therefore ships under `agent-skill/`. This pins the property that
+   * actually matters (no reserved root name in the tarball) rather than the
+   * specific replacement name, so renaming again stays safe but regressing to a
+   * reserved name cannot pass.
+   */
+  const PI_RESERVED_RESOURCE_DIRS = ['extensions', 'skills', 'prompts', 'themes'];
+
+  it.each(PI_RESERVED_RESOURCE_DIRS)(
+    'must not ship a package-root %s/ directory (pi convention-scans it as a resource root)',
+    (reserved) => {
+      const offenders = packFiles.filter(f => f.startsWith(`${reserved}/`));
+      expect(offenders).toEqual([]);
+    },
+  );
+
+  it('ships the agent skill under agent-skill/, with SKILL.md and its launcher', () => {
+    expect(packFiles).toContain('agent-skill/pi-research/SKILL.md');
+    expect(packFiles).toContain('agent-skill/pi-research/scripts/run.mjs');
+    // The TypeScript source of the launcher is built, not shipped.
+    expect(packFiles).not.toContain('agent-skill/pi-research/scripts/run.ts');
+  });
 });
 
 describe('package-lock.json — phantom-optional stubs survive regeneration', () => {

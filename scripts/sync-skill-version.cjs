@@ -20,7 +20,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const SKILL_PATH = path.join(ROOT, 'skills', 'pi-research', 'SKILL.md');
+const SKILL_PATH = path.join(ROOT, 'agent-skill', 'pi-research', 'SKILL.md');
 
 const { version } = require(path.join(ROOT, 'package.json'));
 

@@ -49,14 +49,42 @@ export interface HarnessDef {
 export const HARNESSES: readonly HarnessDef[] = [
   { id: 'claude', label: 'Claude', baseDir: '.claude', skillsDir: path.join('.claude', 'skills'), confidence: 'confirmed' },
   { id: 'openclaw', label: 'OpenClaw', baseDir: '.openclaw', skillsDir: path.join('.openclaw', 'skills'), confidence: 'confirmed', note: 'OpenClaw reads ~/.openclaw/skills as a managed skill root and accepts symlinked skill folders (docs.openclaw.ai/tools/skills).' },
-  { id: 'pi', label: 'pi', baseDir: '.pi', skillsDir: path.join('.pi', 'skills'), confidence: 'confirmed' },
-  { id: 'cursor', label: 'Cursor', baseDir: '.cursor', skillsDir: path.join('.cursor', 'skills'), confidence: 'partial', note: 'Cursor project-level skills are documented; the global ~/.cursor/skills path is community-reported.' },
+  // pi's own skill root is under its agent dir (~/.pi/agent/skills), NOT ~/.pi/skills.
+  // Listed for DETECTION only — pi is never an install target (see SKILL_AGENT_TARGETS):
+  // the host already exposes research as a native tool, so a skill there would just
+  // duplicate it through a slower subprocess.
+  { id: 'pi', label: 'pi', baseDir: '.pi', skillsDir: path.join('.pi', 'agent', 'skills'), confidence: 'confirmed' },
   { id: 'codex', label: 'OpenAI Codex CLI', baseDir: '.codex', skillsDir: path.join('.codex', 'skills'), confidence: 'unverified', note: 'Codex skills support is emerging; path not confirmed by official docs.' },
   { id: 'agents', label: 'Cross-tool (~/.agents/skills)', baseDir: '.agents', skillsDir: path.join('.agents', 'skills'), confidence: 'unverified', note: 'Proposed Universal Agents convention; not yet a ratified standard.' },
 ] as const;
 
 const SKILL_NAME = 'pi-research';
 const PACKAGE_NAME = '@lincoln504/pi-research';
+
+/**
+ * Directory inside this package that holds the shipped skill.
+ *
+ * Deliberately NOT `skills/`: pi treats a package-root `skills/` directory as a
+ * resource root and convention-scans it whenever its manifest omits a `skills`
+ * key, so the old name made pi load this skill — a slower duplicate of the
+ * extension's own native research tool — as soon as anything rewrote the
+ * package's settings entry into object form (which `pi config` does on any
+ * toggle). The name must stay outside pi's reserved resource types
+ * (extensions, skills, prompts, themes).
+ */
+const SKILL_SOURCE_DIR = 'agent-skill';
+/** Pre-1.5.3 location. Still recognised so existing installs stay manageable. */
+const LEGACY_SKILL_SOURCE_DIR = 'skills';
+
+/**
+ * Shape an owned symlink's destination must have: `…/pi-research/<dir>/pi-research`
+ * where `<dir>` is the current or the legacy source directory. Kept in sync with
+ * the duplicate in scripts/cleanup.cjs, which runs on preuninstall without this
+ * module available.
+ */
+const OWNED_SYMLINK_DEST = new RegExp(
+  `[/\\\\]${SKILL_NAME}[/\\\\](?:${SKILL_SOURCE_DIR}|${LEGACY_SKILL_SOURCE_DIR})[/\\\\]${SKILL_NAME}$`,
+);
 
 /**
  * This package's version, used to stamp manifest entries so a stale COPY can be
@@ -77,18 +105,17 @@ function readSkillVersion(sourceDir: string): string | null {
 }
 
 /**
- * The coding agents the in-app installer (the /research-config TUI) targets:
- * Claude, Codex, and OpenClaw. Each loads skills from a home-directory
- * `~/.<agent>/skills/` path — OpenClaw reads `~/.openclaw/skills` as a managed
- * skill root that accepts symlinked skill folders — so a single global symlink
- * works. Every target is gated on the agent's config dir already existing (see
- * skillInstallCandidates), so a tool that isn't set up is never offered and we
+ * The coding agents the in-app installer (the /research-config TUI) targets. Each
+ * loads skills from a home-directory `~/.<agent>/skills/` path, so a single global
+ * symlink works. Every target is gated on the agent's config dir already existing
+ * (see skillInstallCandidates), so a tool that isn't set up is never offered and we
  * never create its home dir.
  *
- * Cursor is deliberately excluded: it has no personal/global skills directory —
- * Cursor only loads skills from a project-level `.cursor/skills/`, so a global
- * `~/.cursor/skills` symlink would never be read. `pi` (the host itself) and the
- * speculative `~/.agents` convention are likewise excluded from the one-click flow.
+ * `pi` (the host itself) and the speculative `~/.agents` convention are excluded:
+ * pi already exposes research as a native tool, and a skill in either root would
+ * only add a slower duplicate. Agents that expose no personal/global skills
+ * directory — only project-level ones — cannot be served by a global symlink and
+ * are likewise not targeted.
  */
 export const SKILL_AGENT_TARGETS = ['claude', 'codex', 'openclaw'] as const;
 
@@ -166,7 +193,11 @@ function homeDir(opts?: { home?: string }): string {
  * Locate the bundled skill source directory (the one containing SKILL.md).
  * Robust across both the bundled CLI (dist/cli.mjs) and unbundled test runs:
  * honors PI_RESEARCH_SKILL_DIR, then walks up from this module and from cwd
- * looking for `skills/pi-research/SKILL.md`.
+ * looking for `agent-skill/pi-research/SKILL.md`.
+ *
+ * The legacy `skills/` location is still probed, after the current one, so a
+ * mixed tree (an older package still on disk beside a newer one) resolves rather
+ * than throwing. It is deliberately second: the current layout always wins.
  */
 export function resolveSkillSourceDir(explicit?: string): string {
   const candidates: string[] = [];
@@ -181,7 +212,8 @@ export function resolveSkillSourceDir(explicit?: string): string {
     if (!start) continue;
     let dir = start;
     for (let i = 0; i < 8; i++) {
-      candidates.push(path.join(dir, 'skills', SKILL_NAME));
+      candidates.push(path.join(dir, SKILL_SOURCE_DIR, SKILL_NAME));
+      candidates.push(path.join(dir, LEGACY_SKILL_SOURCE_DIR, SKILL_NAME));
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;
@@ -193,7 +225,7 @@ export function resolveSkillSourceDir(explicit?: string): string {
       if (fs.existsSync(path.join(c, 'SKILL.md'))) return path.resolve(c);
     } catch { /* next */ }
   }
-  throw new Error('Could not locate the bundled research skill (skills/pi-research/SKILL.md). Set PI_RESEARCH_SKILL_DIR to its path.');
+  throw new Error('Could not locate the bundled research skill (agent-skill/pi-research/SKILL.md). Set PI_RESEARCH_SKILL_DIR to its path.');
 }
 
 export function getManifestPath(opts?: { home?: string }): string {
@@ -251,7 +283,7 @@ function upsertEntry(manifest: Manifest, entry: ManifestEntry): void {
 // Ownership checks (never delete what isn't ours)
 // ---------------------------------------------------------------------------
 
-/** A symlink we own points at the skill source (our package's skills/pi-research). */
+/** A symlink we own points at the skill source (our package's agent-skill/pi-research). */
 function isOwnedSymlink(targetPath: string, expectedSource?: string): boolean {
   try {
     const st = fs.lstatSync(targetPath);
@@ -259,11 +291,17 @@ function isOwnedSymlink(targetPath: string, expectedSource?: string): boolean {
     const dest = path.resolve(path.dirname(targetPath), fs.readlinkSync(targetPath));
     if (expectedSource && path.resolve(expectedSource) === dest) return true;
     // Fallback: own it only if it points at OUR package layout, i.e. the dest
-    // ends in `pi-research/skills/pi-research`. Requiring `pi-research` to be the
-    // immediate parent segment of `skills/pi-research` avoids the substring false
-    // positive where a foreign path like `/home/pi-researcher/.../skills/pi-research`
-    // (note: pi-researcher) would otherwise be misclassified as owned and deleted.
-    return /[/\\]pi-research[/\\]skills[/\\]pi-research$/.test(dest);
+    // ends in `pi-research/<source-dir>/pi-research`. Requiring `pi-research` to be
+    // the immediate parent segment avoids the substring false positive where a
+    // foreign path like `/home/pi-researcher/.../skills/pi-research` (note:
+    // pi-researcher) would otherwise be misclassified as owned and deleted.
+    //
+    // BOTH the current and legacy source-dir names are accepted. Three of this
+    // function's four call sites pass no expectedSource and rely on this branch
+    // alone, so dropping the legacy name would strand every link created before
+    // 1.5.3: reconcile would stop re-pointing it, uninstall would refuse to
+    // remove it, and status would report it as a foreign skill.
+    return OWNED_SYMLINK_DEST.test(dest);
   } catch { return false; }
 }
 

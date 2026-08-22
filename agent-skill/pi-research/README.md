@@ -3,8 +3,8 @@
 A portable [Agent Skill](https://agentskills.io/specification) that gives any
 coding agent multi-agent web research by driving the
 [pi-research](https://github.com/Lincoln504/pi-research) engine. It is the same
-engine the `pi` extension uses, packaged as a skill so Claude, Cursor,
-Codex, OpenClaw, and other Agent-Skills-compatible tools can use it.
+engine the `pi` extension uses, packaged as a skill so Claude, Codex, and other
+Agent-Skills-compatible tools can use it.
 
 ### What it exposes
 
@@ -50,18 +50,15 @@ node "<skill_dir>/scripts/run.mjs" status  # verify detection
 ### Install the skill
 
 Recommended. From the pi extension, run `/research-config` and choose
-Install in External Agents. It detects Claude, Codex, and OpenClaw and
-symlinks this skill into each one that is installed. Remove from External Agents
-removes those symlinks.
+Install in External Agents. It detects the supported agents set up on this machine
+and symlinks this skill into each one. Remove from External Agents removes those
+symlinks.
 
 Uninstalling the npm package does **not** remove them: npm 7 and newer do not run a
 package's own `preuninstall` script (verified against npm 11). Use Remove from
 External Agents first, or run `node scripts/cleanup.cjs` from the package directory,
 otherwise the symlinks, `~/.pi/research/state` and the `~/.cache/pi-research` model
 cache are all left behind.
-
-Cursor is not auto-installed — it has no global skills directory and only reads
-project-level `.cursor/skills/`. Symlink it per-project instead (see the table).
 
 Manual. Or symlink this `pi-research/` directory into your agent's skills folder:
 
@@ -71,7 +68,6 @@ Manual. Or symlink this `pi-research/` directory into your agent's skills folder
 | Claude (project)   | `<project>/.claude/skills/pi-research/` |
 | Codex CLI (personal) | `~/.codex/skills/pi-research/` |
 | Codex CLI (project)  | `<project>/.codex/skills/pi-research/` |
-| Cursor (project-only) | `<project>/.cursor/skills/pi-research/` |
 | OpenClaw (personal) | `~/.openclaw/skills/pi-research/` |
 
 Then ask your agent to pi-research something — its skill system matches the

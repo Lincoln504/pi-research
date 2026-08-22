@@ -33,7 +33,7 @@
   "include": [
     "src/**/*",
     "scripts/**/*",
-    "skills/**/*"
+    "agent-skill/**/*"
   ],
   "exclude": [
     "node_modules",

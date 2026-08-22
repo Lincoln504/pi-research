@@ -10,7 +10,7 @@
  * Artifacts built:
  *   - dist/thread-worker.mjs       (browser worker, via build:worker)
  *   - dist/cli.mjs (+ dist/prompts, dist/webgpu-probe.mjs)  (pi-research CLI binary, via build:cli)
- *   - skills/pi-research/scripts/run.mjs  (skill launcher, via build:skill)
+ *   - agent-skill/pi-research/scripts/run.mjs  (skill launcher, via build:skill)
  */
 
 'use strict';
