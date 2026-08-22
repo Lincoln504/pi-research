@@ -177,4 +177,53 @@ describe('youtube/potoken', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('a queued caller rejected at dequeue does not clear the wedge for later callers', async () => {
+    // Regression: every mintPoTokens() call used to register an unconditional
+    // wedge-clearing handler on its own settle — including a caller whose run
+    // rejects BECAUSE of the dequeue wedge check. That rejected caller's
+    // settle then cleared the flag microtasks after the hard release set it,
+    // so the next caller passed both checks and bridged globalThis while the
+    // abandoned mint was still mid-bridge. The clear is now gated on the call
+    // actually having entered doMint().
+    vi.useFakeTimers();
+    try {
+      const hadWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+      let resolveChallenge!: (v: unknown) => void;
+      const hangingChallenge = new Promise((resolve) => { resolveChallenge = resolve; });
+      challengeCreate.mockImplementationOnce(() => hangingChallenge);
+
+      const firstMint = mintPoTokens(['VISITOR']);
+      firstMint.catch(() => {});
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Queue a second caller BEFORE the hard release fires — it passes the
+      // entry check (not wedged yet) and parks on the chain.
+      const queuedMint = mintPoTokens(['QUEUED']);
+      const queuedRejection = expect(queuedMint).rejects.toThrow(/wedged/i);
+
+      // Hard release: frees the chain, sets the wedge, dequeues the parked
+      // caller — which must reject without starting its own doMint().
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await queuedRejection;
+      expect(challengeCreate).toHaveBeenCalledTimes(1);
+
+      // The queued caller's settle must NOT have cleared the wedge: a third
+      // caller still fails fast, with no second bridge installed.
+      await expect(mintPoTokens(['THIRD'])).rejects.toThrow(/wedged/i);
+      expect(challengeCreate).toHaveBeenCalledTimes(1);
+      expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).not.toEqual(hadWindow);
+
+      // Only the mint that actually bridged clears the wedge when it settles.
+      resolveChallenge(okChallenge);
+      await vi.advanceTimersByTimeAsync(0);
+      await firstMint;
+      expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).toEqual(hadWindow);
+      const result = await mintPoTokens(['FOURTH']);
+      expect(result.get('FOURTH')).toBe('tok-FOURTH');
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
 });

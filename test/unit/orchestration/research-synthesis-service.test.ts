@@ -262,7 +262,7 @@ describe('ResearchSynthesisService', () => {
     // degradation itself. Below 3 cited sources the report must carry an explicit
     // grounding notice so readers (human or agent) get that signal from the engine.
 
-    it('appends a grounding notice when only ONE source could be verified (replace path)', () => {
+    it('appends a grounding notice when only ONE source is cited (replace path)', () => {
       service.storeReport('test-session', '1.A', reportWithCitations([
         { url: 'https://lonely-source.org/page', desc: 'the only page that scraped' },
       ]));
@@ -299,7 +299,7 @@ describe('ResearchSynthesisService', () => {
       expect(result).toContain('Grounding notice: only 2 sources are cited');
     });
 
-    it('does NOT append the notice when 3 or more sources are verified', () => {
+    it('does NOT append the notice when 3 or more sources are cited', () => {
       service.storeReport('test-session', '1.A', reportWithCitations([
         { url: 'https://a.org/1' }, { url: 'https://a.org/2' }, { url: 'https://a.org/3' },
       ]));

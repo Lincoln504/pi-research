@@ -102,6 +102,7 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
       buildFallbackSynthesis: vi.fn(() => '# Fallback'),
       clearReports: vi.fn(),
       getAllReports: vi.fn(() => new Map()),
+      getAllDigests: vi.fn(() => new Map()),
       ensureCitedLinks: vi.fn((_id: string, text: string) => text),
       appendSteeringGuidance: vi.fn((text: string) => text),
       appendMetadata: vi.fn((text: string) => text),
@@ -195,6 +196,64 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
       await runPromise;
 
       expect(vi.mocked(safeUnref)).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Once-Per-Round Events Across Wait Retries', () => {
+    it("emits evaluation_start and runs the health probe exactly once for a round that waits then decides", async () => {
+      // A 'wait' decision decrements the round and re-enters the loop to run the
+      // SAME round again. Pre-fix, every re-entry re-emitted round_start /
+      // evaluation_start (2, 2, 2 for one round-2 evaluation — consumers counting
+      // evaluations got duplicates) and re-ran the full infrastructure health
+      // probe it had just run. firstEntryThisRound gates all three per round.
+      vi.useFakeTimers();
+
+      const observer = {
+        onRoundStart: vi.fn(),
+        onEvaluationStart: vi.fn(),
+      };
+
+      // Round 1 delegates; round 2's router waits once, then chooses synthesize.
+      mockPlanningService.generatePlan.mockResolvedValue({
+        action: 'delegate',
+        researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
+        allQueries: ['q1'],
+      });
+      let routerCall = 0;
+      mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+        if (opts?.mustSynthesize) return { action: 'synthesize', content: 'Final' };
+        routerCall++;
+        if (routerCall === 1) return { action: 'wait' };
+        return { action: 'synthesize', content: '' };
+      });
+
+      // complexity 2 -> maxRounds 3, so round 2 genuinely evaluates instead of
+      // breaking straight to the forced final synthesis.
+      const orchestrator = new DeepResearchOrchestrator({
+        ...baseOptions,
+        complexity: 2 as const,
+        observer: observer as any,
+      });
+      const runPromise = orchestrator.run();
+
+      await vi.advanceTimersByTimeAsync(5000); // round 2's wait sleep
+      await vi.runAllTimersAsync();
+      const result = await runPromise;
+      expect(result).toBe('Final');
+      expect(routerCall).toBe(2); // the wait retry did re-invoke the router
+
+      // Exactly ONE evaluation_start for round 2, none for the wait re-entry.
+      expect(observer.onEvaluationStart).toHaveBeenCalledTimes(1);
+      expect(observer.onEvaluationStart).toHaveBeenCalledWith(2);
+
+      // Health probe once per round (rounds 1 and 2) — the wait retry re-enters
+      // round 2 without re-probing.
+      expect(mockOrchestrationService.checkHealth).toHaveBeenCalledTimes(2);
+      expect(mockOrchestrationService.checkHealth.mock.calls[0][0]).toBe(1);
+      expect(mockOrchestrationService.checkHealth.mock.calls[1][0]).toBe(2);
+
+      // round_start follows the same once-per-round contract.
+      expect(observer.onRoundStart.mock.calls.map((c: any[]) => c[0])).toEqual([1, 2]);
     });
   });
 

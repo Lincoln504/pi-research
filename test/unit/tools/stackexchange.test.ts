@@ -74,6 +74,22 @@ describe('tools/stackexchange', () => {
       expect(result.details).toMatchObject({ error: 'invalid_parameters' });
       expect((result.content[0] as any).text).toContain('Invalid parameters');
     });
+
+    it('should reject an unknown command WITHOUT charging the gathering budget', async () => {
+      // `command` is free-text in the schema, so 'bogus' passes Value.Check.
+      // Pre-fix, the whitelist check sat AFTER tracker.recordCall — an unknown
+      // command burned one of MAX_GATHERING_CALLS while doing zero work.
+      const tracker = createMockTracker();
+      const spy = vi.spyOn(tracker, 'recordCall');
+      const tool = createStackexchangeTool({ ctx: createMockContext(), tracker });
+
+      const result = await tool.execute('test-id', { command: 'bogus' }, undefined, undefined, undefined as any);
+
+      expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+      expect((result.content[0] as any).text).toContain('Invalid stackexchange command: bogus');
+      expect((result.content[0] as any).text).toContain('search, get, user, site');
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   describe('execute - success path', () => {

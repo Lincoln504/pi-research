@@ -489,6 +489,49 @@ describe('ResearchOrchestrationService', () => {
       }
     });
 
+    it('suppresses failure recording for a researcher that settles AFTER the fast-stop terminal error', async () => {
+      // Regression (runTerminated guard): a researcher wedged past the bounded
+      // fast-stop waits is ABANDONED by the stop — its promise settles after the
+      // run's single terminal error has propagated (and, on the tool path, after
+      // endResearchSession freed the session state). Pre-guard, its late
+      // rejection still hit recordResearcherFailure (re-creating the just-freed
+      // session entry via create-on-read — a process-lifetime leak on random
+      // per-run sessionIds) and fired onResearcherFailure after the terminal
+      // event, violating the no-events-after-terminal contract.
+      vi.useFakeTimers();
+      let rejectResearcher!: (err: Error) => void;
+      const onResearcherFailure = vi.fn();
+      try {
+        vi.mocked(runResearcher).mockImplementation(
+          () => new Promise<void>((_res, rej) => { rejectResearcher = rej; }),
+        );
+        vi.mocked(shouldStopResearch)
+          .mockReturnValueOnce(false) // pre-launch check: let the researcher start
+          .mockReturnValue(true);     // post-launch check: threshold crossed while in flight
+        vi.mocked(createResearchStopError).mockImplementation(
+          () => Object.assign(new Error('Research stopped'), { code: 'RESEARCH_STOPPED' }),
+        );
+
+        const run = service.runResearchers(makeRunOptions({ onResearcherFailure }));
+        const expectation = expect(run).rejects.toThrow('Research stopped');
+        // Fire the bounded active-set wait; the stop error propagates with the
+        // researcher still pending.
+        await vi.advanceTimersByTimeAsync(10_001);
+        await expectation;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // The abandoned researcher now fails, post-terminal. Nothing may be
+      // recorded or observed for it.
+      rejectResearcher(new Error('provider exploded late'));
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      expect(recordResearcherFailure).not.toHaveBeenCalled();
+      expect(onResearcherFailure).not.toHaveBeenCalled();
+    });
+
     it('fast-stop throws the STOP error — not the raw service error — when getService rejects during disposal', async () => {
       // shouldStopResearch tripping DURING teardown: the unguarded getService at
       // the fast-stop site threw "Cannot get service … during container disposal",

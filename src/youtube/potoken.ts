@@ -115,13 +115,14 @@ export async function mintPoTokens(
   // otherwise start its own doMint() while the abandoned mint may still be
   // mid-bridge — the exact double-bridge globalThis corruption the flag
   // exists to prevent. (No false positive in the normal path: the
-  // `settled.then(() => { wedged = false; })` handler below is registered on
-  // `settled` BEFORE the race that dequeues the next caller, so a clean
-  // settle clears the flag first.)
+  // wedge-clearing handler below is registered on `settled` BEFORE the race
+  // that dequeues the next caller, so a clean settle clears the flag first.)
+  let enteredMint = false;
   const startIfSafe = () => {
     if (wedged) {
       throw new Error('PoToken minter is wedged by a prior mint that never settled; refusing to start a queued mint until it resolves.');
     }
+    enteredMint = true;
     return doMint(identifiers, opts);
   };
   const run = mintChain.then(startIfSafe, startIfSafe);
@@ -142,7 +143,10 @@ export async function mintPoTokens(
   const settled = run.then(() => undefined, () => undefined);
   // Once doMint() actually settles (success or failure), its own `finally`
   // always runs unbridge() for real — safe for a new mint to bridge again.
-  settled.then(() => { wedged = false; });
+  // Gated on `enteredMint`: a caller REJECTED at dequeue by the wedge check
+  // also settles, and letting it clear the flag would reopen minting while
+  // the abandoned mint's bridge may still be installed.
+  settled.then(() => { if (enteredMint) wedged = false; });
   let hardTimer: NodeJS.Timeout;
   const hardRelease = new Promise<void>(resolve => {
     hardTimer = setTimeout(() => {

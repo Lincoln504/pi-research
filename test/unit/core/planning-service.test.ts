@@ -501,6 +501,28 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeGreaterThan(0);
     });
 
+    it("a 'wait' plan is not stored — the prior delegate agenda survives as the current plan", async () => {
+      // A 'wait' carries no agenda (schema-legal with researchers: []). Storing
+      // it clobbered the last real delegate plan that the empty-after-cap
+      // fallback and the retry's previousPlan/initialAgendaSection all read — so
+      // a rare 'wait' followed by one unparseable/transient retry degraded to an
+      // early empty synthesize instead of continuing the prior agenda.
+      vi.mocked(completeSimple).mockResolvedValueOnce(makeCompleteResponse(validDelegatePlanJson(1)));
+      const delegatePlan = await service.updatePlanForRound(BASE_OPTIONS);
+      expect(delegatePlan.action).toBe('delegate');
+      expect(service.getCurrentPlan('test-session')!.action).toBe('delegate');
+
+      vi.mocked(completeSimple).mockResolvedValueOnce(makeCompleteResponse(
+        JSON.stringify({ action: 'wait', researchers: [], allQueries: [] }),
+      ));
+      const waitPlan = await service.updatePlanForRound(BASE_OPTIONS);
+      expect(waitPlan.action).toBe('wait');
+
+      const current = service.getCurrentPlan('test-session');
+      expect(current!.action).toBe('delegate');
+      expect(current!.researchers!.length).toBeGreaterThan(0);
+    });
+
     it('does NOT throw when the evaluator LLM call times out mid-run — continues the prior agenda (no retry)', async () => {
       vi.mocked(completeSimple).mockRejectedValue(new Error('LLM call timed out'));
       const plan = await service.updatePlanForRound({
