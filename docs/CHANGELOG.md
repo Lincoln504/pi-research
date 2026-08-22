@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **npm `keywords` trimmed from 25 to 13**, dropping the entries that blurred what pi actually loads from this package (`skills`, `agent-skills`, plus generic SEO filler: `ai-research`, `research`, `scraping`, `browser-automation`, `stealth-browser`, `camoufox`, `duckduckgo`, `llm-tools`, `web-access`, `agent`). Retained: the pi-ecosystem flags (`pi`, `pi-package` — load-bearing for pi.dev gallery inclusion — `pi-extension`, `pi-coding-agent`), the harnesses the standalone skill genuinely targets (`agent-skill`, `claude-code`, `codex`, `openclaw`), and the core function words (`web-research`, `deep-research`, `web-search`, `web-scraping`, `knowledge-store`). Cosmetic only: pi never reads npm keywords — resource loading is driven entirely by the `pi` manifest keys, and the pi.dev type chips derive from those same keys (`package.json`).
+
 ## [1.5.2] - 2026-08-22
 
 ### Fixed
