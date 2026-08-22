@@ -162,6 +162,31 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
     // read → the entry omits it and liveness falls back to a bare signal-0 check.
     const myStartTime = await processLifecycle.getCurrentProcessStartTime();
 
+    // Read-only state (a NEWER build's state file is on disk — mixed-version
+    // window): every state write is suppressed, so the port=-1 candidacy claim
+    // below would never be visible to other processes, every process would
+    // "win" its own election, and the GPU lock would likewise always read as
+    // unowned — the exact concurrent-GPU-init segfault class election + lock
+    // exist to prevent. Degrade to a coordination-free mode instead: no
+    // election, local in-process embedder forced onto CPU (concurrent CPU
+    // inference across processes is safe; the exclusion protects GPU/WebGPU
+    // contexts, and a CPU device never touches the GPU lock). Slower embedding
+    // for the mixed-version window only; normal service resumes once every
+    // session runs the same build.
+    const localCpuForReadOnlyState = (): IEmbedder => {
+      logger.warn(
+        '[EmbeddingFactory] State file is read-only (written by a newer build): cross-process leader election and the GPU lock cannot coordinate in this mode. Skipping election and embedding locally on CPU until all sessions run the same build.',
+      );
+      const embedder = buildInProcessEmbedder({ ...cfg, EMBEDDING_DEVICE: 'cpu' }, stateManager);
+      _embeddingInstance = embedder;
+      _cachedModel = cfg.EMBEDDING_MODEL;
+      _cachedDevice = cfg.EMBEDDING_DEVICE;
+      return embedder;
+    };
+    if (stateManager.isReadOnly?.()) {
+      return localCpuForReadOnlyState();
+    }
+
     // ---- Phase 1: Atomically claim candidacy under the state lock ----
     // Writing port=-1 acts as a mutex: other processes that see it will wait
     // for the real port rather than starting their own model initialization.
@@ -199,6 +224,15 @@ export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbed
       iAmCandidate = true;
       return state;
     });
+
+    // Re-check AFTER the claim: the read-only flag is set lazily by the first
+    // read that encounters the newer file — which can be this very updateState.
+    // In that case iAmCandidate is true but the claim write was silently
+    // suppressed: no other process can see it, so proceeding as leader is the
+    // concurrent-election hazard the pre-check above exists to avoid.
+    if (iAmCandidate && stateManager.isReadOnly?.()) {
+      return localCpuForReadOnlyState();
+    }
 
     // A live leader serving a DIFFERENT model must not be adopted: two sessions
     // with different EMBEDDING_MODELs would cross-embed (same-dimension models

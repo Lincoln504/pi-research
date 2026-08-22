@@ -8,6 +8,14 @@ import type { IService } from '../service-registry.ts';
  * State manager service interface
  */
 export interface IStateManager extends IService {
+  /**
+   * True once a newer-build state file forced this process into read-only mode
+   * (writes suppressed) — state-file-based coordination (GPU lock, embedding
+   * leader election) is then void and consumers must degrade to a
+   * coordination-free mode. Optional so structural test doubles need not
+   * implement it; callers use `isReadOnly?.()` (absent ⇒ not read-only).
+   */
+  isReadOnly?(): boolean;
   readState(): Promise<any>;
   writeState(state: any): Promise<void>;
   updateState(updater: (state: any) => any | Promise<any>): Promise<void>;

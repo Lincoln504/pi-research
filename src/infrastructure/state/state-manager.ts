@@ -198,6 +198,21 @@ export class StateManager {
     };
   }
 
+  /**
+   * True once this process has seen a newer-build state file and entered
+   * read-only mode (writes suppressed, reads served from an in-memory default).
+   * In this mode NO cross-process coordination that lives in the state file
+   * works: a GPU-lock acquire always sees "no owner" and the embedding
+   * leader-election CAS always sees an empty slot, so every read-only process
+   * would self-elect — the concurrent-GPU-init class those mechanisms exist to
+   * prevent. Consumers that rely on that exclusion (the embedding factory) must
+   * check this and degrade to a coordination-free mode (local CPU embedding).
+   * The flag is set lazily by the first read that encounters the newer file.
+   */
+  isReadOnly(): boolean {
+    return this.stateTooNew;
+  }
+
   // ==================== Core State Operations ====================
 
   /**
