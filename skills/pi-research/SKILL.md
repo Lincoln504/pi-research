@@ -25,7 +25,14 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
   `knowledge` 600000ms · `research --depth 1` 1500000ms · `--depth 2` 1800000ms · `--depth 3` 2400000ms.
   These already include headroom for the run to sit **queued** behind other runs on a
   busy machine (see below); don't shorten them on the assumption a slot is free.
-- **Background**: append `&` and keep the PID to work while a run completes; otherwise it runs foreground (blocks). Timeouts apply either way.
+- **Background — use ONE mechanism, never two.** If your shell tool has its own
+  background option (e.g. `run_in_background: true` on Claude Code's Bash tool), use
+  that alone and do **not** also append `&`: with both, the shell forks the run and
+  exits at once, the harness reports that instant exit as "completed" while the
+  research continues detached, and the completion notification is meaningless. Only
+  on a harness with no background option, append `&` and keep the PID — and then
+  wait on that PID, not on any "completed" signal, before reading output. Otherwise
+  it runs foreground (blocks). Timeouts apply either way.
 - **Several at once is fine.** Up to 3 runs execute concurrently machine-wide (shared
   with any other tool or agent on this machine); further runs **queue** for a slot and
   report `• queued: …` on stderr — that is normal, not a stall. Only if nothing frees

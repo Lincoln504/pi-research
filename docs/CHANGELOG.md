@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **SKILL.md's backgrounding guidance no longer invites double-backgrounding.** The old bullet ("append `&` and keep the PID") was written for shell tools with no background mechanism of their own; an agent following it inside a harness-level background call (e.g. `run_in_background: true` on Claude Code's Bash tool) forked the run and exited the tracked shell immediately, so the harness reported "completed (exit code 0)" seconds after launch while the research process kept running detached and untracked — repeatedly observed live, with a perfect correlation between the inner `&` and instant false-completion notifications across nine launches. The bullet now says to use exactly one mechanism: the harness's own background option when it exists (never combined with `&`), and `&`-plus-PID — waiting on the PID, not on any "completed" signal — only where no such option exists (`skills/pi-research/SKILL.md`).
+
 ## [1.5.1] - 2026-08-22
 
 Post-1.5.0 hardening pass driven by a full static-analysis battery (npm audit,
