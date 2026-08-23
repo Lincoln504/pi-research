@@ -83,9 +83,13 @@ describe('config (refactored)', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    // Completely clear env vars that we care about
+    // Completely clear env vars that we care about — except the test harness's own
+    // log redirect. PI_RESEARCH_LOG_PATH is not configuration under test; deleting it
+    // let any logger constructed afterwards resolve the user's real shared log file
+    // and append this suite's deliberate WARN/ERROR fixtures to it (including the
+    // "{corrupt json" registry fixture, which reads exactly like a live failure).
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith('PI_RESEARCH_')) {
+      if (key.startsWith('PI_RESEARCH_') && key !== 'PI_RESEARCH_LOG_PATH') {
         delete process.env[key];
       }
     }

@@ -19,45 +19,13 @@ import {
   INTERNAL_NETWORK_PATTERNS,
   type NativeHtmlToMarkdownModule,
 } from './scraper-types.ts';
-import { isCloudflareBlockError, isTaskTimeoutError, isPoolShutdownError } from '../infrastructure/browser/browser-error-utils.ts';
 
 /**
- * True when a scrape failure is an EXPECTED per-URL outcome rather than an engine
- * fault. Scraping the open web routinely hits bot-protection interstitials, thin
- * "stub" pages, HTTP 4xx/5xx, slow/unresponsive remotes, and (on quit) pool-drain
- * races. None of these is a pi-research bug: the URL is already accounted for as
- * "not scraped" (scrape_results_total{outcome=total_failure}) and surfaced to the
- * user that way, and no operator action follows. Callers use this to log such
- * failures at debug instead of error — keeping the ERROR log (and, via
- * logger.error's error-tracker re-track, the diagnostic error count) focused on
- * genuine faults. The messages matched here are produced by validateContent
- * (`Fetch blocked:` / `Fetch returned stub:`), scrapeWithFetch (`HTTP <code>`)
- * and extractPdfToMarkdown (`Could not extract content from PDF`, `PDF too
- * large`) — a malformed/encrypted/scanned-image-only PDF, or one that simply
- * exceeds the deliberate 100MB policy cap, is routine on the open web and
- * just as non-actionable as a stub page or a 404; the 25MB HTML policy caps
- * (`HTML response too large` from the fetch layer, `Browser HTML too large`
- * from the browser layer) are the same deliberate-cap class; the remaining
- * cases delegate to the shared browser-layer predicates. Deliberately does NOT
- * match 'PDF extraction unavailable' (a pdf-oxide-wasm native-module load
- * failure) — that is an infrastructure fault affecting every URL, not a
- * routine per-PDF outcome, and must still surface at ERROR.
+ * Re-exported from the browser error utilities, where it lives beside the three
+ * predicates it delegates to. Kept exported here because this is where every scrape
+ * caller already imports its error helpers from.
  */
-export function isBenignScrapeFailure(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return (
-    msg.startsWith('Fetch blocked:') ||                  // bot-protection interstitial (Cloudflare, DDoS-Guard, …)
-    msg.startsWith('Fetch returned stub:') ||             // nav-only / near-empty page
-    msg.startsWith('Could not extract content from PDF') || // malformed/encrypted/scanned-only PDF
-    msg.startsWith('PDF too large') ||                    // exceeds the deliberate 100MB policy cap
-    msg.startsWith('HTML response too large') ||          // fetch-layer 25MB policy cap — same class as the PDF cap
-    msg.startsWith('Browser HTML too large') ||           // browser-layer 25MB policy cap
-    /^HTTP \d{3}\b/.test(msg) ||                          // remote 4xx/5xx status
-    isCloudflareBlockError(error) ||
-    isTaskTimeoutError(error) ||
-    isPoolShutdownError(error)
-  );
-}
+export { isBenignScrapeFailure } from '../infrastructure/browser/browser-error-utils.ts';
 
 /**
  * Get a random user agent

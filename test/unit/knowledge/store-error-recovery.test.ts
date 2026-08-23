@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KnowledgeStore, isLanceCommitConflict } from '../../../src/knowledge/store.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
+import { logger } from '../../../src/logger.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
@@ -92,6 +94,72 @@ describe('KnowledgeStore Error Recovery', () => {
     await storeWithReconnect.addDocuments([{ url: 'https://poison.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
     expect(reconnectFactory).toHaveBeenCalledOnce();
     await storeWithReconnect.close();
+  });
+
+  it('a recovered embedder reconnect is not logged as ERROR and is counted exactly once', async () => {
+    // Regression: the add-attempt layer used to log ERROR and increment
+    // knowledge_store_add_documents_total{status=error} before rethrowing, even though
+    // withEmbedderReconnect immediately recovered the write. That reported lost writes
+    // that were not lost (31% of all ERRORs in a real run log) and counted the same
+    // batch twice — once as error, once as success.
+    metrics.clearSession();
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+    let callCount = 0;
+    const reconnectFactory = vi.fn().mockResolvedValue(mockEmbedder);
+    const storeWithReconnect = new KnowledgeStore({
+      knowledgeMode: 'project',
+      dbDir: testDbDir,
+      embedder: {
+        ...mockEmbedder,
+        embedMany: vi.fn().mockImplementation(() => {
+          callCount++;
+          if (callCount === 1) throw new Error('ECONNREFUSED');
+          return Promise.resolve([new Float32Array(384)]);
+        }),
+      } as any,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      reconnectFactory,
+    });
+    await storeWithReconnect.initialize();
+    await storeWithReconnect.addDocuments([{ url: 'https://recovered.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+
+    expect(reconnectFactory).toHaveBeenCalledOnce();
+    const addErrors = errorSpy.mock.calls.filter(c => String(c[0]).includes('Failed to add documents'));
+    expect(addErrors).toHaveLength(0);
+
+    const counters = metrics.getSessionSnapshot().counters;
+    expect(counters['knowledge_store_add_documents_total{status="success"}']).toBe(1);
+    expect(counters['knowledge_store_add_documents_total{status="error"}']).toBeUndefined();
+
+    await storeWithReconnect.close();
+  });
+
+  it('an abandoned write is logged as ERROR once and counted once', async () => {
+    metrics.clearSession();
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+    const storeNoReconnect = new KnowledgeStore({
+      knowledgeMode: 'project',
+      dbDir: testDbDir,
+      embedder: {
+        ...mockEmbedder,
+        embedMany: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+      } as any,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      // no reconnectFactory: nothing can recover this, so it is genuinely lost
+    });
+    await storeNoReconnect.initialize();
+    await expect(storeNoReconnect.addDocuments([{ url: 'https://lost.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }])).rejects.toThrow(/ECONNREFUSED/);
+
+    const addErrors = errorSpy.mock.calls.filter(c => String(c[0]).includes('Failed to add documents'));
+    expect(addErrors).toHaveLength(1);
+
+    const counters = metrics.getSessionSnapshot().counters;
+    expect(counters['knowledge_store_add_documents_total{status="error"}']).toBe(1);
+    expect(counters['knowledge_store_add_documents_total{status="success"}']).toBeUndefined();
+
+    await storeNoReconnect.close();
   });
 
   it('deleteByUrl retry loop retries on "Version mismatch" and succeeds', async () => {

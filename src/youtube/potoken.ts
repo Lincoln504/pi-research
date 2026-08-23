@@ -6,8 +6,8 @@
  * HTTP 200 with an EMPTY body (a silent failure). This module mints tokens with
  * `bgutils-js`, running the BotGuard VM under a `jsdom` DOM.
  *
- * Hard-won implementation details (validated live against youtubei.js@17 /
- * bgutils-js@3 / jsdom@29):
+ * Hard-won implementation details (re-validated live against youtubei.js@18 /
+ * bgutils-js@4 / jsdom@29):
  *
  *  1. Cross-realm typed arrays. The BotGuard VM must run in the SAME JS realm as
  *     bgutils' `base64ToU8` (the Node realm). So the interpreter is eval'd via
@@ -171,9 +171,17 @@ async function doMint(
   const started = Date.now();
 
   // Lazy-load heavy deps — never imported at module load (keeps startup native-free).
-  const bgMod = (await import('bgutils-js')) as unknown as BgModule;
-  const BG = bgMod.BG ?? bgMod.default;
-  const { buildURL, getHeaders } = bgMod;
+  // bgutils-js 4 dropped the barrel entry (package.json "exports" has no "."), so each
+  // piece comes from its own subpath: the challenge fetcher and VM client from
+  // /botguard, the minter from /webpo, the attestation URL/header helpers from /utils.
+  const [bgGuard, bgWebPo, bgUtils] = (await Promise.all([
+    import('bgutils-js/botguard'),
+    import('bgutils-js/webpo'),
+    import('bgutils-js/utils'),
+  ])) as unknown as [BgGuardModule, BgWebPoModule, BgUtilsModule];
+  const { getChallenge, BotGuardClient } = bgGuard;
+  const { WebPoMinter } = bgWebPo;
+  const { buildURL, getHeaders } = bgUtils;
   const { JSDOM } = await import('jsdom');
 
   const dom = new JSDOM('<!DOCTYPE html><html lang="en"><body></body></html>', {
@@ -211,18 +219,18 @@ async function doMint(
 
   bridge();
   try {
-    const bgConfig: BgConfig = {
-      fetch: (input: unknown, init?: unknown) =>
+    // bgutils-js 4 replaced BG.Challenge.create(config) with a free getChallenge()
+    // whose config is narrower: no globalObj and no identifier (the content binding is
+    // supplied per-mint, which is what this module already did), and `fetch` renamed
+    // to `fetchFunction`.
+    const challenge = await getChallenge({
+      requestKey,
+      fetchFunction: ((input: unknown, init?: unknown) =>
         fetchImpl(input as Parameters<typeof fetch>[0], {
           ...(init as RequestInit | undefined),
           signal: (init as RequestInit | undefined)?.signal ?? opts.signal,
-        }),
-      globalObj: globalThis,
-      identifier: identifiers[0]!,
-      requestKey,
-    };
-
-    const challenge = await BG.Challenge.create(bgConfig);
+        })) as unknown as typeof fetch,
+    });
     if (!challenge) throw new Error('BotGuard challenge unavailable');
 
     const interpreter = challenge.interpreterJavascript?.privateDoNotAccessOrElseSafeScriptWrappedValue;
@@ -233,10 +241,16 @@ async function doMint(
     // PoToken generation; trust rests on that TLS connection.
     new Function(interpreter)();
 
-    const botguard = await BG.BotGuardClient.create({
+    if (!challenge.program || !challenge.globalName) {
+      throw new Error('BotGuard challenge missing program/globalName');
+    }
+    // `globalObj` was renamed `globalObject` in bgutils-js 4. Passing the old name
+    // leaves the VM without a global to attach to and the minter factory silently
+    // returns a non-function, so this rename is load-bearing, not cosmetic.
+    const botguard = await BotGuardClient.create({
       program: challenge.program,
       globalName: challenge.globalName,
-      globalObj: globalThis,
+      globalObject: globalThis,
     });
 
     const webPoSignalOutput: unknown[] = [];
@@ -260,7 +274,7 @@ async function doMint(
       throw new Error('Integrity token rejected by attestation server (likely a non-residential IP)');
     }
 
-    const minter = await BG.WebPoMinter.create({ integrityToken }, webPoSignalOutput);
+    const minter = await WebPoMinter.create({ integrityToken }, webPoSignalOutput);
 
     const tokens = new Map<string, string>();
     for (const id of identifiers) {
@@ -294,26 +308,27 @@ async function doMint(
 // Minimal structural types for the loosely-typed bgutils-js surface we touch.
 // ---------------------------------------------------------------------------
 
-interface BgConfig {
-  fetch: (input: unknown, init?: unknown) => Promise<Response>;
-  globalObj: unknown;
-  identifier: string;
-  requestKey: string;
+interface BgChallenge {
+  interpreterJavascript?: { privateDoNotAccessOrElseSafeScriptWrappedValue?: string };
+  program?: string;
+  globalName?: string;
 }
 
-interface BgNamespace {
-  Challenge: {
-    create(config: BgConfig): Promise<{
-      interpreterJavascript?: { privateDoNotAccessOrElseSafeScriptWrappedValue?: string };
-      program: string;
-      globalName: string;
-    } | undefined>;
-  };
+interface BgGuardModule {
+  getChallenge(config: {
+    requestKey: string;
+    fetchFunction: typeof fetch;
+    interpreterHash?: string;
+    useYouTubeAPI?: boolean;
+  }): Promise<BgChallenge | undefined>;
   BotGuardClient: {
-    create(opts: { program: string; globalName: string; globalObj: unknown }): Promise<{
+    create(opts: { program: string; globalName: string; globalObject: unknown }): Promise<{
       snapshot(args: { webPoSignalOutput: unknown[] }): Promise<string>;
     }>;
   };
+}
+
+interface BgWebPoModule {
   WebPoMinter: {
     create(
       integrity: { integrityToken: string },
@@ -322,9 +337,7 @@ interface BgNamespace {
   };
 }
 
-interface BgModule {
-  BG?: BgNamespace;
-  default: BgNamespace;
+interface BgUtilsModule {
   buildURL(endpoint: string, useYouTubeAPI?: boolean): string;
   getHeaders(): Record<string, string>;
 }

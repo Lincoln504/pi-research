@@ -75,15 +75,8 @@ await shutdownResearchSDK();
 
 `initResearchSDK` must run before any research call. Auth resolves from
 `options.apiKey` + `options.provider`, else `process.env.PI_RESEARCH_API_KEY` /
-`PI_RESEARCH_PROVIDER`, else pi's `~/.pi/agent/auth.json`. Other exports include
-`runResearchDetailed`, `searchKnowledge`, `scrapeUrl`, `getResearchHealth`,
-`getLastRunStats`, and `getSessionMetrics`, plus `exportKnowledge` (write the
-knowledge store to a web-consumable JSON file) and the post-run telemetry accessors
-`getLastRunMetrics`, `getLastRunSummary`, `getLastErrorReport`, and
-`getLastResearcherOutcome` (planned/launched/succeeded/failed researcher counts plus
-per-researcher failure reasons for the most recent run — lets a caller tell a thin
-report caused by a sparse topic apart from one where most researchers failed). Both
-`@lincoln504/pi-research` and `@lincoln504/pi-research/sdk` export these symbols.
+`PI_RESEARCH_PROVIDER`, else pi's `~/.pi/agent/auth.json`. The five calls above are the
+common path; [API reference](#api-reference) below lists every export with its signature.
 
 > Concurrency: a single initialized SDK instance runs one research call at a time.
 > Overlapping `runDeepResearch`/`runQuickResearch` calls on the same instance throw
@@ -155,6 +148,76 @@ that run, not the browser pool, LanceDB handles or worker processes.
 
 The SDK does not write report files. Report export is a front-end concern — the pi
 extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
+
+### API reference
+
+Everything below is exported from both `@lincoln504/pi-research` and
+`@lincoln504/pi-research/sdk`, except the two marked *sdk subpath only* — the package
+entry point deliberately does not re-publish them. Every call except `repairJson` and
+`getSDKContainer` requires `initResearchSDK()` first and throws `SDK not initialized`
+otherwise.
+
+**Lifecycle**
+
+| Export | Signature | Notes |
+|---|---|---|
+| `initResearchSDK` | `(options?: ResearchSDKOptions) => Promise<void>` | Registers services. No-ops if already initialized; waits out an in-flight shutdown. |
+| `shutdownResearchSDK` | `() => Promise<void>` | Required. Drains the writer queue, closes LanceDB, kills worker processes. Clears every `getLast*` accessor. |
+| `getSDKContainer` | `() => ServiceContainer \| null` | *sdk subpath only.* Internal/test surface — the live service container, or `null` before init. Not covered by semver; the package entry point does not export it. |
+
+**Research**
+
+| Export | Signature | Notes |
+|---|---|---|
+| `runDeepResearch` | `(query, options?, signal?) => Promise<string>` | Depth 1–3. Returns the Markdown report. `options` is `ResearchOptions` minus the fields the SDK owns (`ctx`, `query`, `model`, `sessionId`, `researchId`). |
+| `runQuickResearch` | `(query, options?, signal?) => Promise<string>` | Depth 0. Same as above with `depth` fixed and therefore not accepted. |
+| `runResearchDetailed` | `(query, options?, signal?) => Promise<ResearchRunResult>` | Same run as `runDeepResearch`, returning `{ report, sessionId, runId, metrics, stats, reports }` instead of the bare string. |
+| `getResearchReports` | `(researchId?) => Promise<Map<string, string>>` | Per-researcher reports keyed by researcher id. Defaults to the most recent run; empty map if there has not been one. |
+
+**Web access**
+
+| Export | Signature | Notes |
+|---|---|---|
+| `scrapeUrl` | `(url, signal?) => Promise<ScrapeResult>` | One URL through the full pipeline (SSRF gate → fetch or stealth browser → PDF extraction → Markdown). |
+| `verifyUrl` | `(url, signal?) => Promise<boolean>` | Reachability only, no content returned. Resolves `false` rather than throwing on a blocked or dead URL. |
+
+**Knowledge store**
+
+| Export | Signature | Notes |
+|---|---|---|
+| `searchKnowledge` | `(queries: string[], signal?) => Promise<KnowledgeSearchResult>` | `{ text, found: 'yes' \| 'maybe' \| 'no', documentsSearched, citations }`. Resolves `found: 'no'` when the store is disabled, empty, or unavailable — it does not throw. |
+| `exportKnowledge` | `(outputPath: string) => Promise<void>` | Writes the store to a web-consumable JSON file. |
+
+**Post-run telemetry** — all reflect the most recent completed run, are `null` until one completes, and are cleared by `shutdownResearchSDK()`.
+
+| Export | Signature | Notes |
+|---|---|---|
+| `getLastRunStats` | `() => ResearchStats \| null` | Headline counts (searches, scrapes, tokens, cost) derived from the run snapshot. |
+| `getLastRunMetrics` | `() => IMetricsSnapshot \| null` | The raw counters/gauges/histograms for that run. |
+| `getLastRunSummary` | `() => RunSummary \| null` | `{ runId, startedAt, completedAt, durationMs, status, snapshot }`. |
+| `getLastErrorReport` | `() => ErrorReport \| null` | Aggregated errors — totals, patterns, by-domain, by-type. Lets an unattended caller see what failed without parsing logs. |
+| `getLastResearcherOutcome` | `() => ResearcherOutcome \| null` | `{ planned, launched, succeeded, failed, failureReasons }`. Distinguishes a thin report caused by a sparse topic from one where most researchers failed. |
+| `getSessionMetrics` | `() => IMetricsSnapshot` | Cumulative across every run since init, rather than per-run. |
+| `logRunErrorSummary` | `(report, depthLabel, status) => void` | *sdk subpath only.* Emits one compact, secret-redacted line for a run's tracked errors. No-op when the report is null or empty. |
+
+**Health and utilities**
+
+| Export | Signature | Notes |
+|---|---|---|
+| `getResearchHealth` | `(opts?: { force?: boolean }) => Promise<HealthReport>` | Runs every registered check. `force` bypasses the cached result. |
+| `repairJson` | `(json: string) => string` | Repairs truncated/malformed model JSON. Pure; usable before init. |
+
+**Types** — `ResearchSDKOptions`, `ResearchRunResult`, `KnowledgeSearchResult`, `ResearcherOutcome`,
+`ResearchOptions`, `ResearchObserver`, `IMetricsSnapshot`, `IMetricHistogram`, `RunSummary`, and
+`ResearchStats`.
+
+**Also on the package entry point**, for callers that want the orchestrators directly rather
+than through the SDK wrapper: `DeepResearchOrchestrator`, `QuickResearchOrchestrator`,
+`HeadlessObserver` (an observer that prints progress to stdout), `ServiceNames`,
+`shutdownManager`, `extractRunStats`, `normalizeUrl`, the config accessors
+`getConfig` / `setConfig` / `resetConfig` / `validateConfig`, and the team-size constants.
+These are lower-level than the SDK functions above and assume you manage the service
+container yourself.
 
 ### Init options
 

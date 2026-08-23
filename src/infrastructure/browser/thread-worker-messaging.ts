@@ -6,7 +6,7 @@
 
 let workerId: string = '';
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, promises as fsp } from 'node:fs';
 import { redactSecrets } from '../../utils/log-utils.ts';
 import { safeUnref } from '../../utils/safe-unref.ts';
 import { MAX_HTML_SIZE, MAX_PDF_SIZE } from '../../web-research/scraper-types.ts';
@@ -406,6 +406,146 @@ function seedSubresourceVerdict(validatedUrl: string): void {
 }
 
 /**
+ * True when Firefox has discarded a response body it once held, so `response.body()`
+ * can never succeed for that response again. Distinct from every other body failure —
+ * a closed target, an aborted task — which must keep their original error.
+ */
+function isEvictedBodyError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /was evicted|Response body is unavailable/i.test(msg);
+}
+
+/** Upper bound on the PDF re-fetch below. A 14MB PDF measured ~20s on a normal link. */
+const PDF_REFETCH_TIMEOUT_MS = 90_000;
+
+/**
+ * Re-request a PDF whose navigation body Firefox has already discarded.
+ *
+ * Uses the browser context's own request API rather than a bare fetch so the retry
+ * carries the same cookies, headers, proxy and TLS profile the navigation used — the
+ * reason this URL reached the stealth-browser fallback in the first place is usually
+ * that a plain fetch does not get served.
+ *
+ * SSRF: this is the one request in the scrape path that does NOT pass through
+ * `page.route` or fire `page.on('response')`, so neither the request-time DNS check
+ * nor the serverAddr rebinding backstop covers it. Three things stand in for them:
+ * the URL is re-validated here with the same DNS-aware check the route guard uses;
+ * it is the FINAL navigation URL, whose actually-connected IP the caller validated
+ * via `response.serverAddr()` seconds earlier; and redirects are refused outright, so
+ * the re-fetch cannot be walked to an unvalidated host. What remains is a TTL-0
+ * rebind landing inside the seconds between the navigation and this retry, on a host
+ * that already answered from a public address — strictly narrower than the
+ * subresource TOCTOU window the request-time check already accepts.
+ */
+async function refetchPdfBody(
+  page: any,
+  url: string,
+  validateForWorker: (u: string) => Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  await validateForWorker(url);
+  if (signal?.aborted) throw new Error('Aborted');
+
+  // Raced against the task signal, not merely checked before starting. Playwright's
+  // request API takes no AbortSignal, and closing the page does not cancel it — so
+  // without this race a slow retry would hold the poolifier worker slot for up to
+  // PDF_REFETCH_TIMEOUT_MS past the deadline that was supposed to free it. The request
+  // itself is left to settle and be discarded; what matters is that the slot is not
+  // pinned waiting for it.
+  const requestPromise = page.context().request.get(url, {
+    maxRedirects: 0,
+    timeout: PDF_REFETCH_TIMEOUT_MS,
+  });
+  requestPromise.catch(() => {});
+  const response = await (signal
+    ? Promise.race([
+        requestPromise,
+        new Promise<never>((_, reject) => {
+          if (signal.aborted) return reject(new Error('Aborted'));
+          signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+        }),
+      ])
+    : requestPromise);
+  const status = Number(response.status?.() ?? 0);
+  // A 3xx here means the server wants to send us somewhere maxRedirects:0 refused to
+  // follow — report it as the HTTP outcome it is rather than reading a redirect body.
+  if (!response.ok?.()) throw new Error(`HTTP ${status}`);
+
+  const declared = parseInt(String((await response.headersArray?.() ?? []).find?.((h: any) => String(h.name).toLowerCase() === 'content-length')?.value ?? ''), 10);
+  if (Number.isFinite(declared) && declared > MAX_PDF_SIZE) {
+    throw new Error(`PDF too large (${Math.round(declared / 1024 / 1024)}MB, max 100MB)`);
+  }
+
+  const buffer: Buffer = await response.body();
+  if (buffer.byteLength > MAX_PDF_SIZE) {
+    throw new Error(`PDF too large (${Math.round(buffer.byteLength / 1024 / 1024)}MB, max 100MB)`);
+  }
+  logToDebugFile('DEBUG', `[Worker-${workerId}] Re-fetched evicted PDF body (${buffer.byteLength} bytes) for: ${url}`);
+  return buffer;
+}
+
+/**
+ * Finish a scrape from a Download the navigation turned into.
+ *
+ * A server that sends a PDF with `Content-Disposition: attachment` never produces a
+ * document for Playwright to inspect — Firefox hands the response to the download
+ * manager and `page.goto()` rejects with "Download is starting". The bytes have
+ * already arrived at that point, so the URL is recoverable; before this path existed
+ * every such source (vendor datasheets, standards-body PDFs, several journal hosts)
+ * was reported as an outright scrape failure.
+ *
+ * The SSRF guarantees are the ones the normal PDF branch relies on: the download's
+ * response passed through the same `page.on('response')` inspection, so settling
+ * `pendingAddrChecks` and re-checking the poison gate before returning bytes is
+ * equivalent here.
+ */
+async function readPdfDownload(
+  download: any,
+  url: string,
+  page: any,
+  pendingAddrChecks: Array<Promise<void>>,
+  getPoisonedError: () => Error | null,
+): Promise<{ contentType: string; bufferB64: string; jitter: number }> {
+  const failure = await download.failure?.().catch(() => null);
+  if (failure) throw new Error(`Fetch blocked: download failed (${failure})`);
+
+  // Only PDFs are usable as binary content downstream; anything else (zip, csv, xlsx)
+  // is a routine unsupported-target outcome for this URL, not a fault.
+  const suggested = String(download.suggestedFilename?.() ?? '');
+  const downloadUrl = String(download.url?.() ?? url);
+  const looksLikePdf =
+    suggested.toLowerCase().endsWith('.pdf') || downloadUrl.toLowerCase().split('?')[0]!.endsWith('.pdf');
+  if (!looksLikePdf) {
+    throw new Error(`Unsupported download: ${suggested || downloadUrl} is not a PDF`);
+  }
+
+  const filePath = await download.path();
+  if (!filePath) throw new Error('Fetch blocked: download produced no readable file');
+
+  // Same 100MB policy cap the PDF branch enforces, checked from the file size so the
+  // bytes are never read into the worker at all when the file is over the limit.
+  const { size } = await fsp.stat(filePath);
+  if (size > MAX_PDF_SIZE) {
+    const sizeMB = Math.round(size / 1024 / 1024);
+    throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+  }
+
+  const buffer = await fsp.readFile(filePath);
+
+  await Promise.allSettled(pendingAddrChecks);
+  const poisoned = getPoisonedError();
+  if (poisoned) throw poisoned;
+
+  // Delete before the page closes: the context's download directory is removed on
+  // context close, but a worker's context is reused across tasks, so an undeleted
+  // file would accumulate for the life of the worker.
+  await download.delete?.().catch(() => {});
+  await page.close();
+  logToDebugFile('DEBUG', `[Worker-${workerId}] Recovered attachment-served PDF (${buffer.byteLength} bytes) for: ${url}`);
+  return { contentType: 'application/pdf', bufferB64: buffer.toString('base64'), jitter: 0 };
+}
+
+/**
  * Execute a scrape task
  */
 export async function executeScrapeTask(
@@ -445,6 +585,14 @@ export async function executeScrapeTask(
   // to surface this instead of the secondary 'Target closed' error the triggering
   // page.close() produces.
   let oversizedPdfError: Error | null = null;
+
+  // Set when the navigation turns into a download instead of a document. A server that
+  // sends the PDF with Content-Disposition: attachment makes Firefox hand the response
+  // to the download manager, and page.goto() then rejects with "Download is starting" —
+  // the PDF branch below was never reached and the document was lost even though the
+  // bytes had already arrived. Captured here so the goto catch can finish the scrape
+  // from the downloaded file instead of failing the URL.
+  let pendingDownload: any = null;
 
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
@@ -589,8 +737,32 @@ export async function executeScrapeTask(
       }
     });
 
+    // A navigation the server marks as an attachment never becomes a document: Firefox
+    // routes it to the download manager and goto() rejects. Record the Download object
+    // so the goto catch below can read the bytes that already arrived.
+    page.on('download', (d: any) => { pendingDownload ??= d; });
+
     // High-fidelity wait: try domcontentloaded first for speed
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+    let response;
+    try {
+      response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+    } catch (navErr: unknown) {
+      // Only the download case is recoverable here; everything else (timeout, DNS,
+      // 'Target closed' from an abort/poison) must keep its original error.
+      const navMsg = navErr instanceof Error ? navErr.message : String(navErr);
+      const isDownloadNav = /download is starting/i.test(navMsg);
+      if (!isDownloadNav) throw navErr;
+      // The 'download' event and the goto rejection are not ordered relative to each
+      // other, so give the event a brief moment to land before giving up on it.
+      if (!pendingDownload) {
+        await Promise.race([
+          page.waitForEvent('download', { timeout: 5000 }).catch(() => null),
+          new Promise(r => setTimeout(r, 5000)),
+        ]);
+      }
+      if (!pendingDownload) throw navErr;
+      return await readPdfDownload(pendingDownload, url, page, pendingAddrChecks, () => poisonedError);
+    }
 
     // DNS-rebinding defense-in-depth. The page.route guard's validateForWorker resolves the
     // hostname independently of the browser's own connect-time resolution, so a TTL-0 rebind can
@@ -647,7 +819,18 @@ export async function executeScrapeTask(
       // decided this and be in the middle of closing the page — skip the (redundant,
       // about-to-fail) download attempt rather than race it.
       if (oversizedPdfError) throw oversizedPdfError;
-      const buffer = await response.body();
+      let buffer: Buffer;
+      try {
+        buffer = await response.body();
+      } catch (bodyErr) {
+        // Firefox drops large navigation response bodies from its juggler-side cache,
+        // after which response.body() can only ever fail. Measured against a 13.9MB
+        // TU Delft lecture PDF: the body is unavailable whether it is requested at
+        // headers-received time or after the load settles, so this is not a race that
+        // asking earlier can win — the bytes are simply no longer held for us.
+        if (!isEvictedBodyError(bodyErr)) throw bodyErr;
+        buffer = await refetchPdfBody(page, finalUrl, validateForWorker, signal);
+      }
       // ...then the actual bytes: the header is advisory and absent on chunked
       // responses, so the byte count is the check that actually bounds memory.
       // Checked BEFORE toString('base64') doubles the allocation.

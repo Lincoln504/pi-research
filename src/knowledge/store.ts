@@ -23,6 +23,7 @@ import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
 import { createStoreTable, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
 import { addDocumentsToStore, assertValidEmbeddingVectors, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
+import type { AddDocumentsOutcome } from './store-operations.ts';
 import { isEmbedderUnreachable } from './embedder-utils.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -713,13 +714,14 @@ export class KnowledgeStore implements IKnowledgeStore {
       // Now check isClosing after registering
       if (this.isClosing) {
         logger.warn(`[store] Skipping addDocuments — store is closing`);
+        metrics.increment('knowledge_store_add_documents_total', 1, { status: 'ignored_closing' });
         return;
       }
 
       let table = await this.getFreshTable();
       const workspace = this.getWorkspace();
 
-      await this.withEmbedderReconnect(async (embedder) => {
+      const outcome = await this.withEmbedderReconnect<AddDocumentsOutcome>(async (embedder) => {
         let retryCount = 0;
         const MAX_RETRIES = 5;
         const BASE_DELAY = 100;
@@ -727,7 +729,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         while (retryCount <= MAX_RETRIES) {
           try {
             const isGlobal = this.options.knowledgeMode === 'global';
-          await addDocumentsToStore(
+            return await addDocumentsToStore(
               table, 
               docs, 
               embedder, 
@@ -735,7 +737,6 @@ export class KnowledgeStore implements IKnowledgeStore {
               workspace,
               isGlobal
             );
-            return;
           } catch (err) {
             // Detect commit conflicts typical of cross-process write contention
             if (isLanceCommitConflict(err)) {
@@ -758,7 +759,24 @@ export class KnowledgeStore implements IKnowledgeStore {
             throw err;
           }
         }
+        // Unreachable: the loop only exits via return or throw. Present so the
+        // outcome type stays non-optional for the accounting below.
+        throw new Error('[store] addDocuments retry loop exited without result');
       });
+
+      // Exactly one outcome per logical addDocuments call. Attempts that failed and
+      // were then recovered by the reconnect/conflict retries are not counted here
+      // and are not logged at ERROR — only a write that is actually abandoned is.
+      // An empty batch is a no-op and is not counted at all, as before.
+      if (outcome !== 'empty') {
+        metrics.increment('knowledge_store_add_documents_total', 1, {
+          status: outcome === 'ignored_closing' ? 'ignored_closing' : 'success',
+        });
+      }
+    } catch (err) {
+      metrics.increment('knowledge_store_add_documents_total', 1, { status: 'error' });
+      logger.error('[store] Failed to add documents:', err);
+      throw err;
     } finally {
       this.activeWrites.delete(writePromise);
       writeResolve!();

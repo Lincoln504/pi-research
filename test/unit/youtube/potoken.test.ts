@@ -32,15 +32,21 @@ vi.mock('jsdom', () => ({
 }));
 
 // --- Mock bgutils-js. challengeCreate is overridable per test (for the mutex/delay test). ---
+// bgutils-js 4 has no barrel entry — the package's "exports" map defines only the three
+// subpaths below — so each is mocked separately. Mocking the bare specifier instead
+// resolves to nothing and the suite fails to import at all.
 const challengeCreate = vi.fn();
 const snapshot = vi.fn(async () => 'botguard-response');
 const mintAsWebsafeString = vi.fn(async (id: string) => `tok-${id}`);
-vi.mock('bgutils-js', () => ({
-  BG: {
-    Challenge: { create: (...a: unknown[]) => challengeCreate(...a) },
-    BotGuardClient: { create: vi.fn(async () => ({ snapshot })) },
-    WebPoMinter: { create: vi.fn(async () => ({ mintAsWebsafeString })) },
-  },
+const botGuardCreate = vi.fn(async (_opts?: Record<string, unknown>) => ({ snapshot }));
+vi.mock('bgutils-js/botguard', () => ({
+  getChallenge: (...a: unknown[]) => challengeCreate(...a),
+  BotGuardClient: { create: (...a: unknown[]) => botGuardCreate(...(a as [])) },
+}));
+vi.mock('bgutils-js/webpo', () => ({
+  WebPoMinter: { create: vi.fn(async () => ({ mintAsWebsafeString })) },
+}));
+vi.mock('bgutils-js/utils', () => ({
   buildURL: () => 'https://jnn-pa.googleapis.com/$rpc/GenerateIT',
   getHeaders: () => ({ 'content-type': 'application/json+protobuf' }),
 }));
@@ -79,6 +85,26 @@ describe('youtube/potoken', () => {
     // globalThis must be restored to its original state (no window leak).
     expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).toEqual(hadWindow);
     expect(windowClose).toHaveBeenCalled(); // DOM torn down
+    vi.unstubAllGlobals();
+  });
+
+  it('calls the bgutils-js 4 API with the names that version actually reads', async () => {
+    // These three renames are load-bearing and all fail SILENTLY rather than loudly:
+    // bgutils-js 4 renamed BotGuardClient's `globalObj` to `globalObject` (the VM then
+    // has no global to attach to and the minter factory returns a non-function), replaced
+    // BG.Challenge.create with a free getChallenge(), and renamed its `fetch` config field
+    // to `fetchFunction` (an unset fetcher falls back to the ambient one, losing the
+    // caller's AbortSignal). A structural mock accepts either spelling, so pin them.
+    await mintPoTokens(['VISITOR']);
+
+    const challengeConfig = challengeCreate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(typeof challengeConfig['fetchFunction']).toBe('function');
+    expect(challengeConfig).not.toHaveProperty('fetch');
+    expect(challengeConfig['requestKey']).toBeTruthy();
+
+    const clientOptions = botGuardCreate.mock.calls[0]![0] as unknown as Record<string, unknown>;
+    expect(clientOptions['globalObject']).toBe(globalThis);
+    expect(clientOptions).not.toHaveProperty('globalObj');
     vi.unstubAllGlobals();
   });
 

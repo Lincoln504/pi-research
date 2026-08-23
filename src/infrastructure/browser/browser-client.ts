@@ -16,6 +16,7 @@ import { errorTracker } from '../../utils/error-tracker.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
 import { Utf8Body } from '../../utils/http-body.ts';
 import { getClientAgent } from './client-agent.ts';
+import { isTransientSocketError } from './browser-error-utils.ts';
 import { getHealthCheckBudgetMs } from './config.ts';
 import type { NodeError } from '../../types/index.ts';
 
@@ -281,12 +282,29 @@ export class BrowserClient implements IScheduler {
                     errorType = 'unknown';
                 }
                 const error = new Error(errorMsg);
-                logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, errorMsg);
-                errorTracker.trackError(error, {
-                    component: 'browser-manager',
-                    operation,
-                    errorType,
-                });
+                // This is one ATTEMPT against the leader, not an outcome. runBrowserTask
+                // retries every transient socket failure — a leader handover (ECONNREFUSED
+                // against the departing leader's port) is the common case and recovers a
+                // few hundred milliseconds later. Logging ERROR and tracking here made every
+                // recovered handover look like a fault twice over: once in the ERROR log,
+                // and once more in the error tracker on top of the caller's own richer
+                // record (taskType + errorType) on the retry path. Observed 5 of 5 times in
+                // a real run log, each followed immediately by a successful recovery.
+                //
+                // A failure the caller will NOT retry still reports at ERROR here, and a
+                // retryable one that exhausts its budget still surfaces upstream with URL
+                // context (see web-scraper's isBenignScrapeFailure branch), so nothing that
+                // actually costs the user a result becomes invisible.
+                if (isTransientSocketError(error)) {
+                    logger.debug(`[BrowserClient] Transient failure talking to http://127.0.0.1:${this.port}${path} (caller will retry): ${errorMsg}`);
+                } else {
+                    logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, errorMsg);
+                    errorTracker.trackError(error, {
+                        component: 'browser-manager',
+                        operation,
+                        errorType,
+                    });
+                }
                 reject(error);
             });
             req.write(JSON.stringify(data));

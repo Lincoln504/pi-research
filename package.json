@@ -118,7 +118,7 @@
     "@kreuzberg/html-to-markdown-node": "^3.5.5",
     "@lancedb/lancedb": "0.37.1",
     "apache-arrow": "21.1.0",
-    "bgutils-js": "^3.2.0",
+    "bgutils-js": "^4.0.3",
     "camoufox-js": "^0.10.2",
     "esbuild": "^0.28.1",
     "impit": "0.13.0",

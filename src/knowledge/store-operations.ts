@@ -14,6 +14,13 @@ import { metrics } from '../utils/metrics.ts';
 import { StoreDocument } from '../core/interfaces/knowledge-interfaces.ts';
 
 /**
+ * What a single add attempt actually did. Returned rather than logged/counted here
+ * so the caller — which owns the retry loop — records exactly one outcome per
+ * logical addDocuments call.
+ */
+export type AddDocumentsOutcome = 'written' | 'empty' | 'ignored_closing';
+
+/**
  * Guard against a broken embedder silently writing corrupt vectors: a
  * wrong-count, empty, ragged, or NaN/Inf-poisoned result would otherwise land
  * in the FixedSizeList column and surface only as an opaque Arrow error or,
@@ -69,12 +76,11 @@ export async function addDocumentsToStore(
   isClosing: () => boolean,
   workspace: string,
   isGlobal: boolean
-): Promise<void> {
-  if (docs.length === 0) return;
+): Promise<AddDocumentsOutcome> {
+  if (docs.length === 0) return 'empty';
   if (isClosing()) {
     logger.warn('[store] Ignoring addDocuments during close');
-    metrics.increment('knowledge_store_add_documents_total', 1, { status: 'ignored_closing' });
-    return;
+    return 'ignored_closing';
   }
 
   const startTime = Date.now();
@@ -98,14 +104,19 @@ export async function addDocumentsToStore(
     await table.add(data);
     const duration = Date.now() - startTime;
     metrics.observe('knowledge_store_add_documents_duration_ms', duration);
-    metrics.increment('knowledge_store_add_documents_total', 1, { status: 'success' });
     metrics.increment('knowledge_store_chunks_added_total', docs.length);
     logger.log(`[store] Added ${docs.length} chunk(s) for ${docs[0]?.url} [workspace=${workspace}, global=${isGlobal}]`);
+    return 'written';
   } catch (err) {
     const duration = Date.now() - startTime;
     metrics.observe('knowledge_store_add_documents_duration_ms', duration, { status: 'error' });
-    metrics.increment('knowledge_store_add_documents_total', 1, { status: 'error' });
-    logger.error('[store] Failed to add documents:', err);
+    // Attempt-level failure only. The caller retries embedder-unreachable and Lance
+    // commit-conflict failures and usually succeeds, so logging ERROR and counting a
+    // terminal outcome here reported lost writes that were not lost, and double-counted
+    // the batch in knowledge_store_add_documents_total (once error, once success).
+    // Outcome accounting belongs to KnowledgeStore.addDocuments, which is the only
+    // layer that knows whether the write was ultimately abandoned.
+    logger.debug(`[store] add attempt failed after ${duration}ms: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
 }

@@ -368,7 +368,10 @@ export async function initBrowser(): Promise<void> {
  * rather than left to leak.
  */
 export async function acquireTaskContext(): Promise<any> {
-  const contextPromise = browser.newContext();
+  // acceptDownloads is explicit, not defaulted: executeScrapeTask recovers PDFs that a
+  // server sends as an attachment by reading the resulting Download, and that object
+  // only exists when downloads are accepted.
+  const contextPromise = browser.newContext({ acceptDownloads: true });
   contextPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser context rejection: ${err.message}`));
   let contextTimeoutId: NodeJS.Timeout | undefined;
   let contextRaceLost = false;

@@ -3,7 +3,7 @@ import * as crypto from 'node:crypto';
 import { logger } from '../../logger.ts';
 import { Utf8Body } from '../../utils/http-body.ts';
 import type { SearchResult } from '../../web-research/types.ts';
-import { isCloudflareBlockError, isPoolShutdownError } from './browser-error-utils.ts';
+import { isCloudflareBlockError, isPoolShutdownError, isBenignScrapeFailure } from './browser-error-utils.ts';
 
 export interface BrowserServerOptions {
     onSearch: (query: string, signal?: AbortSignal) => Promise<SearchResult[]>;
@@ -204,6 +204,14 @@ export class BrowserServer {
                             // Pool destroyed mid-request during quit/SIGTERM teardown — expected,
                             // not a server fault. DEBUG so a normal shutdown doesn't emit ERRORs.
                             logger.debug('[BrowserServer] Request abandoned during shutdown:', error instanceof Error ? error.message : String(error));
+                        } else if (isBenignScrapeFailure(error)) {
+                            // Per-URL outcomes the CLIENT side already classifies as routine —
+                            // an HTTP 4xx/5xx, a navigation timeout, an oversized PDF, a blocked
+                            // fetch. The leader saw the same failure first and logged it at ERROR
+                            // regardless, so every one of those outcomes still produced exactly
+                            // one false ERROR per URL despite the client's classification. Same
+                            // predicate as web-scraper.ts, so the two layers agree.
+                            logger.debug('[BrowserServer] Expected per-URL scrape outcome:', error instanceof Error ? error.message.split('\n')[0] : String(error));
                         } else {
                             logger.error('[BrowserServer] Error handling request:', error);
                         }
