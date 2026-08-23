@@ -220,21 +220,37 @@ describe('executeScrapeTask — attachment-served PDF', () => {
 
   it('reads the bytes back through the handle it measured, so the file cannot be swapped underneath', async () => {
     const { context, filePath } = makeDownloadHarness();
-    // Replace the download with a different file at the same path in the window
-    // between the size check and the read. Measuring one path and then reading it
-    // again would hand back the impostor's bytes; measuring and reading one open
-    // handle returns the file that was actually checked.
+    // Replace the download with a different file at the same path in the window between
+    // the size check and the read. Measuring one path and then reading it again would
+    // hand back the impostor's bytes; measuring and reading one open handle returns the
+    // file that was actually checked.
+    //
+    // The two platforms reach that guarantee differently and the test asserts both.
+    // POSIX allows the rename and the open handle keeps pointing at the original inode.
+    // Windows refuses it outright (EPERM: a file with an open handle cannot be renamed
+    // over), so holding the handle is what blocks the swap rather than what survives it.
+    // Either way the bytes returned are the bytes that were measured — which is the
+    // property, not the mechanism.
+    let swapOutcome = 'not attempted';
     const realOpen = fs.promises.open.bind(fs.promises);
     const openSpy = vi.spyOn(fs.promises, 'open').mockImplementation(async (...args: any[]) => {
       const real: any = await realOpen(...(args as [any]));
       const impostor = `${filePath}.impostor`;
       fs.writeFileSync(impostor, Buffer.from('%PDF-1.7\nSWAPPED\n%%EOF'));
-      fs.renameSync(impostor, filePath);
+      try {
+        fs.renameSync(impostor, filePath);
+        swapOutcome = 'swapped';
+      } catch {
+        fs.rmSync(impostor, { force: true });
+        swapOutcome = 'refused by the OS';
+      }
       return real;
     });
     try {
       const result = await executeScrapeTask(context, 'https://attach.example.com/dl?id=9');
       expect(result.bufferB64).toBe(PDF_BYTES.toString('base64'));
+      // Guards the test itself: a swap that was never attempted would prove nothing.
+      expect(swapOutcome).not.toBe('not attempted');
     } finally {
       openSpy.mockRestore();
     }
