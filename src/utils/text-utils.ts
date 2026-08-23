@@ -281,6 +281,105 @@ export function lastCitedLinksHeader(text: string): { lineStart: number; textSta
 }
 
 /**
+ * A first-person opener that announces the report instead of being part of it:
+ * "I have gathered extensive material… Let me now synthesize my findings into a
+ * comprehensive report."
+ *
+ * Deliberately narrow. It has to match a line that is BOTH first-person AND about the
+ * act of reporting, because the only available response is to delete the line, and the
+ * cost of deleting a real one is losing content nothing else can recover.
+ */
+const REPORT_NARRATION_OPENER = /^(?:I|I'll|I'm|Let me|Now I|Next I|First,? I)\b/i;
+const REPORT_NARRATION_SUBJECT =
+  /\b(?:report|synthesi[sz]\w*|findings|material|sources|scraped|gathered|research\w*|summar\w+)\b/i;
+
+/**
+ * Remove a leading line that narrates the report rather than being part of it.
+ *
+ * The researcher prompt forbids this, and the instruction is not reliably obeyed: across
+ * live quick runs the delivered document repeatedly opened with "I have gathered
+ * sufficient material… I will now synthesize the full report." Quick mode has no
+ * synthesis step behind it to absorb that, so it reaches the reader as the report's
+ * first line.
+ *
+ * Every condition here narrows a DESTRUCTIVE action, so each one is required rather than
+ * scored: the segment must be a single line, must be separated from the report by a
+ * blank line, must read as first-person narration ABOUT reporting, and must leave
+ * something behind. A report that opens correctly — with a topic title, as the format
+ * requires — matches none of them.
+ *
+ * @returns the body with the preamble removed, and the preamble itself (empty when
+ *          nothing was stripped) so callers can log and count what they dropped.
+ */
+export function stripReportPreamble(text: string): { body: string; preamble: string } {
+  const trimmed = text.trimStart();
+  const breakAt = trimmed.indexOf('\n\n');
+  if (breakAt < 0) return { body: text, preamble: '' };
+
+  const head = trimmed.slice(0, breakAt).trim();
+  const rest = trimmed.slice(breakAt + 2).trimStart();
+  if (head.includes('\n')) return { body: text, preamble: '' };
+  // Something has to be left. There is deliberately no LENGTH floor beyond that: a
+  // short remainder is the answer ("Paris is the capital of France."), and keeping the
+  // narration to pad it out would both deliver the wrong text and let that narration's
+  // full stop satisfy the analysis check that runs on the result.
+  if (!rest) return { body: text, preamble: '' };
+  if (!REPORT_NARRATION_OPENER.test(head)) return { body: text, preamble: '' };
+  if (!REPORT_NARRATION_SUBJECT.test(head)) return { body: text, preamble: '' };
+
+  return { body: rest, preamble: head };
+}
+
+/**
+ * The prose body of a synthesis: everything before its CITED LINKS section, trimmed.
+ * Returns the whole text when there is no such section.
+ *
+ * Exists to measure how much the model ACTUALLY wrote. Length alone cannot do that,
+ * because the engine rebuilds and appends the citation list itself — a report whose
+ * body is one title line still comes out kilobytes long once that block lands, which
+ * is precisely how a synthesis containing no analysis reached users looking complete.
+ */
+export function synthesisProseBody(text: string): string {
+  const { lineStart } = lastCitedLinksHeader(text);
+  return (lineStart < 0 ? text : text.slice(0, lineStart)).trim();
+}
+
+/**
+ * Whether a synthesis carries no actual analysis — a heading with nothing under it,
+ * a stray sentence fragment, or an empty string.
+ *
+ * Two INDEPENDENT signals, either of which is enough, so the check does not rest on a
+ * single tuned number:
+ *
+ *  - Volume. Less prose than a real report could possibly contain. Pass 0 to DISABLE
+ *    this signal, which callers must do wherever no length data justifies a floor:
+ *    a wrongly-flagged report is worse than a missed one when the only available
+ *    response is to warn the reader about output that is actually fine.
+ *  - Structure. No sentence ever ends. Every observed failure was a bare title line,
+ *    which has no terminator at all; any genuine report has many. This one needs no
+ *    threshold and would catch a title of any length.
+ *
+ * Measured on the prose only — the text before CITED LINKS — because the engine
+ * rebuilds and appends the source list itself, which pads a one-line failure out to
+ * kilobytes and is exactly how such a report reached users looking complete.
+ */
+export function isAnalysisFreeSynthesis(text: string, minProseChars: number): boolean {
+  const prose = synthesisProseBody(text);
+  // Drop markdown heading markers and blockquote/bold decoration before judging, so a
+  // model that writes "## Title" is measured the same as one that writes "Title".
+  const stripped = prose.replace(/^[ \t]*(?:#{1,6}[ \t]*|>[ \t]*|\*\*)/gm, '').trim();
+  if (minProseChars > 0 && stripped.length < minProseChars) return true;
+  // A report with no sentence-ending punctuation anywhere is a heading, a fragment or a
+  // list of bare labels — never analysis. The terminator set must not assume Latin
+  // punctuation: a report written in a script that ends sentences with a danda, an
+  // Arabic full stop or a CJK full stop is a correct report, and this signal is the only
+  // one quick mode runs, where a false positive tells the reader a good answer is
+  // untrustworthy.
+  if (!/[.!?。！？।॥۔؟።]/.test(stripped)) return true;
+  return false;
+}
+
+/**
  * Parses the CITED LINKS section from a researcher report, extracting URLs, sources, and their descriptions.
  * Handles both single-line 'URL - description' and multi-line 'Source:'/'Description:' formats.
  */

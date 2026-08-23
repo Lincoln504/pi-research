@@ -115,6 +115,16 @@ describe('quick research renders the shipped researcher template', () => {
     expect(prompt).not.toContain('what is a coverage digest');
   });
 
+  it('tells the model to open with the report rather than narrate its way into one', async () => {
+    // Observed in a live quick run: the delivered document opened with "I have gathered
+    // extensive material… Let me now synthesize my findings into a comprehensive report."
+    // Quick mode has no synthesis step to strip that, so it reached the reader verbatim.
+    const prompt = await renderQuickPrompt();
+
+    expect(prompt).toContain('No preamble');
+    expect(prompt).toContain('no narration of what you are about to do');
+  });
+
   it('delivers the goal and quick-mode workflow instructions in the initial USER message', async () => {
     // The capture point moves one step later than renderQuickPrompt's: the session is
     // created successfully and session.prompt() (the user message) throws instead.

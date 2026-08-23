@@ -62,6 +62,8 @@ Write your report immediately after scraping is complete, or as soon as a tool r
 ## Report Format
 
 {{digest_section}}
+Emit the report and nothing else. No preamble, and no narration of what you are about to do — not "I have gathered extensive material…", not "Let me now synthesize my findings…". Begin at the report's own first line.
+
 Use [N] inline citations throughout. Write in plain prose — no markdown headings, no bullet points, no bold or italic text. Use clear paragraphs separated by blank lines. The full CITED LINKS list goes at the very end.
 
 [Topic Title]

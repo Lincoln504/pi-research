@@ -239,7 +239,12 @@ describe('ResearchSynthesisService', () => {
       expect(synthesis).toContain('Alpha report content');
       expect(synthesis).toContain('1.B');
       expect(synthesis).toContain('Beta report content');
-      expect(synthesis).toContain('automated synthesis');
+      expect(synthesis).toContain('automated compilation');
+      // The preamble must not assert WHY the synthesis step produced nothing: this
+      // fallback now serves both an interrupted run and one whose synthesis LLM
+      // returned a report with no analysis in it, and telling a user the run was
+      // interrupted when it was not is the misleading output it exists to prevent.
+      expect(synthesis).not.toMatch(/interrupted/i);
     });
 
     it('contains "Round 2" when currentRound is 2', () => {

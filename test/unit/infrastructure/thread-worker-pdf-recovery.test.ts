@@ -105,7 +105,7 @@ function makeDownloadHarness(opts: { filename?: string; bytes?: Buffer; failure?
     close: vi.fn(async () => {}),
     mainFrame: () => ({}),
   };
-  return { context: { newPage: async () => page }, page, deleteSpy };
+  return { context: { newPage: async () => page }, page, deleteSpy, filePath };
 }
 
 describe('executeScrapeTask — evicted PDF body', () => {
@@ -192,19 +192,51 @@ describe('executeScrapeTask — attachment-served PDF', () => {
     ).rejects.toThrow(/Unsupported download:/);
   });
 
-  it('enforces the 100MB cap from the downloaded file size', async () => {
+  it('enforces the 100MB cap from the open handle, without reading the bytes', async () => {
     const { context } = makeDownloadHarness();
-    const statSpy = vi.spyOn(fs.promises, 'stat').mockResolvedValue({ size: MAX_PDF_SIZE + 1 } as any);
-    const readSpy = vi.spyOn(fs.promises, 'readFile');
+    const realOpen = fs.promises.open.bind(fs.promises);
+    const readFileSpy = vi.fn();
+    const closeSpy = vi.fn();
+    const openSpy = vi.spyOn(fs.promises, 'open').mockImplementation(async (...args: any[]) => {
+      const real: any = await realOpen(...(args as [any]));
+      return {
+        stat: async () => ({ size: MAX_PDF_SIZE + 1 }),
+        readFile: (...a: any[]) => { readFileSpy(); return real.readFile(...a); },
+        close: () => { closeSpy(); return real.close(); },
+      } as any;
+    });
     try {
       await expect(
         executeScrapeTask(context, 'https://attach.example.com/dl?id=9'),
       ).rejects.toThrow(/PDF too large \(\d+MB, max 100MB\)/);
       // Checked from the file size, so the oversized bytes are never read into the worker.
-      expect(readSpy).not.toHaveBeenCalled();
+      expect(readFileSpy).not.toHaveBeenCalled();
+      // ...and the descriptor is released even though the cap rejected the file.
+      expect(closeSpy).toHaveBeenCalled();
     } finally {
-      statSpy.mockRestore();
-      readSpy.mockRestore();
+      openSpy.mockRestore();
+    }
+  });
+
+  it('reads the bytes back through the handle it measured, so the file cannot be swapped underneath', async () => {
+    const { context, filePath } = makeDownloadHarness();
+    // Replace the download with a different file at the same path in the window
+    // between the size check and the read. Measuring one path and then reading it
+    // again would hand back the impostor's bytes; measuring and reading one open
+    // handle returns the file that was actually checked.
+    const realOpen = fs.promises.open.bind(fs.promises);
+    const openSpy = vi.spyOn(fs.promises, 'open').mockImplementation(async (...args: any[]) => {
+      const real: any = await realOpen(...(args as [any]));
+      const impostor = `${filePath}.impostor`;
+      fs.writeFileSync(impostor, Buffer.from('%PDF-1.7\nSWAPPED\n%%EOF'));
+      fs.renameSync(impostor, filePath);
+      return real;
+    });
+    try {
+      const result = await executeScrapeTask(context, 'https://attach.example.com/dl?id=9');
+      expect(result.bufferB64).toBe(PDF_BYTES.toString('base64'));
+    } finally {
+      openSpy.mockRestore();
     }
   });
 

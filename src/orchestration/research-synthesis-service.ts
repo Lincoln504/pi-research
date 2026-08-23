@@ -277,7 +277,12 @@ export class ResearchSynthesisService implements IService {
     if (reportCount === 0) {
       synthesis += 'No researcher reports were generated before the process stopped.';
     } else {
-      synthesis += `This is an automated synthesis of ${reportCount} individual researcher report(s) gathered before the process was interrupted.\n\n`;
+      // Neutral about WHY the synthesis step produced nothing usable, because there are
+      // now two callers: a run interrupted mid-flight, and one whose synthesis LLM returned
+      // a report with no analysis in it. Asserting an interruption would be inaccurate for
+      // the second, and telling a user the run was interrupted when it was not is exactly
+      // the kind of misleading output this fallback exists to avoid.
+      synthesis += `This is an automated compilation of ${reportCount} individual researcher report(s). The synthesis step did not produce a usable summary for this run, so the findings are presented as collected.\n\n`;
       synthesis += Array.from(reports.entries())
         .map(([id, report]) => `Researcher ${id}\n\n${report}`)
         .join('\n\n');

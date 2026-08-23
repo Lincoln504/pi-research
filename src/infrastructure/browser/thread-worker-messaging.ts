@@ -524,13 +524,23 @@ async function readPdfDownload(
 
   // Same 100MB policy cap the PDF branch enforces, checked from the file size so the
   // bytes are never read into the worker at all when the file is over the limit.
-  const { size } = await fsp.stat(filePath);
-  if (size > MAX_PDF_SIZE) {
-    const sizeMB = Math.round(size / 1024 / 1024);
-    throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+  //
+  // The size is measured on an OPEN HANDLE and the bytes are read back through that
+  // same handle, so the check and the read cannot land on two different files: a
+  // stat-by-path followed by a read-by-path is a time-of-check/time-of-use gap, and
+  // the download directory is a path the browser process is still writing to.
+  const handle = await fsp.open(filePath, 'r');
+  let buffer: Buffer;
+  try {
+    const { size } = await handle.stat();
+    if (size > MAX_PDF_SIZE) {
+      const sizeMB = Math.round(size / 1024 / 1024);
+      throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+    }
+    buffer = await handle.readFile();
+  } finally {
+    await handle.close().catch(() => {});
   }
-
-  const buffer = await fsp.readFile(filePath);
 
   await Promise.allSettled(pendingAddrChecks);
   const poisoned = getPoisonedError();

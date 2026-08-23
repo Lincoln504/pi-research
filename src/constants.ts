@@ -202,6 +202,36 @@ export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 20;
 export const DEFAULT_EXCLUDED_TOOLS: readonly string[] = ['grep'];
 
 /**
+ * Volume signal for {@link isAnalysisFreeSynthesis}: prose below this, measured BEFORE
+ * the CITED LINKS section, is treated as a synthesis containing no analysis.
+ *
+ * Calibrated against 41 real reports from the run logs rather than guessed. The two
+ * broken ones — each a lone title line, delivered as a "complete" 6.8KB and 9.9KB
+ * document because the engine's own citation rebuild padded them out — measured 131 and
+ * 147 characters. The shortest LEGITIMATE report measured 1056.
+ *
+ * Set at 800 rather than hugging the failures, because the response to tripping it is
+ * ADDITIVE: the model's own text is kept and the researcher reports are appended below
+ * it. A false positive therefore costs some duplication, never a lost report, so the
+ * boundary is placed to catch marginal cases rather than to avoid them. It is also only
+ * one of two independent signals — a synthesis with no sentence-ending punctuation is
+ * caught at any length, so a long title would not slip through on volume alone.
+ */
+export const MIN_SYNTHESIS_PROSE_CHARS = 800;
+
+/** Flags a quick-mode report that contains no analysis, where there is no fallback to add. */
+export const QUICK_THIN_REPORT_NOTICE =
+  '_Note: this run did not produce a substantive write-up. The sources below were ' +
+  'retrieved and are cited accurately, but the summary above should not be treated as ' +
+  'a complete answer — consider re-running, or running at a deeper level._';
+
+/** Explains an additive fallback in the delivered report, so the reader is never misled. */
+export const SYNTHESIS_FALLBACK_NOTICE =
+  '_Note: the synthesis step did not produce a usable summary for this run, so the ' +
+  'individual researcher reports are included below in full. The sources cited at the ' +
+  'end of this document are unaffected._';
+
+/**
  * The complete set of excludable research tool names — the vocabulary
  * `--exclude-tools` / `excludeTools` / PI_RESEARCH_DISABLED_TOOLS accept.
  * Kept here (next to DEFAULT_EXCLUDED_TOOLS) so validation and the exclusion

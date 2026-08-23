@@ -17,8 +17,8 @@ import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
-import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
-import { getMaxScrapeBatches, resolveExcludedTools } from '../constants.ts';
+import { ensureAssistantResponse, parseCitations, isAnalysisFreeSynthesis, synthesisProseBody, stripReportPreamble } from '../utils/text-utils.ts';
+import { getMaxScrapeBatches, resolveExcludedTools, QUICK_THIN_REPORT_NOTICE } from '../constants.ts';
 import { resolveResearchModel, isPromptCachingActiveForModel } from '../core/llm/research-model-resolver.ts';
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
@@ -353,6 +353,44 @@ export class QuickResearchOrchestrator {
           // deliverable and goes straight to the user, so reading it back is what keeps the
           // digest out of the delivered document.
           result = synthesisService.getReport(this.options.researchId, 'quick') ?? result;
+
+          // Drop a leading line that announces the report instead of being part of it
+          // ("I have gathered sufficient material… I will now synthesize the full
+          // report."). The prompt forbids it and the instruction is not reliably obeyed;
+          // quick mode has nothing behind it to absorb the line, so it lands as the
+          // reader's first sentence. Removed BEFORE the analysis check below, so that
+          // check measures the report rather than the narration about it.
+          const { body: withoutPreamble, preamble } = stripReportPreamble(result);
+          if (preamble) {
+            logger.debug(`[QuickOrchestrator] Dropped a ${preamble.length}-char narration preamble from the report: ${preamble.slice(0, 120)}`);
+            metrics.increment('research_report_preamble_stripped_total', 1, { mode: 'quick' });
+            result = withoutPreamble;
+          }
+
+          // Same disguise as the deep path, and here it is the DELIVERABLE: a report with
+          // no analysis in it — a bare heading, a fragment — is about to have the rebuilt
+          // source list appended below, which pads it to kilobytes and makes a failed run
+          // read as a complete one. Quick mode has no second layer of researcher reports to
+          // fall back on, so the honest response is to say so in the report itself rather
+          // than hand back a heading over a link dump and call it a success.
+          //
+          // The VOLUME signal is deliberately disabled here (0). The 800-character floor was
+          // calibrated on deep reports; quick mode answers a single question and a correct
+          // reply can legitimately be one sentence, and there is no measured distribution of
+          // quick-report lengths to justify any floor. Since the only available response is
+          // a warning, a false positive would tell a user their correct answer is untrustworthy
+          // — strictly worse than missing a thin one. The structural signal is length-independent
+          // and carries no such risk: "Paris is the capital of France." ends a sentence and
+          // passes, a bare title does not and is flagged.
+          //
+          // Added to the body BEFORE ensureCitedLinks so the links land beneath it — the
+          // same ordering constraint the weak-grounding notice observes, because
+          // parseCitations absorbs any text trailing the last entry into its description.
+          if (isAnalysisFreeSynthesis(result, 0)) {
+            logger.warn(`[QuickOrchestrator] Report contains no complete sentence (${synthesisProseBody(result).length} char(s) of prose) — flagging it in the report`);
+            metrics.increment('research_synthesis_analysis_free_total', 1, { mode: 'quick' });
+            result = `${result.trim()}\n\n${QUICK_THIN_REPORT_NOTICE}`;
+          }
 
           // Ensure CITED LINKS section is accurate and consistent
           result = synthesisService.ensureCitedLinks(this.options.researchId, result);

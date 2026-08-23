@@ -425,6 +425,120 @@ describe('DeepResearchOrchestrator', () => {
     });
   });
 
+  it('keeps a title-only synthesis AND appends the researcher reports, with a notice', async () => {
+    // The exact production failure, twice observed: the synthesis LLM returned nothing
+    // but a title. `!result.trim()` passes on it, ensureCitedLinks then appended the
+    // rebuilt source list, and a 6.8KB document with zero sentences of analysis was
+    // reported as a completed run.
+    //
+    // The response is ADDITIVE on purpose. Nothing the model wrote is discarded, so a
+    // false positive can only ever cost duplication — which is what lets the detector's
+    // boundary sit far from real reports rather than hugging them.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
+      action: 'synthesize',
+      content:
+        'Survey of Small Open-Weight Vision-Language Models (0.5B–6B) Released in 2026 by Independent Labs, Startups, and Emerging AI Groups',
+    });
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockSynthesisService.getReportCount.mockReturnValue(2);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    const result = await orchestrator.run();
+
+    expect(mockSynthesisService.buildFallbackSynthesis).toHaveBeenCalled();
+    expect(result).toContain('Fallback Synthesis');
+    // The model's own text survives — this is the non-destructive property.
+    expect(result).toContain('Survey of Small Open-Weight');
+    // And the reader is told what happened rather than silently handed a substitution.
+    expect(result).toContain('did not produce a usable summary');
+  });
+
+  it('leaves a real synthesis untouched and never appends to it', async () => {
+    const realReport = 'Findings on the subject, with substantive analysis. '.repeat(22);
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: realReport });
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockSynthesisService.getReportCount.mockReturnValue(2);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    const result = await orchestrator.run();
+
+    expect(mockSynthesisService.buildFallbackSynthesis).not.toHaveBeenCalled();
+    expect(result).not.toContain('did not produce a usable summary');
+    expect(result).toContain('substantive analysis');
+  });
+
+  it('catches a long heading that has no sentence in it, which volume alone would pass', async () => {
+    // Second, independent signal: over the volume floor but not one sentence ends.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
+      action: 'synthesize',
+      content: 'Comprehensive Survey Of Every Known Approach '.repeat(30),
+    });
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockSynthesisService.getReportCount.mockReturnValue(2);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    const result = await orchestrator.run();
+
+    expect(mockSynthesisService.buildFallbackSynthesis).toHaveBeenCalled();
+    expect(result).toContain('Fallback Synthesis');
+  });
+
+  it('judges the report inside a raw JSON envelope, not the envelope', async () => {
+    // When upstream JSON parsing fails, finalReport.content arrives as the whole envelope
+    // string. It is long and full of punctuation, so both signals read it as a healthy
+    // report — and the unwrap that follows then replaced it with the title it was hiding.
+    // Unwrapping BEFORE the checks is what closes that bypass.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
+      action: 'synthesize',
+      content: JSON.stringify({
+        // Long enough that the envelope itself clears the volume floor, so the test
+        // fails against a build that checks before unwrapping rather than after.
+        reasoning: 'The researchers covered the question well across several rounds, and the sources agree. '.repeat(12),
+        action: 'synthesize',
+        content: 'Survey of Small Open-Weight Vision-Language Models Released in 2026',
+      }),
+    });
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockSynthesisService.getReportCount.mockReturnValue(2);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    const result = await orchestrator.run();
+
+    expect(mockSynthesisService.buildFallbackSynthesis).toHaveBeenCalled();
+    expect(result).toContain('did not produce a usable summary');
+    // The envelope's own fields never reach the reader.
+    expect(result).not.toContain('"reasoning"');
+  });
+
+  it('falls back when the JSON envelope wraps an empty report', async () => {
+    // Same bypass, worse outcome: the envelope is non-empty so the empty-check passed,
+    // and the unwrap then emptied `result` with nothing left to catch it — the run
+    // delivered a citation list with no document above it.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
+      action: 'synthesize',
+      content: JSON.stringify({ reasoning: 'Nothing further to add.', action: 'synthesize', content: '' }),
+    });
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockSynthesisService.getReportCount.mockReturnValue(2);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    const result = await orchestrator.run();
+
+    expect(mockSynthesisService.buildFallbackSynthesis).toHaveBeenCalled();
+    expect(result).toContain('Fallback Synthesis');
+  });
+
+  it('never turns a thin synthesis into a thrown error when there is nothing to add', async () => {
+    // With zero reports there is no better material, so a short answer is returned as-is
+    // rather than discarded — the check may only ever ADD.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Brief but real.' });
+    mockSynthesisService.hasReports.mockReturnValue(false);
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await expect(orchestrator.run()).resolves.toContain('Brief but real.');
+    expect(mockSynthesisService.buildFallbackSynthesis).not.toHaveBeenCalled();
+  });
+
   it('throws (not hollow success) when synthesis is empty and ZERO reports were collected', async () => {
     // Regression: the default depth-1 plan is a SINGLE researcher, and the
     // fast-stop threshold (MAX_FAILED_RESEARCHERS = 2) never trips for one

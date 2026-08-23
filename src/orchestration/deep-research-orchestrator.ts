@@ -9,7 +9,8 @@ import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons } from './session-state.ts';
-import { MAX_EXTRA_ROUNDS_WITH_STEERING, resolveExcludedTools } from '../constants.ts';
+import { MAX_EXTRA_ROUNDS_WITH_STEERING, MIN_SYNTHESIS_PROSE_CHARS, SYNTHESIS_FALLBACK_NOTICE, resolveExcludedTools } from '../constants.ts';
+import { synthesisProseBody, isAnalysisFreeSynthesis } from '../utils/text-utils.ts';
 import {
   getMaxRounds,
 } from '../core/planning-utils.ts';
@@ -594,6 +595,19 @@ export class DeepResearchOrchestrator {
 
       let result = finalReport.content || '';
 
+      // Unwrap FIRST, before anything judges the content. If the LLM returned the full
+      // JSON envelope as its response text and JSON parsing failed upstream,
+      // finalReport.content is the raw JSON string rather than the extracted markdown —
+      // and every check below would then be measuring the envelope instead of the report.
+      // An envelope wrapping an empty or title-only content read as a long, well-punctuated
+      // document, so neither guard fired and the unwrapped nothing went straight out.
+      try {
+        const parsed: unknown = JSON.parse(result);
+        if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>)['content'] === 'string') {
+          result = (parsed as Record<string, unknown>)['content'] as string;
+        }
+      } catch { /* result is not JSON — use as-is */ }
+
       if (!result.trim()) {
           if (hasReports) {
               // Content is empty but reports exist — build a fallback synthesis.
@@ -603,17 +617,29 @@ export class DeepResearchOrchestrator {
               // No reports, no recorded failures, and nothing to ship either.
               throw new Error('Research produced no report — no source material was collected.');
           }
+      } else if (hasReports && isAnalysisFreeSynthesis(result, MIN_SYNTHESIS_PROSE_CHARS)) {
+          // The synthesis LLM returned something, but nothing that constitutes analysis —
+          // twice in the run logs it was a lone title line. `!result.trim()` passes on
+          // that, and ensureCitedLinks then appends the rebuilt source list underneath, so
+          // a 131-character failure reached the user as a 6.8KB document with a heading,
+          // citations, and not one sentence between them, reported as a successful run.
+          //
+          // The response is deliberately ADDITIVE rather than a replacement. Whatever the
+          // model did write is kept, the researchers' own reports are appended below it,
+          // and a notice states plainly what happened. That matters more than the
+          // detector's precision: because a false positive can only ever ADD material,
+          // never discard it, the threshold can sit far away from real reports instead of
+          // hugging them out of fear of destroying a legitimate one. A missed detection
+          // costs a thin report; a false detection costs a few paragraphs of duplication.
+          const proseChars = synthesisProseBody(result).length;
+          logger.warn(`[DeepOrchestrator] LLM synthesis for ${researchId} carried no analysis (${proseChars} char(s) of prose, min ${MIN_SYNTHESIS_PROSE_CHARS}) — appending ${synthesisCheckService.getReportCount(researchId)} researcher report(s) below it`);
+          metrics.increment('research_synthesis_analysis_free_total', 1, { mode: 'deep' });
+          result = [
+              result.trim(),
+              SYNTHESIS_FALLBACK_NOTICE,
+              synthesisCheckService.buildFallbackSynthesis(researchId, this.currentRound),
+          ].join('\n\n');
       }
-
-      // Guard: if the LLM returned the full JSON envelope as its response text and JSON
-      // parsing failed upstream, finalReport.content may be the raw JSON string rather
-      // than the extracted markdown. Unwrap it here so docs never show the raw JSON.
-      try {
-        const parsed: unknown = JSON.parse(result);
-        if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>)['content'] === 'string') {
-          result = (parsed as Record<string, unknown>)['content'] as string;
-        }
-      } catch { /* result is not JSON — use as-is */ }
 
       // Final post-processing: Ensure CITED LINKS section is accurate and consistent
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
