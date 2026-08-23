@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **The GitHub Release job added in 1.6.0 is gone; tags remain the only release marker.** Cutting a Release per tag was not wanted — the tag plus `docs/CHANGELOG.md` is the intended record — so the job was removed and the one Release it created (v1.6.0) was deleted. The tag itself is untouched, and nothing about publishing changes: the release workflow is still CI-gate → tarball test → npm publish (`.github/workflows/release.yml`).
+
 ## [1.6.0] - 2026-08-22
 
 Driven by log forensics rather than by the test suite: every entry below was found
@@ -32,7 +38,6 @@ and recovered conditions reported as terminal failures.
 
 - **`bgutils-js` upgraded 3.2.0 → 4.0.3**, the YouTube PoToken stack's most upstream-brittle dependency and the one pin with no written rationale. v4 is a hard break: the barrel entry is gone (the package now exposes only `/botguard`, `/webpo` and `/utils` subpaths, so the previous bare import resolves to nothing), `BG.Challenge.create` became a free `getChallenge()` whose config drops `globalObj`/`identifier` and renames `fetch` to `fetchFunction`, and `BotGuardClient`'s `globalObj` became `globalObject`. All three renames fail silently rather than loudly — a wrong `globalObject` leaves the VM with no global to attach to and the minter factory returns a non-function — so each is now pinned by a test that asserts the field names v4 actually reads, and the whole flow was re-validated live: a real PoToken minted against Google's attestation endpoint and a real transcript fetched. Staying on v3 meant sitting on an unmaintained line for the one subsystem that breaks whenever YouTube changes BotGuard, with the failure mode being a silent empty transcript body (`src/youtube/potoken.ts`).
 - **`jsdom` deliberately stays at 29.1.1.** jsdom 30 narrows its supported Node range to `^22.22.2 || ^24.15.0 || >=26.0.0`, which excludes both part of this package's own `>=22.19.0` floor and Node 25 entirely; 29's `^20.19.0 || ^22.13.0 || >=24.0.0` covers the whole supported surface. Attempted, measured against the engine ranges, reverted — the pin now has the same recorded rationale as the others (`package.json`).
-- **Tags now produce GitHub Releases.** 44 tags existed and zero Releases, so each version's changelog entry was reachable only by reading `docs/CHANGELOG.md` in the tree. A new job extracts that version's section from the tag's own copy of the changelog and publishes it. It runs after `publish` and needs it, so a failed npm publish cannot announce a version nobody can install; it holds `contents: write` and nothing else — in particular no `id-token` — and installs nothing, so no dependency lifecycle script runs while that token is live. A version that reached npm with no changelog section fails the job rather than publishing an empty Release (`.github/workflows/release.yml`).
 
 ### Added
 
