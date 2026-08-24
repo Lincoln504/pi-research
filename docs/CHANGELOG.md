@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+An agent-skill run reported that every search had failed and concluded it had hit an
+unfixable environment problem. It was half right: the install really was broken, but
+nothing in the tool would say so, and one of the two causes was the tool's own doing.
+
+### Fixed
+
+- **A second install captured the skill links of the first.** `reconcileSkillInstalls()` runs on every engine-touching CLI invocation and resolves its source from whichever copy is being invoked. It re-pointed any owned link whose destination differed — including a perfectly healthy one — so an ordinary second install captured the user's global Claude/Codex/OpenClaw skill links merely by being run once. That is a documented setup, not an exotic one: `docs/SDK.md` instructs users to `npm install @lincoln504/pi-research` INTO their project so the SDK imports resolve, and anything that then ran the project-local CLI moved the global skill into the project. Moving, cleaning or deleting the project later killed the skill with an opaque `Cannot find module …/scripts/run.mjs`. Reconcile now repairs only a link that is dangling or whose target has been gutted — the case it was written for, which is what an update that relocates the package actually produces. Choosing between two live installs is what the explicit `skill install` is for. Two existing tests asserted the old behaviour and were unfaithful in the same way: each described "package relocated by an update" while leaving the old directory on disk, so the link never dangled (`src/skill-install/skill-installer.ts`).
+- **`skill status` called a dead skill installed.** Detection tested that the link existed, never that it resolved, so a dangling symlink reported as `installed (symlink)` — leaving the harness's later "Cannot find module" as the only signal anything was wrong. A link or copy whose target is missing, or which lacks `SKILL.md` / `scripts/run.mjs`, is now reported as BROKEN with the command that repairs it (`src/skill-install/skill-installer.ts`, `src/cli.ts`).
+- **`status` reported a build that cannot search as ready.** npm 12 turns dependency install scripts off by default. `camoufox-js` needs `better-sqlite3` to launch a browser at all, and its binding is produced by exactly such a script — so the module imports fine and throws only at first use. `ready` was derived from credentials alone and said yes; `isBrowserAvailable()` only stats the camoufox binary and never sees it. Measured across every native dependency this package ships: better-sqlite3 is the ONLY one that fails that way — onnxruntime-node carries its binding inside its own tarball, and lancedb, impit and html-to-markdown resolve prebuilt platform packages, which is why the knowledge store kept answering while search was dead. `status` now opens an in-memory database to settle it, gates `ready` on the result, and prints the remedy. The old comment claiming "nothing else fails" was wrong and is corrected (`src/infrastructure/browser/config.ts`, `src/cli.ts`).
+- **A broken install was reported as a network outage.** With no binding, every browser worker dies identically and the run said browser workers may be unavailable, DuckDuckGo unreachable, or the system under extreme load. All three were false and none is actionable — a calling agent read it and gave up rather than reinstalling. A total search failure whose workers all died on a missing native module now says it is an incomplete install and names the flag that fixes it (`src/infrastructure/browser/browser-error-utils.ts`, `src/web-research/browser-search.ts`).
+
+### Changed
+
+- **README documents the npm 12 install flag** on the install commands themselves, and drops a claim that a run flags unreachable pages. Turnstile is named because it is the challenge readers actually hit, and a handful of inflated verbs are now plain ones.
+
+### Verified
+
+- 2938 unit tests over 233 files, lint, type-check over source and tests, dependency-cruiser.
+- The failure mode was reproduced and the remedy measured: a scripts-blocked install of 1.6.1 fails `better-sqlite3` at first use and passes every other native dependency. A live agent-skill run through the installed link completes clean with zero binding errors.
+
 ## [1.6.1] - 2026-08-23
 
 A report that contained no analysis was being delivered as a completed run, because

@@ -45,7 +45,7 @@ import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFil
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { buildModelRegistry, safeGetAvailable } from './core/llm/model-registry-factory.ts';
 import { RESEARCH_TOOL_NAMES } from './constants.ts';
-import { isBrowserAvailable } from './infrastructure/browser/config.ts';
+import { isBrowserAvailable, probeBrowserNativeDeps } from './infrastructure/browser/config.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -796,19 +796,25 @@ async function cmdStatus(json?: boolean): Promise<number> {
   // (scripts/setup.cjs), which npm 11.19+ BLOCKS BY DEFAULT — it now warns
   // "packages have install scripts not yet covered by allowScripts" and carries
   // on, so the browser is simply absent on an otherwise successful install.
-  // Every other native artifact survives that (onnxruntime, sharp, esbuild and
-  // webgpu all ship prebuilt platform packages), which is exactly what makes
-  // this one worth reporting: nothing else fails, and without this the first
-  // symptom is a scrape falling back mid-run. A missing browser degrades
-  // capability rather than breaking the tool — the fetch path still serves most
-  // pages — so it is reported alongside `ready` rather than folded into it.
-  // isBrowserAvailable() is a resolve + existsSync; it never launches anything.
+  // A missing browser DEGRADES capability rather than breaking the tool — the fetch
+  // path still serves most pages — so it is reported alongside `ready` rather than
+  // folded into it. isBrowserAvailable() is a resolve + existsSync; it never launches
+  // anything.
+  //
+  // The browser's NATIVE DEPENDENCIES are a separate and harsher question, and were
+  // previously assumed away here with "nothing else fails". Measured: better-sqlite3,
+  // which camoufox-js needs to launch at all, is built by a dependency install script
+  // and does NOT survive a scripts-blocked install. When it is missing every browser
+  // worker dies and SEARCH IS DEAD — not degraded — while the knowledge store keeps
+  // working because onnxruntime and lancedb both ship their binaries. That is not a
+  // capability note, so it gates `ready`: a build that cannot search cannot research.
   const browserInstalled = isBrowserAvailable();
+  const nativeDeps = probeBrowserNativeDeps();
   const summary = {
     package: '@lincoln504/pi-research',
     version: PKG_VERSION,
     cli: `node ${process.argv[1]}`,
-    ready: !det.problem,
+    ready: !det.problem && nativeDeps.ok,
     credentials: {
       source: det.source,
       apiKeyConfigured: det.apiKeyConfigured,
@@ -819,6 +825,11 @@ async function cmdStatus(json?: boolean): Promise<number> {
     },
     browser: {
       installed: browserInstalled,
+      nativeDepsOk: nativeDeps.ok,
+      nativeDepsError: nativeDeps.ok ? null : nativeDeps.error,
+      nativeDepsFix: nativeDeps.ok
+        ? null
+        : 'Reinstall allowing dependency install scripts: npm install -g @lincoln504/pi-research --allow-scripts (npm 12 turns them off by default).',
       // Same remedy the health check prints, so both surfaces name one command.
       fix: browserInstalled ? null : 'npx camoufox-js fetch',
       note: browserInstalled
@@ -837,7 +848,19 @@ async function cmdStatus(json?: boolean): Promise<number> {
 
   toStdout(`pi-research ${PKG_VERSION}\n`);
   toStdout(`ready: ${summary.ready ? 'yes' : 'no'}\n\n`);
-  toStdout(configBlock(det, summary.ready ? undefined : '— fix the problem above, then re-run.') + '\n');
+  // The hint points at the CONFIG block, so it belongs to a credential problem only.
+  // `ready` can now also be false because the browser's native deps are missing, and
+  // that is reported below with its own remedy — sending the reader back to a config
+  // block that has nothing wrong with it would be its own small lie.
+  toStdout(configBlock(det, det.problem ? '— fix the problem above, then re-run.' : undefined) + '\n');
+  if (!summary.browser.nativeDepsOk) {
+    // Printed BEFORE the browser-download note: a missing binary is a degradation the
+    // fetch path covers, while a missing binding means no search runs at all. The more
+    // severe problem has to be the one the reader sees first.
+    toStdout(`\nbrowser engine: BROKEN — native dependencies were never built, so no search can run.\n`);
+    toStdout(`  ${summary.browser.nativeDepsFix}\n`);
+    toStdout(`  Underlying error: ${summary.browser.nativeDepsError}\n`);
+  }
   if (!summary.browser.installed) {
     toStdout(`\nstealth browser: NOT INSTALLED — run: ${summary.browser.fix}\n`);
     toStdout(`  ${summary.browser.note}\n`);
@@ -940,16 +963,21 @@ async function cmdSkill(s: NonNullable<ParsedArgs['skill']>): Promise<number> {
     if (s.json) {
       toStdout(pretty({
         command: 'skill', action: 'status',
-        agents: agents.map((d) => ({ id: d.id, label: d.label, present: d.present, installed: d.installed, path: d.absSkillPath })),
+        agents: agents.map((d) => ({ id: d.id, label: d.label, present: d.present, installed: d.installed, broken: d.broken, path: d.absSkillPath })),
       }));
       return EXIT.OK;
     }
     toStdout(`pi-research agent skill — install status\n\n`);
     for (const d of agents) {
+      // A broken install must not read as a working one. It said "installed (symlink)"
+      // for a link whose target had been deleted, so the only sign anything was wrong
+      // came later, from the harness, as "Cannot find module …/scripts/run.mjs".
+      const kind = d.installed === 'owned-copy' ? 'copy' : 'symlink';
       const state = !d.present ? 'agent not detected'
         : d.installed === 'none' ? 'not installed'
         : d.installed === 'foreign' ? 'a different skill occupies this slot — left untouched'
-        : `installed (${d.installed === 'owned-copy' ? 'copy' : 'symlink'})`;
+        : d.broken ? `BROKEN ${kind} — target is missing or incomplete; re-run \`${BINARY_NAME} skill install\``
+        : `installed (${kind})`;
       const loc = d.installed === 'owned-symlink' || d.installed === 'owned-copy' ? `  → ${d.absSkillPath}` : '';
       toStdout(`  ${d.label.padEnd(18)} ${state}${loc}\n`);
     }

@@ -105,3 +105,49 @@ describe('reconcileSkillInstalls — a second install must not capture the link'
     expect(fs.readFileSync(path.join(target, 'SKILL.md'), 'utf-8')).toContain('RELOCATED');
   });
 });
+
+describe('a hollow install is reported and repaired, not called healthy', () => {
+  it('detectHarnesses flags an owned link whose target is gone', async () => {
+    const { detectHarnesses } = await import('../../../src/skill-install/skill-installer.ts');
+    const source = makeInstall(globalBase, '1.6.1', 'GLOBAL');
+    installSkill(['claude'], { home, skillSourceDir: source });
+
+    let claude = detectHarnesses({ home }).find(d => d.id === 'claude')!;
+    expect(claude.installed).toBe('owned-symlink');
+    expect(claude.broken).toBe(false);
+
+    fs.rmSync(path.join(globalBase, 'pi-research'), { recursive: true, force: true });
+
+    claude = detectHarnesses({ home }).find(d => d.id === 'claude')!;
+    // Still ours, but dead. Reporting this as "installed" is what left the failure to
+    // surface later as an opaque "Cannot find module …/scripts/run.mjs".
+    expect(claude.installed).toBe('owned-symlink');
+    expect(claude.broken).toBe(true);
+  });
+
+  it('detectHarnesses flags a target that exists but has been gutted', async () => {
+    const { detectHarnesses } = await import('../../../src/skill-install/skill-installer.ts');
+    const source = makeInstall(globalBase, '1.6.1', 'GLOBAL');
+    installSkill(['claude'], { home, skillSourceDir: source });
+
+    // Partial delete / interrupted install: the directory survives, the launcher does not.
+    fs.rmSync(path.join(source, 'scripts', 'run.mjs'), { force: true });
+
+    const claude = detectHarnesses({ home }).find(d => d.id === 'claude')!;
+    expect(claude.broken).toBe(true);
+  });
+
+  it('reconcile repairs a gutted target instead of leaving it hollow', () => {
+    const source = makeInstall(globalBase, '1.6.1', 'GLOBAL');
+    installSkill(['claude'], { home, skillSourceDir: source });
+    const target = path.join(home, '.claude', 'skills', 'pi-research');
+
+    fs.rmSync(path.join(source, 'scripts', 'run.mjs'), { force: true });
+
+    const fresh = makeInstall(projectBase, '1.6.1', 'REPAIRED');
+    const result = reconcileSkillInstalls({ home, skillSourceDir: fresh });
+
+    expect(result.repointed).toEqual([target]);
+    expect(fs.existsSync(path.join(target, 'scripts', 'run.mjs'))).toBe(true);
+  });
+});

@@ -325,6 +325,14 @@ export interface DetectedHarness extends HarnessDef {
   absSkillPath: string;
   /** Current install state of THIS skill at that path. */
   installed: 'none' | 'owned-symlink' | 'owned-copy' | 'foreign';
+  /**
+   * Ours, but not usable: the symlink dangles, or the directory it resolves to is
+   * missing SKILL.md / scripts/run.mjs. Reported because the alternative is what
+   * actually happened — `skill status` said "installed (symlink)" for a link whose
+   * target had been deleted, so the only signal the user got was the harness failing
+   * later with "Cannot find module …/scripts/run.mjs".
+   */
+  broken: boolean;
 }
 
 export function detectHarnesses(opts?: { home?: string }): DetectedHarness[] {
@@ -342,8 +350,26 @@ export function detectHarnesses(opts?: { home?: string }): DetectedHarness[] {
         else installed = 'foreign';
       }
     } catch { /* none */ }
-    return { ...h, present, absSkillsDir, absSkillPath, installed };
+    const broken = (installed === 'owned-symlink' || installed === 'owned-copy')
+      && !isUsableSkillDir(absSkillPath);
+    return { ...h, present, absSkillsDir, absSkillPath, installed, broken };
   });
+}
+
+/**
+ * The two files a skill directory is useless without: the manifest a harness reads to
+ * discover the skill, and the launcher it executes. A link or copy can exist while the
+ * thing it points at does not — the target was deleted, moved, or partially removed —
+ * and the harness then fails at invocation time with "Cannot find module …/run.mjs",
+ * which says nothing about the install being the problem. Checked rather than assumed
+ * so both `skill status` and the startup reconcile can tell a live install from a
+ * hollow one.
+ */
+function isUsableSkillDir(p: string): boolean {
+  try {
+    return fs.existsSync(path.join(p, 'SKILL.md'))
+        && fs.existsSync(path.join(p, 'scripts', 'run.mjs'));
+  } catch { return false; }
 }
 
 function isSymlinkPresent(p: string): boolean {
@@ -695,7 +721,11 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
     // Only ever touch links we own; a foreign link at this path stays + tracked.
     if (!isOwnedSymlink(e.path)) { keep.push(e); continue; }
 
-    const targetLive = fs.existsSync(e.path); // existsSync follows the link
+    // A target that resolves but has been gutted (partial delete, interrupted
+    // install, pruned tree) is as dead as one that is gone — and it fails later,
+    // at invocation, with an error that never mentions the install. Treat both as
+    // needing repair.
+    const targetLive = fs.existsSync(e.path) && isUsableSkillDir(e.path); // existsSync follows the link
 
     // A link pointing at a DIFFERENT but perfectly live pi-research install is left
     // alone. Re-pointing it was a silent hijack: reconcile runs on every

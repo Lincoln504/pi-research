@@ -12,6 +12,7 @@ import { platform, homedir } from 'node:os';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
 import { getLogger } from '../../logger.ts';
+import { createRequire } from 'node:module';
 
 // ============================================================================
 // Binary Cache Management
@@ -310,6 +311,48 @@ export function resolveHeadlessMode(): boolean | 'virtual' {
  * 
  * Single point of control: all existing skipTests() checks use this function.
  */
+/**
+ * Whether the browser stack's NATIVE dependencies can actually load.
+ *
+ * `isBrowserAvailable()` answers a different question — is the camoufox binary on
+ * disk — and a browser can be fully downloaded and still unable to launch. camoufox-js
+ * requires `better-sqlite3`, whose binding is produced by a dependency INSTALL SCRIPT,
+ * and npm 12 turns those off by default. The module then imports fine and throws only
+ * when first used, so nothing notices until every browser worker dies mid-run with
+ * "Could not locate the bindings file" and the run reports a network problem it does
+ * not have.
+ *
+ * Measured, not assumed: of this package's native dependencies, only better-sqlite3
+ * fails a scripts-blocked install. onnxruntime-node ships its binding inside its own
+ * tarball, and lancedb, impit and html-to-markdown all resolve prebuilt platform
+ * packages, so the knowledge store keeps working while search is dead — exactly the
+ * split seen in the field.
+ *
+ * Opening an in-memory database is the only check that settles it: resolving the
+ * module or stat-ing a path does not, because the failure is in the binding lookup at
+ * first use. It costs a few milliseconds and is confined to diagnostics.
+ */
+export function probeBrowserNativeDeps(
+    /** Injected for tests. Production callers pass nothing. */
+    load: () => void = defaultNativeDepLoad,
+): { ok: true } | { ok: false; error: string } {
+    try {
+        load();
+        return { ok: true };
+    } catch (err) {
+        // First line only: the bindings error enumerates every path it tried, which is
+        // pages of noise in a status block. The rest is in the log if it is wanted.
+        return { ok: false, error: err instanceof Error ? err.message.split('\n')[0]!.trim() : String(err) };
+    }
+}
+
+function defaultNativeDepLoad(): void {
+    const require = createRequire(import.meta.url);
+    const Database = require('better-sqlite3') as new (p: string) => { close(): void };
+    const db = new Database(':memory:');
+    db.close();
+}
+
 export function isBrowserAvailable(): boolean {
     if (isFullMockMode()) return false;
     try {
