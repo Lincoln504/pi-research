@@ -696,11 +696,18 @@ export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResu
     if (!isOwnedSymlink(e.path)) { keep.push(e); continue; }
 
     const targetLive = fs.existsSync(e.path); // existsSync follows the link
-    let dest: string | null = null;
-    try { dest = path.resolve(path.dirname(e.path), fs.readlinkSync(e.path)); } catch { /* unreadable */ }
 
-    const stale = source !== null && dest !== null && dest !== path.resolve(source);
-    if (!targetLive || stale) {
+    // A link pointing at a DIFFERENT but perfectly live pi-research install is left
+    // alone. Re-pointing it was a silent hijack: reconcile runs on every
+    // engine-touching CLI invocation, from whichever copy of the package is being
+    // invoked, so any second install captured the user's skill links just by being
+    // run once. docs/SDK.md tells users to `npm install @lincoln504/pi-research` INTO
+    // their project, so the second install is a documented, ordinary setup — and when
+    // that project was later moved or cleaned, the global skill died with an opaque
+    // "Cannot find module .../run.mjs". Self-healing only needs the dangling case
+    // (`!targetLive`), which is what an update that relocates the package produces;
+    // choosing between two live installs is what the explicit `skill install` is for.
+    if (!targetLive) {
       if (source !== null) {
         // Re-point to the current package source (handles update/reinstall).
         try {

@@ -87,11 +87,17 @@ describe('reconcileSkillInstalls — symlink re-point copy-fallback staging swee
     fs.mkdirSync(leftover, { recursive: true });
     fs.writeFileSync(path.join(leftover, 'partial-junk'), 'incomplete copy from a killed process');
 
-    // Package relocated (e.g. by an update) — the link is now stale.
+    // Package relocated (e.g. by an update) — the link is now DANGLING. The old
+    // location has to actually go: reconcile re-points a link that points at
+    // nothing, and deliberately leaves a link alone while its target is still
+    // live, because any second live install running the CLI once would otherwise
+    // capture the user's skill links out from under them.
     const movedBase = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-skill-moved-'));
     const movedSource = path.join(movedBase, 'pi-research', 'agent-skill', 'pi-research');
     try {
       writeSource(movedSource, '1.1.0', 'RELOCATED');
+      fs.rmSync(path.join(sourceDir, 'pi-research'), { recursive: true, force: true });
+      expect(fs.existsSync(target)).toBe(false); // the link now dangles
 
       // Force the re-point down the copy-fallback branch.
       symlinkFailure.active = true;

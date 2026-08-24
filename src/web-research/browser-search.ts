@@ -6,7 +6,7 @@
 
 import { runWorkerSearch } from '../infrastructure/browser/task-execution-service.ts';
 import { getMaxWorkers, COLD_START_ALLOWANCE_MS } from '../infrastructure/browser/config.ts';
-import { isTaskTimeoutError } from '../infrastructure/browser/browser-error-utils.ts';
+import { isTaskTimeoutError, isNativeBindingError } from '../infrastructure/browser/browser-error-utils.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { normalizeUrl } from '../utils/url-utils.ts';
@@ -319,6 +319,24 @@ export async function performSearch(
             reason = `all ${filteredQueries.length} queries encountered worker errors`;
         } else if (timeoutCount + errorCount === filteredQueries.length) {
             reason = `${timeoutCount} queries timed out and ${errorCount} queries failed`;
+        }
+
+        // A missing native addon is a BROKEN INSTALL, and the generic advice below
+        // actively misleads: it sends the reader to check their network and their
+        // machine load when neither is involved and neither can be acted on. npm 12
+        // defaults `allowScripts` to off, so a plain install no longer builds
+        // camoufox-js's better-sqlite3 dependency and every browser worker dies
+        // identically. Say that instead, and say what fixes it.
+        if (isNativeBindingError(sampleWorkerError)) {
+            metrics.increment('browser_search_total_failures_total', 1, { cause: 'native_binding' });
+            throw new Error(
+                `Search completely failed: ${reason}, all with a missing native module. ` +
+                `This is an incomplete install, not a network problem: the browser engine's ` +
+                `native dependencies were never built. npm 12 does not run dependency install ` +
+                `scripts by default — reinstall allowing them (npm install @lincoln504/pi-research ` +
+                `--allow-scripts, or npm approve-scripts --allow-scripts-pending), then retry.` +
+                (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
+            );
         }
 
         throw new Error(

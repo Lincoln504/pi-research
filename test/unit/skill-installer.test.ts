@@ -356,9 +356,18 @@ describe('reconcileSkillInstalls (startup self-heal)', () => {
     return dest;
   }
 
-  it('re-points an owned symlink left stale by an update to the current source', () => {
+  it('re-points an owned symlink left dangling by an update to the current source', () => {
     mkHarnessBase('claude');
-    const dest = manualInstall('claude', fakeOldSource());
+    const oldSource = fakeOldSource();
+    const dest = manualInstall('claude', oldSource);
+    // An update that relocates the package takes the OLD PATH WITH IT — that is what
+    // makes the link stale, and it is the only case reconcile re-points. A link whose
+    // target is still live is deliberately left alone: reconcile runs from whichever
+    // install invoked the CLI, so re-pointing a healthy link let any second install
+    // silently capture the user's skill links (see reconcile-does-not-hijack.test.ts).
+    fs.rmSync(path.join(HOME, 'oldpkg'), { recursive: true, force: true });
+    expect(fs.existsSync(dest)).toBe(false); // dangling
+
     const r = reconcileSkillInstalls(opts()); // current source = real bundled SKILL_SRC
     expect(r.repointed).toContain(dest);
     expect(fs.realpathSync(dest)).toBe(fs.realpathSync(SKILL_SRC));

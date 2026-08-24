@@ -124,6 +124,27 @@ export function isPoolShutdownError(error: unknown): boolean {
     );
 }
 
+/**
+ * A native addon that is missing or unloadable, i.e. a BROKEN INSTALL rather than
+ * anything about the page, the network or the load on the machine.
+ *
+ * The case that produced this: npm 12 turns `allowScripts` OFF by default, so a
+ * plain `npm install` no longer runs dependency lifecycle scripts — including the
+ * one that fetches/builds `better-sqlite3`, which `camoufox-js` needs to launch a
+ * browser at all. Every browser worker then dies with "Could not locate the
+ * bindings file", every query fails, and the run reported that DuckDuckGo might be
+ * unreachable or the machine under extreme load. Neither was true, and the advice
+ * that follows from each is useless. An install fault has to say so.
+ */
+const NATIVE_BINDING_FAILURE =
+  /Could not locate the bindings file|ERR_DLOPEN_FAILED|NODE_MODULE_VERSION|was compiled against a different Node\.js version|invalid ELF header|Cannot find module '[^']*\.node'/;
+
+/** True when the failure is a missing/unloadable native addon — a broken install. */
+export function isNativeBindingError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return NATIVE_BINDING_FAILURE.test(msg);
+}
+
 /** Playwright navigation failures whose cause is at the remote end — see below. */
 const BENIGN_NAVIGATION_FAILURE =
   /page\.goto: (?:Timeout \d+ *ms exceeded|net::|NS_ERROR_|SEC_ERROR_|MOZILLA_PKIX_ERROR_)/;

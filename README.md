@@ -44,6 +44,8 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
+On npm 12 or newer, add `--allow-scripts` to either install above. npm 12 stopped running dependency install scripts by default, and the stealth browser's native dependencies are built by one — without it searches fail with a missing-module error rather than a warning at install time.
+
 In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install downloads the stealth browser engine, which takes a few minutes.
 
 ### How it works
