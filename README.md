@@ -63,7 +63,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - Keeping a persistent and searchable knowledge store of findings, scoped globally or per project.
 - Building agent systems that find and read web content, or populating a dataset of web sources.
 
-### Why pi-research
+### Why
 
 - **No quota and no monthly fee.** Most AI search providers cap free searches and then charge, with results served from their index on their servers. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
 - **The index is local.** Every finding can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs, so repeat questions get faster and cheaper answers.
