@@ -67,7 +67,6 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 - **No quota and no monthly fee.** Most AI search providers cap free searches and then charge, with results served from their index on their servers. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
 - **The index is local.** Every finding can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs, so repeat questions get faster and cheaper answers.
-- **Cited reports rather than raw dumps.** Each run returns one sourced Markdown report instead of raw web content pasted into the conversation. Context efficient and easy to verify.
 - **Read-only by design.** The research agent cannot run shell commands or write, edit, or delete anything — the right shape for an agent whose whole job is reading untrusted web pages. Prompt injection picked up mid-run has nothing to act on.
 - **Search a little or a lot.** Depth levels range from a quick pass to a large-scale investigation.
 
