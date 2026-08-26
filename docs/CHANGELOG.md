@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-08-25
+
+A unit test that had already been granted CI-jitter headroom twice went red a third
+time — and this time the timing signature (rejection 10008ms into a 10000ms window)
+identified a real race in the lock acquire loop rather than a slow runner.
+
+### Fixed
+
+- **A waiter gave up on a torn lock at the exact moment its reclaim window opened.** The acquire loop's reclaim decision measures the lock's age at `fs.stat` time, but the stall-check exemption that keeps a waiter alive until that reclaim ("never give up on a lock we are about to be allowed to take") compared a fresh `Date.now()` against the window. For the few milliseconds between the stat and the stall check the two clocks could disagree, and a retry tick landing astride the window boundary satisfied neither: not yet reclaimable by its stat, no longer awaited by the clock. Since a torn, pid-less lock never shows progress, the long-expired stall bound then fired, and a wait that had correctly outlasted it was abandoned right as the recovery became permitted — in production, a knowledge-store init failing at the moment it could have recovered. Both judgments now derive from the same observation, so every tick that can read the lock either reclaims it or keeps waiting; the try-take exclusion and the absolute ceiling are unchanged (`src/infrastructure/file-lock-service.ts`).
+- **The test's forensic comment blamed scheduler jitter for all three CI failures.** True for the first two (which failed at the stall bound); wrong for this one (which failed at the window boundary). The record now distinguishes the two mechanisms (`test/unit/infrastructure/file-lock-progress-aware-wait.test.ts`).
+
+### Verified
+
+- 2938 unit tests over 233 files, lint, type-check, and the full CI matrix green on the fix commit — including the ubuntu-latest job that caught the failure.
+
 ## [1.6.2] - 2026-08-24
 
 An agent-skill run reported that every search had failed and concluded it had hit an
