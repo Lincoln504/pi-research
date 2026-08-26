@@ -50,7 +50,7 @@ On npm 12 or newer, allow the one install script search depends on before instal
 npm config set allow-scripts=better-sqlite3 --location=user
 ```
 
-npm 12 stopped running dependency install scripts by default, and the stealth browser's SQLite module is built by one. The install still succeeds — npm prints an install-scripts warning and moves on — but every search then fails with a missing-module error. The config above covers both installs; for the standalone install alone, appending `--allow-scripts=better-sqlite3` to the `npm install -g` line works too. The bare flag with no value allows nothing, and `pi install` runs a project-scoped npm install, which accepts only the config form.
+npm 12 stopped running dependency install scripts by default, and the stealth browser's SQLite module is built by one. Skipped, the install still succeeds with a warning — but every search fails with a missing-module error. The config covers both installs; for the standalone install, `--allow-scripts=better-sqlite3` on the `npm install -g` line also works. The bare flag allows nothing, and `pi install` accepts only the config form.
 
 In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install downloads the stealth browser engine, which takes a few minutes.
 

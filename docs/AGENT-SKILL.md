@@ -21,6 +21,10 @@ npm install -g @lincoln504/pi-research   # the engine (puts `pi-research` on PAT
 pi-research skill install                # link the skill into every detected agent
 ```
 
+On npm 12 or newer, first run `npm config set allow-scripts=better-sqlite3 --location=user`:
+npm 12 blocks the install script that builds the stealth browser's SQLite module, and
+without it every search fails with a missing-module error (see the [README](../README.md#install)).
+
 `skill install` targets only agents already set up under `$HOME`, never overwrites a
 different skill in the slot, and records what it created so `pi-research skill uninstall`
 removes exactly that. Run `pi-research skill status` to see where it is installed.

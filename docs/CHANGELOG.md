@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-08-26
+
+The npm 12 install remedy shipped in 1.6.2 was put through real installs in
+disposable npm 12.0.2 containers and found not to work: the bare `--allow-scripts`
+flag every surface recommended is accepted by npm and allows nothing.
+
+### Fixed
+
+- **`status` and the total-search-failure error printed a repair command that repairs nothing.** Measured per npm version against a scripted tarball: npm ≤11.15 runs dependency install scripts silently, 11.16–11.19 warn but still run them, and npm 12 blocks them — so the 1.6.2 claim that "npm 11.19+ blocks" was wrong on version, and the remedy was worse than wrong on form: `--allow-scripts` is a comma-separated package-name list, so the bare flag is accepted and allows nothing — the install stays broken. The flag is also global-install-only: a project-scoped install (the SDK path, and what `pi install` runs underneath) rejects it with `EALLOWSCRIPTS`. And after a blocked install, approving and rerunning `npm install` does not rebuild the already-extracted package. Both surfaces now print commands measured to work — `--allow-scripts=better-sqlite3` for a global install; `npm approve-scripts better-sqlite3` then `npm rebuild better-sqlite3` for a project-scoped one (`src/cli.ts`, `src/web-research/browser-search.ts`).
+
+### Changed
+
+- **Install docs lead with the one form measured to cover every install path** — `npm config set allow-scripts=better-sqlite3 --location=user`, verified against a fresh `pi install` and a project install — and the npm 12 note now appears on every surface that shows an install command (README, SDK, agent-skill docs, and the shipped skill README) rather than the README alone, with the wording tightened.
+
+### Verified
+
+- Each printed command form measured on real installs in npm 12.0.2 containers: the global flag form builds the binding, the user-level config form covers global, project, and `pi install`, and the approve + rebuild flow repairs an already-blocked install.
+- 2938 unit tests over 233 files, lint, and type-check green.
+
 ## [1.6.3] - 2026-08-25
 
 A unit test that had already been granted CI-jitter headroom twice went red a third
