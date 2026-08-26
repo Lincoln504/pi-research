@@ -18,10 +18,26 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs';
 
 process.env['NODE_ENV'] = 'test';
 process.env['PI_RESEARCH_DEBUG'] = 'false';
 process.env['PI_RESEARCH_FORCE_READY'] = 'true';
+
+// Isolate the unit suite from the developer's REAL ~/.pi/research/config.env.
+// getConfig() layers that file under process.env, so without this redirect unit-test
+// behavior silently varies by machine: on a dev box carrying e.g.
+// PI_RESEARCH_LLM_TIMEOUT_MS=900000, getLlmTimeoutMs() answered 900000 in tests while
+// CI (no config.env) saw the 300000 default — a budget-sensitive test passed on CI and
+// failed locally, purely from the host's personal config (found while fixing issue #9;
+// same isolation philosophy as the log-path redirect below). Redirecting HOME moves
+// config.env, state-dir, and knowledge-db discovery onto a throwaway directory.
+// USERPROFILE is set too: os.homedir() reads HOME on POSIX but USERPROFILE on Windows,
+// and the unit matrix runs on all three OSes. CI is unaffected — its runners have no
+// ~/.pi/research to begin with, which is exactly the environment this creates.
+const unitHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-unit-home-'));
+process.env['HOME'] = unitHome;
+process.env['USERPROFILE'] = unitHome;
 
 // Never auto-fetch the camoufox browser during unit tests. Unit tests mock the
 // browser layer (so getCamoufoxBinaryPath() points at a non-existent temp dir),

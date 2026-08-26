@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] - 2026-08-26
+
+Issue #9 reported deep-research runs stalling for minutes inside planning salvage
+and then silently degrading to a single researcher. Three of its four claims were
+real; the fourth (zero prompt-cache reads) turned out to be the provider's route
+reporting no cached tokens — with a metric doc that wrongly implied otherwise.
+
+### Fixed
+
+- **Agentic JSON salvage could hang for two full LLM timeouts before the caller's fallback ran.** Each of `repairJsonWithLlm`'s two attempts was granted the entire `PI_RESEARCH_LLM_TIMEOUT_MS` budget (5 min default), and a timed-out attempt was still followed by a second — with a strictly larger prompt (validation errors are appended) and the same full budget, a near-certain repeat of the timeout observed in the wild as salvage hanging until manual abort. The whole salvage pass now shares ONE LLM-timeout budget: each attempt gets the remaining time, an attempt that cannot finish inside what remains (floor 30s — a repair call must re-upload the malformed payload and re-emit the full JSON) is skipped with a log line instead of launched into a guaranteed timeout, and a timed-out attempt is never retried, because unlike a validation failure the retry cannot plausibly succeed — it only delays the caller's fallback (`src/core/llm/agentic-repair.ts`).
+- **A malformed plan JSON was diagnosed with its best evidence discarded.** Both planning call sites caught the parse error and logged a generic "JSON malformed" warning — dropping the thrown parse/validation detail — and nothing anywhere recorded the response's `stopReason`, so a plan truncated at the output-token cap (`stopReason 'length'`, the likeliest cause with a verbose model) was indistinguishable in the log from schema-incompatible output, which is exactly the ambiguity issue #9 hit ("no clear truncation/max-tokens reason captured"). The parse error, `stopReason`, and a tail preview of the response (truncation leaves the JSON dangling at the END — a head preview cannot show it) are now logged at both sites, and every planning/lead call warns when it hit its output-token cap (`src/core/planning-service.ts`).
+- **A failed planning pass silently degraded a deep query to one researcher.** `buildFallbackCoordinatorPlan` returns a structurally ordinary plan, so when the model's plan JSON was unusable the TUI showed the fallback as a normal 'ready' coordinator and SDK consumers saw an ordinary `planning_success` — no surface said the user's deep-research request had been quietly downgraded to a single researcher with boilerplate queries. Fallback plans now carry `fallback: true` (never requested from the model; optional in the schema so persisted plans still validate), the TUI coordinator line reads 'fallback — planning failed', and the marker rides the plan object into every `onPlanningSuccess` consumer (`src/core/interfaces/research-plan-types.ts`, `src/core/planning-utils.ts`, `src/observers/research-observer-impl.ts`).
+- **Unit tests read the developer's real `~/.pi/research/config.env`.** `getConfig()` layers that file under process env, so unit-test behavior silently varied by machine: on a dev box carrying `PI_RESEARCH_LLM_TIMEOUT_MS=900000`, `getLlmTimeoutMs()` answered 900000 in tests while CI (no config.env) saw the 300000 default — found when a budget-sensitive salvage test passed on CI and failed locally. The unit setup now redirects `HOME`/`USERPROFILE` onto a throwaway directory (os.homedir() reads HOME on POSIX, USERPROFILE on Windows, and the unit matrix runs all three OSes), isolating config.env, the state dir, and knowledge-db discovery the same way the log path was already isolated (`test/setup/unit-env.ts`).
+
+### Changed
+
+- **The cache-metrics doc no longer implies "counter absent" distinguishes an uncaching provider.** For the openai-completions family (including OpenRouter), pi-ai's usage normalization always emits `cacheRead`/`cacheWrite`, defaulting missing upstream fields to 0 — so a route that does no prompt caching shows `llm_cache_read_tokens_total` stuck at 0, not omitted, and the 0-vs-absent distinction only holds for APIs that omit the fields outright. Issue #9's "no prompt-cache benefit during planning" is this: the model's OpenRouter route reports no cached tokens, while the run's prompts were already cache-shaped (round-invariant system prompts, run-varying content appended at the tail, session-affinity id forwarded). The doc now says how to read a stuck-at-zero counter (`src/utils/llm-usage.ts`).
+
+### Verified
+
+- 2943 unit tests over 233 files (5 new: salvage-timeout non-retry, below-floor skip, validation-retry regression guard, fallback marker, schema round-trip of the marker), lint, and both type-checks green — with the suite running under the isolated HOME, i.e. against CI-equivalent config for the first time.
+
 ## [1.6.5] - 2026-08-26
 
 1.6.4 verified its commands and then recommended the wrong one first: the user-level
