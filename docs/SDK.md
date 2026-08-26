@@ -13,18 +13,18 @@ run the `pi` extension, which keeps its own private copy your scripts can't impo
 npm install @lincoln504/pi-research
 ```
 
-On npm 12 or newer, allow the one install script search depends on before installing:
+On npm 12 or newer, npm skips dependency install scripts by default and a project-scoped
+install rejects the `--allow-scripts` flag — record the one script search depends on in
+your project instead, then run it:
 
 ```bash
-npm config set allow-scripts=better-sqlite3 --location=user
+npm approve-scripts better-sqlite3   # pins the approval in your allowScripts field
+npm rebuild better-sqlite3
 ```
 
-npm 12 blocks dependency install scripts by default, and a project-scoped install
-rejects the `--allow-scripts` flag — hence the config form. Skipped, the install
-succeeds but every search fails with a missing-module error. To repair an install
-that already ran blocked: `npm approve-scripts better-sqlite3` (pins the approval
-in your project's `allowScripts` field), then `npm rebuild better-sqlite3` —
-rerunning `npm install` does not rebuild the already-extracted package.
+Without that script every search fails with a missing-module error, and rerunning
+`npm install` does not run it — `npm rebuild` does. The same pair repairs an install
+that already ran blocked.
 
 Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
 (env or `~/.pi/research/config.env`). The SDK never follows the model selected

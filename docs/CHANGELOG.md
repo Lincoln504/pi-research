@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-08-26
+
+1.6.4 verified its commands and then recommended the wrong one first: the user-level
+`allow-scripts` config that "covers every install path" does cover them — at a cost
+npm's own tracker had already documented, which the container runs (installing only
+this package) could not see.
+
+### Fixed
+
+- **The install docs led with a config setting that breaks unrelated projects.** While a user-level `allow-scripts` is set, any `npm install` or `npm ci` of a project with a git dependency fails with `EALLOWSCRIPTS` (npm/cli#9783, filed 2026-07-18): git-dependency preparation spawns an inner project-scoped install that receives the setting as `npm_config_allow_scripts`, where npm judges it as a forbidden command-line flag. The same env-forwarding breaks any install reached through `npm run-script` (npm/cli#9912, filed 2026-08-24) — including a `pi install` invoked from an npm script. The 1.6.4 remedy also never said to remove the setting, so a user following it kept the trap armed permanently. Every surface now leads with the remedy that touches nothing else: the inline `--allow-scripts=better-sqlite3` flag on the global install (a one-off — harmless on npm 11.16–11.19, where it at most silences the advisory warning, and on npm ≤11.15, where an unknown config flag is an accepted warning, measured: warning and exit 0), project-local `npm approve-scripts better-sqlite3` + `npm rebuild better-sqlite3` for the SDK path (also the repair for an install that already ran blocked), and for `pi install` — which passes no flags to npm — set the config, install, delete it again, with the reason stated at the point of use. The README prose is shorter than what it replaces (`README.md`, `docs/SDK.md`, `docs/AGENT-SKILL.md`, `agent-skill/pi-research/README.md`).
+- **The manual per-agent install section showed a bare `npm install -g`.** The npm-12 note sat ~110 lines above at the top of the page, so a reader landing at the manual flow — or arriving by search — saw an unguarded command whose failure mode is a search that dies with a missing-module error and an install that reported success. The flag now rides on the command itself, which needs no note (`docs/AGENT-SKILL.md`).
+- **The 1.6.3 "Verified" line named one job for two failures.** It credited "the ubuntu-latest job that caught the failure" directly below a bullet whose failure was seen on macos-latest; the release contained two failures on two runners (the lock race on ubuntu, the cleanup crash on macos). The line now names both, so the record matches the commits (`docs/CHANGELOG.md`).
+
+### Verified
+
+- 2938 unit tests over 233 files, lint, and type-check green.
+- The flag-on-the-line and approve+rebuild forms are the same forms 1.6.4 measured working in npm 12.0.2 containers. The older-npm acceptance of the flag was measured directly (an unknown config flag warns and exits 0, so the install line is safe on the npm shipped with the minimum supported Node). The set-install-delete bracket reuses the config form 1.6.4 verified reaching `pi install`, with the removal step and its reason taken from npm/cli#9783's workaround guidance.
+
 ## [1.6.4] - 2026-08-26
 
 The npm 12 install remedy shipped in 1.6.2 was put through real installs in
@@ -38,7 +56,7 @@ identified a real race in the lock acquire loop rather than a slow runner.
 
 ### Verified
 
-- 2938 unit tests over 233 files, lint, type-check, and the full CI matrix green on the fix commit — including the ubuntu-latest job that caught the failure.
+- 2938 unit tests over 233 files, lint, type-check, and the full CI matrix green on the fix commits — including the ubuntu-latest job that caught the lock race and the macos-latest job that caught the cleanup crash.
 
 ## [1.6.2] - 2026-08-24
 

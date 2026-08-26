@@ -40,17 +40,17 @@ pi install npm:@lincoln504/pi-research
 Standalone, as an [agent skill](docs/AGENT-SKILL.md) for Claude Code, Codex, and other skills-compatible agents:
 
 ```bash
-npm install -g @lincoln504/pi-research
+npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3
 pi-research skill install
 ```
 
-On npm 12 or newer, allow the one install script search depends on before installing:
+On npm 12 or newer, npm skips dependency install scripts by default; the flag allows the one that builds search's SQLite module — without it, every search fails with a missing-module error (the flag is harmless on older npm). `pi install` passes no flags to npm, so on npm 12 bracket any install or update with the same allowance as config — set, run, delete — because while the setting is in place it can break installs of other projects with git dependencies ([npm/cli#9783](https://github.com/npm/cli/issues/9783)):
 
 ```bash
 npm config set allow-scripts=better-sqlite3 --location=user
+pi install npm:@lincoln504/pi-research
+npm config delete allow-scripts --location=user
 ```
-
-npm 12 stopped running dependency install scripts by default, and the stealth browser's SQLite module is built by one. Skipped, the install still succeeds with a warning — but every search fails with a missing-module error. The config covers both installs; for the standalone install, `--allow-scripts=better-sqlite3` on the `npm install -g` line also works. The bare flag allows nothing, and `pi install` accepts only the config form.
 
 In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install downloads the stealth browser engine, which takes a few minutes.
 

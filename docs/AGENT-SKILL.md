@@ -17,13 +17,14 @@ For standalone use without pi, install the engine globally, then link the skill 
 every coding agent detected on this machine:
 
 ```bash
-npm install -g @lincoln504/pi-research   # the engine (puts `pi-research` on PATH)
+npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3   # the engine (puts `pi-research` on PATH)
 pi-research skill install                # link the skill into every detected agent
 ```
 
-On npm 12 or newer, first run `npm config set allow-scripts=better-sqlite3 --location=user`:
-npm 12 blocks the install script that builds the stealth browser's SQLite module, and
-without it every search fails with a missing-module error (see the [README](../README.md#install)).
+On npm 12 or newer the flag is needed: npm blocks dependency install scripts by
+default, and without the one that builds the stealth browser's SQLite module every
+search fails with a missing-module error. It is harmless on older npm (see the
+[README](../README.md#install)).
 
 `skill install` targets only agents already set up under `$HOME`, never overwrites a
 different skill in the slot, and records what it created so `pi-research skill uninstall`
@@ -129,7 +130,7 @@ Manual. Symlink the directory into any agent's skills folder yourself:
   (`PI_RESEARCH_MODEL`) + API key. See [Configuration](CONFIGURATION.md).
 
 ```bash
-npm install -g @lincoln504/pi-research
+npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3
 node "<skill_dir>/scripts/run.mjs" status   # verify the engine is detected
 ```
 
