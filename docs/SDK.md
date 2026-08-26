@@ -13,6 +13,14 @@ run the `pi` extension, which keeps its own private copy your scripts can't impo
 npm install @lincoln504/pi-research
 ```
 
+On npm 12 or newer, also approve the one dependency install script search depends on:
+run `npm approve-scripts better-sqlite3` after the install, then `npm rebuild
+better-sqlite3` (rerunning `npm install` does not rebuild an already-extracted
+package). npm 12 blocks dependency install scripts by default, and a project-scoped
+install rejects the `--allow-scripts` flag — approval lives in your project's
+`allowScripts` field instead. Without it the install succeeds but every search fails
+with a missing-module error.
+
 Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
 (env or `~/.pi/research/config.env`). The SDK never follows the model selected
 inside the pi extension; only when neither is set does it fall back to the first

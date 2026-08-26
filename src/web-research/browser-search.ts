@@ -333,8 +333,9 @@ export async function performSearch(
                 `Search completely failed: ${reason}, all with a missing native module. ` +
                 `This is an incomplete install, not a network problem: the browser engine's ` +
                 `native dependencies were never built. npm 12 does not run dependency install ` +
-                `scripts by default — reinstall allowing them (npm install @lincoln504/pi-research ` +
-                `--allow-scripts, or npm approve-scripts --allow-scripts-pending), then retry.` +
+                `scripts by default — reinstall allowing the script (global install: ` +
+                `npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3; ` +
+                `project install: npm approve-scripts better-sqlite3, then npm rebuild better-sqlite3), then retry.` +
                 (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
             );
         }

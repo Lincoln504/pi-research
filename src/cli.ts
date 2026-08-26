@@ -793,9 +793,10 @@ async function cmdStatus(json?: boolean): Promise<number> {
   const paths = resolvedConfigPaths();
   const cfg = getConfig(process.cwd(), 'cli');
   // The stealth browser is installed by this package's `postinstall`
-  // (scripts/setup.cjs), which npm 11.19+ BLOCKS BY DEFAULT — it now warns
-  // "packages have install scripts not yet covered by allowScripts" and carries
-  // on, so the browser is simply absent on an otherwise successful install.
+  // (scripts/setup.cjs), which npm 12 BLOCKS BY DEFAULT (11.16–11.19 only warn
+  // and still run it — measured per version against a scripted tarball) — npm
+  // prints "packages had install scripts blocked" and carries on, so the
+  // browser is simply absent on an otherwise successful install.
   // A missing browser DEGRADES capability rather than breaking the tool — the fetch
   // path still serves most pages — so it is reported alongside `ready` rather than
   // folded into it. isBrowserAvailable() is a resolve + existsSync; it never launches
@@ -827,14 +828,18 @@ async function cmdStatus(json?: boolean): Promise<number> {
       installed: browserInstalled,
       nativeDepsOk: nativeDeps.ok,
       nativeDepsError: nativeDeps.ok ? null : nativeDeps.error,
+      // --allow-scripts is a package-name LIST, not a boolean: the bare flag is
+      // accepted and silently allows nothing (measured on npm 12.0.2). It is
+      // also global/one-off only — a project-scoped install rejects it with
+      // EALLOWSCRIPTS, where `npm approve-scripts` is the supported route.
       nativeDepsFix: nativeDeps.ok
         ? null
-        : 'Reinstall allowing dependency install scripts: npm install -g @lincoln504/pi-research --allow-scripts (npm 12 turns them off by default).',
+        : 'Reinstall allowing the dependency install script: npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3 (npm 12 blocks dependency install scripts by default). For a project-scoped install: npm approve-scripts better-sqlite3, then npm rebuild better-sqlite3.',
       // Same remedy the health check prints, so both surfaces name one command.
       fix: browserInstalled ? null : 'npx camoufox-js fetch',
       note: browserInstalled
         ? null
-        : 'Stealth browser not installed — scraping falls back to plain fetch, which some sites block. npm 11.19+ blocks install scripts by default, which skips this package\'s postinstall.',
+        : 'Stealth browser not installed — scraping falls back to plain fetch, which some sites block. npm 12 blocks install scripts by default, which skips this package\'s postinstall; the engine is fetched on first use instead.',
     },
     knowledgeStoreMode: cfg.KNOWLEDGE_STORE_MODE,
     defaultDepth: cfg.DEFAULT_RESEARCH_DEPTH,
