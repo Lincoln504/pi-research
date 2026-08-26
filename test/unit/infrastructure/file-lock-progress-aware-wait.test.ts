@@ -208,6 +208,15 @@ describe('an unidentifiable lock is judged by whether a heartbeat can judge it',
     // the peer's very first inspection can establish reclaim eligibility. Scaled up
     // 5x from the previous attempt for headroom against that, not against local jitter
     // (which was never reproduced here in any of three attempts).
+    //
+    // A THIRD CI failure (ubuntu-latest, 2026-08-24) was a different mechanism and a
+    // real bug this test then caught: rejection at 10008ms — the window boundary, not
+    // the stall bound. The acquire loop judged reclaim eligibility from the stat-time
+    // lockAge but judged "still awaiting the window" from a fresh Date.now(); a tick
+    // whose stat landed just before the boundary while the clock crossed it before the
+    // stall check satisfied neither, and the acquirer gave up the moment it became
+    // allowed to take the lock. Fixed by deriving both judgments from the same
+    // observation, so every readable tick either reclaims or keeps waiting.
     const { lockPath } = await makeLock({ lockTimeout: 5_000 });
     await fs.writeFile(lockPath, '', 'utf-8'); // torn: no uuid, no pid, unparseable
     const now = new Date();

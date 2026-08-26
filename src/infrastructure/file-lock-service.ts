@@ -694,12 +694,13 @@ export class FileLockService implements IService {
             const errnoError = error as NodeJS.ErrnoException;
             if (errnoError.code === 'EEXIST') {
               contentionCount++;
-              // When the contended lock becomes eligible for reclaim, if this tick can
-              // know it. Scoped per observation: a tick that could not read the lock
+              // Whether THIS tick judged the contended lock not-yet-eligible for the
+              // pid-less reclaim — i.e. we are waiting for a recovery we will be allowed
+              // to perform. Scoped per observation: a tick that could not read the lock
               // learned nothing, and an eligibility carried over from an earlier one is
               // no longer evidence of anything. See the stall check below for why the
               // stall bound must not fire before this moment.
-              let reclaimEligibleAt: number | null = null;
+              let awaitingReclaim = false;
               // Read lock content to verify ownership and liveness before considering stale
               try {
                 const rawContent = await fs.readFile(this.lockFilePath, 'utf-8');
@@ -720,17 +721,26 @@ export class FileLockService implements IService {
                 // A lock with no readable pid is judged purely on age (see
                 // _shouldReclaim), and its mtime never moves again — so it can never
                 // show progress and the stall bound is guaranteed to expire first.
-                // Record when it becomes reclaimable so the wait below can outlast the
-                // stall bound rather than abandoning the recovery at 20s.
+                // Mark this tick as awaiting that reclaim so the wait below can outlast
+                // the stall bound rather than abandoning the recovery at 20s.
+                //
+                // Judged from the SAME lockAge observation _shouldReclaim will use, not
+                // from a fresh Date.now() at the stall check: the two clocks disagreed
+                // for the few ms between the stat and that check, and a tick landing
+                // astride the window boundary judged the lock not-yet-reclaimable here
+                // yet no-longer-awaited there — giving up at the exact moment the
+                // window opened (ubuntu CI, 2026-08-24: rejected 10008ms into a
+                // 10000ms window). The complement of _shouldReclaim's strict > means
+                // one of the two branches now holds on every readable tick.
                 //
                 // Deliberately NOT extended to a live owner: there the heartbeat is the
                 // designed progress signal, its absence past lockTimeout is real evidence
                 // of a wedge, and reporting that to the caller promptly beats waiting out
                 // a two-to-four-minute live-owner threshold on a lock we may well never
                 // be handed.
-                reclaimEligibleAt = (parsed?.pid ?? null) === null
-                  ? stats.mtimeMs + this._unidentifiedStaleThreshold()
-                  : null;
+                awaitingReclaim = this.lockTimeout > 0
+                  && (parsed?.pid ?? null) === null
+                  && lockAge <= this._unidentifiedStaleThreshold();
 
                 if (lockUuid === this.lockUuid) {
                   // This is our own lock — a previous attempt was interrupted. Reclaim.
@@ -802,8 +812,6 @@ export class FileLockService implements IService {
               // on the spot rather than wait for anything, and the run semaphore's slot
               // files carry a TEN-MINUTE unidentified window, so honouring eligibility
               // there would turn "is this slot free right now" into a ten-minute block.
-              const awaitingReclaim =
-                this.lockTimeout > 0 && reclaimEligibleAt !== null && Date.now() < reclaimEligibleAt;
               if ((stalledFor >= this.lockTimeout && !awaitingReclaim) || waitedFor >= this.acquireCeilingMs) {
                 metrics.observe('state_lock_acquire_duration_ms', waitedFor, { status: 'timeout' });
                 metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
