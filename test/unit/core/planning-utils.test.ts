@@ -271,6 +271,12 @@ describe('parseJsonPlan', () => {
     expect(plan.researchers![0]!.id).toBe('1');
   });
 
+  it('accepts and preserves the optional engine-set fallback marker', () => {
+    const text = '{"action":"delegate","fallback":true,"researchers":[{"id":"1","name":"R1","goal":"g","queries":["q1"]}],"allQueries":["q1"]}';
+    const plan = parseJsonPlan(text);
+    expect(plan.fallback).toBe(true);
+  });
+
   it('parses valid raw JSON without a code block', () => {
     const text = '{"action":"synthesize","researchers":[{"id":"2","name":"R2","goal":"g2","queries":["q2","q3"]}],"allQueries":["q2","q3"]}';
     const plan = parseJsonPlan(text);
@@ -350,6 +356,11 @@ describe('buildFallbackCoordinatorPlan', () => {
   it('returns a plan with action delegate', () => {
     const plan = buildFallbackCoordinatorPlan(svc, '', 'test query');
     expect(plan.action).toBe('delegate');
+  });
+
+  it('marks the plan as an engine fallback (issue #9: silent single-researcher degradation)', () => {
+    const plan = buildFallbackCoordinatorPlan(svc, '', 'test query');
+    expect(plan.fallback).toBe(true);
   });
 
   it('returns exactly one researcher', () => {

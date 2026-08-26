@@ -464,12 +464,30 @@ export class PlanningService implements IPlanningService {
       // Track usage once, on the successful attempt (failed attempts throw before here).
       recordLlmUsage(model, (response as any).usage, { component: 'coordinator', complexity, observer });
 
+      // Truncation is the #1 cause of a malformed plan: a response that hit the
+      // output-token cap ends mid-JSON no matter how well it started. Log the cap
+      // hit here so the malformed-JSON warning below is diagnosable from the log
+      // (stopReason 'length' is otherwise dropped — validateAndExtractText only
+      // inspects 'error').
+      if (response.stopReason === 'length') {
+        logger.warn(
+          `[PlanningService] Plan response hit the output-token cap (stopReason 'length', maxTokens ${config.PLANNING_MAX_TOKENS}); output is likely truncated mid-JSON`
+        );
+      }
+
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;
       try {
         plan = this.parseJsonPlan(responseText);
-      } catch {
-        logger.warn('[PlanningService] Initial plan JSON malformed, attempting agentic repair');
+      } catch (err) {
+        // The thrown error carries the parse/validation detail and a head preview;
+        // stopReason + the response TAIL are the missing forensics — truncation leaves
+        // the JSON dangling at the END of the text, which no head preview shows.
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          `[PlanningService] Initial plan JSON malformed (stopReason '${response.stopReason}'), attempting agentic repair. ` +
+          `Parse error: ${reason}. Response tail: ${JSON.stringify(responseText.slice(-160))}`
+        );
         const repaired = await repairJsonWithLlm<ResearchPlan>(
             responseText,
             completeSimple,
@@ -769,8 +787,15 @@ export class PlanningService implements IPlanningService {
       let plan: ResearchPlan | null = null;
       try {
           plan = this.parseJsonPlan(responseText);
-      } catch {
-        logger.warn(`[PlanningService] ${role} JSON malformed, attempting agentic repair`);
+      } catch (err) {
+        // Same forensics as the initial-plan site; the response object itself is not
+        // in scope here (callLead/synthesizeCorpus return text only), but callLead
+        // already warned if that call hit its output-token cap.
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          `[PlanningService] ${role} JSON malformed, attempting agentic repair. ` +
+          `Parse error: ${reason}. Response tail: ${JSON.stringify(responseText.slice(-160))}`
+        );
         const repaired = await repairJsonWithLlm<ResearchPlan>(
             responseText,
             completeSimple,
@@ -1044,6 +1069,12 @@ export class PlanningService implements IPlanningService {
           config.LLM_TIMEOUT_MS, label,
         );
         const responseText = validateAndExtractText(response, label);
+        // A cap hit here means the router decision / synthesis pass was cut mid-output
+        // (often mid-JSON) — surface it so a downstream malformed-JSON warning has its
+        // cause in the log instead of a silent stopReason drop.
+        if (response.stopReason === 'length') {
+          logger.warn(`[PlanningService] ${label} response hit the output-token cap (stopReason 'length', maxTokens ${args.maxTokens}); output is likely truncated`);
+        }
         return { response, responseText };
       },
       {

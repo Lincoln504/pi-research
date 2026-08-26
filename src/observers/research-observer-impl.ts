@@ -158,7 +158,10 @@ export function createResearchObserver(
     },
 
     onPlanningSuccess: (plan) => {
-      updateSliceStatus(panelState, 'coord', 'ready', debouncedRefresh);
+      // A fallback plan means the model's planning output was unusable and the engine
+      // degraded to a single researcher — the user asked for deep research and got a
+      // shallow one. Say so in the status line instead of presenting it as 'ready'.
+      updateSliceStatus(panelState, 'coord', plan.fallback ? 'fallback — planning failed' : 'ready', debouncedRefresh);
       completeSlice(panelState, 'coord');
       const unitsPerResearcher = getUnitsPerResearcher(undefined, ctx.cachingActive);
       const count = plan.researchers?.length || 0;

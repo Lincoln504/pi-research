@@ -214,6 +214,9 @@ export function buildFallbackCoordinatorPlan(serviceName: string, _rawText: stri
   logger.warn(`[${serviceName}] Coordinator fallback: single researcher for "${query.slice(0, 80)}"`);
   return {
     action: 'delegate',
+    // Marks this as engine-generated after unusable model output, so UI surfaces can
+    // say "degraded" instead of presenting one researcher as the model's considered plan.
+    fallback: true,
     researchers: [{ id: '1', name: 'General Researcher', goal: `Research the following query comprehensively: ${query}`, queries }],
     allQueries: queries,
   };

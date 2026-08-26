@@ -5,6 +5,7 @@ vi.mock('../../../src/logger.ts', () => ({
 }));
 
 import { repairJsonWithLlm } from '../../../src/core/llm/agentic-repair.ts';
+import { getLlmTimeoutMs } from '../../../src/core/llm/llm-timeout.ts';
 import { logger } from '../../../src/logger.ts';
 import { Type } from 'typebox';
 import type { Model } from '@earendil-works/pi-ai';
@@ -158,6 +159,66 @@ describe('repairJsonWithLlm', () => {
       expect(result).toBeNull();
       expect(mockCompleter).toHaveBeenCalledTimes(2); // both attempts run
       expect(vi.mocked(logger.error)).toHaveBeenCalled();
+    });
+  });
+
+  describe('repair budget (issue #9: salvage hanging through two full LLM timeouts)', () => {
+    // Both attempts share ONE getLlmTimeoutMs() budget, a timed-out attempt is never
+    // followed by another, and an attempt that cannot finish in the remaining time is
+    // skipped. Fake timers compress the budget. The budget is DERIVED, not assumed:
+    // a stray PI_RESEARCH_LLM_TIMEOUT_MS in the ambient env must not change what the
+    // test measures (unit-env.ts isolates the config.env file; this covers process env).
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('does not launch attempt 2 after an attempt times out', async () => {
+      const budget = getLlmTimeoutMs();
+      // Attempt 1 never settles; the shared budget's withTimeout fires at the deadline.
+      mockCompleter.mockImplementation(() => new Promise(() => {}));
+      const pending = repairJsonWithLlm('{', mockCompleter, auth, { model: stubModel });
+      await vi.advanceTimersByTimeAsync(budget);
+      const result = await pending;
+      expect(result).toBeNull();
+      expect(mockCompleter).toHaveBeenCalledTimes(1); // attempt 2 never launches
+      // The timeout is explained in the log, not just the raw error.
+      expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+        expect.stringContaining('Salvage attempt timed out; not retrying')
+      );
+    });
+
+    it('skips the retry when the remaining shared budget is below the attempt floor', async () => {
+      const budget = getLlmTimeoutMs();
+      // Attempt 1 resolves instantly but fails schema validation (normally retried);
+      // the clock is then moved to 5s before the deadline — under the 30s floor.
+      mockCompleter.mockImplementation(() => {
+        vi.setSystemTime(Date.now() + (budget - 5_000));
+        return Promise.resolve({
+          ...baseMessage,
+          content: [{ type: 'text', text: '{"foo":"x"}' }], // missing bar → schema fail
+          stopReason: 'stop',
+        });
+      });
+      const result = await repairJsonWithLlm('bad', mockCompleter, auth, { model: stubModel, schema });
+      expect(result).toBeNull();
+      expect(mockCompleter).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+        expect.stringContaining(`only 5000ms of the ${budget}ms repair budget remains`)
+      );
+    });
+
+    it('still retries a schema-validation failure while budget remains', async () => {
+      // Regression guard: the shared budget must not eat the legitimate retry — the
+      // existing two-attempt contract for validation failures is unchanged.
+      mockCompleter
+        .mockResolvedValueOnce({ ...baseMessage, content: [{ type: 'text', text: '{"foo":"x"}' }], stopReason: 'stop' })
+        .mockResolvedValueOnce({ ...baseMessage, content: [{ type: 'text', text: '{"foo":"x","bar":2}' }], stopReason: 'stop' });
+      const result = await repairJsonWithLlm('bad', mockCompleter, auth, { model: stubModel, schema });
+      expect(result).toEqual({ foo: 'x', bar: 2 });
+      expect(mockCompleter).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -44,6 +44,12 @@ export const ResearchPlanSchema = Type.Object({
   allQueries: Type.Optional(Type.Array(Type.String())),
   content: Type.Optional(Type.String()),
   title: Type.Optional(Type.String()),
+  // Set ONLY by buildFallbackCoordinatorPlan (never requested from the model): marks a
+  // plan the engine synthesized after the model's planning output was unusable, so a
+  // single-researcher fallback is distinguishable from a plan the model actually chose.
+  // Without it a deep query silently degrades to one researcher with no user-visible
+  // notice — the TUI/SDK see an ordinary plan (issue #9).
+  fallback: Type.Optional(Type.Boolean()),
 });
 
 /**

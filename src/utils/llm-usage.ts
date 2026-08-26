@@ -67,6 +67,14 @@ function warnIfUnpriced(model: Model<any>, tokens: number, cost: number): void {
  * `tokens > 0 || cost > 0`, so a response whose usage is all-zero across the board
  * emits nothing — harmless in practice because cache fields are summed into `tokens`,
  * so a reported cache split implies a nonzero total.
+ *
+ * Accuracy note: for the openai-completions API family (which includes OpenRouter),
+ * pi-ai's usage normalization ALWAYS sets cacheRead/cacheWrite, defaulting missing
+ * upstream fields to 0 — so on those providers a route without prompt caching shows the
+ * counter at 0 rather than omitting it. The 0-vs-absent distinction only holds for APIs
+ * that omit the fields outright. A run showing llm_cache_read_tokens_total stuck at 0
+ * with nonzero input tokens is therefore most simply read as "this route reports no
+ * cached tokens", not "our prompts defeat the cache".
  */
 function recordCacheTokens(parsed: Partial<TokenUsage>, labels: Record<string, string>): void {
   if (typeof parsed.cacheRead === 'number') {
