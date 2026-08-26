@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 
 // Deterministically control os.platform() so every platform branch of the
 // path-resolution logic is exercised on any host. CI runs on Linux, so without
@@ -152,13 +152,20 @@ describe('browser-config', () => {
             // Under the OS tmpdir, NOT the real ~/.cache/pi-research:
             // getBrowserProfileDir mkdirs its result, and a unit test must not
             // leave artifacts in the user's actual cache tree.
-            const custom = join(tmpdir(), 'pi-research-test', 'profiles-test-override');
+            // A directory of our OWN via mkdtemp — NOT nested under the shared
+            // <tmpdir>/pi-research-test that unit-env.ts routes the whole suite's
+            // log file into. The old cleanup removed that shared directory
+            // recursively, which both deleted the live log out from under every
+            // parallel worker and raced the lazy logger re-creating it
+            // mid-removal: ENOTEMPTY on macos-latest CI, 2026-08-26.
+            const own = mkdtempSync(join(tmpdir(), 'pi-research-profilecontain-'));
+            const custom = join(own, 'profiles-test-override');
             try {
                 expect(getBrowserProfileDir({ TMP_DIR: custom } as any)).toBe(
                     join(custom, 'pi-research', 'profiles')
                 );
             } finally {
-                rmSync(join(tmpdir(), 'pi-research-test'), { recursive: true, force: true });
+                rmSync(own, { recursive: true, force: true });
             }
         });
     });
