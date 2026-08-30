@@ -12,6 +12,7 @@ import { createResearchTool, createHealthTool } from './tool.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { logger } from './logger.ts';
 import { checkPiCompatibility } from './core/pi-version.ts';
+import { checkPiAiSkew } from './core/pi-ai-skew.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
@@ -112,6 +113,19 @@ export default async function (pi: ExtensionAPI) {
   }
   if (compat.message) {
     logger.warn(compat.message);
+  }
+
+  // The gate above classifies the HOST version but cannot see the copies THIS
+  // extension resolves from its own node_modules — the 2026-08-30 incident
+  // (host 0.84.4 vs extension-resolved pi-ai 0.84.2) passed it as 'ok' while
+  // every researcher died at provider load. Detect that skew here and refuse
+  // to start with the actual remediation instead.
+  const skew = checkPiAiSkew();
+  if (skew.fatal) {
+    throw new Error(skew.message ?? '[pi-research] pi-ai version skew.');
+  }
+  if (skew.message) {
+    logger.warn(skew.message);
   }
 
   // Re-register the beforeExit safety net (deactivate() strips event listeners during reload).
