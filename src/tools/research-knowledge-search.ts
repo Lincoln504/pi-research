@@ -34,7 +34,7 @@ import { Value } from 'typebox/value';
 import { completeSimple } from '../core/llm/pi-ai-completion.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import { recordLlmUsage } from '../utils/llm-usage.ts';
-import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
+import { buildSafeOptions, validateAndExtractText, buildConstrainedSubmitTool, completeSimpleStructured } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { withTimeout } from '../core/llm/llm-timeout.ts';
 import { abortableDelay } from '../web-research/retry-utils.ts';
@@ -497,6 +497,15 @@ export async function runBackgroundExtraction(
   const systemPrompt = user === null ? fill(system) : system;
   const userMessage = user === null ? finalInstruction : `${fill(user)}\n\n${finalInstruction}`;
 
+  // Structured-output path, same pattern as the planner/router: offer the
+  // schema-constrained submit tool (the synthesis response IS a JSON object
+  // validated below), fall back to the text pipeline on a prose answer.
+  const submitSynthesisTool = buildConstrainedSubmitTool(
+    'submit_knowledge_synthesis',
+    'Submit the extracted answer in the required structured format.',
+    ResearchKnowledgeSynthesisResponseSchemaAsTSchema,
+  );
+
   // Phase 4a: Stateless LLM call — no AgentSession, no side-effects.
   // llmTimeout is resolved by the caller from the iface-aware Config so a
   // per-interface overlay (pi.env / cli.env) is honored here.
@@ -509,26 +518,32 @@ export async function runBackgroundExtraction(
   for (;;) {
     attempt++;
     try {
-      const response = await withTimeout(
-        completeSimple(model, {
+      const structured = await withTimeout(
+        completeSimpleStructured(model, {
           systemPrompt,
           messages: [
-            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+            { role: 'user', content: [{ type: 'text', text: userMessage + `\n\nRespond by calling the ${submitSynthesisTool.name} tool with the extraction as its arguments.` }], timestamp: Date.now() },
           ],
-        }, buildSafeOptions(model, {
+        }, submitSynthesisTool, buildSafeOptions(model, {
           apiKey: auth.apiKey,
           headers: auth.headers,
           signal,
           sessionId,
-        }, maxTokens, thinkingLevel)),
+        }, maxTokens, thinkingLevel), 'Knowledge Extraction'),
         llmTimeout,
         'knowledge-search-extraction',
       );
+      const response = structured.response;
 
       // Track token and cost metrics for the background synthesis call
       recordLlmUsage(model, (response as any).usage, { component: 'knowledge_search' });
 
-      responseText = validateAndExtractText(response, 'Knowledge Extraction');
+      // Tool-call arguments are re-serialized so the SAME parse → coerce →
+      // validate pipeline below runs for both outcomes; text passes through
+      // byte-identical to the previous behavior.
+      responseText = structured.kind === 'toolCall'
+        ? JSON.stringify(structured.args)
+        : structured.text;
       break;
     } catch (err) {
       // A real cancellation propagates immediately — no retry, no fallback.

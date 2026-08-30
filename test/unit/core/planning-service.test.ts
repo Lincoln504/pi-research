@@ -304,6 +304,43 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeGreaterThan(0);
     });
 
+    it('accepts a submit_plan tool call as the plan (structured output path, no parse/repair)', async () => {
+      // The constrained-sampling path: the model calls submit_plan instead of
+      // emitting JSON text. Arguments are re-serialized through the SAME
+      // parse → coerce → validate pipeline, and no repair call is needed.
+      const planArgs = JSON.parse(validDelegatePlanJson(2));
+      vi.mocked(completeSimple).mockResolvedValue({
+        ...makeCompleteResponse(''),
+        content: [{ type: 'toolCall', id: 'tc_plan', name: 'submit_plan', arguments: planArgs }],
+      } as any);
+
+      const plan = await service.generatePlan(BASE_OPTIONS);
+
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers!.length).toBe(2);
+      // Exactly ONE LLM call: the tool-call path must not fall into agentic repair.
+      expect(vi.mocked(completeSimple)).toHaveBeenCalledTimes(1);
+      // The submit tool was offered with constrained sampling (strict 'prefer')
+      // and toolChoice 'auto'.
+      const ctx = vi.mocked(completeSimple).mock.calls[0]![1] as any;
+      expect(ctx.tools).toHaveLength(1);
+      expect(ctx.tools[0].name).toBe('submit_plan');
+      expect(ctx.tools[0].constrainedSampling).toEqual({ type: 'json_schema', strict: 'prefer' });
+    });
+
+    it('still parses text answers when the model ignores the submit tool', async () => {
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
+      const plan = await service.generatePlan(BASE_OPTIONS);
+      expect(plan.action).toBe('delegate');
+      // The tool was still OFFERED — degradation is a model choice, not a config one.
+      const ctx = vi.mocked(completeSimple).mock.calls[0]![1] as any;
+      expect(ctx.tools?.[0]?.name).toBe('submit_plan');
+      // The instruction rode in the USER message, keeping the system prompt byte-stable
+      // for the prompt cache.
+      const userText = ctx.messages.map((m: any) => m.content.map((c: any) => c.text ?? '').join('')).join('');
+      expect(userText).toContain('Respond by calling the submit_plan tool');
+    });
+
     it('sets the currentPlan after a successful generatePlan call', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
       await service.generatePlan(BASE_OPTIONS);

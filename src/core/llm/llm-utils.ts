@@ -4,9 +4,10 @@
  * Shared logic for safe and robust LLM interactions.
  */
 
-import { type Model, type AssistantMessage, type SimpleStreamOptions, type ModelThinkingLevel } from '@earendil-works/pi-ai';
+import { type Model, type AssistantMessage, type SimpleStreamOptions, type ModelThinkingLevel, type Tool, type TSchema, type Context, type ToolCall } from '@earendil-works/pi-ai';
 import { extractText } from '../../utils/text-utils.ts';
 import { logger } from '../../logger.ts';
+import { completeSimple } from './pi-ai-completion.ts';
 
 /**
  * Standardize LLM request options for maximum compatibility and robustness.
@@ -67,6 +68,24 @@ export function buildSafeOptions(
 export function validateAndExtractText(response: AssistantMessage, label: string): string {
   // NOTE: never use console.log here — this runs inside the TUI render loop and
   // any direct stdout write corrupts the rendered panel. Use the logger (file) instead.
+  assertNoLlmError(response, label);
+
+  // 2. Extract text content
+  const text = extractText(response);
+  if (!text || !text.trim()) {
+    throw new Error(`${label} returned no text content from LLM. Raw response: ${JSON.stringify(response, null, 2)}`);
+  }
+
+  return text;
+}
+
+/**
+ * Throw a readable error when a response carries a provider/transport failure.
+ *
+ * Factored out of validateAndExtractText so the structured-completion path below
+ * shares the exact same error mapping without requiring text content.
+ */
+function assertNoLlmError(response: AssistantMessage, label: string): void {
   // 1. Check for explicit provider errors or empty response
   if (response.stopReason === 'error' || response.errorMessage) {
     const errorMsg = response.errorMessage || 'Unknown provider error';
@@ -82,12 +101,77 @@ export function validateAndExtractText(response: AssistantMessage, label: string
     const cleanMsg = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
     throw new Error(`${label} failed: ${cleanMsg}`);
   }
+}
 
-  // 2. Extract text content
-  const text = extractText(response);
-  if (!text || !text.trim()) {
-    throw new Error(`${label} returned no text content from LLM. Raw response: ${JSON.stringify(response, null, 2)}`);
+/**
+ * Build a submit tool whose arguments pi-ai can schema-constrain where the
+ * provider supports it (OpenAI/Anthropic/Bedrock/Mistral/Gemini 3 strict
+ * json_schema; grammar tools on GPT-5+ endpoints) and that degrades to a plain
+ * tool call everywhere else — never worse than an unconstrained call.
+ *
+ * `strict: 'prefer'` is deliberate over 'require': a custom OpenAI-compatible
+ * endpoint (vLLM, llama.cpp, gateways) must keep working — it simply gets a
+ * normal function tool whose arguments our own validation still checks.
+ */
+export function buildConstrainedSubmitTool(name: string, description: string, parameters: TSchema): Tool {
+  return {
+    name,
+    description,
+    parameters,
+    constrainedSampling: { type: 'json_schema', strict: 'prefer' },
+  };
+}
+
+/**
+ * Result of a structured completion: the model either called the submit tool
+ * (args already parsed by pi-ai) or answered in text (fallback path).
+ */
+export type StructuredCompletion =
+  | { kind: 'toolCall'; toolName: string; args: Record<string, any>; response: AssistantMessage }
+  | { kind: 'text'; text: string; response: AssistantMessage };
+
+/**
+ * completeSimple, but with a submit tool offered for structured output.
+ *
+ * toolChoice stays 'auto' (pi-ai's ToolChoice has no forced-tool mode): the
+ * model is INSTRUCTED to call the tool by the prompt; a text answer is
+ * returned as { kind: 'text' } and flows into the caller's existing
+ * parse/repair pipeline unchanged. Constrained sampling (see
+ * buildConstrainedSubmitTool) makes the tool-call path schema-exact where the
+ * provider supports it — the fallback is exactly today's behavior.
+ *
+ * Errors map identically to validateAndExtractText (shared assertNoLlmError).
+ */
+export async function completeSimpleStructured(
+  model: Model<any>,
+  context: Pick<Context, 'systemPrompt' | 'messages'>,
+  tool: Tool,
+  options: SimpleStreamOptions,
+  label: string,
+): Promise<StructuredCompletion> {
+  const response = await completeSimple(
+    model,
+    { ...context, tools: [tool] },
+    { ...options, toolChoice: 'auto' },
+  );
+
+  assertNoLlmError(response, label);
+
+  // Tool calls arrive as content blocks on the AssistantMessage, not a
+  // dedicated field — match the submit tool by name so an off-spec model call
+  // to some other (nonexistent) tool is not mistaken for structured output.
+  const call = response.content.find(
+    (block): block is ToolCall => (block as ToolCall).type === 'toolCall' && (block as ToolCall).name === tool.name,
+  );
+  if (call) {
+    return { kind: 'toolCall', toolName: call.name, args: call.arguments ?? {}, response };
   }
 
-  return text;
+  const text = extractText(response);
+  if (!text || !text.trim()) {
+    throw new Error(
+      `${label} returned neither a ${tool.name} tool call nor text content. Raw response: ${JSON.stringify(response, null, 2)}`,
+    );
+  }
+  return { kind: 'text', text, response };
 }

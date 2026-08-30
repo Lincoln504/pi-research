@@ -23,12 +23,12 @@ import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { normalizeCitations } from '../utils/citation-utils.ts';
 import { lastCitedLinksHeader } from '../utils/text-utils.ts';
 import { repairJsonWithLlm } from './llm/agentic-repair.ts';
-import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
+import { buildSafeOptions, validateAndExtractText, buildConstrainedSubmitTool, completeSimpleStructured } from './llm/llm-utils.ts';
 import { safeGetApiKeyAndHeaders } from './llm/model-registry-factory.ts';
 import { withTimeout } from './llm/llm-timeout.ts';
 import { retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { getConfig, type Config } from '../config.ts';
-import type { Model } from '@earendil-works/pi-ai';
+import type { Model, Tool } from '@earendil-works/pi-ai';
 import { DEFAULT_MODEL_CONTEXT_WINDOW } from '../constants.ts';
 import { deriveCoverageDigest, formatDigestsForRouter } from '../utils/coverage-digest.ts';
 import {
@@ -419,6 +419,18 @@ export class PlanningService implements IPlanningService {
 
     const userMessage = `Generate the initial research plan for: "${query}"`;
 
+    // Structured-output path: offer a schema-constrained submit tool (pi-ai
+    // constrainedSampling, strict 'prefer'). Where the provider supports strict
+    // json_schema the plan arrives schema-exact with no parse/repair round-trip;
+    // everywhere else it degrades to a plain tool call, and a text answer flows
+    // into the existing parse/repair pipeline unchanged — never worse than today.
+    const submitPlanTool = buildConstrainedSubmitTool(
+      'submit_plan',
+      'Submit the complete research plan as structured arguments.',
+      PlanningResponseSchemaAsTSchema,
+    );
+    const toolInstruction = `\n\nRespond by calling the ${submitPlanTool.name} tool with the plan as its arguments.`;
+
     try {
       const authResult = await safeGetApiKeyAndHeaders(modelRegistry, model);
       if (!authResult.ok) {
@@ -434,21 +446,27 @@ export class PlanningService implements IPlanningService {
       // malformed JSON (a different failure) and would otherwise be re-paid on every attempt.
       const { response, responseText } = await retryWithBackoff(
         async () => {
-          const response = await withTimeout(
-            completeSimple(model, {
+          const structured = await withTimeout(
+            completeSimpleStructured(model, {
               systemPrompt: populatedPrompt,
               messages: [
-                { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+                { role: 'user', content: [{ type: 'text', text: userMessage + toolInstruction }], timestamp: Date.now() },
               ],
-            }, buildSafeOptions(model, {
+            }, submitPlanTool, buildSafeOptions(model, {
               apiKey: authResult.apiKey || '',
               headers: authResult.headers,
               signal,
               sessionId,
-            }, config.PLANNING_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
+            }, config.PLANNING_MAX_TOKENS, config.LLM_THINKING_LEVEL), 'Coordinator'),
             llmTimeout, 'coordinator-generatePlan',
           );
-          const responseText = validateAndExtractText(response, 'Coordinator');
+          const response = structured.response;
+          // A tool call's arguments are already an object: re-serialize so they
+          // flow through the SAME parse → coerce → validate (→ repair) pipeline;
+          // on a text answer this is byte-identical to the previous behavior.
+          const responseText = structured.kind === 'toolCall'
+            ? JSON.stringify(structured.args)
+            : structured.text;
           return { response, responseText };
         },
         {
@@ -751,6 +769,15 @@ export class PlanningService implements IPlanningService {
       const responseText = isRouter
         ? await (() => {
             const routerMessage = buildRouterMessage(...this.buildRouterEvidence(options, round), runContext);
+            // Same structured-output pattern as generatePlan: the router's output
+            // is a structured JSON delegate plan (validated by the same
+            // parseJsonPlan), so offer the constrained submit tool and fall back
+            // to the text pipeline when the model answers in prose.
+            const submitRoutingTool = buildConstrainedSubmitTool(
+              'submit_routing_decision',
+              'Submit the updated round-2 routing plan as structured arguments.',
+              PlanningResponseSchemaAsTSchema,
+            );
             // The router carries no reduce mechanism the way synthesizeCorpus does — a
             // routing decision made from PARTITIONED evidence isn't naturally mergeable
             // the way synthesis prose is, and this call's output is a structured JSON
@@ -775,10 +802,11 @@ export class PlanningService implements IPlanningService {
             return this.callLead({
               ...callOptions,
               systemPrompt: populate(''),
-              userMessage: routerMessage,
+              userMessage: routerMessage + `\n\nRespond by calling the ${submitRoutingTool.name} tool with the updated plan as its arguments.`,
               maxTokens: ROUTER_MAX_TOKENS,
               component: 'router',
               label: 'router-updatePlanForRound',
+              submitTool: submitRoutingTool,
             });
           })()
         : await this.synthesizeCorpus({ ...callOptions, reports, runContext, populate });
@@ -1049,11 +1077,40 @@ export class PlanningService implements IPlanningService {
     maxTokens: number;
     component: string;
     label: string;
+    /** Optional structured-output tool; when set the call offers it and stringifies tool-call args as the text. */
+    submitTool?: Tool;
   }): Promise<string> {
     const { model, signal, config, complexity, observer, label } = args;
 
     const { response, responseText } = await retryWithBackoff(
       async () => {
+        // Structured path: offer the caller's submit tool (constrained where the
+        // provider supports it) and unify both outcomes into the text contract
+        // this method has always had — tool-call args re-serialized through the
+        // SAME downstream parse/validate/repair, text passed through untouched.
+        if (args.submitTool) {
+          const structured = await withTimeout(
+            completeSimpleStructured(model, {
+              systemPrompt: args.systemPrompt,
+              messages: [
+                { role: 'user', content: [{ type: 'text', text: args.userMessage }], timestamp: Date.now() },
+              ],
+            }, args.submitTool, buildSafeOptions(model, {
+              apiKey: args.apiKey,
+              headers: args.headers,
+              signal,
+              sessionId: args.sessionId,
+            }, args.maxTokens, config.LLM_THINKING_LEVEL), label),
+            config.LLM_TIMEOUT_MS, label,
+          );
+          const responseText = structured.kind === 'toolCall'
+            ? JSON.stringify(structured.args)
+            : structured.text;
+          if (structured.response.stopReason === 'length') {
+            logger.warn(`[PlanningService] ${label} response hit the output-token cap (stopReason 'length', maxTokens ${args.maxTokens}); output is likely truncated`);
+          }
+          return { response: structured.response, responseText };
+        }
         const response = await withTimeout(
           completeSimple(model, {
             systemPrompt: args.systemPrompt,
