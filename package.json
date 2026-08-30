@@ -18,6 +18,7 @@
     "src/",
     "dist/cli.mjs",
     "dist/thread-worker.mjs",
+    "dist/pdf-extract-worker.mjs",
     "dist/webgpu-probe.mjs",
     "dist/prompts/",
     "agent-skill/",

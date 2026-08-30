@@ -33,3 +33,10 @@ process.setMaxListeners(20);
 // make session-metric assertions non-deterministic. Run registries are per-call (scoped by
 // runWithRunRegistry) and are unaffected by this.
 afterEach(() => { metrics.clearSession(); });
+
+// PDF extraction: the unit suite mocks pdf-oxide-wasm at the module level,
+// which cannot reach into a real worker thread. Keep the parse in-process
+// (today's behavior) unless a test explicitly opts into the worker path.
+if (!process.env['PI_RESEARCH_PDF_WORKER']) {
+  process.env['PI_RESEARCH_PDF_WORKER'] = 'off';
+}

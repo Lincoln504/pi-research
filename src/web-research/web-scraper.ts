@@ -30,6 +30,9 @@ import { readBodyCapped, BodyTooLargeError } from '../utils/http-body.ts';
 import { getServiceContainer } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
 import { cacheScrapedContent } from '../utils/shared-links.ts';
+// PDF extraction now lives in pdf-extraction.ts (worker-thread offload with an
+// identical in-process fallback); same export name and contract as before.
+import { extractPdfToMarkdown } from './pdf-extraction.ts';
 
 /** Backoff before the fetch layer's single transient retry. */
 const FETCH_RETRY_DELAY_MS = 250;
@@ -73,117 +76,6 @@ async function getMarkdownConverter(): Promise<(html: string) => Promise<string>
 async function convertToMarkdown(html: string): Promise<string> {
   const converter = await getMarkdownConverter();
   return converter(html);
-}
-
-// TODO(hardening, medium): this synchronous WASM parse runs on the MAIN
-// process's event loop — a large/complex PDF can block it for seconds,
-// starving every concurrent scrape, the TUI render loop, and timers. The
-// correct fix is a worker_threads-based extraction (mirroring the browser
-// pool's CPU isolation pattern), but it is deliberately NOT done in this
-// pass: pdf-oxide-wasm is dynamically imported here and unit tests mock the
-// module via vitest, which cannot reach into a real worker thread — moving
-// the parse requires a companion test-seam redesign first. Bounded today by
-// MAX_PDF_SIZE (100MB) and the scrape task's own deadline.
-async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
-  if (bytes.length > MAX_PDF_SIZE) {
-    const sizeMB = Math.round(bytes.length / 1024 / 1024);
-    logger.warn(`[Scrapers] PDF too large (${sizeMB}MB, max 100MB), skipping extraction`);
-    metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'size_exceeded' });
-    // THROW, never an in-band "*Error: ...*" string: a returned banner flowed
-    // into validateContent as if it were page content, and a verbose one
-    // (≥50 words / ≥200 chars) cleared the stub gate — the failure banner was
-    // then cached and cited as a successful scrape.
-    throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
-  }
-
-  const pdfExtractionStart = Date.now();
-
-  // The native module load is caught SEPARATELY from the parse/extraction
-  // logic below: a failure here (missing prebuilt binary for this platform,
-  // corrupted install) is an INFRASTRUCTURE fault — PDF extraction is broken
-  // for every URL, not just this one — not the routine, expected outcome of
-  // a malformed/encrypted/scanned-image-only PDF. Sharing one catch with the
-  // parse logic used to log both at `debug` and lump both under
-  // 'extraction_failed', so a broken install produced an endless stream of
-  // silent per-PDF "failures" instead of ever surfacing the real cause.
-  let WasmPdfDocument: (new (bytes: Uint8Array) => {
-    pageCount(): number;
-    toMarkdownAll(): string;
-    toMarkdown(page: number): string;
-    free(): void;
-  });
-  try {
-    ({ WasmPdfDocument } = await import('pdf-oxide-wasm'));
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logger.error(`[Scrapers] pdf-oxide-wasm failed to load — PDF extraction is unavailable (not just for this URL): ${msg}`);
-    metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'native_module_unavailable' });
-    errorTracker.trackError(e instanceof Error ? e : String(e), {
-      component: 'scrapers',
-      operation: 'pdf-extract',
-      contentType: 'pdf',
-      errorType: 'native_module_unavailable',
-    });
-    // Deliberately does NOT start with 'Could not extract content from PDF' —
-    // isBenignScrapeFailure must NOT classify this as the routine per-PDF
-    // outcome it is for the parse-failure branch below.
-    throw new Error(`PDF extraction unavailable (pdf-oxide-wasm failed to load: ${msg})`, { cause: e });
-  }
-
-  try {
-    const doc = new WasmPdfDocument(bytes);
-    // free() is native/WASM-side memory, not GC-reclaimed — it must run on
-    // every exit, including the case toMarkdownAll() AND the per-page fallback
-    // both throw (a malformed/encrypted PDF the codebase already treats as
-    // routine on the open web, so this path fires regularly). It used to sit
-    // after the fallback loop, reachable only when nothing below it threw —
-    // the one case that needed the fallback landing squarely on the one case
-    // that skipped the free(), leaking one WasmPdfDocument per occurrence in a
-    // browser-server process that stays warm across many research sessions.
-    try {
-      const pageCount = doc.pageCount();
-
-      let markdown = `# PDF Document\n\n**Pages:** ${pageCount}\n\n`;
-
-      try {
-        markdown += doc.toMarkdownAll();
-      } catch {
-        for (let i = 0; i < pageCount; i++) {
-          markdown += `## Page ${i + 1}\n\n${doc.toMarkdown(i)}\n\n`;
-        }
-      }
-
-      const pdfExtractionDuration = Date.now() - pdfExtractionStart;
-      metrics.observe('scrape_pdf_conversion_ms', pdfExtractionDuration);
-      metrics.increment('scrape_pdf_conversions_total', 1, { status: 'success', pages: String(pageCount) });
-      return markdown;
-    } finally {
-      doc.free();
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    // debug, not error: a malformed/encrypted/scanned-image-only PDF is an
-    // expected, non-actionable per-URL outcome, not a genuine fault — the same
-    // reason isBenignScrapeFailure (scraper-utils.ts) keeps stub/blocked/HTTP-error
-    // content out of ERROR. This is called from both the fetch layer (where a
-    // browser-layer fallback always follows — the fetch layer's own catch at line
-    // ~529 already logs ANY of its failures at debug for that reason) and the
-    // browser layer (the last resort — isBenignScrapeFailure now recognizes this
-    // message so that terminal call site's own classification stays consistent
-    // too). Logging ERROR here, before either caller gets a chance to classify,
-    // pre-empted both of those and always alarmed regardless.
-    logger.debug(`[Scrapers] PDF extraction failed: ${msg}`);
-    metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'extraction_failed' });
-    errorTracker.trackError(e instanceof Error ? e : String(e), {
-      component: 'scrapers',
-      operation: 'pdf-extract',
-      contentType: 'pdf',
-      errorType: 'extraction_failed',
-    });
-    // See the size branch above: an extraction failure must FAIL the scrape,
-    // not travel in-band as pseudo-content.
-    throw new Error(`Could not extract content from PDF (${msg})`, { cause: e });
-  }
 }
 
 /**
