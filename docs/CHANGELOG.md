@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - Unreleased
+
+### Fixed
+
+- **A stale extension `node_modules` crashed every LLM call with a misleading "Provider error".** When the host pi advanced past the `@earendil-works/*` copies this extension resolves (host 0.84.4 vs extension pi-ai 0.84.2), mixed-version module graphs killed researchers and knowledge triage/extraction at provider load with ESM named-export errors (`clampThinkingBudgetToAnswerRoom`, first exported in pi-ai 0.84.3). The lockfile now resolves the SDK trio at 0.84.4, and a new load-time guard (`checkPiAiSkew`) walks the host tree and the extension's resolved copies and REFUSES TO START with the exact remediation instead of five silent researcher deaths (`src/core/pi-ai-skew.ts`).
+- **A large PDF blocked the main process's event loop for seconds.** pdf-oxide-wasm's parse is irreducibly synchronous, so it now runs in a dedicated worker_threads worker (zero-copy transfer, 30s terminate-and-retry-in-process) with byte-identical error strings, metrics, and classification; a missing bundle or `PI_RESEARCH_PDF_WORKER=off` keeps today's in-process behavior (`src/web-research/pdf-extraction.ts`).
+
+### Changed
+
+- **Planner, round-2 router, and knowledge synthesis now offer schema-constrained submit tools** (pi-ai `constrainedSampling`, `strict: 'prefer'`): schema-exact JSON where the provider supports it, plain tool calls everywhere else, and text answers still flow through the existing parse/repair pipeline unchanged (`src/core/llm/llm-utils.ts`).
+- Runtime deps refreshed: camoufox-js 0.12, impit 0.14.4; apache-arrow stays lockstep 21.1.0 (lancedb 0.37.1 cannot read 21.2.0 IPC) and playwright-core stays 1.60.0 (camoufox 0.12 peer-caps <1.61.0).
+- CI typechecks with the TypeScript 7 native compiler alongside TS6 (~9x faster, 3.7s vs ~35s here); TS6 remains the typescript-eslint compiler until its TS 7.1 API support lands.
+
 ## [1.6.6] - 2026-08-26
 
 Issue #9 reported deep-research runs stalling for minutes inside planning salvage

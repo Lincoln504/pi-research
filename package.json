@@ -80,6 +80,8 @@
     "lint:fix": "npx eslint --config config/tooling/eslint.config.js src/ --fix",
     "type-check": "tsc --noEmit",
     "type-check:tests": "tsc --noEmit --project config/tooling/tsconfig.test.json",
+    "type-check:native": "npx -y -p typescript@7.0.2 tsc --noEmit -p tsconfig.json",
+    "type-check:native:tests": "npx -y -p typescript@7.0.2 tsc --noEmit --project config/tooling/tsconfig.test.json",
     "build:worker": "node scripts/build.cjs worker",
     "test": "npm run test:unit",
     "test:unit": "vitest run --config config/tooling/vitest.config.unit.ts",
