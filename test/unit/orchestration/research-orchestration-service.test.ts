@@ -22,6 +22,11 @@ vi.mock('../../../src/infrastructure/browser/browser-error-utils.ts', () => ({
 // Mock constants
 vi.mock('../../../src/constants.ts', () => ({
   RESEARCHER_LAUNCH_DELAY_MS: 0,
+  // Used by runResearch's exclusion chokepoint (additive: earlier tests never
+  // reach it, but the capacity/cancelled metrics tests run through runResearch).
+  RESEARCH_TOOL_NAMES: ['research'],
+  resolveExcludedTools: (callerExclusions?: readonly string[], configDisabled: readonly string[] = []) =>
+    [...new Set([...(callerExclusions ?? []), ...configDisabled])],
 }));
 
 // Mock search
@@ -76,6 +81,8 @@ import { parseCitations } from '../../../src/utils/text-utils.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import { runResearcher } from '../../../src/orchestration/researcher-executor.ts';
 import { recordResearcherFailure, shouldStopResearch, createResearchStopError } from '../../../src/orchestration/session-state.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
+import { ResearchRunCapacityError } from '../../../src/infrastructure/research-run-semaphore.ts';
 
 const mockSearch = search as ReturnType<typeof vi.fn>;
 const mockRunAll = healthRegistry.runAll as ReturnType<typeof vi.fn>;
@@ -593,6 +600,73 @@ describe('ResearchOrchestrationService', () => {
         expect(wedgedAbortAll).toHaveBeenCalledWith('r1');
       } finally {
         vi.useRealTimers();
+      }
+    });
+  });
+
+  // =========================================================================
+  // runResearch — run-level metrics for refused/cancelled runs (Audit L1)
+  // =========================================================================
+  describe('runResearch capacity/cancel metrics', () => {
+    const baseOptions = {
+      ctx: { cwd: process.cwd(), container: { isReady: true } },
+      query: 'capacity probe',
+      depth: 0,
+      // A fully-resolved model short-circuits resolveResearchModel — the test
+      // only needs to reach the run-cap acquire block.
+      model: { provider: 'test', id: 'test-model' },
+    } as any;
+
+    it('a capacity-refused run is counted (capacity_refused) and rethrown with its terminal onError', async () => {
+      const incSpy = vi.spyOn(metrics, 'increment');
+      vi.mocked(getService).mockImplementation(async (name: any) => {
+        if (name === ServiceNames.RESEARCH_RUN_SEMAPHORE) {
+          throw new ResearchRunCapacityError(3, 30000);
+        }
+        throw new Error(`unexpected getService(${String(name)})`);
+      });
+      const onError = vi.fn();
+      try {
+        const service = new ResearchOrchestrationService();
+        await expect(
+          service.runResearch({ ...baseOptions, observer: { onError } }),
+        ).rejects.toBeInstanceOf(ResearchRunCapacityError);
+        expect(incSpy).toHaveBeenCalledWith(
+          'research_manager_requests_total',
+          1,
+          expect.objectContaining({ status: 'capacity_refused', depth: '0' }),
+        );
+        // The exactly-one-terminal-event contract is kept for observers.
+        expect(onError).toHaveBeenCalledTimes(1);
+      } finally {
+        incSpy.mockRestore();
+        vi.mocked(getService).mockReset();
+      }
+    });
+
+    it('an abort while queueing for a slot is counted (cancelled), not as an error', async () => {
+      const incSpy = vi.spyOn(metrics, 'increment');
+      const abortErr = new Error('Aborted');
+      abortErr.name = 'AbortError';
+      vi.mocked(getService).mockImplementation(async (name: any) => {
+        if (name === ServiceNames.RESEARCH_RUN_SEMAPHORE) throw abortErr;
+        throw new Error(`unexpected getService(${String(name)})`);
+      });
+      const onError = vi.fn();
+      try {
+        const service = new ResearchOrchestrationService();
+        await expect(
+          service.runResearch({ ...baseOptions, observer: { onError } }),
+        ).rejects.toMatchObject({ name: 'AbortError' });
+        expect(incSpy).toHaveBeenCalledWith(
+          'research_manager_requests_total',
+          1,
+          expect.objectContaining({ status: 'cancelled' }),
+        );
+        expect(onError).toHaveBeenCalledTimes(1);
+      } finally {
+        incSpy.mockRestore();
+        vi.mocked(getService).mockReset();
       }
     });
   });
