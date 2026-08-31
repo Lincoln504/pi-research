@@ -41,7 +41,7 @@ const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mock
   // for a 'model.onnx_data' reference). Default: a SELF-CONTAINED graph — no
   // external-weights string — so the historical fixtures stay "cached". Tests
   // for the poisoned-cache case override mockOpenRead with a graph-stub buffer.
-  let mockOpenRead = Buffer.from('mock onnx graph, self-contained weights');
+  let mockOpenRead: Buffer<ArrayBufferLike> = Buffer.from('mock onnx graph, self-contained weights');
   const mockOpen = vi.fn().mockImplementation(async () => ({
     read: async (buf: Buffer, off: number, len: number) => {
       const src = mockOpenRead.subarray(0, len);
