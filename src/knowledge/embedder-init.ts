@@ -208,6 +208,34 @@ export async function isModelCached(model: string): Promise<boolean> {
 
     const entries = await readdir(onnxDir).catch(() => [] as string[]);
 
+    // External-weights integrity: transformers.js exports most embedding models as a
+    // small graph stub (model.onnx) that references its real weights in a SIBLING
+    // model.onnx_data. An interrupted download can leave EXACTLY the stub without the
+    // weights — every check above passes (the stub is a valid protobuf, config and
+    // tokenizer are present), so this function reported "cached", the loader ran with
+    // allowRemoteModels=false, and transformers failed with "model.onnx_data ... not
+    // found locally" — an error isCorruptModelError did not classify, so no purge and
+    // no re-download: init retried into the same wall until the caller's budget died.
+    // Detect the reference in the graph bytes and require the weights file when it is
+    // present. The scan is bounded to 1MB: a self-contained (internal-weights) model.onnx
+    // is far larger than that, and the reference string lives in the small external-data
+    // layout's protobuf.
+    const onnxPath = path.default.join(onnxDir, 'model.onnx');
+    const onnxStat = await stat(onnxPath).catch(() => null);
+    if (onnxStat && onnxStat.size > 0 && onnxStat.size <= 1024 * 1024) {
+      const handle = await import('node:fs/promises');
+      const fh = await handle.default.open(onnxPath, 'r');
+      try {
+        const { buffer, bytesRead } = await fh.read(Buffer.alloc(Math.min(onnxStat.size, 1024 * 1024)), 0, Math.min(onnxStat.size, 1024 * 1024), 0);
+        const referencesExternalWeights = buffer.subarray(0, bytesRead).includes('model.onnx_data');
+        if (referencesExternalWeights && !entries.includes('model.onnx_data')) {
+          return false;
+        }
+      } finally {
+        await fh.close();
+      }
+    }
+
     // If an external weights file is listed, it must be non-empty — an interrupted
     // download can leave a zero-length model.onnx_data that crashes the ONNX loader.
     const hasExternalWeights = entries.includes('model.onnx_data');
@@ -259,7 +287,13 @@ export function isCorruptModelError(err: unknown): boolean {
     msg.includes('deserialize') ||
     msg.includes('file_length') ||
     msg.includes('protobuf parsing failed') ||
-    msg.includes('invalid protobuf')
+    msg.includes('invalid protobuf') ||
+    // transformers.js local-file-missing: the cache LOOKED complete to isModelCached
+    // but a referenced file (typically external weights, model.onnx_data) is absent —
+    // an interrupted download. Classifying it here routes to purge + one remote
+    // re-download instead of init retrying into the same wall.
+    msg.includes('not found locally') ||
+    msg.includes('local_files_only=true')
   );
 }
 
