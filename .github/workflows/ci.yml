@@ -27,16 +27,6 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ONNXRUNTIME_NODE_SKIP_BINARIES: 1
-  # windows-latest migrated its image to Visual Studio 2026 (version 18) in
-  # August 2026 (actions/runner-images#13272). node-gyp 11.2.0 — the version
-  # bundled with npm 11 — has no find-VS entry for version "18" and aborts
-  # with `unknown version "undefined" found at .../Microsoft Visual Studio/18`,
-  # which made better-sqlite3 13 (no prebuilt binaries since 13.0.0, so every
-  # install node-gyp-rebuilds) unbuildable on every Windows leg. Naming the
-  # MSVS generation explicitly is the documented remedy for the detection gap
-  # (runner-images#13272/#14017); gyp ignores the variable outside the MSVS
-  # generator, so the Linux/macOS legs are unaffected. Safe to drop once the
-  # bundled node-gyp learns version 18.
 
 jobs:
   analyze:
@@ -318,6 +308,17 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
+      # Run npm 12, not the node-bundled npm: npm 12 bundles node-gyp ^13, whose
+      # find-VS recognizes the Visual Studio 2026 ("version 18") that the
+      # windows-latest image migrated to in August 2026 (actions/runner-images
+      # #13272). npm ≤11's node-gyp 11.2 crashes detecting it (maxbuffer RangeError
+      # in its PowerShell probe, then `unknown version "undefined"`), which made
+      # better-sqlite3 13's dependency rebuild unbuildable on the Windows leg.
+      # npm 12 is also what consumers on supported Node versions actually run.
+      # (GYP_MSVS_VERSION=2026 was tried first and does NOT help: the 11.2 crash
+      # is in version DETECTION, before that variable is consulted.)
+      - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
+        run: npm install -g npm@12
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -337,6 +338,18 @@ jobs:
         # (the browser is fetched lazily on first use), but that left the Windows and
         # macOS branches of setup.cjs with no way to fail a build — a broken launcher
         # produced a green `npm ci`. This is the one place they are enforced.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PI_RESEARCH_STRICT_SETUP: '1'
+      # npm ≥11.19 blocks dependency install scripts by default (warn-and-skip;
+      # npm 12 hardens the machinery further), so the postinstall browser fetch
+      # above NO LONGER RUNS on modern npm. Provision the browser explicitly —
+      # this is the one job whose suite launches real browsers on all three
+      # OSes, and a silently-missing binary would skip them all green. Running
+      # scripts/setup.cjs (not a bare `camoufox-js fetch`) keeps the strict-mode
+      # enforcement and the install-dir resolution consumers actually get.
+      - name: Provision the Camoufox browser (explicit — npm ≥11.19 skips postinstall)
+        run: node scripts/setup.cjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PI_RESEARCH_STRICT_SETUP: '1'
@@ -581,6 +594,12 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
+      # npm 12, mirroring the integration job: its node-gyp 13 builds
+      # better-sqlite3 13 on the VS2026 windows-latest image, and its
+      # script-skip semantics are what this job's clean-project install step
+      # must model for real consumers.
+      - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
+        run: npm install -g npm@12
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -590,7 +609,7 @@ jobs:
           # saved node_modules tree. See scripts/ensure-native-deps.cjs.
           key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
-        # Skip the ~100MB camoufox fetch: this job's own tree never launches a
+        # Skip the ~500MB camoufox fetch: this job's own tree never launches a
         # browser. No GITHUB_TOKEN here (unlike the integration job's equivalent
         # step): setup.cjs checks PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD first and
         # returns before ever reaching the GitHub-releases fetch the token would
@@ -612,12 +631,17 @@ jobs:
         run: |
           TAR_FILE="$(npm pack --ignore-scripts | tail -1)"
           echo "TAR_FILE=$TAR_FILE" >> "$GITHUB_ENV"
-      - name: Install packed tarball in a clean project (strict, real postinstall)
+      - name: Install packed tarball in a clean project (strict, real setup)
         # Mirrors how a real consumer / `pi install` resolves the package:
         #  - NO --legacy-peer-deps, so a peer/ERESOLVE conflict (the class that
         #    broke the fresh install) fails CI instead of shipping.
-        #  - scripts enabled so our setup.cjs postinstall is exercised and must
-        #    exit 0; browser download skipped to keep it fast and deterministic.
+        #  - npm ≥11.19 skips install scripts by default, so the postinstall is
+        #    NOT exercised by the install itself any more (measured on npm
+        #    12.0.2: approve-scripts registers the approval but the script still
+        #    never runs for a file:/ tarball). Run scripts/setup.cjs explicitly
+        #    — it must execute and exit 0; browser download skipped to keep it
+        #    fast and deterministic (the integration job exercises the real
+        #    fetch + launches).
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
@@ -627,6 +651,7 @@ jobs:
           cd "$WORK"
           npm init -y >/dev/null
           npm install "./$TAR_FILE"
+          node "node_modules/@lincoln504/pi-research/scripts/setup.cjs"
           echo "INSTALLED_DIR=$WORK/node_modules/@lincoln504/pi-research" >> "$GITHUB_ENV"
           # npm places a SCOPED package's bin shim in node_modules/.bin, not
           # node_modules/@scope/.bin — export it rather than deriving it downstream.
