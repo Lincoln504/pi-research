@@ -170,18 +170,43 @@ function verifyManifest() {
     return;
   }
 
-  // npm pack --json prints a JSON array to stdout, but on some npm versions the
-  // `prepare` lifecycle still runs during `npm pack` even with --ignore-scripts,
-  // emitting build progress text BEFORE the JSON. Slice from the first '[' so we
-  // parse only the JSON array regardless of any leading chatter.
+  // npm pack --json prints a JSON array to stdout, but npm versions differ in
+  // the chatter they put around it: some emit prepare/build text BEFORE the
+  // JSON, and npm 12 can emit content AFTER it (observed on CI: "Unexpected
+  // non-whitespace character after JSON"). Slice out exactly the first
+  // complete JSON array with a string/escape-aware bracket scan, so both
+  // leading and trailing chatter are ignored on every npm version.
   const jsonStart = raw.indexOf('[');
   if (jsonStart < 0) {
     fail(`npm pack produced no JSON output. Got: ${raw.slice(0, 200)}`);
     return;
   }
+  let jsonEnd = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = jsonStart; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '[') depth++;
+    else if (ch === ']') {
+      depth--;
+      if (depth === 0) { jsonEnd = i; break; }
+    }
+  }
+  if (jsonEnd < 0) {
+    fail(`npm pack JSON was truncated. Got: ${raw.slice(jsonStart, jsonStart + 200)}…`);
+    return;
+  }
   let parsed;
   try {
-    parsed = JSON.parse(raw.slice(jsonStart));
+    parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
   } catch (e) {
     fail(`could not parse npm pack JSON: ${e.message}`);
     return;
