@@ -3,7 +3,7 @@ import { Embedder, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedd
 import { metrics } from '../../../src/utils/metrics.ts';
 
 // vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)
-const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile } = vi.hoisted(() => {
+const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile, mockOpen, setMockOpenRead } = vi.hoisted(() => {
   const mockPipelineFn = vi.fn(async (text: string | string[], _options: any) => {
     const dimensions = 384;
     if (Array.isArray(text)) {
@@ -37,8 +37,21 @@ const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mock
   const mockStat = vi.fn().mockResolvedValue({ size: 1024 });
   const mockRm = vi.fn().mockResolvedValue(undefined);
   const mockReadFile = vi.fn().mockResolvedValue('{}');
+  // Backs isModelCached's external-weights scan (it opens model.onnx and looks
+  // for a 'model.onnx_data' reference). Default: a SELF-CONTAINED graph — no
+  // external-weights string — so the historical fixtures stay "cached". Tests
+  // for the poisoned-cache case override mockOpenRead with a graph-stub buffer.
+  let mockOpenRead = Buffer.from('mock onnx graph, self-contained weights');
+  const mockOpen = vi.fn().mockImplementation(async () => ({
+    read: async (buf: Buffer, off: number, len: number) => {
+      const src = mockOpenRead.subarray(0, len);
+      src.copy(buf, off);
+      return { bytesRead: src.length, buffer: buf };
+    },
+    close: async () => undefined,
+  }));
 
-  return { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile };
+  return { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile, mockOpen, setMockOpenRead: (b: Buffer) => { mockOpenRead = b; } };
 });
 
 vi.mock('@huggingface/transformers', () => ({
@@ -52,6 +65,10 @@ vi.mock('node:fs/promises', () => ({
   stat: (...args: unknown[]) => mockStat(...args),
   rm: (...args: unknown[]) => mockRm(...args),
   readFile: (...args: unknown[]) => mockReadFile(...args),
+  default: {
+    open: (...args: unknown[]) => mockOpen(...args),
+  },
+  open: (...args: unknown[]) => mockOpen(...args),
 }));
 
 // Keep unit tests hermetic: the real resolveEmbeddingDevice('auto', ...) spawns
@@ -601,6 +618,23 @@ describe('cache-aware initialization', () => {
     await embedder.initialize();
 
     expect(allowRemoteAtCallTime).toBe(true);
+  });
+
+  it('treats a graph-stub-without-weights cache as NOT cached (poisoned external-weights download)', async () => {
+    // The field-observed poisoning: model.onnx (the small external-data graph
+    // stub), config.json, and a tokenizer all present, but the weights file
+    // model.onnx_data never landed. The stub's bytes reference it, so the scan
+    // must veto the cache and force a fresh download instead of loading with
+    // remote models disabled into a guaranteed local-file-missing failure.
+    const { isModelCached } = await import('../../../src/knowledge/embedder-init.ts');
+    mockReaddir.mockResolvedValue(['model.onnx', 'config.json']); // no weights file
+    setMockOpenRead(Buffer.from('mock graph protobuf ... external_data model.onnx_data ...'));
+    await expect(isModelCached('test-model')).resolves.toBe(false);
+
+    // And a self-contained graph (no reference string) with the same dir state
+    // is still cached — the scan only vetoes when the reference is present.
+    setMockOpenRead(Buffer.from('mock onnx graph, self-contained weights'));
+    await expect(isModelCached('test-model')).resolves.toBe(true);
   });
 
   it('purges a corrupt cache and re-downloads once when the load deserialize-fails', async () => {

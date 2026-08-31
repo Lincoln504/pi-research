@@ -223,16 +223,22 @@ export async function isModelCached(model: string): Promise<boolean> {
     const onnxPath = path.default.join(onnxDir, 'model.onnx');
     const onnxStat = await stat(onnxPath).catch(() => null);
     if (onnxStat && onnxStat.size > 0 && onnxStat.size <= 1024 * 1024) {
-      const handle = await import('node:fs/promises');
-      const fh = await handle.default.open(onnxPath, 'r');
       try {
-        const { buffer, bytesRead } = await fh.read(Buffer.alloc(Math.min(onnxStat.size, 1024 * 1024)), 0, Math.min(onnxStat.size, 1024 * 1024), 0);
-        const referencesExternalWeights = buffer.subarray(0, bytesRead).includes('model.onnx_data');
-        if (referencesExternalWeights && !entries.includes('model.onnx_data')) {
-          return false;
+        const handle = await import('node:fs/promises');
+        const fh = await handle.default.open(onnxPath, 'r');
+        try {
+          const { buffer, bytesRead } = await fh.read(Buffer.alloc(Math.min(onnxStat.size, 1024 * 1024)), 0, Math.min(onnxStat.size, 1024 * 1024), 0);
+          const referencesExternalWeights = buffer.subarray(0, bytesRead).includes('model.onnx_data');
+          if (referencesExternalWeights && !entries.includes('model.onnx_data')) {
+            return false;
+          }
+        } finally {
+          await fh.close();
         }
-      } finally {
-        await fh.close();
+      } catch {
+        // A read failure here is NOT evidence of a poisoned cache — treat the
+        // verdict as inconclusive and fall through to the historical checks
+        // (the loader-side corrupt classification remains the backstop).
       }
     }
 
