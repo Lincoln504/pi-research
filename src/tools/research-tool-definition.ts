@@ -282,7 +282,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
       // replace it (validateAndSanitizeQuery below rejects an empty query anyway;
       // failing here keeps the message clear and matches the CLI's up-front check).
       if (!query) {
-        return { content: [{ type: 'text', text: 'Error: research requires a query; initialLinks seed URLs for a query but cannot replace it.' }], details: {} };
+        return { content: [{ type: 'text', text: 'Error: research requires a query; initialLinks seeds URLs for the query but cannot replace it.' }], details: {} };
       }
 
       // Each run gets its own isolated registry; session-level counter is incremented

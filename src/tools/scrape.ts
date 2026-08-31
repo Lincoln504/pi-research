@@ -110,6 +110,17 @@ export function createScrapeTool(options: {
     async execute(_callId: string, params: unknown, signal: AbortSignal, _onUpdate: AgentToolUpdateCallback<any>): Promise<AgentToolResult<unknown>> {
       const callStartTime = Date.now();
 
+      // Validate BEFORE spending the budget slot — the doctrine security.ts /
+      // stackexchange.ts / youtube-transcript.ts already follow (a rejected call
+      // must not consume a batch). The limit check used to run first, inverting it.
+      if (!Value.Check(ScrapeParamsSchema, params)) {
+        metrics.increment('tool_scrape_calls_total', 1, { status: 'invalid_params' });
+        return {
+          content: [{ type: 'text', text: 'Invalid parameters for scrape tool. Expected an array of URLs.' }],
+          details: { error: 'invalid_params' },
+        };
+      }
+
       // Rate-limit enforcement (only when tracker is present)
       if (options.tracker) {
         const callCount = options.tracker.getToolCallCount('scrape');
@@ -121,14 +132,6 @@ export function createScrapeTool(options: {
             details: { blocked: true, reason: 'limit_reached' },
           };
         }
-      }
-
-      if (!Value.Check(ScrapeParamsSchema, params)) {
-        metrics.increment('tool_scrape_calls_total', 1, { status: 'invalid_params' });
-        return {
-          content: [{ type: 'text', text: 'Invalid parameters for scrape tool. Expected an array of URLs.' }],
-          details: { error: 'invalid_params' },
-        };
       }
 
       const p = params as ScrapeParams;

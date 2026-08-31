@@ -119,4 +119,4 @@ When delegating, ensure:
 - **Researcher IDs**: Use Round.Index format — the current round number from the RUN CONTEXT block, then the researcher index. In round 3 that is **3.1**, **3.2**, and so on.
 - **Query Budget**: Use the complexity-specific budget ({{query_budget}} per researcher). Fill each researcher's query budget completely.
 - **Team Size**: Scale researcher count to match the gaps. Use up to {{max_team_size}} researchers when delegating, but a single well-targeted researcher is often sufficient for focused gaps. Don't pad the team when fewer researchers will cover the remaining gaps efficiently.
-- **Format**: ONLY return valid JSON in a code block. Never return report prose.
+- **Format**: Call `submit_routing_decision` with the updated plan as its arguments when the tool is offered; otherwise return ONLY valid JSON in a code block. Never return report prose.

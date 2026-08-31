@@ -10,11 +10,16 @@ import { Value } from 'typebox/value';
 import { stackexchangeCommand } from '../stackexchange/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { getMaxGatheringCalls } from '../constants.ts';
+import type { Config } from '../config.ts';
 import { isCancellation } from '../utils/cancellation.ts';
 
 export function createStackexchangeTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
+  /** The run's resolved config — the gathering-call budget prompt must read the
+   *  SAME overlay-resolved value the tracker enforces, not the ambient default
+   *  (scrape.ts fixed this same advertised-vs-enforced drift). */
+  config?: Config;
 }): ToolDefinition {
   const { tracker } = options;
 
@@ -64,7 +69,7 @@ export function createStackexchangeTool(options: {
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',
       'Use tags to filter by specific topics.',
       'Use maxPages parameter to control pagination for search results (default: 5 pages).',
-      `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls()} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
+      `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls(options.config)} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
     ],
     parameters: StackExchangeParamsSchema,
     executionMode: 'parallel',

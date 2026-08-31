@@ -68,11 +68,8 @@ export function createSearchTool(options: {
       let queries = p.queries;
       metrics.increment('tool_search_queries_total', queries.length);
 
-      if (queries.length < 1) {
-        metrics.increment('tool_search_calls_total', 1, { status: 'insufficient_queries' });
-        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 1 highly specific queries.`);
-      }
-
+      // (No min-length check needed: Value.Check above enforces minItems: 1, so
+      // an under-length call is already rejected as invalid_parameters.)
       // Hard cap at the documented 30-query maximum
       let submittedQueries = queries.length;
       if (queries.length > 30) {

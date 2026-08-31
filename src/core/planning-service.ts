@@ -779,7 +779,9 @@ export class PlanningService implements IPlanningService {
             // to the text pipeline when the model answers in prose.
             const submitRoutingTool = buildConstrainedSubmitTool(
               'submit_routing_decision',
-              'Submit the updated round-2 routing plan as structured arguments.',
+              // Audit LOW: this description is offered verbatim on EVERY delegation
+              // round — the hard-coded "round-2" misdescribed rounds 3, 4, … N.
+              `Submit the updated round-${round} routing plan as structured arguments.`,
               PlanningResponseSchemaAsTSchema,
             );
             // The router carries no reduce mechanism the way synthesizeCorpus does — a

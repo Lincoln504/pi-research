@@ -10,6 +10,7 @@ import { Value } from 'typebox/value';
 import { searchSecurityDatabases } from '../security/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { getMaxGatheringCalls } from '../constants.ts';
+import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
 import { isCancellation } from '../utils/cancellation.ts';
 import type { SecuritySearchParams } from '../security/types.ts';
@@ -26,6 +27,10 @@ function truncateDescription(description: string): string {
 export function createSecuritySearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
+  /** The run's resolved config — the gathering-call budget prompt must read the
+   *  SAME overlay-resolved value the tracker enforces, not the ambient default
+   *  (scrape.ts fixed this same advertised-vs-enforced drift). */
+  config?: Config;
 }): ToolDefinition {
 
   const SecuritySearchParamsSchema = Type.Object({
@@ -67,7 +72,7 @@ export function createSecuritySearchTool(options: {
       'Available for looking up CVE IDs, package vulnerabilities, or security advisories.',
       'Supports databases: NVD (340k+ CVEs), CISA KEV (actively exploited), GitHub Advisories (open source), OSV (packages).',
       'Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
-      `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls()} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
+      `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls(options.config)} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
     ],
     parameters: SecuritySearchParamsSchema,
     executionMode: 'parallel',

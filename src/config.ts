@@ -1,9 +1,15 @@
 /**
  * Configuration Module
  *
- * Source of truth: .env file in the extension directory.
- * The /research-config TUI is a friendly editor for that file.
- * process.env values override the file (useful for CI / one-off overrides).
+ * Resolution order (lowest → highest precedence):
+ *   built-in DEFAULTS
+ *   < ~/.pi/research/config.env          (user file; the /research-config TUI edits this)
+ *   < ~/.pi/research/{iface}.env         (per-interface overlay: cli.env, pi.env, sdk.env)
+ *   < legacy extension-dir .env          (deprecated; migrated on load)
+ *   < project registry (~/.pi/research/projects.json, per-directory)
+ *   < process.env                        (CI / one-off overrides)
+ * See loadEnvFiles()/createConfig() below for the implementation and the
+ * scope-demotion rules for project-registered keys read from ambient files.
  */
 
 import * as fs from 'node:fs';

@@ -43,7 +43,7 @@ Before splitting the query into researchers, pin down its scope — exactly what
 
 ## Output Format
 
-Return ONLY a JSON block containing your full team plan. Use this general schema:
+Respond with your full team plan by CALLING the `submit_plan` tool when it is offered in the conversation — its arguments ARE the plan (primary, schema-exact channel). Only if you cannot call tools, return a JSON block instead. Use this general schema:
 
 ```json
 {
@@ -72,4 +72,4 @@ Return ONLY a JSON block containing your full team plan. Use this general schema
 - **Researcher IDs**: Use Round.Index format (e.g. **1.1**, **1.2**).
 - **Citations**: Each researcher's queries should be designed to uncover sources that can be comprehensively cited. Prioritize queries that lead to authoritative references, data, and documented facts.
 - **Title**: Set `"title"` to 1-2 words that best name the core topic (e.g. `"iPhone 15"`, `"React Performance"`, `"PostgreSQL Replication"`). Use proper nouns and brand names where applicable. Do NOT use generic words like "research", "overview", or "options".
-- **Format**: Valid JSON only. No markdown, no explanation outside the JSON block.
+- **Format**: Call `submit_plan` with the plan as its arguments when the tool is offered; otherwise output valid JSON only. No markdown, no explanation outside the JSON block.

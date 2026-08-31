@@ -890,6 +890,12 @@ export async function searchKnowledge(
   if (!Array.isArray(queries) || queries.length === 0) {
     throw new Error('searchKnowledge requires a non-empty array of queries.');
   }
+  if (queries.length > 5) {
+    // Fail-fast, matching the CLI's contract ('knowledge accepts at most 5
+    // queries.') — the previous silent slice(0, 5) dropped input without telling
+    // the caller, the exact advertised-vs-enforced drift this SDK avoids.
+    throw new Error('searchKnowledge accepts at most 5 queries.');
+  }
 
   // Lazily import the tool factory so the SDK bundle stays lean when unused.
   const { createResearchKnowledgeSearchTool } = await import('./tools/research-knowledge-search.ts');
