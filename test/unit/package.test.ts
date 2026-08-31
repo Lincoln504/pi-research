@@ -50,13 +50,19 @@ describe('npm pack', () => {
       maxBuffer: 32 * 1024 * 1024,
     });
 
-    // npm 12 can emit stdout content after the closing bracket (verify-package.cjs
-    // hit the same on CI), so a bare JSON.parse of the whole output is version-
-    // fragile. Extract the first complete JSON array with a string/escape-aware
-    // bracket scan — kept in sync with the scanner in scripts/verify-package.cjs
+    // npm pack --json changed shape across versions: npm ≤11 prints a JSON
+    // ARRAY of entries, npm 12 prints a single OBJECT keyed by package name —
+    // and both can carry stdout chatter around it. Extract the first complete
+    // JSON value with a string/escape-aware brace/bracket scan, then normalize
+    // the shape. Kept in sync with the scanner in scripts/verify-package.cjs
     // (a CJS script this ESM test cannot import).
-    const start = output.indexOf('[');
-    if (start < 0) throw new Error(`npm pack produced no JSON output: ${output.slice(0, 200)}`);
+    const objStart = output.indexOf('{');
+    const arrStart = output.indexOf('[');
+    const starts = [objStart, arrStart].filter((i) => i >= 0);
+    if (starts.length === 0) throw new Error(`npm pack produced no JSON output: ${output.slice(0, 200)}`);
+    const start = Math.min(...starts);
+    const openCh = output[start];
+    const closeCh = openCh === '{' ? '}' : ']';
     let depth = 0;
     let inString = false;
     let escaped = false;
@@ -70,15 +76,18 @@ describe('npm pack', () => {
         continue;
       }
       if (ch === '"') inString = true;
-      else if (ch === '[') depth++;
-      else if (ch === ']') {
+      else if (ch === openCh) depth++;
+      else if (ch === closeCh) {
         depth--;
         if (depth === 0) { end = i; break; }
       }
     }
     if (end < 0) throw new Error('npm pack JSON was truncated');
-    const parsed = JSON.parse(output.slice(start, end + 1)) as Array<{ files?: Array<{ path?: string }> }>;
-    return (parsed[0]?.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === 'string');
+    const parsed = JSON.parse(output.slice(start, end + 1)) as
+      | Array<{ files?: Array<{ path?: string }> }>
+      | Record<string, { files?: Array<{ path?: string }> }>;
+    const entry = Array.isArray(parsed) ? parsed[0] : parsed[Object.keys(parsed)[0]];
+    return (entry?.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === 'string');
   }
 
   it('should include package.json', () => {

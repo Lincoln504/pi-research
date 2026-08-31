@@ -170,17 +170,21 @@ function verifyManifest() {
     return;
   }
 
-  // npm pack --json prints a JSON array to stdout, but npm versions differ in
-  // the chatter they put around it: some emit prepare/build text BEFORE the
-  // JSON, and npm 12 can emit content AFTER it (observed on CI: "Unexpected
-  // non-whitespace character after JSON"). Slice out exactly the first
-  // complete JSON array with a string/escape-aware bracket scan, so both
-  // leading and trailing chatter are ignored on every npm version.
-  const jsonStart = raw.indexOf('[');
+  // npm pack --json changed shape across versions: npm ≤11 prints a JSON ARRAY
+  // of entries, npm 12 prints a single OBJECT keyed by package name — and both
+  // can carry chatter before/after (observed on CI: "Unexpected non-whitespace
+  // character after JSON"). Extract the first complete JSON value (object or
+  // array) with a string/escape-aware brace/bracket scan, then normalize the
+  // shape to the entry.
+  const objStart = raw.indexOf('{');
+  const arrStart = raw.indexOf('[');
+  const jsonStart = (objStart < 0) ? arrStart : (arrStart < 0) ? objStart : Math.min(objStart, arrStart);
   if (jsonStart < 0) {
     fail(`npm pack produced no JSON output. Got: ${raw.slice(0, 200)}`);
     return;
   }
+  const openCh = raw[jsonStart];
+  const closeCh = openCh === '{' ? '}' : ']';
   let jsonEnd = -1;
   let depth = 0;
   let inString = false;
@@ -194,8 +198,8 @@ function verifyManifest() {
       continue;
     }
     if (ch === '"') inString = true;
-    else if (ch === '[') depth++;
-    else if (ch === ']') {
+    else if (ch === openCh) depth++;
+    else if (ch === closeCh) {
       depth--;
       if (depth === 0) { jsonEnd = i; break; }
     }
@@ -211,7 +215,8 @@ function verifyManifest() {
     fail(`could not parse npm pack JSON: ${e.message}`);
     return;
   }
-  const files = parsed[0].files.map((f) => f.path);
+  const entry = Array.isArray(parsed) ? parsed[0] : parsed[Object.keys(parsed)[0]];
+  const files = (entry?.files ?? []).map((f) => f.path);
   const set = new Set(files);
 
   for (const req of REQUIRED) {
