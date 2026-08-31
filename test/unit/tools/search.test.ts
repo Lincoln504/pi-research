@@ -35,22 +35,24 @@ describe('tools/search', () => {
     expect(tool.promptGuidelines![0]).toContain('5-30 queries');
   });
 
-  it('should cap queries at 30 if too many are provided', async () => {
+  it('should REJECT over-cap queries via the schema (no silent truncation)', async () => {
     const { search } = await import('../../../src/web-research/search.ts');
     const tool = createSearchTool(mockOptions);
     const manyQueries = Array(50).fill('q');
 
-    await tool.execute('id', { queries: manyQueries }, undefined, undefined, {} as any);
+    // The schema advertises maxItems: 30 and execute validates against it, so
+    // a host that over-sends gets an explicit rejection — NOT 50 queries
+    // silently truncated to 30 (the old advertised-50/cap-30 drift).
+    const result = await tool.execute('id', { queries: manyQueries }, undefined, undefined, {} as any);
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+    expect(search).not.toHaveBeenCalled();
+  });
 
-    expect(search).toHaveBeenCalledWith(
-      expect.arrayContaining(Array(30).fill('q')),
-      undefined, // options.config
-      undefined, // signal
-      expect.any(Function), // implementation wraps onProgress in a lambda
-      expect.any(Object), // container
-      undefined // sessionId — this fixture has no getGlobalState
-    );
-    expect(vi.mocked(search).mock.calls[0][0].length).toBe(30);
+  it('advertises an honest schema: maxItems matches the 30-query runtime cap', () => {
+    const tool = createSearchTool(mockOptions);
+    const queriesProp = (tool.parameters as any).properties.queries;
+    expect(queriesProp.maxItems).toBe(30);
+    expect(queriesProp.minItems).toBe(1);
   });
 
   it('should report progress during execution', async () => {

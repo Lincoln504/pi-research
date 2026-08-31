@@ -29,7 +29,10 @@ export function createSearchTool(options: {
   const SearchParamsSchema = Type.Object({
     queries: Type.Array(Type.String(), {
         minItems: 1,
-        maxItems: 50,
+        // Honest schema: the runtime cap is 30 (hard-coded below), so the
+        // advertised max must be 30 — a host reading maxItems 50 would compose
+        // up to 50 queries and silently lose 20 of them at the cap.
+        maxItems: 30,
         description: 'A list of 5-30 search queries to execute (minimum 1).'
     }),
   });
@@ -71,6 +74,7 @@ export function createSearchTool(options: {
       }
 
       // Hard cap at the documented 30-query maximum
+      let submittedQueries = queries.length;
       if (queries.length > 30) {
           logger.warn(`[search tool] Capping tool call queries: ${queries.length} → 30`);
           metrics.increment('tool_search_capped_queries_total', queries.length - 30);
@@ -107,6 +111,11 @@ export function createSearchTool(options: {
 
         let markdown = `# Web Search Results (${queries.length} queries)\n\n`;
         markdown += `**Source: Web Search**\n\n`;
+        if (submittedQueries > queries.length) {
+          // In-band so the calling agent knows its input was truncated and can
+          // re-plan with a follow-up search — mirrors scrape.ts's over-cap note.
+          markdown += `> NOTE: ${submittedQueries - queries.length} of ${submittedQueries} submitted queries were dropped by the 30-query cap. Re-run a follow-up search with the remainder if those topics matter.\n\n`;
+        }
         // Untrusted-data boundary: result titles/snippets below are attacker-influenceable (via a
         // page's own <title>/meta). Remind the model in-band that they are data, not instructions —
         // mirrors the scrape tool's banner; defense-in-depth alongside the researcher prompt.

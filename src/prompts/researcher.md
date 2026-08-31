@@ -50,7 +50,7 @@ Write your report immediately after scraping is complete, or as soon as a tool r
   - `youtube_transcript`: Read the captions/transcript of YouTube videos from your source list — it is the `scrape` for video. ONE call only, batching up to a few of the most relevant YouTube links. Cite these as `Source: YouTube Transcript`.
   - `stackexchange`: Use ONLY for Stack Overflow or Stack Exchange URLs.
   - `security_search`: Query NVD, CVE, OSV, CISA databases.
-  - `read` / `grep`: Read files and search text in the local codebase. Use ONLY if local codebase context is explicitly required.
+  - `read`: Read files in the local codebase. Use ONLY if local codebase context is explicitly required.
 {{extra_tool_guidelines}}
 
 - **Specialized Tooling Directive**: Do NOT waste time with auxiliary tools (`stackexchange`, `security_search`) unless they are **specifically necessary** for your assigned goal. They are not for exploratory steps. Your primary workflow is to **scrape** authoritative web sources and **report** findings.
