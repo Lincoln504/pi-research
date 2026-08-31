@@ -40,6 +40,14 @@ export class Chunker {
     let sentenceExtensions = 0;
     let newlineExtensions = 0;
     let spaceExtensions = 0;
+    // Running count of ``` fences in text[0..start) — fence parity for the
+    // code-block-atomicity check. Maintained incrementally at the bottom of
+    // the loop (each iteration scans only the span of text newly consumed);
+    // the previous text.slice(0, start) rescan per iteration made chunking
+    // O(n²): ~350MB of allocation+regex scanning for a 1MB document, on the
+    // ingest hot path, worst exactly on the largest pages.
+    let fencesBefore = 0;
+    let lastFenceScan = 0;
 
     while (start < text.length) {
       const iterationStart = start;
@@ -49,10 +57,9 @@ export class Chunker {
         let slice = text.slice(start, end);
         let extendedForCodeBlock = false;
         
-        // 0. Code blocks atomicity
-        const textBefore = text.slice(0, start);
-        const codeBlockMatchesBefore = textBefore.match(/```/g);
-        const startsInCodeBlock = codeBlockMatchesBefore && codeBlockMatchesBefore.length % 2 !== 0;
+        // 0. Code blocks atomicity (fence parity from the running counter —
+        // see fencesBefore above).
+        const startsInCodeBlock = fencesBefore % 2 !== 0;
 
         // Hard cap: never extend a chunk beyond 4x targetSize (min 2000 chars) for code blocks.
         // A very large code block (e.g. a package compatibility table) can otherwise
@@ -231,6 +238,17 @@ export class Chunker {
             start += 1;
           }
         }
+      }
+
+      // Advance the running fence counter over the span this iteration newly
+      // consumed. start only ever moves forward (start-side forward-progress
+      // guard), so scanning [lastFenceScan, start) once keeps fencesBefore
+      // exactly equal to the fence count in text[0..start) that the next
+      // iteration's parity check needs — amortized O(n) across the whole loop.
+      if (start > lastFenceScan) {
+        const newlyConsumed = text.slice(lastFenceScan, start).match(/```/g);
+        if (newlyConsumed) fencesBefore += newlyConsumed.length;
+        lastFenceScan = start;
       }
     }
 

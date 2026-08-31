@@ -168,6 +168,14 @@ export interface IKnowledgeStoreService extends IService {
  */
 export interface IWriterQueue extends IService {
   drain(): Promise<void>;
+  /**
+   * Fire-and-forget enqueue of a derived, re-derivable row (a link description
+   * or synthesis). RAM-ONLY by design: the queue is not journaled, so anything
+   * enqueued but not yet addDocuments-committed is LOST on crash or kill, and
+   * dispose() bounds its final drain (dropping the remainder on timeout). Never
+   * enqueue primary user data that cannot be re-produced by re-running the
+   * scrape/synthesis that produced it.
+   */
   enqueue(item: IngestionItem): void;
 }
 

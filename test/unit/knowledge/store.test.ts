@@ -484,7 +484,7 @@ describe('KnowledgeStore', () => {
     expect(await store.count()).toBe(2);
   });
 
-  it('rebuildFtsIndex builds after documents are added, then skips when row count is unchanged', async () => {
+  it('rebuildFtsIndex builds after documents are added, then skips when the table version is unchanged (count is NOT a sufficient signal)', async () => {
     await store.open();
     // Empty table → nothing to index.
     await expect(store.rebuildFtsIndex()).resolves.toBe(false);

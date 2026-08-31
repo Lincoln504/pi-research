@@ -356,3 +356,27 @@ describe('Chunker', () => {
     });
   });
 });
+
+describe('running fence parity across many boundary crossings (O(n²) regression)', () => {
+  it('keeps code-block atomicity when fences land on many successive chunk boundaries', () => {
+    // Each block straddles at least one boundary: the parity check that decides
+    // "starts in code block" must see the correct fence count at EVERY start
+    // offset, which after the incremental-counter fix comes from the running
+    // total rather than a full prefix rescan. Any off-by-one in the incremental
+    // advance shows up as a chunk split mid-block here.
+    const filler = 'x'.repeat(180);
+    const blocks = Array.from({ length: 40 }, (_, i) => `\`\`\`js\nblock ${i}\n${filler}\n\`\`\`\n${filler}\n`);
+    const text = blocks.join('');
+    const chunks = new Chunker({ targetSize: 200, overlap: 40 }).chunk(text);
+
+    // Overlap-aware reconstruction (matches the lossless tests above) — with
+    // 80 fences straddling successive chunk boundaries this pins the running
+    // fence counter to the old rescan semantics: any off-by-one in the
+    // incremental advance shifts a boundary and corrupts reconstruction.
+    let reconstructed = chunks[0]!.text;
+    for (let i = 1; i < chunks.length; i++) {
+      reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
+    }
+    expect(reconstructed).toBe(text);
+  });
+});
