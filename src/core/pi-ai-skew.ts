@@ -23,12 +23,21 @@
  * based: the @earendil-works packages' exports maps are import-only, so
  * `createRequire(...).resolve()` fails with ERR_PACKAGE_PATH_NOT_EXPORTED,
  * and resolution would find the same (possibly stale) copy either way. Instead
- * we walk directories to package.json files directly:
+ * we walk directories to package.json files directly, reproducing the node_modules
+ * walk Node's bare-specifier resolution performs:
  *
- *   - EXTENSION side: from this module's own location up to the package root
- *     (the first package.json — src/ has none), then read
- *     node_modules/@earendil-works/{pi-ai,pi-coding-agent}/package.json.
- *     That is the copy our bare imports actually bind (nearest node_modules).
+ *   - EXTENSION side: from this module's own directory, walk ancestors and at
+ *     each level read node_modules/@earendil-works/{pi-ai,pi-coding-agent}/package.json;
+ *     the FIRST hit is the copy our bare imports actually bind. The package's own
+ *     node_modules wins when present (git installs clone + `npm install` inside the
+ *     checkout; the dev repo has its own), but on the PRIMARY layout — `pi install
+ *     npm:` — pi runs one flat managed npm tree at ~/.pi/agent/npm/ where the
+ *     extension sits at node_modules/@lincoln504/pi-research with NO nested copies
+ *     (measured) and its @earendil-works deps hoist to the managed root. A
+ *     nested-only lookup misses those entirely and would false-warn "missing" on
+ *     every healthy startup — so the walk must continue past the package root,
+ *     exactly like Node's does. The package root (nearest package.json) is still
+ *     recorded as the remedy target for genuinely-broken installs.
  *   - HOST side: from the process entry script (process.argv[1], realpath'd —
  *     Node resolves the main entry by default, so an nvm bin symlink anchors
  *     inside the host package) up to the package.json whose name IS
@@ -85,10 +94,32 @@ function findPackageRoot(startFile: string, name?: string): { dir: string; pkg: 
   return null;
 }
 
-/** Version of `@earendil-works/<pkg>` as laid out under `root`'s node_modules, or null. */
-function nestedVersion(root: string, pkg: string): string | null {
-  const p = readPkgJson(path.join(root, 'node_modules', '@earendil-works', pkg, 'package.json'));
-  return p?.version ?? null;
+/** A resolved @earendil-works copy: its version and the install root that provided it. */
+export interface ResolvedSdkCopy {
+  version: string;
+  /** The directory whose node_modules produced this copy — the `cd` target for the install remedy. */
+  installRoot: string;
+}
+
+/**
+ * Resolve `@earendil-works/<pkg>` from `startDir` exactly as Node's bare-specifier
+ * resolution binds it: walk ancestors, and at each level take the FIRST
+ * `<dir>/node_modules/@earendil-works/<pkg>/package.json` found. Covers the nested
+ * copies of a git checkout, the dev repo's own node_modules, and — critically — the
+ * flat managed tree `pi install npm:` produces, where the copies hoist to the
+ * managed root ABOVE the package and a nested-only lookup would miss them.
+ */
+function resolveSdkCopy(startDir: string, pkg: string): ResolvedSdkCopy | null {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 32; i++) {
+    const pkgDir = path.join(dir, 'node_modules', '@earendil-works', pkg);
+    const p = readPkgJson(path.join(pkgDir, 'package.json'));
+    if (p?.version) return { version: p.version, installRoot: dir };
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+  return null;
 }
 
 export interface PiAiSkewInput {
@@ -98,6 +129,12 @@ export interface PiAiSkewInput {
   extPiAi: string | null;
   /** Extension-resolved pi-coding-agent version, or null. */
   extPiCodingAgent: string | null;
+  /** Where the pi-ai copy resolved FROM (the install root whose node_modules has it).
+   *  Lets the remedy `cd` into the tree that actually owns a stale copy — the flat
+   *  managed tree of `pi install npm:`, not the package dir. Falls back to extRoot. */
+  piAiRoot?: string;
+  /** Same, for the pi-coding-agent copy. */
+  piCodingAgentRoot?: string;
 }
 
 export type PiAiSkewLevel = 'ok' | 'standalone' | 'incomplete' | 'stale' | 'newer' | 'internal';
@@ -122,9 +159,18 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
     return { level: 'standalone', fatal: false, message: null };
   }
 
-  const remedy = extRoot
-    ? `Fix: cd ${extRoot} && npm install (align this extension's node_modules with host pi ${hostVersion}), then reload pi.`
-    : `Fix: reinstall this extension so its node_modules matches host pi ${hostVersion}, then reload pi.`;
+  // The remedy must `cd` into the tree that OWNS the copy being replaced: the
+  // package's own checkout when the copy resolved nested there, or — on the flat
+  // `pi install npm:` managed tree — the managed root its deps hoisted to.
+  const fixRootOf = (copyRoot: string | undefined) => copyRoot ?? extRoot;
+  const remedyFor = (copyRoot: string | undefined) => {
+    const root = fixRootOf(copyRoot);
+    return root
+      ? `Fix: cd ${root} && npm install (align this install's @earendil-works copies with host pi ${hostVersion}), then reload pi.`
+      : `Fix: reinstall this extension so its node_modules matches host pi ${hostVersion}, then reload pi.`;
+  };
+  // Default remedy when no specific copy is implicated (absent-copy warns).
+  const remedy = remedyFor(undefined);
 
   if (!extPiAi || !extPiCodingAgent) {
     // A PRESENT copy that already lags the host is the proven crash direction
@@ -137,21 +183,22 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
     const present = presentVersion ? parsePiVersion(presentVersion) : null;
     const host = parsePiVersion(hostVersion);
     if (present && host && compareVersions(present, host) < 0) {
+      const presentRemedy = remedyFor(extPiAi ? input.piAiRoot : input.piCodingAgentRoot);
       return {
         level: 'stale',
         fatal: true,
         message:
           `[pi-research] Extension node_modules has @earendil-works/${presentPkg} ${presentVersion}, which LAGS host pi ${hostVersion} ` +
-          `(${extPiAi ? 'pi-coding-agent' : 'pi-ai'} is not nested here to compare against) — a copy lagging the host crashes every LLM call at provider load ` +
-          `(ESM export errors like the missing 'clampThinkingBudgetToAnswerRoom' of pi-ai 0.84.2-vs-0.84.3+). ${remedy}`,
+          `(${extPiAi ? 'pi-coding-agent' : 'pi-ai'} is not resolvable here to compare against) — a copy lagging the host crashes every LLM call at provider load ` +
+          `(ESM export errors like the missing 'clampThinkingBudgetToAnswerRoom' of pi-ai 0.84.2-vs-0.84.3+). ${presentRemedy}`,
       };
     }
     return {
       level: 'incomplete',
       fatal: false,
       message:
-        `[pi-research] Extension node_modules is missing @earendil-works/` +
-        `${!extPiAi ? 'pi-ai' : 'pi-coding-agent'} — LLM calls may fail at module load. ${remedy}`,
+        `[pi-research] This extension cannot resolve @earendil-works/` +
+        `${!extPiAi ? 'pi-ai' : 'pi-coding-agent'} from its install location (walked node_modules up the tree) — LLM calls may fail at module load. ${remedy}`,
     };
   }
 
@@ -181,6 +228,8 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
     const base =
       `[pi-research] Extension node_modules is internally inconsistent (pi-ai ${extPiAi} vs ` +
       `pi-coding-agent ${extPiCodingAgent}) — a half-updated install against host pi ${hostVersion}. `;
+    // Aim the remedy at the tree owning the LAGGING copy — that is the one to update.
+    const laggingRemedy = remedyFor(aiOlder ? input.piAiRoot : input.piCodingAgentRoot);
     if (anyOlder) {
       return {
         level: 'internal',
@@ -189,7 +238,7 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
           base +
           `A copy lagging the host crashes every LLM call at provider load ` +
           `(ESM export errors like the missing 'clampThinkingBudgetToAnswerRoom' ` +
-          `of pi-ai 0.84.2-vs-0.84.3+). ${remedy}`,
+          `of pi-ai 0.84.2-vs-0.84.3+). ${laggingRemedy}`,
       };
     }
     return {
@@ -205,6 +254,7 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
     // every researcher/knowledge LLM call dies at provider load with a
     // confusing ESM named-export error. Refusing to start with THIS message
     // is strictly better than five silent researcher deaths.
+    const staleRemedy = remedyFor(aiOlder ? input.piAiRoot : input.piCodingAgentRoot);
     return {
       level: 'stale',
       fatal: true,
@@ -212,7 +262,7 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
         `[pi-research] Fatal version skew: host pi ${hostVersion} but this extension resolves ` +
         `pi-ai ${extPiAi} / pi-coding-agent ${extPiCodingAgent}. Mixed-version module graphs crash ` +
         `every LLM call at provider load (ESM export errors like the missing ` +
-        `'clampThinkingBudgetToAnswerRoom' of pi-ai 0.84.2-vs-0.84.3+). ${remedy}`,
+        `'clampThinkingBudgetToAnswerRoom' of pi-ai 0.84.2-vs-0.84.3+). ${staleRemedy}`,
     };
   }
 
@@ -233,6 +283,40 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
 }
 
 /**
+ * Extension-side resolution, exported for fixture tests: resolves both SDK copies
+ * from `fromFile`'s location the way Node would bind them, plus the package root
+ * (the remedy target of last resort for genuinely-broken installs).
+ */
+export interface ExtensionCopies {
+  extRoot: string | null;
+  piAi: string | null;
+  piCodingAgent: string | null;
+  piAiRoot: string | null;
+  piCodingAgentRoot: string | null;
+}
+
+export function resolveExtensionCopies(fromFile: string): ExtensionCopies {
+  // jiti hands us a file:// URL; real-path strings also accepted.
+  const anchor = fromFile.startsWith('file:') ? fileURLToPath(fromFile) : fromFile;
+  const ext = findPackageRoot(anchor);
+  // Walk from the MODULE's directory (not the package root): Node checks
+  // <dir>/node_modules at every ancestor of the importing file, so the package's
+  // own node_modules is covered AND the walk continues past it into whatever
+  // install root the package lives in — the flat managed tree `pi install npm:`
+  // produces, a project's hoisted tree, or the monorepo root.
+  const startDir = path.dirname(path.resolve(anchor));
+  const ai = resolveSdkCopy(startDir, 'pi-ai');
+  const ca = resolveSdkCopy(startDir, 'pi-coding-agent');
+  return {
+    extRoot: ext?.dir ?? null,
+    piAi: ai?.version ?? null,
+    piCodingAgent: ca?.version ?? null,
+    piAiRoot: ai?.installRoot ?? null,
+    piCodingAgentRoot: ca?.installRoot ?? null,
+  };
+}
+
+/**
  * Collect the real skew state from this process and classify it.
  *
  * Never throws: any read/walk failure degrades to null inputs (classified as
@@ -240,12 +324,7 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
  * extension down with it.
  */
 export function checkPiAiSkew(fromFile: string = import.meta.url): PiAiSkewResult {
-  // Extension side: nearest package.json above this module = our package root.
-  // jiti hands us a file:// URL; real-path strings also accepted.
-  const anchor = fromFile.startsWith('file:') ? fileURLToPath(fromFile) : fromFile;
-  const ext = findPackageRoot(anchor);
-  const extPiAi = ext ? nestedVersion(ext.dir, 'pi-ai') : null;
-  const extPiCodingAgent = ext ? nestedVersion(ext.dir, 'pi-coding-agent') : null;
+  const copies = resolveExtensionCopies(fromFile);
 
   // Host side: the process entry script, realpath'd. In a pi run this anchors
   // inside the host's own package; anywhere else the named walk finds nothing.
@@ -260,7 +339,13 @@ export function checkPiAiSkew(fromFile: string = import.meta.url): PiAiSkewResul
   }
 
   return classifyPiAiSkew(
-    { hostVersion, extPiAi, extPiCodingAgent },
-    ext?.dir,
+    {
+      hostVersion,
+      extPiAi: copies.piAi,
+      extPiCodingAgent: copies.piCodingAgent,
+      piAiRoot: copies.piAiRoot ?? undefined,
+      piCodingAgentRoot: copies.piCodingAgentRoot ?? undefined,
+    },
+    copies.extRoot ?? undefined,
   );
 }

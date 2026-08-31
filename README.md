@@ -98,4 +98,4 @@ This project is always `@lincoln504/pi-research` on npm. The `pi-research` (unsc
 
 ### Versioning
 
-pi-research typically follows the latest pi version and does not support backwards compatibility.
+pi-research typically follows the latest pi version and is not actively backwards compatible.

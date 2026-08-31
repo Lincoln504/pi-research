@@ -7,8 +7,11 @@
  * so it must classify as 'standalone' and never throw).
  */
 
-import { describe, it, expect } from 'vitest';
-import { classifyPiAiSkew, checkPiAiSkew } from '../../../src/core/pi-ai-skew.ts';
+import { describe, it, expect, afterAll } from 'vitest';
+import { classifyPiAiSkew, checkPiAiSkew, resolveExtensionCopies } from '../../../src/core/pi-ai-skew.ts';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 describe('classifyPiAiSkew', () => {
   it('no host → standalone, silent', () => {
@@ -96,6 +99,144 @@ describe('classifyPiAiSkew', () => {
   it('unparseable versions → incomplete warn (the guard must not invent startup failures)', () => {
     const r = classifyPiAiSkew({ hostVersion: 'banana', extPiAi: '0.84.4', extPiCodingAgent: '0.84.4' });
     expect(r).toMatchObject({ level: 'incomplete', fatal: false });
+  });
+});
+
+describe('resolveExtensionCopies (node_modules walk)', () => {
+  // Fixture trees reproducing every real install layout. The anchor is a module
+  // file inside the extension package, exactly what jiti hands checkPiAiSkew.
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const r of roots) fs.rmSync(r, { recursive: true, force: true });
+  });
+
+  function makeLayout(build: (root: string) => string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-ai-skew-layout-'));
+    roots.push(root);
+    return build(root);
+  }
+
+  function writePkg(file: string, name: string, version: string): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ name, version }));
+  }
+
+  const ANCHOR_PARTS = path.join('@lincoln504', 'pi-research', 'src', 'core', 'pi-ai-skew.ts');
+
+  it('flat managed tree (pi install npm:): copies hoist ABOVE the package — resolved, not "missing"', () => {
+    // Measured shape of ~/.pi/agent/npm/ after `pi install npm:@lincoln504/pi-research`:
+    // one flat npm tree, the package at node_modules/@lincoln504/pi-research with NO
+    // nested node_modules, its @earendil-works deps hoisted to the managed root.
+    let root = '';
+    const anchor = makeLayout((r) => {
+      root = r;
+      writePkg(path.join(root, 'node_modules', '@earendil-works', 'pi-ai', 'package.json'), '@earendil-works/pi-ai', '0.84.4');
+      writePkg(path.join(root, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), '@earendil-works/pi-coding-agent', '0.84.4');
+      writePkg(path.join(root, 'node_modules', '@lincoln504', 'pi-research', 'package.json'), '@lincoln504/pi-research', '1.6.6');
+      return path.join(root, 'node_modules', ANCHOR_PARTS);
+    });
+    fs.mkdirSync(path.dirname(anchor), { recursive: true });
+    fs.writeFileSync(anchor, 'export {};\n');
+    const pkgRoot = path.join(root, 'node_modules', '@lincoln504', 'pi-research');
+
+    const r = resolveExtensionCopies(anchor);
+    expect(r.piAi).toBe('0.84.4');
+    expect(r.piCodingAgent).toBe('0.84.4');
+    // extRoot is still the package dir (the remedy target of last resort)...
+    expect(r.extRoot).toBe(pkgRoot);
+    // ...but each copy's install root is the MANAGED TREE ROOT, which is what
+    // the remedy must `cd` into — `npm install` inside the package dir would
+    // create a rogue divergent nested install.
+    expect(r.piAiRoot).toBe(root);
+    expect(r.piCodingAgentRoot).toBe(root);
+
+    // The regression this pins: a healthy flat install classifies ok, NOT the
+    // "missing @earendil-works/pi-ai" incomplete warn the nested-only lookup
+    // produced here on every startup.
+    const c = classifyPiAiSkew(
+      { hostVersion: '0.84.4', extPiAi: r.piAi, extPiCodingAgent: r.piCodingAgent, piAiRoot: r.piAiRoot!, piCodingAgentRoot: r.piCodingAgentRoot! },
+      r.extRoot ?? undefined,
+    );
+    expect(c).toEqual({ level: 'ok', fatal: false, message: null });
+  });
+
+  it('nested copies (git install / dev repo): package-local node_modules wins', () => {
+    let root = '';
+    const anchor = makeLayout((r) => {
+      root = r;
+      writePkg(path.join(root, 'pkg', 'node_modules', '@earendil-works', 'pi-ai', 'package.json'), '@earendil-works/pi-ai', '0.84.2');
+      writePkg(path.join(root, 'pkg', 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), '@earendil-works/pi-coding-agent', '0.84.2');
+      writePkg(path.join(root, 'pkg', 'package.json'), '@lincoln504/pi-research', '1.6.6');
+      writePkg(path.join(root, 'node_modules', '@earendil-works', 'pi-ai', 'package.json'), '@earendil-works/pi-ai', '0.84.4');
+      writePkg(path.join(root, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), '@earendil-works/pi-coding-agent', '0.84.4');
+      return path.join(root, 'pkg', 'src', 'index.ts');
+    });
+    const r = resolveExtensionCopies(anchor);
+    // Node binds the NEAREST node_modules — the stale nested copy, which is
+    // exactly the skew the guard must catch.
+    expect(r.piAi).toBe('0.84.2');
+    expect(r.piCodingAgent).toBe('0.84.2');
+    // The install root is the directory OWNING that nearest node_modules
+    // (<root>/pkg), i.e. what `cd … && npm install` must target.
+    expect(r.piAiRoot).toBe(path.join(root, 'pkg'));
+    expect(r.extRoot).toBe(path.join(root, 'pkg'));
+  });
+
+  it('half-hoisted incident shape: stale nested pi-ai beside a fresh hoisted pi-coding-agent', () => {
+    let root = '';
+    const anchor = makeLayout((r) => {
+      root = r;
+      writePkg(path.join(root, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), '@earendil-works/pi-coding-agent', '0.84.4');
+      writePkg(path.join(root, 'node_modules', '@lincoln504', 'pi-research', 'package.json'), '@lincoln504/pi-research', '1.6.6');
+      writePkg(path.join(root, 'node_modules', '@lincoln504', 'pi-research', 'node_modules', '@earendil-works', 'pi-ai', 'package.json'), '@earendil-works/pi-ai', '0.84.2');
+      return path.join(root, 'node_modules', ANCHOR_PARTS);
+    });
+    fs.mkdirSync(path.dirname(anchor), { recursive: true });
+    fs.writeFileSync(anchor, 'export {};\n');
+    const pkgRoot = path.join(root, 'node_modules', '@lincoln504', 'pi-research');
+
+    const r = resolveExtensionCopies(anchor);
+    expect(r.piAi).toBe('0.84.2');
+    expect(r.piCodingAgent).toBe('0.84.4');
+    const c = classifyPiAiSkew(
+      { hostVersion: '0.84.4', extPiAi: r.piAi, extPiCodingAgent: r.piCodingAgent, piAiRoot: r.piAiRoot!, piCodingAgentRoot: r.piCodingAgentRoot! },
+      r.extRoot ?? undefined,
+    );
+    expect(c.level).toBe('internal');
+    expect(c.fatal).toBe(true);
+    // The remedy aims at the tree owning the STALE copy (the package's own
+    // nested node_modules here), not the managed root.
+    expect(c.message).toContain(`cd ${pkgRoot} && npm install`);
+  });
+
+  it('truly absent copies: both null, extRoot still found', () => {
+    let root = '';
+    const anchor = makeLayout((r) => {
+      root = r;
+      writePkg(path.join(root, 'node_modules', '@lincoln504', 'pi-research', 'package.json'), '@lincoln504/pi-research', '1.6.6');
+      return path.join(root, 'node_modules', ANCHOR_PARTS);
+    });
+    fs.mkdirSync(path.dirname(anchor), { recursive: true });
+    fs.writeFileSync(anchor, 'export {};\n');
+
+    const r = resolveExtensionCopies(anchor);
+    expect(r.piAi).toBeNull();
+    expect(r.piCodingAgent).toBeNull();
+    expect(r.extRoot).toBe(path.join(root, 'node_modules', '@lincoln504', 'pi-research'));
+  });
+
+  it('stale flat-managed copies lag the host → fatal stale with a managed-root remedy', () => {
+    // The actual 2026-08-30 protection case on the PRIMARY install path: the
+    // host updates, the managed tree's hoisted copies do not.
+    const r = { piAi: '0.84.2', piCodingAgent: '0.84.2', piAiRoot: '/home/x/.pi/agent/npm', extRoot: '/home/x/.pi/agent/npm/node_modules/@lincoln504/pi-research' };
+    const c = classifyPiAiSkew(
+      { hostVersion: '0.84.4', extPiAi: r.piAi, extPiCodingAgent: r.piCodingAgent, piAiRoot: r.piAiRoot, piCodingAgentRoot: r.piAiRoot },
+      r.extRoot,
+    );
+    expect(c.level).toBe('stale');
+    expect(c.fatal).toBe(true);
+    expect(c.message).toContain('cd /home/x/.pi/agent/npm && npm install');
+    expect(c.message).not.toContain(`${r.extRoot} && npm install`);
   });
 });
 
