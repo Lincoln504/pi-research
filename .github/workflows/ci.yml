@@ -244,7 +244,11 @@ jobs:
       # npm 12 on every leg: its node-gyp 13 recognizes the VS2026 image on
       # windows-latest (npm ≤11's node-gyp 11.2 cannot — see the matrix comment).
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        run: npm install -g npm@12
+        # --force: npm's self-upgrade enforces npm 12's engines floor
+        # (^22.22.2) against .nvmrc's 22.19.0; npm 12 otherwise RUNS fine on
+        # 22.19 (measured end-to-end: tarball installs, prebuilt better-sqlite3
+        # loads). The engines line is a support window, not a technical floor.
+        run: npm install -g npm@12 --force
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -327,7 +331,11 @@ jobs:
       # (GYP_MSVS_VERSION=2026 was tried first and does NOT help: the 11.2 crash
       # is in version DETECTION, before that variable is consulted.)
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        run: npm install -g npm@12
+        # --force: npm's self-upgrade enforces npm 12's engines floor
+        # (^22.22.2) against .nvmrc's 22.19.0; npm 12 otherwise RUNS fine on
+        # 22.19 (measured end-to-end: tarball installs, prebuilt better-sqlite3
+        # loads). The engines line is a support window, not a technical floor.
+        run: npm install -g npm@12 --force
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -608,7 +616,11 @@ jobs:
       # script-skip semantics are what this job's clean-project install step
       # must model for real consumers.
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        run: npm install -g npm@12
+        # --force: npm's self-upgrade enforces npm 12's engines floor
+        # (^22.22.2) against .nvmrc's 22.19.0; npm 12 otherwise RUNS fine on
+        # 22.19 (measured end-to-end: tarball installs, prebuilt better-sqlite3
+        # loads). The engines line is a support window, not a technical floor.
+        run: npm install -g npm@12 --force
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
