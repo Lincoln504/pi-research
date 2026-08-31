@@ -36,8 +36,15 @@
  */
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
+
+// ESM-safe module directory. Bare __dirname is undefined in the bundled
+// dist/cli.mjs (esbuild format: 'esm') and in jiti-loaded ESM — before this
+// fix the packaged CLI threw ReferenceError on the first PDF and every
+// extraction failed. Same pattern as worker-pool-manager.ts.
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { errorTracker } from '../utils/error-tracker.ts';
@@ -152,6 +159,9 @@ interface PendingRequest {
   resolve: (r: PdfParseResult) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** The Worker instance serving this request — timeout teardown must target
+   * THIS worker, never whatever is current when the timer fires. */
+  worker: Worker;
 }
 
 let pdfWorker: Worker | null = null;
@@ -162,11 +172,14 @@ let warnedWorkerUnavailable = false;
 type WorkerInvoke = (bytes: Uint8Array) => Promise<PdfParseResult>;
 
 function resolveWorkerPath(): string | null {
-  const candidate = join(__dirname, WORKER_FILENAME);
+  const candidate = join(MODULE_DIR, WORKER_FILENAME);
   return existsSync(candidate) ? candidate : null;
 }
 
-function pdfWorkerEnabled(): boolean {
+/** True when the worker bundle is present next to this module and the off
+ *  kill-switch is not set. Exported for the regression test that pins the
+ *  ESM-safe resolution (bare __dirname would throw here in dist/cli.mjs). */
+export function pdfWorkerEnabled(): boolean {
   if (process.env['PI_RESEARCH_PDF_WORKER'] === 'off') return false;
   return resolveWorkerPath() !== null;
 }
@@ -192,8 +205,9 @@ function getOrCreatePdfWorker(): Worker | null {
     }
     return null;
   }
+  let worker: Worker;
   try {
-    pdfWorker = new Worker(workerPath);
+    worker = new Worker(workerPath);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (!warnedWorkerUnavailable) {
@@ -202,16 +216,17 @@ function getOrCreatePdfWorker(): Worker | null {
     }
     return null;
   }
+  pdfWorker = worker;
   // An idle worker must never keep the process alive at shutdown; there is no
   // browser process to reap and no cleanup ordering to respect (unlike the
   // browser pool), so unref replaces dispose wiring entirely.
   try {
-    pdfWorker.unref();
+    worker.unref();
   } catch {
     // unref() on a terminating worker can throw on some Node versions — the
     // exit handler below already clears our reference.
   }
-  pdfWorker.on('message', (msg: { id: number; ok: boolean; markdown?: string; pageCount?: number; kind?: PdfExtractErrorKind; message?: string }) => {
+  worker.on('message', (msg: { id: number; ok: boolean; markdown?: string; pageCount?: number; kind?: PdfExtractErrorKind; message?: string }) => {
     const pending = pendingRequests.get(msg.id);
     if (pending === undefined) return;
     pendingRequests.delete(msg.id);
@@ -222,17 +237,23 @@ function getOrCreatePdfWorker(): Worker | null {
       pending.reject(new PdfExtractError(msg.kind ?? 'extraction_failed', msg.message ?? 'PDF worker failed'));
     }
   });
-  pdfWorker.on('error', (e) => {
-    pdfWorker = null;
-    failAllPending(`crashed: ${e instanceof Error ? e.message : String(e)}`);
+  // Crash/exit handlers act only when the dying worker is the CURRENT one: a
+  // terminate()-then-respawn sequence can leave the old worker's exit event
+  // arriving after a fresh worker was created — without this identity check a
+  // stale exit would null the global and fail the NEW worker's requests.
+  worker.on('error', (e) => {
+    if (pdfWorker === worker) {
+      pdfWorker = null;
+      failAllPending(`crashed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   });
-  pdfWorker.on('exit', (code) => {
-    if (pdfWorker !== null) {
+  worker.on('exit', (code) => {
+    if (pdfWorker === worker) {
       pdfWorker = null;
       failAllPending(`exited (code ${code})`);
     }
   });
-  return pdfWorker;
+  return worker;
 }
 
 function extractViaWorkerImpl(bytes: Uint8Array): Promise<PdfParseResult> {
@@ -250,15 +271,31 @@ function extractViaWorkerImpl(bytes: Uint8Array): Promise<PdfParseResult> {
   const transferable = bytes.slice();
   return new Promise<PdfParseResult>((resolve, reject) => {
     const timer = setTimeout(() => {
+      // The worker instance serving THIS request — terminate that one, never
+      // whatever happens to be current when the timer fires.
+      const doomed = pendingRequests.get(id)?.worker ?? null;
+      // Drop THIS request first so failAllPending below (which rejects every
+      // REMAINING pending request and clears their timers) cannot double-fire
+      // on it — siblings fail fast instead of hanging out their own 30s.
       pendingRequests.delete(id);
       // A sync wasm parse wedged past the deadline can only be stopped by
       // terminating its thread. The NEXT PDF spawns a fresh worker.
-      pdfWorker?.terminate().catch(() => undefined);
       pdfWorker = null;
+      failAllPending(`timed out after ${PDF_WORKER_TIMEOUT_MS}ms`);
+      doomed?.terminate().catch(() => undefined);
       reject(new Error(`PDF worker timed out after ${PDF_WORKER_TIMEOUT_MS}ms`));
     }, PDF_WORKER_TIMEOUT_MS);
-    pendingRequests.set(id, { resolve, reject, timer });
-    worker.postMessage({ id, bytes: transferable }, [transferable.buffer]);
+    pendingRequests.set(id, { resolve, reject, timer, worker });
+    try {
+      worker.postMessage({ id, bytes: transferable }, [transferable.buffer]);
+    } catch (e) {
+      // Synchronous transport failure: this request falls back in-process.
+      // Clear the armed timer and the entry, else the timer fires later and
+      // terminates whatever worker is CURRENT (an unrelated in-flight parse).
+      pendingRequests.delete(id);
+      clearTimeout(timer);
+      reject(new Error(`PDF worker transport failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
   });
 }
 

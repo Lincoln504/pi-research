@@ -16,6 +16,7 @@ import {
   extractPdfToMarkdown,
   parsePdfCore,
   PdfExtractError,
+  pdfWorkerEnabled,
 } from '../../../src/web-research/pdf-extraction.ts';
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -36,6 +37,34 @@ vi.mock('pdf-oxide-wasm', () => {
       free = () => { pdfMockState.freeCalls++; };
     },
   };
+});
+
+describe('worker bundle path resolution (ESM-safe, regression for dist/cli.mjs)', () => {
+  beforeEach(() => {
+    // The unit setup defaults PI_RESEARCH_PDF_WORKER=off; this describe needs
+    // the real resolution path to run.
+    delete process.env['PI_RESEARCH_PDF_WORKER'];
+  });
+
+  it('locates the bundle WITHOUT throwing when the env kill-switch is unset', () => {
+    // Regression: resolveWorkerPath() previously used bare __dirname, which is
+    // undefined in the bundled dist/cli.mjs (esbuild format esm) and in
+    // jiti-loaded ESM — the first PDF in a built install threw ReferenceError
+    // BEFORE this module's try/catch, failing every extraction. Under vitest
+    // the shim hides it, so this pins the source invariant instead.
+    expect(() => pdfWorkerEnabled()).not.toThrow();
+  });
+
+  it('pins the ESM-safe source invariant (no bare __dirname)', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { fileURLToPath } = await import('node:url');
+    const source = await readFile(
+      fileURLToPath(new URL('../../../src/web-research/pdf-extraction.ts', import.meta.url)),
+      'utf-8',
+    );
+    expect(source).toContain('fileURLToPath(import.meta.url)');
+    expect(source.match(/join\(\s*__dirname/)).toBeNull();
+  });
 });
 
 const VALID_BYTES = () => new TextEncoder().encode('%PDF-1.4 minimal');
