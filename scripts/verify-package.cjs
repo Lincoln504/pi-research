@@ -42,6 +42,11 @@ const REQUIRED = [
   // worker .mjs is what FixedClusterPool spawns.
   'src/infrastructure/browser/thread-worker.mjs',
   'dist/thread-worker.mjs',
+  // PDF worker bundle pair — a dropped copy step would ship a package where
+  // PDF extraction silently regresses to main-thread parsing (graceful
+  // fallback, no error), so the manifest gate is the only place that catches it.
+  'src/web-research/pdf-extract-worker.mjs',
+  'dist/pdf-extract-worker.mjs',
   // CLI binary (the `pi-research` bin in package.json)
   'dist/cli.mjs',
   // Out-of-process WebGPU viability probe (cli.mjs spawns it; shipped via files[])

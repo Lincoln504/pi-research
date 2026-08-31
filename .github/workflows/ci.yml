@@ -196,7 +196,7 @@ jobs:
       # typescript-eslint/tooling compiler until typescript-eslint supports the
       # TS 7.1 programmatic API. These steps pin the exact TS7 version — a
       # floating one would let a future TS7 minor gate CI on changes we never
-      # opted into. ~8-12x faster than the TS6 checks above.
+      # opted into. ~9x faster than the TS6 checks above (3.7s vs ~35s here).
       - run: npm run type-check:native
       - run: npm run type-check:native:tests
 

@@ -236,7 +236,8 @@ export function checkPiAiSkew(fromFile: string = import.meta.url): PiAiSkewResul
     const host = findPackageRoot(entry, '@earendil-works/pi-coding-agent');
     hostVersion = host?.pkg.version ?? null;
   } catch {
-    hostVersion = null;
+    // Entry missing/unreadable (standalone context) — hostVersion stays null
+    // and classifyPiAiSkew treats the host side as undetectable.
   }
 
   return classifyPiAiSkew(

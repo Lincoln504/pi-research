@@ -44,13 +44,12 @@ function getWindowsCamoufoxDir(): string {
  * camoufox-js (getBrowserEnv, scripts/setup.cjs) so that install and lookup
  * cannot disagree.
  *
- * CAVEAT, deliberate: the pinned camoufox-js (0.10.x — see
- * thread-worker-browser.ts for why it cannot move yet) hardcodes
- * `userCacheDir("camoufox")` and honours NEITHER variable, so on the shipped
- * pin a custom location still only relocates lookup and the underlying bug
- * remains. This plumbing is correct and inert rather than wrong: it starts
- * working the moment the pin can advance, and costs nothing until then. Until
- * that happens, treat a custom browser directory as unsupported.
+ * HISTORY: camoufox-js <0.12.0 hardcoded `userCacheDir("camoufox")` and
+ * honoured NEITHER variable, which made this plumbing deliberately inert for
+ * two pin cycles. The 0.12.0 refresh (2026-08-30) honours CAMOUFOX_INSTALL_DIR
+ * again, so a custom location now relocates the install itself, not just our
+ * lookup — the two can no longer disagree via version skew, but keep the dual
+ * export (install + lookup) so they can never drift apart in future.
  */
 function getCustomCamoufoxDir(): string | undefined {
     return process.env['CAMOUFOX_INSTALL_DIR'] || process.env['PLAYWRIGHT_BROWSERS_PATH'] || undefined;

@@ -249,3 +249,20 @@ describe('package-lock.json — phantom-optional stubs survive regeneration', ()
   });
 });
 
+
+describe('version sync across release artifacts', () => {
+  // The three release gates (verify-package.cjs manifest mode, the release
+  // workflow's grep, prepublishOnly) all assert package.json and SKILL.md carry
+  // the same version — but they only run at release/CI time. The 1.6.6 bump was
+  // made as a plain commit, SKILL.md stayed at 1.6.5, and the drift sat on the
+  // branch until the release-engineering audit caught it. This is the cheap
+  // local tripwire that fails `test:unit` within seconds of a version bump that
+  // skipped `npm version` (which runs scripts/sync-skill-version.cjs).
+  it('SKILL.md metadata version matches package.json', () => {
+    const pkgVersion = JSON.parse(fs.readFileSync('package.json', 'utf-8')).version as string;
+    const skill = fs.readFileSync('agent-skill/pi-research/SKILL.md', 'utf-8');
+    const m = skill.match(/"version"\s*:\s*"([^"]+)"/);
+    expect(m, 'SKILL.md metadata carries a version field').not.toBeNull();
+    expect(m![1]).toBe(pkgVersion);
+  });
+});

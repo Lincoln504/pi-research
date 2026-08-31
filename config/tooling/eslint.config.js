@@ -10,8 +10,11 @@ const config = [
       'dist/**',
       '*.d.ts',
       'examples/**',
-      // Compiled worker bundle — build artifact, not source
+      // Compiled worker bundles — build artifacts, not source. Both listed
+      // explicitly: the files only exist after prepare/build, and flat-config
+      // globs would otherwise make lint coverage cache-state-dependent.
       'src/infrastructure/browser/thread-worker.mjs',
+      'src/web-research/pdf-extract-worker.mjs',
     ],
   },
   // JavaScript recommended rules

@@ -53,12 +53,11 @@ function resolveCamoufoxBin() {
  * agree or install and lookup land in different directories.
  *
  * CAMOUFOX_INSTALL_DIR first: it is camoufox-js's own variable and the only one
- * that can relocate the install (camoufox-js <0.12.0 hardcodes
- * userCacheDir("camoufox") and honours nothing). PLAYWRIGHT_BROWSERS_PATH is
- * kept as the documented alias and is exported BELOW as CAMOUFOX_INSTALL_DIR.
- * NOTE: inert on the pinned camoufox-js 0.10.x, which reads neither — this is
- * forward-compatible plumbing, not a live fix. See src/infrastructure/browser/
- * config.ts and thread-worker-browser.ts.
+ * that can relocate the install (camoufox-js <0.12.0 hardcoded
+ * userCacheDir("camoufox") and honoured nothing — inert there; effective on the
+ * 0.12.0+ refresh). PLAYWRIGHT_BROWSERS_PATH is kept as the documented alias
+ * and is exported BELOW as CAMOUFOX_INSTALL_DIR. See
+ * src/infrastructure/browser/config.ts and thread-worker-browser.ts.
  */
 function customCamoufoxDir() {
   return process.env.CAMOUFOX_INSTALL_DIR || process.env.PLAYWRIGHT_BROWSERS_PATH || null;

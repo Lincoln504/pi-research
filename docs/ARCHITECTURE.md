@@ -309,27 +309,25 @@ Worker pool over direct browser — browser processes are isolated in workers so
 in one cannot affect the orchestrator or other sessions.
 
 Pinned browser stack — `playwright-core` and `impit` are pinned to exact versions and
-`camoufox-js` to its `0.10.x` line; the three are coupled and upgraded together, because
-each floating range broke fresh consumer installs that our lockfile masked.
+`camoufox-js` is pinned to its `0.12.0` line; the three are coupled and upgraded together,
+because each floating range broke fresh consumer installs that our lockfile masked.
 playwright-core stays at `1.60.0` (1.61+ rejects camoufox's Juggler and fails every
-launch — corroborated upstream, since camoufox-js `0.12.0` declares
+launch — corroborated upstream: camoufox-js `0.12.0` declares
 `peerDependencies: { "playwright-core": "<1.61.0" }`, the same bound this pin holds by
-hand). `impit` stays at `0.13.0`: camoufox-js 0.10.2 requires `^0.13.0`, and within that
-range only 0.13.0 lacks the `only-allow pnpm` preinstall guard that breaks
-`npm install -g` (an upstream mistake in 0.13.1/0.14.0, dropped again in 0.14.1). An
-exact pin is required because npm `overrides` do not propagate to consumers. Rationale in
-full: `src/infrastructure/browser/thread-worker-browser.ts`.
+hand). `impit` is exact at `0.14.4` (refreshed from `0.13.0` on 2026-08-30 together with
+the camoufox bump) — exact because npm `overrides` do not propagate to consumers, so an
+exact pin is the only way to force a version downstream; impit's `only-allow pnpm`
+preinstall-guard incident (0.13.1/0.14.0, dropped in 0.14.1) is why floating ranges are
+not trusted here. Rationale in full: `src/infrastructure/browser/thread-worker-browser.ts`.
 
-The two original blockers have both lapsed — camoufox restored Windows binaries in
-`v152.0.4-beta.26` (2026-07-16) and impit's guard is long gone — but camoufox-js `0.12.0`
-is held back by a third, worse one: it requires `better-sqlite3 ^13.0.1`, and
-better-sqlite3 13 **dropped prebuilt binaries**. 12.x installs via
-`prebuild-install || node-gyp rebuild`; 13.x ships no install script at all, so npm
-auto-runs `node-gyp rebuild` against its `binding.gyp` and every install demands a full
-C++ toolchain. This was measured, not inferred: the upgrade was made, and `npm ci` failed
-outright on the Windows CI runner (`could not find a version of Visual Studio 2017 or
-newer`) — i.e. it would break installation for most Windows users, which is exactly what
-this pin exists to prevent. Check better-sqlite3 before camoufox next time.
+The 0.10.x→0.12.0 camoufox bump had been held back through two refresh cycles by three
+blockers, all since resolved: camoufox restored Windows binaries in `v152.0.4-beta.26`
+(2026-07-16); impit's pnpm guard existed only in 0.13.1/0.14.0; and better-sqlite3 13
+(camoufox-js 0.12's dependency) dropped prebuilt binaries, which failed `npm ci` outright
+on Windows CI when measured. That last one is now handled by the documented npm 12
+script-approval flow (`--allow-scripts=better-sqlite3` global / `approve-scripts`+
+`rebuild` project-scoped — README, docs/SDK.md, and the skill docs lead with it), which is
+what made the refresh shippable. Any future bump checks better-sqlite3 first, not camoufox.
 
 The browser BINARY, by contrast, is not pinned and cannot be. `camoufox-js fetch` takes
 no version argument: it walks the `daijro/camoufox` GitHub releases newest-first and takes
@@ -339,8 +337,7 @@ which camoufox-js version is installed — the npm pins do not freeze it, and a 
 camoufox release could break launches for fresh installs with no change on our side.
 Windows assets were in fact missing from `v146-hardware` through `v152.0.2-alpha` and
 returned in `v152.0.4-beta.26` (2026-07-16). Current newest is `v152.0.4-beta.28`
-(Firefox 152); it launches and drives cleanly under playwright-core `1.60.0` **with
-camoufox-js 0.10.2** (whose `MIN_VERSION` is `beta.19`, so it accepts it), verified
+(Firefox 152); it launches and drives cleanly under playwright-core `1.60.0`, verified
 directly, as does the older `v135.0.1-beta.24` an existing cache may still hold. The
 practical consequence is that browser freshness is independent of the npm pin: a stale
 `camoufox-js` does not mean a stale Firefox. Re-verify a real launch when bumping this
@@ -427,6 +424,8 @@ npm run test:unit         # unit tests, no browser required
 npm run test:integration  # requires camoufox (Xvfb only for the opt-in virtual-display tests)
 npm run type-check        # TypeScript strict mode (src)
 npm run type-check:tests  # TypeScript strict mode (tests)
+npm run type-check:native        # SAME checks on the TS7 native compiler (pinned; ~9x faster)
+npm run type-check:native:tests  # TS7 native check, test project
 npm run lint              # ESLint
 npm run deps:check        # architectural rule enforcement
 npm run build:worker      # bundle the browser worker (required before integration tests / publish)
