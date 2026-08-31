@@ -50,7 +50,34 @@ describe('npm pack', () => {
       maxBuffer: 32 * 1024 * 1024,
     });
 
-    const parsed = JSON.parse(output) as Array<{ files?: Array<{ path?: string }> }>;
+    // npm 12 can emit stdout content after the closing bracket (verify-package.cjs
+    // hit the same on CI), so a bare JSON.parse of the whole output is version-
+    // fragile. Extract the first complete JSON array with a string/escape-aware
+    // bracket scan — kept in sync with the scanner in scripts/verify-package.cjs
+    // (a CJS script this ESM test cannot import).
+    const start = output.indexOf('[');
+    if (start < 0) throw new Error(`npm pack produced no JSON output: ${output.slice(0, 200)}`);
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let i = start; i < output.length; i++) {
+      const ch = output[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '[') depth++;
+      else if (ch === ']') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    if (end < 0) throw new Error('npm pack JSON was truncated');
+    const parsed = JSON.parse(output.slice(start, end + 1)) as Array<{ files?: Array<{ path?: string }> }>;
     return (parsed[0]?.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === 'string');
   }
 
