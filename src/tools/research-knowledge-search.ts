@@ -597,6 +597,7 @@ export async function runBackgroundExtraction(
       // at repairJsonWithLlm's smaller default (16384). Mirrors the planning-service repairs.
       maxTokens,
       thinkingLevel,
+      timeoutMs: llmTimeout,
       onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'knowledge_search' }),
     },
   );

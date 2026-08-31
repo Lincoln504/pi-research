@@ -114,9 +114,9 @@ export class ServiceContainer {
   private services: Map<string, ServiceRegistration<any>> = new Map();
   private dependencies: Map<string, Set<string>> = new Map();
   public isDisposing: boolean = false;
-  // The single in-flight disposeAll() run, so concurrent disposeAll()/reset() calls
-  // coalesce onto (and AWAIT) it rather than a second caller observing "disposed" while
-  // teardown is still running, or reset() throwing mid-disposal.
+  // The single in-flight disposeAll() run. Only reset() JOINS it (awaiting teardown
+  // rather than throwing mid-disposal — the Windows CI teardown fix); a concurrent
+  // second disposeAll() returns immediately without awaiting (see disposeAll).
   private _disposalPromise: Promise<void> | null = null;
   public isReady: boolean = false;
   public cwd: string = process.cwd();
@@ -489,9 +489,11 @@ export class ServiceContainer {
   async disposeAll(): Promise<void> {
     // Synchronous re-entrancy guard: isDisposing is set as _runDisposeAll's first
     // statement (before any await), so a service whose dispose() re-enters disposeAll()
-    // gets a safe no-op instead of recursing. Also publish the in-flight run as
-    // _disposalPromise so reset() (a separate, non-re-entrant caller) can AWAIT the
-    // teardown instead of throwing on the race — the Windows CI teardown fix.
+    // gets a safe no-op instead of recursing OR deadlocking (awaiting its own teardown).
+    // CONTRACT (verbatim, matches the code): a concurrent SECOND disposeAll() caller
+    // also returns immediately WITHOUT awaiting the in-flight teardown — only reset()
+    // joins it via _disposalPromise. Any caller that must observe "teardown complete"
+    // before acting should call reset(), or await container._disposalPromise explicitly.
     if (this.isDisposing) return;
     this._disposalPromise = this._runDisposeAll().finally(() => { this._disposalPromise = null; });
     return this._disposalPromise;

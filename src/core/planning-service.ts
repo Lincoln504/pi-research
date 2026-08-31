@@ -182,8 +182,11 @@ export function partitionCorpus<T>(
  * leave the prior (still-running) stream orphaned and billed, and would multiply a multi-minute
  * wait. A timeout instead degrades straight to the fallback plan (see the catch blocks, which
  * treat "timed out" as degradable). A deliberate cancellation is never retried — detected by
- * AbortSignal state / AbortError name, not by the message (withTimeout emits the same "cancelled
- * or timed out" wording for a user-abort and a real timeout, and abortableDelay is the backstop).
+ * AbortSignal state / AbortError name, not by the message: the withTimeout imported here is
+ * llm-timeout's, whose timeout rejection reads "LLM call timed out after Nms (label)" while a
+ * user abort surfaces as the underlying fetch's AbortError — two DIFFERENT shapes, unlike the
+ * same-named withTimeout in web-research/retry-utils.ts (whose wording this comment used to
+ * describe). Rename candidate if these two helpers ever converge.
  *
  * Exported for direct unit testing of the abort/timeout guards.
  */
@@ -519,6 +522,7 @@ export class PlanningService implements IPlanningService {
                 sessionId,
                 maxTokens: config.PLANNING_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
+                timeoutMs: config.LLM_TIMEOUT_MS,
                 onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: 'coordinator', complexity, observer }),
             }
         );
@@ -837,6 +841,7 @@ export class PlanningService implements IPlanningService {
                 sessionId,
                 maxTokens: isRouter ? ROUTER_MAX_TOKENS : config.SYNTHESIS_MAX_TOKENS,
                 thinkingLevel: config.LLM_THINKING_LEVEL,
+                timeoutMs: config.LLM_TIMEOUT_MS,
                 onUsage: (rawUsage) => recordLlmUsage(model, rawUsage, { component: role, complexity, observer }),
             }
         );
