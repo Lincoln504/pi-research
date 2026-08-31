@@ -33,6 +33,10 @@ describe('isCancellation', () => {
     'Aborted',
     'aborted',
     'The operation was aborted',
+    // DOMException's canonical message form — the variant that motivated the
+    // (?:the|this) alternation; without its own entry here the branch it added
+    // is untested and can silently regress.
+    'This operation was aborted',
     'Research aborted',
     'research cancelled',
     'Research canceled',

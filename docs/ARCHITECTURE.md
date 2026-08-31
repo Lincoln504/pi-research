@@ -322,12 +322,14 @@ not trusted here. Rationale in full: `src/infrastructure/browser/thread-worker-b
 
 The 0.10.x→0.12.0 camoufox bump had been held back through two refresh cycles by three
 blockers, all since resolved: camoufox restored Windows binaries in `v152.0.4-beta.26`
-(2026-07-16); impit's pnpm guard existed only in 0.13.1/0.14.0; and better-sqlite3 13
-(camoufox-js 0.12's dependency) dropped prebuilt binaries, which failed `npm ci` outright
-on Windows CI when measured. That last one is now handled by the documented npm 12
-script-approval flow (`--allow-scripts=better-sqlite3` global / `approve-scripts`+
-`rebuild` project-scoped — README, docs/SDK.md, and the skill docs lead with it), which is
-what made the refresh shippable. Any future bump checks better-sqlite3 first, not camoufox.
+(2026-07-16); impit's pnpm guard existed only in 0.13.1/0.14.0; and camoufox-js 0.12's
+better-sqlite3 13 upgrade, which initially looked like it demanded a C++ toolchain on
+every install. Measured on 13.0.3: `prebuilds/` for all eight platform/arch pairs ship
+INSIDE its tarball and load at runtime via node-gyp-build — no install script, nothing
+for a consumer to approve. What actually broke was tooling, not the binding: npm ≤11's
+injected `node-gyp rebuild` needlessly recompiles a binding.gyp with no install script
+(and its node-gyp 11.2 cannot detect the VS2026 CI runner image), which is why CI runs
+npm 12. Any future bump checks better-sqlite3 first, not camoufox.
 
 The browser BINARY, by contrast, is not pinned and cannot be. `camoufox-js fetch` takes
 no version argument: it walks the `daijro/camoufox` GitHub releases newest-first and takes
@@ -363,7 +365,8 @@ caret-safe. Note also that every `@lancedb/lancedb` release through 0.37 declare
 changes which pairing needs re-validating.
 
 Pinned validation library — `typebox` is pinned to the exact version the pi host packages
-depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` 0.84.2 pin `1.3.7`). Every
+depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` pin `1.3.7` across
+the 0.84.x line). Every
 tool's parameter schema is built with TypeBox here and handed across the boundary to pi's
 tool system, so the two must agree on `Value.Check`/`Convert` semantics. A floating `^1.1.38`
 range let a fresh consumer install resolve pi-research to a newer TypeBox than pi's, shipping

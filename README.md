@@ -95,3 +95,7 @@ MIT. Bundled third-party licenses are listed in [docs/THIRD-PARTY-NOTICES.md](do
 ### Package identity
 
 This project is always `@lincoln504/pi-research` on npm. The `pi-research` (unscoped) package is unrelated and deprecated.
+
+### Versioning
+
+pi-research typically follows the latest pi version and does not support backwards compatibility.
