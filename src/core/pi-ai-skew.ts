@@ -127,6 +127,25 @@ export function classifyPiAiSkew(input: PiAiSkewInput, extRoot?: string): PiAiSk
     : `Fix: reinstall this extension so its node_modules matches host pi ${hostVersion}, then reload pi.`;
 
   if (!extPiAi || !extPiCodingAgent) {
+    // A PRESENT copy that already lags the host is the proven crash direction
+    // even in a half-hoisted layout (the 2026-08-30 failure had exactly this
+    // shape: stale nested pi-ai beside a hoisted pi-coding-agent) — classify it
+    // stale/fatal, not the softer incomplete warn. Only a genuinely-absent
+    // copy (nothing to compare) stays warn.
+    const presentVersion = extPiAi ?? extPiCodingAgent;
+    const presentPkg = extPiAi ? 'pi-ai' : 'pi-coding-agent';
+    const present = presentVersion ? parsePiVersion(presentVersion) : null;
+    const host = parsePiVersion(hostVersion);
+    if (present && host && compareVersions(present, host) < 0) {
+      return {
+        level: 'stale',
+        fatal: true,
+        message:
+          `[pi-research] Extension node_modules has @earendil-works/${presentPkg} ${presentVersion}, which LAGS host pi ${hostVersion} ` +
+          `(${extPiAi ? 'pi-coding-agent' : 'pi-ai'} is not nested here to compare against) — a copy lagging the host crashes every LLM call at provider load ` +
+          `(ESM export errors like the missing 'clampThinkingBudgetToAnswerRoom' of pi-ai 0.84.2-vs-0.84.3+). ${remedy}`,
+      };
+    }
     return {
       level: 'incomplete',
       fatal: false,

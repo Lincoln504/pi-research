@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HeadlessObserver } from '../../../src/orchestration/headless-observer.ts';
+import { HeadlessObserver, isHeadlessObserverBag } from '../../../src/orchestration/headless-observer.ts';
 import type { HeadlessObserverOptions } from '../../../src/orchestration/headless-observer.ts';
 import type { ResearchPlan } from '../../../src/core/interfaces/research-plan-types.ts';
 
@@ -411,5 +411,28 @@ describe('makeSafeObserver', () => {
     expect(() => (safe as any).onStart('q', 1)).not.toThrow();
     expect(onStart).toHaveBeenCalledWith('q', 1);
     expect((safe as any).onComplete('done')).toBe('saw done');
+  });
+});
+
+describe('isHeadlessObserverBag', () => {
+  it('demotes a bare { onProgress } callback bag', () => {
+    expect(isHeadlessObserverBag({ onProgress: () => {} })).toBe(true);
+  });
+
+  it('keeps a full observer that ALSO exposes onProgress — demotion would lose its typed callbacks', () => {
+    // HeadlessObserver itself emits through onProgress but is the wrapped form.
+    expect(isHeadlessObserverBag(new HeadlessObserver({ onProgress: () => {} }))).toBe(false);
+    // A plain object with onProgress + ANY typed lifecycle method is a full
+    // observer. Spot-check across the interface families (the original marker
+    // list missed most of these and would have wrongly demoted them).
+    for (const typed of ['onSearchStart', 'onResearcherProgress', 'onPlanningTokens', 'onEvaluationDecision', 'onSynthesisStart', 'onTokensConsumed']) {
+      expect(isHeadlessObserverBag({ onProgress: () => {}, [typed]: () => {} })).toBe(false);
+    }
+  });
+
+  it('objects without onProgress are not bags (nothing to demote)', () => {
+    expect(isHeadlessObserverBag({ onSearchStart: () => {} })).toBe(false);
+    expect(isHeadlessObserverBag(null)).toBe(false);
+    expect(isHeadlessObserverBag('nope')).toBe(false);
   });
 });

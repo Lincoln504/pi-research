@@ -78,6 +78,21 @@ describe('classifyPiAiSkew', () => {
     expect(r.message).toContain('pi-ai');
   });
 
+  it('half-hoisted layout: a PRESENT copy that lags the host is fatal stale, not an incomplete warn', () => {
+    // The 2026-08-30 crash shape: a stale nested pi-ai beside a hoisted
+    // (absent) pi-coding-agent — there is no second copy to compare against,
+    // but the present copy lags the host, which is the proven crash direction.
+    const r = classifyPiAiSkew({ hostVersion: '0.84.4', extPiAi: '0.84.2', extPiCodingAgent: null });
+    expect(r.level).toBe('stale');
+    expect(r.fatal).toBe(true);
+    expect(r.message).toContain('pi-ai');
+    expect(r.message).toContain('LAGS host pi 0.84.4');
+    // Mirror: a stale nested pi-coding-agent with no nested pi-ai.
+    const r2 = classifyPiAiSkew({ hostVersion: '0.84.4', extPiAi: null, extPiCodingAgent: '0.84.3' });
+    expect(r2.level).toBe('stale');
+    expect(r2.fatal).toBe(true);
+  });
+
   it('unparseable versions → incomplete warn (the guard must not invent startup failures)', () => {
     const r = classifyPiAiSkew({ hostVersion: 'banana', extPiAi: '0.84.4', extPiCodingAgent: '0.84.4' });
     expect(r).toMatchObject({ level: 'incomplete', fatal: false });

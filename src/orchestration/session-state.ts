@@ -658,8 +658,11 @@ export function recordResearcherFailure(piSessionId: string | undefined, researc
  */
 export function getResearcherFailureReasons(piSessionId: string | undefined, researchId: string): Record<string, string> {
   const sid = normalizeSessionId(piSessionId);
-  const state = getPiState(sid);
-  const reasons = state.failureReasons.get(researchId);
+  // Peek, never create: this is a read path (getFailedResearchers below is the
+  // sibling). A read for an ended/never-created session must not resurrect a
+  // PiSessionState keyed by a random sessionId and leak it for process lifetime.
+  const state = peekPiState(sid);
+  const reasons = state?.failureReasons.get(researchId);
   return reasons ? Object.fromEntries(reasons) : {};
 }
 

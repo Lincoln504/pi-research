@@ -92,9 +92,18 @@ export function isHeadlessObserverBag(observer: unknown): boolean {
   if (observer instanceof HeadlessObserver) return false;
   const o = observer as Record<string, unknown>;
   if (typeof o['onProgress'] !== 'function') return false;
+  // The full optional surface of ResearchObserver (observer-interfaces.ts).
+  // Anything typed marks the object a full observer; only a bare { onProgress }
+  // bag falls through to demotion.
   const lifecycleMethods = [
-    'onStart', 'onRunQueued', 'onPlanningStart', 'onRoundStart', 'onResearcherStart',
-    'onComplete', 'onError', 'onResearcherFailure',
+    'onStart', 'onRunQueued',
+    'onPlanningStart', 'onPlanningProgress', 'onPlanningTokens', 'onPlanningSuccess',
+    'onRoundStart',
+    'onSearchStart', 'onSearchProgress', 'onSearchComplete',
+    'onResearcherStart', 'onResearcherProgress', 'onResearcherTokensHint', 'onResearcherComplete', 'onResearcherFailure',
+    'onToolResult',
+    'onEvaluationStart', 'onEvaluationProgress', 'onEvaluationTokens', 'onEvaluationDecision',
+    'onSynthesisStart', 'onComplete', 'onError', 'onTokensConsumed',
   ];
   return !lifecycleMethods.some(m => typeof o[m] === 'function');
 }

@@ -99,4 +99,23 @@ describe('raceWithSignal', () => {
     await expect(op).resolves.toBe('late');
     expect(getEventListeners(c.signal, 'abort').length).toBe(0);
   });
+
+  it('already-aborted signal: a later rejection of the eager op is swallowed, not unhandled', async () => {
+    const c = new AbortController();
+    c.abort();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const op = Promise.reject(new Error('probe exploded post-abort'));
+      await expect(raceWithSignal(op, c.signal)).resolves.toBeUndefined();
+      // Give the rejected op's handler dispatch a few macrotasks to fire —
+      // unhandledRejection lands on a later tick than the race resolution.
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });

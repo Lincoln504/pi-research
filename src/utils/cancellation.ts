@@ -30,7 +30,7 @@ export function isCancellation(error: unknown, signal?: AbortSignal | null): boo
   if (signal?.aborted) return true;
   if (error instanceof Error && error.name === 'AbortError') return true;
   const message = error instanceof Error ? error.message : String(error);
-  return /^(aborted|the operation was aborted|research (aborted|cancelled|canceled)|operation cancelled|operation canceled)\.?$/i.test(
+  return /^(aborted|(?:the|this) operation was aborted|research (aborted|cancelled|canceled)|operation cancelled|operation canceled)\.?$/i.test(
     message.trim(),
   );
 }
@@ -50,7 +50,14 @@ export function isCancellation(error: unknown, signal?: AbortSignal | null): boo
  */
 export function raceWithSignal<T>(op: Promise<T>, signal?: AbortSignal | null): Promise<T | undefined> {
   if (!signal) return op.then((v) => v);
-  if (signal.aborted) return Promise.resolve(undefined);
+  if (signal.aborted) {
+    // The op was started eagerly and may still REJECT later; without a handler
+    // attached that rejection surfaces as an unhandledRejection even though the
+    // race already resolved. Swallow it — abandonment drops the outcome by
+    // contract (the op must be safe to leave draining).
+    void op.catch(() => {});
+    return Promise.resolve(undefined);
+  }
   let onAbort: () => void;
   const abandoned = new Promise<undefined>((resolve) => {
     onAbort = () => resolve(undefined);

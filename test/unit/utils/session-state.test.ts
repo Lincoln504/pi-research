@@ -23,6 +23,8 @@ import {
   consumeQueuedMessages,
   getSteeringMessages,
   getActiveResearchRunCount,
+  getAllTrackedSessions,
+  getResearcherFailureReasons,
 } from '../../../src/orchestration/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
@@ -360,4 +362,30 @@ describe('utils/session-state', () => {
       expect(getSteeringMessages(psid).map(m => m.text)).toContain('meant for whichever run reads it next');
     });
   });
+
+describe('read paths never create session state (peek-vs-create discipline)', () => {
+  beforeEach(() => {
+    resetAllPiSessions();
+  });
+
+  it('reads against an unknown piSessionId create nothing', () => {
+    expect(getResearcherFailureReasons('never-created-session', 'research-1')).toEqual({});
+    expect(getFailedResearchers('never-created-session', 'research-1')).toEqual([]);
+    expect(shouldStopResearch('never-created-session', 'research-1')).toBe(false);
+    expect(getAllTrackedSessions()).toEqual([]);
+  });
+
+  it('reads against an ended session do not resurrect it', () => {
+    const psid = 'peek-after-end';
+    const runId = startResearchSession(psid);
+    recordResearcherFailure(psid, runId, '1:1', 'boom');
+    endResearchSession(psid, runId);
+    const trackedBefore = getAllTrackedSessions().length;
+
+    expect(getResearcherFailureReasons(psid, runId)).toEqual({});
+    expect(getFailedResearchers(psid, runId)).toEqual([]);
+    expect(shouldStopResearch(psid, runId)).toBe(false);
+    expect(getAllTrackedSessions().length).toBe(trackedBefore);
+  });
+});
 });
