@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KnowledgeStore } from '../../../src/knowledge/store.ts';
 import { Embedder } from '../../../src/knowledge/embedder.ts';
+import { metrics } from '../../../src/utils/metrics.ts';
+import { logger } from '../../../src/logger.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
@@ -737,4 +739,45 @@ describe('KnowledgeStore', () => {
     
     await migrateStore.close();
   });
+
+  it('model-alternation detector: onward changes stay quiet; only a RETURN to an earlier model warns as thrash', async () => {
+    const incSpy = vi.spyOn(metrics, 'increment');
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const alternationWarns = () => warnSpy.mock.calls.filter(c => String(c[0]).includes('MODEL ALTERNATION'));
+    const mk = (name: string) => new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: name,
+      knowledgeMode: 'project',
+    });
+    // initialize(), not bare open(): the manifest — and with it the migration
+    // history the detector reads — is loaded by initialize(), the entry the
+    // service layer uses. A bare open() never restores the history.
+    const openAddClose = async (s: KnowledgeStore) => {
+      await s.initialize();
+      await s.addDocuments([{ url: 'https://alternation.test', text: 'doc', metadata: {}, timestamp: Date.now() }]);
+      await s.close();
+    };
+
+    try {
+      await openAddClose(mk('model-a'));                // establish the table at A
+      expect(alternationWarns()).toHaveLength(0);
+      await openAddClose(mk('model-b'));                // A→B: first migration — quiet
+      expect(alternationWarns()).toHaveLength(0);
+      await openAddClose(mk('model-c'));                // B→C: deliberate onward change — quiet
+      expect(alternationWarns()).toHaveLength(0);
+
+      await openAddClose(mk('model-b'));                // C→B: RETURN to an earlier model — thrash
+      expect(alternationWarns().length).toBe(1);
+      expect(alternationWarns()[0]![0]).toContain('model-b');
+      expect(incSpy).toHaveBeenCalledWith(
+        'knowledge_store_model_migration_total',
+        1,
+        expect.objectContaining({ alternation: 'true' }),
+      );
+    } finally {
+      incSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  }, 30000);
 });

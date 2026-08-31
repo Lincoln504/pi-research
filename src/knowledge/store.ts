@@ -91,6 +91,10 @@ export class KnowledgeStore implements IKnowledgeStore {
   // Compared against the incoming migration target to detect alternating-model
   // thrash against a shared dbDir (see the alternation warn in openInternal).
   private lastMigration: { model: string; ts: number } | null = null;
+  // The migration BEFORE lastMigration — detects a RETURN to an earlier model
+  // (A→B→A, the true ping-pong signature) while leaving a deliberate onward
+  // change (A→B→C) quiet. Persisted alongside lastMigration.
+  private prevMigration: { model: string; ts: number } | null = null;
   // LanceDB table version at the last successful FTS rebuild. rebuildFtsIndex() skips
   // when the version is unchanged: a research run that committed no new transactions
   // would otherwise create a fresh FTS index (and a new table version) on every cleanup,
@@ -148,6 +152,9 @@ export class KnowledgeStore implements IKnowledgeStore {
         if (manifest.lastMigration && typeof manifest.lastMigration.model === 'string') {
           this.lastMigration = { model: manifest.lastMigration.model, ts: Number(manifest.lastMigration.ts) || 0 };
         }
+        if (manifest.prevMigration && typeof manifest.prevMigration.model === 'string') {
+          this.prevMigration = { model: manifest.prevMigration.model, ts: Number(manifest.prevMigration.ts) || 0 };
+        }
       }
     } catch (err) {
       logger.warn('[store] Failed to load manifest, using default table name:', err);
@@ -160,12 +167,13 @@ export class KnowledgeStore implements IKnowledgeStore {
     try {
       const content = JSON.stringify({
         activeTableName: this.tableName,
-        // Record of the most recent model/schema migration. Read back on open
+        // Record of the two most recent model/schema migrations. Read back on open
         // to detect ALTERNATION (two configurations sharing this dbDir each
         // migrating the table back and forth) — previously that thrash was
         // invisible outside a per-open WARN line, while every alternation
         // served an empty store.
         lastMigration: this.lastMigration,
+        prevMigration: this.prevMigration,
       }, null, 2);
       await fsPromises.writeFile(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
       await fsPromises.rename(tempPath, this.manifestPath);
@@ -318,10 +326,23 @@ export class KnowledgeStore implements IKnowledgeStore {
             // newest backup for the other model's data; make that LOUD and
             // countable instead of a per-open WARN nobody correlates.
             const prev = this.lastMigration;
-            if (prev !== null && prev.model !== this.options.modelName) {
-              const ageHours = Math.max(0, Math.round((Date.now() - prev.ts) / 3_600_000));
+            const twoAgo = this.prevMigration;
+            // Thrash = RETURN to the model from two migrations ago (A→B→A):
+            // the ping-pong of two configurations sharing this dbDir. A first
+            // migration (no history) and a deliberate onward change (A→B→C)
+            // stay quiet; with two configs fighting, every leg after the first
+            // round-trip IS a bounce-back, so the real case still fires on
+            // every subsequent leg. (The prev.model check is kept even though a
+            // real migration to a different target implies it — defense in
+            // depth against a hand-edited manifest.)
+            const isThrash =
+              prev !== null && prev.model !== this.options.modelName &&
+              twoAgo !== null && twoAgo.model === this.options.modelName;
+            if (isThrash) {
+              const ageHours = Math.max(0, Math.round((Date.now() - twoAgo!.ts) / 3_600_000));
               logger.warn(
-                `[store] MODEL ALTERNATION on the shared table: migrated to '${prev.model}' ~${ageHours}h ago, now migrating to '${this.options.modelName}'. ` +
+                `[store] MODEL ALTERNATION on the shared table: '${this.options.modelName}' was already here ~${ageHours}h ago ` +
+                `(migrations: '${twoAgo!.model}' → '${prev!.model}' → back to '${this.options.modelName}'). ` +
                 `Two configurations sharing this dbDir are thrashing it — each open serves an empty store until re-ingest. ` +
                 `Fix the EMBEDDING_MODEL drift, or give each model its own dbDir.`,
               );
@@ -329,6 +350,7 @@ export class KnowledgeStore implements IKnowledgeStore {
             } else {
               metrics.increment('knowledge_store_model_migration_total', 1, { alternation: 'false' });
             }
+            this.prevMigration = prev;
             this.lastMigration = { model: this.options.modelName, ts: Date.now() };
             // Persisted by the saveManifest() later in openInternal.
           }
