@@ -212,6 +212,11 @@ jobs:
         # Each OS leg uses the pinned .nvmrc version (node: '' selects the file).
         node: ['']
         include:
+          # npm 12 on the windows leg, same reason as the integration/validate
+          # jobs: npm ≤11's node-gyp 11.2 cannot detect the runner image's
+          # Visual Studio 2026, and better-sqlite3 13's dependency rebuild then
+          # fails `npm ci` outright. Unit tests never build it themselves, but
+          # `npm ci` installs it, so the leg needs a node-gyp that works.
           # package.json declares `engines.node: ">=22.19.0"`, but every job pinned
           # .nvmrc (22.19.0) — so the ONLY Node version ever tested was the floor,
           # while consumers on a newer major were unverified. One extra leg on the
@@ -236,6 +241,10 @@ jobs:
           # matrix.node is empty for the standard legs → fall back to .nvmrc.
           node-version: ${{ matrix.node }}
           node-version-file: ${{ matrix.node == '' && '.nvmrc' || '' }}
+      # npm 12 on every leg: its node-gyp 13 recognizes the VS2026 image on
+      # windows-latest (npm ≤11's node-gyp 11.2 cannot — see the matrix comment).
+      - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
+        run: npm install -g npm@12
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:

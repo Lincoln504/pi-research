@@ -40,19 +40,19 @@ pi install npm:@lincoln504/pi-research
 Standalone, as an [agent skill](docs/AGENT-SKILL.md) for Claude Code, Codex, and other skills-compatible agents:
 
 ```bash
-npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3
+npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-On npm 12 or newer, npm skips dependency install scripts by default; the flag allows the one that builds search's SQLite module — without it, every search fails with a missing-module error (the flag is harmless on older npm). `pi install` passes no flags to npm, so on npm 12 bracket any install or update with the same allowance as config — set, run, delete — because while the setting is in place it can break installs of other projects with git dependencies ([npm/cli#9783](https://github.com/npm/cli/issues/9783)):
+On npm ≥11.19 (and npm 12), dependency install scripts are skipped by default. This
+package needs none of them: better-sqlite3 13 ships prebuilt bindings for every
+supported platform inside its own tarball, and the stealth browser (~500MB)
+self-provisions on its first use instead of at install time — so the first scrape
+takes a few minutes. Nothing needs approving. (On older npm, which still runs
+scripts, a Windows machine without Visual Studio Build Tools can fail while npm
+needlessly recompiles better-sqlite3; upgrading npm fixes that too.)
 
-```bash
-npm config set allow-scripts=better-sqlite3 --location=user
-pi install npm:@lincoln504/pi-research
-npm config delete allow-scripts --location=user
-```
-
-In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md). The first install downloads the stealth browser engine, which takes a few minutes.
+In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
 ### How it works
 

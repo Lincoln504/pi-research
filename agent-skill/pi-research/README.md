@@ -43,13 +43,14 @@ model/key is missing.
   model (`PI_RESEARCH_MODEL`) + API key. See [`references/configuration.md`](references/configuration.md).
 
 ```bash
-npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3
+npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status  # verify detection
 ```
 
-On npm 12 or newer the flag is needed: npm blocks the install script that builds the
-stealth browser's SQLite module, and without it every search fails with a
-missing-module error. It is harmless on older npm.
+On npm ≥11.19 (and npm 12) dependency install scripts are skipped by default — and
+none are needed: better-sqlite3 13 ships prebuilt bindings in its own tarball, and
+the stealth browser self-provisions on its first use (the first scrape takes a few
+minutes). No approval is required.
 
 ### Install the skill
 

@@ -331,11 +331,12 @@ export async function performSearch(
             metrics.increment('browser_search_total_failures_total', 1, { cause: 'native_binding' });
             throw new Error(
                 `Search completely failed: ${reason}, all with a missing native module. ` +
-                `This is an incomplete install, not a network problem: the browser engine's ` +
-                `native dependencies were never built. npm 12 does not run dependency install ` +
-                `scripts by default — reinstall allowing the script (global install: ` +
-                `npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3; ` +
-                `project install: npm approve-scripts better-sqlite3, then npm rebuild better-sqlite3), then retry.` +
+                `This is an incomplete install, not a network problem: better-sqlite3 13 ` +
+                `ships prebuilt bindings for every supported platform and loads them at ` +
+                `runtime, so a missing binding means an old or broken npm install. ` +
+                `Upgrade npm to ≥12 (npm install -g npm@12) and reinstall this package — ` +
+                `modern npm skips the needless recompile that fails on toolchain-less ` +
+                `machines, and the prebuilt binding then loads as-is.` +
                 (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
             );
         }

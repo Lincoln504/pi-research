@@ -13,18 +13,13 @@ run the `pi` extension, which keeps its own private copy your scripts can't impo
 npm install @lincoln504/pi-research
 ```
 
-On npm 12 or newer, npm skips dependency install scripts by default and a project-scoped
-install rejects the `--allow-scripts` flag — record the one script search depends on in
-your project instead, then run it:
-
-```bash
-npm approve-scripts better-sqlite3   # pins the approval in your allowScripts field
-npm rebuild better-sqlite3
-```
-
-Without that script every search fails with a missing-module error, and rerunning
-`npm install` does not run it — `npm rebuild` does. The same pair repairs an install
-that already ran blocked.
+On npm ≥11.19 (and npm 12), dependency install scripts are skipped by default. Nothing
+here needs them: better-sqlite3 13 carries prebuilt bindings for every supported
+platform and loads them at runtime, and the stealth browser self-provisions on its
+first use. (The `npm approve-scripts better-sqlite3` + `npm rebuild` pair documented by
+earlier releases repaired better-sqlite3 12, which downloaded its binding from an
+install script — 13 ships the binding instead, and on npm 12.0.2 an approval does not
+make a skipped script run anyway.)
 
 Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
 (env or `~/.pi/research/config.env`). The SDK never follows the model selected

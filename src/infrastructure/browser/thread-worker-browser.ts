@@ -139,12 +139,15 @@ export async function initBrowser(): Promise<void> {
         //   • camoufox-js  ^0.12.0 (2026-08-30 refresh) → the 0.10.x pin survived
         //     two refresh cycles on three since-lapsed blockers (Windows assets
         //     returned in v152.0.4-beta.26, 2026-07-16; impit's `only-allow pnpm`
-        //     guard existed only in 0.13.1/0.14.0; and better-sqlite3 13's
-        //     dropped-prebuilts install breakage, which `npm ci` failed outright
-        //     with on Windows CI). The refresh accepted better-sqlite3 13 under
-        //     the documented npm 12 script-approval flow (--allow-scripts /
-        //     approve-scripts, see README + docs/SDK.md); a future bump must
-        //     still check better-sqlite3 first, not camoufox.
+        //     guard existed only in 0.13.1/0.14.0; and better-sqlite3 13's changed
+        //     install model). The refresh accepted better-sqlite3 13. MEASURED on
+        //     13.0.3: `prebuilds/` for all eight platform/arch pairs ship INSIDE
+        //     the tarball and load at runtime via node-gyp-build — no install
+        //     script, no toolchain needed on modern npm (≥11.19 skips the
+        //     injected `node-gyp rebuild` that a binding.gyp without an install
+        //     script triggers; it was that needless rebuild, not a missing
+        //     binary, that broke toolchain-less Windows installs). A future bump
+        //     must still check better-sqlite3 first, not camoufox.
         //   • playwright-core  1.60.0 (exact) → playwright-core and the camoufox
         //     binary are one matched Juggler-protocol pair. 1.61 added a
         //     viewport.isMobile field the build REJECTS ("property

@@ -828,13 +828,15 @@ async function cmdStatus(json?: boolean): Promise<number> {
       installed: browserInstalled,
       nativeDepsOk: nativeDeps.ok,
       nativeDepsError: nativeDeps.ok ? null : nativeDeps.error,
-      // --allow-scripts is a package-name LIST, not a boolean: the bare flag is
-      // accepted and silently allows nothing (measured on npm 12.0.2). It is
-      // also global/one-off only — a project-scoped install rejects it with
-      // EALLOWSCRIPTS, where `npm approve-scripts` is the supported route.
+      // better-sqlite3 13 ships prebuilds/ for all eight platform/arch pairs and
+      // loads them at runtime via node-gyp-build — no install script involved.
+      // On modern npm (≥11.19) the injected `node-gyp rebuild` that a
+      // binding.gyp-without-install-script triggers is skipped, so a missing
+      // binding here means an old/broken install, not an approval problem:
+      // point at the upgrade that fixes it.
       nativeDepsFix: nativeDeps.ok
         ? null
-        : 'Reinstall allowing the dependency install script: npm install -g @lincoln504/pi-research --allow-scripts=better-sqlite3 (npm 12 blocks dependency install scripts by default). For a project-scoped install: npm approve-scripts better-sqlite3, then npm rebuild better-sqlite3.',
+        : 'Upgrade npm and reinstall: npm install -g npm@12, then reinstall @lincoln504/pi-research. better-sqlite3 13 ships prebuilt bindings (no script needed); older npm needlessly recompiles it and fails on machines without a C++ toolchain.',
       // Same remedy the health check prints, so both surfaces name one command.
       fix: browserInstalled ? null : 'npx camoufox-js fetch',
       note: browserInstalled
