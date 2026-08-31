@@ -39,6 +39,26 @@ const unitHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-unit-home-')
 process.env['HOME'] = unitHome;
 process.env['USERPROFILE'] = unitHome;
 
+// The throwaway HOME is per worker process and used to outlive it forever:
+// nothing removed it, so every `npm run test:unit` leaked one tmpdir (4,990
+// were found on one dev machine). Remove our own when the worker exits, and
+// opportunistically reclaim leaks older than 24h — no test run keeps a worker
+// alive that long — while never touching dirs owned by concurrent runs.
+try {
+  process.on('exit', () => {
+    try { fs.rmSync(unitHome, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+  const staleCutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const entry of fs.readdirSync(os.tmpdir())) {
+    if (!entry.startsWith('pi-research-unit-home-')) continue;
+    const dir = path.join(os.tmpdir(), entry);
+    try {
+      if (dir === unitHome) continue;
+      if (fs.statSync(dir).mtimeMs < staleCutoff) fs.rmSync(dir, { recursive: true, force: true });
+    } catch { /* raced with another worker's sweep, or already gone */ }
+  }
+} catch { /* tmpdir unreadable — isolation above still applies */ }
+
 // Never auto-fetch the camoufox browser during unit tests. Unit tests mock the
 // browser layer (so getCamoufoxBinaryPath() points at a non-existent temp dir),
 // which would otherwise make the runtime browser-provisioning step in
