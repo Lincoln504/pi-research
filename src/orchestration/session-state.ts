@@ -89,10 +89,31 @@ function getPiState(piSessionId: string | undefined): PiSessionState {
 }
 
 /**
+ * Read-only lookup: returns the session's state WITHOUT creating one for an
+ * unknown/ended piSessionId. Read paths must use this — getPiState() on a
+ * diagnostic/late read for an already-ended session resurrects a full
+ * PiSessionState (four Maps, arrays, timer slots) that only endResearchSession
+ * or clearAllSessionState removes: a slow leak in a long-lived host, and a
+ * violation of the same peek-vs-create discipline ResearchSessionService and
+ * ResearchSynthesisService already enforce ("read/delete paths must never
+ * resurrect").
+ */
+function peekPiState(piSessionId: string | undefined): PiSessionState | null {
+  return piSessions.get(normalizeSessionId(piSessionId)) ?? null;
+}
+
+/**
  * Add a steering message to a Pi session
  */
 export function addSteeringMessage(piSessionId: string | undefined, message: string): void {
   const sid = normalizeSessionId(piSessionId);
+  if (!piSessionId) {
+    // Steering is scoped by piSessionId; a falsy one collapses to the shared
+    // 'default' sid, where two concurrent runs that both omitted it would
+    // consume and inject EACH OTHER's guidance. In-repo callers always pass a
+    // real id — make an SDK caller's contract violation loud at the boundary.
+    logger.warn('[session-state] addSteeringMessage called without a piSessionId — steering collapsed to the shared "default" scope and may cross-talk between concurrent runs.');
+  }
   const state = getPiState(sid);
 
   // Cap per-message length. All active steering is re-sent to the evaluator every
@@ -308,6 +329,10 @@ export function hasQueuedSteeringMessages(piSessionId: string | undefined): bool
  */
 export function onSessionOrderChange(piSessionId: string | undefined, callback: () => void): () => void {
   const sid = normalizeSessionId(piSessionId);
+  // Deliberately CREATE-on-read (the one exception to peekPiState): a
+  // subscription registered BEFORE the session's first write must survive to
+  // see it — peeking here would attach to nothing and silently never fire.
+  // The state object this creates is the same one later writers mutate.
   const state = getPiState(sid);
   state.subscribers.push(callback);
   return () => {
@@ -397,7 +422,8 @@ export function hideMasterWidget(piSessionId: string | undefined): void {
  */
 export function refreshAllSessions(piSessionId: string | undefined): void {
   const sid = normalizeSessionId(piSessionId);
-  const state = getPiState(sid);
+  const state = peekPiState(sid);
+  if (!state) return; // nothing was ever created for this session — nothing to refresh
 
   if (state.refreshTimeout) {
     clearTimeout(state.refreshTimeout);
@@ -642,8 +668,8 @@ export function getResearcherFailureReasons(piSessionId: string | undefined, res
  */
 export function getFailedResearchers(piSessionId: string | undefined, researchId: string): string[] {
   const sid = normalizeSessionId(piSessionId);
-  const state = getPiState(sid);
-  const failures = state.failures.get(researchId) || [];
+  const state = peekPiState(sid);
+  const failures = state?.failures.get(researchId) || [];
   return [...new Set(failures)];
 }
 
@@ -680,8 +706,8 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
   // blocking.
   // Lead with the RECORDED errors when we have them — the actual root cause
   // (e.g. a provider 429) beats generic guidance every time.
-  const state = getPiState(sid);
-  const reasons = state.failureReasons.get(researchId);
+  const state = peekPiState(sid);
+  const reasons = state?.failureReasons.get(researchId);
   const recorded = reasons && reasons.size > 0
     ? ['Recorded errors:', ...[...reasons].map(([id, r]) => `• researcher ${id}: ${r}`), '']
     : [];

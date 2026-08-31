@@ -21,7 +21,7 @@ import { ensureAssistantResponse, parseCitations, isAnalysisFreeSynthesis, synth
 import { getMaxScrapeBatches, resolveExcludedTools, QUICK_THIN_REPORT_NOTICE } from '../constants.ts';
 import { resolveResearchModel, isPromptCachingActiveForModel } from '../core/llm/research-model-resolver.ts';
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
-import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
+import { HeadlessObserver, makeSafeObserver, isHeadlessObserverBag, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { raceWithSignal } from '../utils/cancellation.ts';
 import { ServiceNames, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
@@ -55,7 +55,7 @@ export class QuickResearchOrchestrator {
 
     // Resolve observer: if options were provided instead of an instance, create the instance.
     // Either way, wrap it so a throwing observer callback can never fail the run.
-    if (options.observer && typeof (options.observer as any).onProgress === 'function' && !(options.observer instanceof HeadlessObserver)) {
+    if (options.observer && isHeadlessObserverBag(options.observer)) {
        this.observer = makeSafeObserver(new HeadlessObserver(options.observer as HeadlessObserverOptions));
     } else {
        this.observer = options.observer ? makeSafeObserver(options.observer as ResearchObserver) : undefined;
@@ -521,6 +521,11 @@ export class QuickResearchOrchestrator {
         // exactly once (the inner catch sets the flag for its own scope).
         if (!terminalCallbackFired) {
           const aborted = signal?.aborted === true;
+          // Audit L4: the early-throw path (healthcheck/session-registration) fired
+          // the terminal callbacks but recorded no run metric — the session counter
+          // under-counted exactly these failures. Mirrors the inner catch's labels.
+          metrics.observe('research_session_duration_ms', Date.now() - sessionStart, { mode: 'quick', complexity: '0', status: aborted ? 'cancelled' : 'error' });
+          metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: aborted ? 'cancelled' : 'error' });
           if (!aborted) {
             observer?.onResearcherFailure?.('quick', error instanceof Error ? error.message : String(error));
           }

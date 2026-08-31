@@ -164,10 +164,18 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           (observer as { onError?: (e: Error) => void } | undefined)?.onError?.(err as Error);
         } catch { /* observer isolation */ }
       }
-      if (err instanceof ResearchRunCapacityError) throw err; // capacity exhausted → fail fast
+      if (err instanceof ResearchRunCapacityError) {
+        // Audit L1: a capacity-refused run was invisible to run-level metrics —
+        // the rethrow happened before the success/error accounting ran.
+        metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'capacity_refused', source: 'extension' });
+        throw err; // capacity exhausted → fail fast
+      }
       // A cancel while queueing for a slot must stay cancelled. Fail-open here would
       // start the very run the user just aborted.
-      if (err instanceof Error && err.name === 'AbortError') throw err;
+      if (err instanceof Error && err.name === 'AbortError') {
+        metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'cancelled', source: 'extension' });
+        throw err;
+      }
       logger.warn(`[ResearchOrchestrationService] Run-cap unavailable, proceeding without it: ${err instanceof Error ? err.message : String(err)}`);
     }
 

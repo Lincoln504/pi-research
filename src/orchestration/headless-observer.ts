@@ -75,6 +75,30 @@ export function makeSafeObserver<T extends object>(observer: T): T {
   }) as T;
 }
 
+/**
+ * True when `observer` is a HeadlessObserverOptions BAG — a bare
+ * `{ onProgress }` callback object — rather than a full ResearchObserver.
+ *
+ * Detection is by ABSENCE of a typed lifecycle method, not merely presence of
+ * onProgress: a full observer that ALSO exposes onProgress (a subclass, an
+ * EventEmitter-style adapter, a proxy) would otherwise be silently demoted to
+ * a bag, funnelling every event through onProgress and losing every typed
+ * callback. Any typed method (onStart/onRoundStart/onResearcherStart/…)
+ * marks the object a full observer; HeadlessObserver itself is exempt (it
+ * emits through onProgress but is already the wrapped form).
+ */
+export function isHeadlessObserverBag(observer: unknown): boolean {
+  if (!observer || typeof observer !== 'object') return false;
+  if (observer instanceof HeadlessObserver) return false;
+  const o = observer as Record<string, unknown>;
+  if (typeof o['onProgress'] !== 'function') return false;
+  const lifecycleMethods = [
+    'onStart', 'onRunQueued', 'onPlanningStart', 'onRoundStart', 'onResearcherStart',
+    'onComplete', 'onError', 'onResearcherFailure',
+  ];
+  return !lifecycleMethods.some(m => typeof o[m] === 'function');
+}
+
 export class HeadlessObserver implements ResearchObserver {
   constructor(private options: HeadlessObserverOptions = {}) {}
 

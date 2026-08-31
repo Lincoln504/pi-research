@@ -17,7 +17,7 @@ import {
 import type {
   ResearchObserver,
 } from '../core/interfaces/observer-interfaces.ts';
-import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
+import { HeadlessObserver, makeSafeObserver, isHeadlessObserverBag, type HeadlessObserverOptions } from './headless-observer.ts';
 import {
   ServiceNames,
   type IResearchOrchestration,
@@ -63,7 +63,7 @@ export class DeepResearchOrchestrator {
     
     // Resolve observer: if options were provided instead of an instance, create the instance.
     // Either way, wrap it so a throwing observer callback can never fail the run.
-    if (options.observer && typeof (options.observer as any).onProgress === 'function' && !(options.observer instanceof HeadlessObserver)) {
+    if (options.observer && isHeadlessObserverBag(options.observer)) {
        this.observer = makeSafeObserver(new HeadlessObserver(options.observer as HeadlessObserverOptions));
     } else {
        this.observer = options.observer ? makeSafeObserver(options.observer as ResearchObserver) : undefined;

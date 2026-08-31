@@ -92,11 +92,17 @@ export function createCleanupFunction(
       let hasUI = false;
       try { hasUI = ctx.hasUI; } catch { /* ctx stale (session closed mid-run) → treat as no UI */ }
       if (hasUI) {
-        ctx.ui.setWidget(masterWidgetId, undefined);
-        const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
-        if (typeof tuiUI?.setWorkingVisible === 'function') {
-          tuiUI.setWorkingVisible(true);
-        }
+        // Audit L3: the ctx can go stale BETWEEN the hasUI probe and these calls
+        // (session replacement races the probe) — the same throw this block exists
+        // to suppress would then reject the whole cleanup promise. Guard the calls
+        // identically to the probe.
+        try {
+          ctx.ui.setWidget(masterWidgetId, undefined);
+          const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
+          if (typeof tuiUI?.setWorkingVisible === 'function') {
+            tuiUI.setWorkingVisible(true);
+          }
+        } catch { /* ctx went stale after the probe → UI is gone; nothing to clean */ }
       }
     } else {
       refreshAllSessions(piSessionId);

@@ -30,7 +30,7 @@ import type {
 import type { IPlanningService } from './core/interfaces/planning-interfaces.ts';
 import type { ResearchObserver, HeadlessObserverOptions } from './core/interfaces/observer-interfaces.ts';
 import type { ResearchPlan } from './core/interfaces/research-plan-types.ts';
-import { HeadlessObserver } from './orchestration/headless-observer.ts';
+import { HeadlessObserver, isHeadlessObserverBag } from './orchestration/headless-observer.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
@@ -694,7 +694,7 @@ function wrapObserverForOutcomeCapture(
   onPlanned: (count: number) => void,
 ): ResearchObserver {
   const base: ResearchObserver | undefined =
-    observer && typeof (observer as HeadlessObserverOptions).onProgress === 'function' && !(observer instanceof HeadlessObserver)
+    observer && isHeadlessObserverBag(observer)
       ? new HeadlessObserver(observer as HeadlessObserverOptions)
       : (observer as ResearchObserver | undefined);
 
