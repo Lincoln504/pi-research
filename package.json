@@ -118,7 +118,7 @@
     "@earendil-works/pi-coding-agent": ">=0.84.0 <1",
     "@earendil-works/pi-tui": ">=0.84.0 <1",
     "@huggingface/transformers": "4.2.0",
-    "@kreuzberg/html-to-markdown-node": "^3.5.5",
+    "@kreuzberg/html-to-markdown-node": "^3.7.2",
     "@lancedb/lancedb": "0.37.1",
     "apache-arrow": "21.1.0",
     "bgutils-js": "^4.0.3",

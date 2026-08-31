@@ -267,20 +267,30 @@ describe('package-lock.json — phantom-optional stubs survive regeneration', ()
   // nested stubs (and re-run `npm ci --dry-run` to confirm sync) before
   // pushing. Clears when kreuzberg publishes the musl variants or drops the
   // references — at that point delete this test along with the stubs.
-  it('keeps the nested {"optional": true} stubs for kreuzberg\'s unpublished musl variants', () => {
+  it('keeps the VERSIONED optional stubs for kreuzberg\'s phantom musl variants (npm 12 form)', () => {
+    // HISTORY: the stubs were nested bare {"optional": true} entries under the
+    // npm ≤11 lockfile; npm 12's ci rejects bare stubs ("Missing …@ from lock
+    // file") AND its own `--package-lock-only` regeneration silently drops the
+    // entries (the registry 404s), so every regen broke `npm ci` again. The
+    // stubs are now VERSIONED top-level entries (version + resolved + optional,
+    // no integrity — the 404 is skipped as an optional at install time; both
+    // behaviors verified against npm 12.0.2). If this test fails after a lock
+    // regeneration, re-add the two entries exactly as below before pushing.
     const lock = JSON.parse(
       fs.readFileSync(path.join(__dirname, '../../package-lock.json'), 'utf-8'),
-    ) as { packages: Record<string, { optional?: boolean }> };
+    ) as { packages: Record<string, { optional?: boolean; version?: string }> };
 
     const parent = 'node_modules/@kreuzberg/html-to-markdown-node';
     for (const variant of ['linux-arm64-musl', 'linux-x64-musl']) {
-      const key = `${parent}/node_modules/@kreuzberg/html-to-markdown-node-${variant}`;
+      const key = `${parent}-${variant}`;
+      const entry = lock.packages[key];
       expect(
-        lock.packages[key],
-        `package-lock.json lost the nested stub for the UNPUBLISHED ${variant} platform package — ` +
-        `npm ci will fail on CI. Re-add "${key}": {"optional": true} (see this test's comment).`,
+        entry,
+        `package-lock.json lost the stub for the UNPUBLISHED ${variant} platform package — ` +
+        `npm ci will fail on CI. Re-add "${key}": { "version": "3.7.2", "resolved": "https://registry.npmjs.org/@kreuzberg/html-to-markdown-node-${variant}/-/html-to-markdown-node-${variant}-3.7.2.tgz", "optional": true } (see this test's comment).`,
       ).toBeDefined();
-      expect(lock.packages[key]!.optional).toBe(true);
+      expect(entry!.optional).toBe(true);
+      expect(entry!.version).toBe('3.7.2');
     }
   });
 });
