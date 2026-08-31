@@ -142,6 +142,19 @@ describe('completeSimpleStructured', () => {
 
     await expect(
       completeSimpleStructured(STUB_MODEL, { messages: [] as any }, TOOL, {}, 'Coordinator'),
-    ).rejects.toThrow('neither a submit_plan tool call nor text content');
+    ).rejects.toThrow('returned no text content and no submit_plan tool call');
+  });
+
+  it('classifies the empty-response error as RETRIABLE (retry → degrade, never abort)', async () => {
+    // Regression (audit HIGH): the original message "neither a … tool call nor
+    // text content" does NOT contain the legacy classifier substring
+    // 'no text content', so an empty structured response aborted the run at
+    // the first occurrence instead of retrying and degrading to the fallback
+    // plan like the text path always did.
+    vi.mocked(completeSimple).mockResolvedValue(textResponse('   '));
+    const err = await completeSimpleStructured(STUB_MODEL, { messages: [] as any }, TOOL, {}, 'Coordinator').catch((e: unknown) => e);
+    const { isRetriableLlmError } = await import('../../../../src/core/planning-service.ts');
+    expect(err).toBeInstanceOf(Error);
+    expect(isRetriableLlmError(err)).toBe(true);
   });
 });

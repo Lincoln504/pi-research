@@ -169,8 +169,12 @@ export async function completeSimpleStructured(
 
   const text = extractText(response);
   if (!text || !text.trim()) {
+    // 'no text content' is load-bearing: the planning layer's retry/degrade
+    // classifiers (isRetriableLlmError) match that legacy substring from
+    // validateAndExtractText, and an empty response must retry → degrade to
+    // the fallback plan exactly like the text path — not abort the run.
     throw new Error(
-      `${label} returned neither a ${tool.name} tool call nor text content. Raw response: ${JSON.stringify(response, null, 2)}`,
+      `${label} returned no text content and no ${tool.name} tool call. Raw response: ${JSON.stringify(response, null, 2)}`,
     );
   }
   return { kind: 'text', text, response };
