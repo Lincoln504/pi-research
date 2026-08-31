@@ -27,12 +27,19 @@ import { tmpdir } from 'node:os';
 import { logger } from '../../logger.ts';
 import { getCamoufoxBinaryPath } from './config.ts';
 
-/** Bound the ~100MB download so a stalled network fails fast instead of hanging forever. */
-const FETCH_TIMEOUT_MS = 15 * 60 * 1000;
-/** A lock older than this is considered stale (crashed mid-fetch) and may be stolen. */
-const STALE_LOCK_MS = 20 * 60 * 1000;
-/** When another process holds the fetch lock, poll this long for the browser to appear. */
-const WAIT_FOR_PEER_MS = 16 * 60 * 1000;
+/** Bound the ~500MB camoufox-js 0.12 browser download (measured 484MB; the
+ *  0.10 pin was ~100MB and the old bound assumed that) so a stalled network
+ *  fails eventually instead of hanging forever, while a slow-but-working link
+ *  can actually finish. */
+const FETCH_TIMEOUT_MS = 45 * 60 * 1000;
+/** A lock older than this is considered stale (crashed mid-fetch) and may be stolen.
+ *  Must exceed FETCH_TIMEOUT_MS: stealing a LIVE fetcher's lock mid-download would
+ *  start a second 500MB download beside the first. */
+const STALE_LOCK_MS = 55 * 60 * 1000;
+/** When another process holds the fetch lock, poll this long for the browser to appear.
+ *  Spans a full FETCH_TIMEOUT_MS fetch, so a legitimate slow peer is waited out rather
+ *  than duplicated. */
+const WAIT_FOR_PEER_MS = 50 * 60 * 1000;
 const POLL_INTERVAL_MS = 2000;
 
 /** In-process dedupe: concurrent pool inits / scrapers share one fetch. */
@@ -78,7 +85,7 @@ function runFetch(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const bin = resolveCamoufoxBin();
     const [cmd, args] = bin ? [bin, ['fetch']] : ['npx', ['camoufox-js', 'fetch']];
-    logger.info(`[ensure-browser] Camoufox not found; fetching the browser (this runs once, ~100MB): ${cmd} ${args.join(' ')}`);
+    logger.info(`[ensure-browser] Camoufox not found; fetching the browser (this runs once, ~500MB): ${cmd} ${args.join(' ')}`);
 
     // Windows needs shell:true to run the .cmd shim (Node CVE-2024-27980 fix makes a
     // shell-less spawn of .cmd throw EINVAL), but shell:true performs NO quoting, so a

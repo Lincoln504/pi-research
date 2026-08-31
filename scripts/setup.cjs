@@ -125,10 +125,13 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
       // shell metacharacters would execute them at install time. Windows still
       // needs a shell to run the `.cmd` shim, and there the path is quoted; the
       // runtime twin in ensure-browser.ts uses the same shape.
-      // Bound the ~100MB download so a stalled/interrupted network fails fast
-      // instead of hanging `npm install` forever (the catch below exits 0, and the
-      // browser is re-fetchable manually). 15 min is ample even on slow links.
-      const spawnOpts = { stdio: 'inherit', env, timeout: 15 * 60 * 1000 };
+      // Bound the ~500MB camoufox-js 0.12 browser download (was ~100MB on the
+      // 0.10 pin — the old 15-minute bound could kill a download that would
+      // have succeeded on a slow link) so a stalled/interrupted network fails
+      // eventually instead of hanging `npm install` forever (the catch below
+      // exits 0, and the browser is re-fetchable manually). 45 min covers a
+      // working link down to ~180 KB/s; a dead link aborts on its own sooner.
+      const spawnOpts = { stdio: 'inherit', env, timeout: 45 * 60 * 1000 };
       const res = bin
         ? (isWindows
             ? spawnSync(`"${bin}"`, ['fetch'], { ...spawnOpts, shell: true })
