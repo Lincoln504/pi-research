@@ -237,7 +237,7 @@ export class DeepResearchOrchestrator {
         // Once per round, not per loop entry: a 'wait' retry re-enters the same
         // round and must not re-probe the same infrastructure it just probed.
         if (firstEntryThisRound) {
-          await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
+          await orchestrationService.checkHealth(this.currentRound, researchId, ctx, signal);
         }
 
         // 1. Update/Generate Plan

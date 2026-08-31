@@ -38,6 +38,7 @@ import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../ut
 import { runResearcher } from './researcher-executor.ts';
 import { ResearchRunSemaphore, ResearchRunCapacityError } from '../infrastructure/research-run-semaphore.ts';
 import { recordResearcherFailure, shouldStopResearch, createResearchStopError } from './session-state.ts';
+import { raceWithSignal } from '../utils/cancellation.ts';
 import { isAbortSentinel, boundSessionAbort } from './abort-utils.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
@@ -682,7 +683,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param round - Current round number
    * @param ctx - Optional extension context for container isolation
    */
-  async checkHealth(round: number, _researchId?: string, ctx?: any): Promise<void> {
+  async checkHealth(round: number, _researchId?: string, ctx?: any, signal?: AbortSignal): Promise<void> {
     // Round 1 is skipped because there is nothing to diagnose yet — the pool was
     // built moments earlier and no work has run through it. A consequence worth
     // stating: a complexity-1 run has exactly ONE research round, so it now never
@@ -692,6 +693,10 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     // does not use. This check is advisory logging; a quick run loses nothing but
     // that cost.
     if (round <= 1) return;
+    if (signal?.aborted) {
+      logger.debug(`[ResearchOrchestrationService] Health check at Round ${round} skipped (run already aborted).`);
+      return;
+    }
 
     try {
       const container = tryGetServiceContainerFromCtx(ctx);
@@ -702,7 +707,17 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         registry = healthRegistry;
       }
 
-      const health = await registry.runAll();
+      // Abort-aware: a user cancel landing inside a probe previously waited out
+      // the FULL probe budget (105s observed) — the one await on this path that
+      // ignored the run signal. The abandoned probe keeps draining in the
+      // background (probes carry their own timeouts and are safe to leave
+      // running); its dropped result costs nothing because the next abort-aware
+      // await in the run loop raises the cancel anyway.
+      const health = await raceWithSignal(registry.runAll(), signal);
+      if (health === undefined) {
+        logger.debug(`[ResearchOrchestrationService] Health check at Round ${round} abandoned (run signal fired).`);
+        return;
+      }
 
       if (health.status === 'healthy') {
         logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);

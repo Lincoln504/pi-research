@@ -34,3 +34,29 @@ export function isCancellation(error: unknown, signal?: AbortSignal | null): boo
     message.trim(),
   );
 }
+
+/**
+ * Race `op` against `signal`, resolving `undefined` when the signal fires
+ * first. The LOSER keeps running in the background — this is an abandon, not
+ * a cancel: the op must be safe to leave draining (probes with their own
+ * timeouts, best-effort telemetry) and its eventual result or rejection is
+ * dropped. Callers treating abandonment as "skip the work" keep their abort
+ * handling at the next signal-aware await, exactly where the rest of the run's
+ * abort plumbing expects it.
+ *
+ * The listener is hoisted (defined once, removed in `finally`) so a settled
+ * race can never leak an `abort` listener onto a long-lived run signal — the
+ * same hygiene the orchestrators' capacity-wait races apply.
+ */
+export function raceWithSignal<T>(op: Promise<T>, signal?: AbortSignal | null): Promise<T | undefined> {
+  if (!signal) return op.then((v) => v);
+  if (signal.aborted) return Promise.resolve(undefined);
+  let onAbort: () => void;
+  const abandoned = new Promise<undefined>((resolve) => {
+    onAbort = () => resolve(undefined);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  return Promise.race([op, abandoned]).finally(() => {
+    signal.removeEventListener('abort', onAbort!);
+  });
+}

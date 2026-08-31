@@ -23,6 +23,7 @@ import { resolveResearchModel, isPromptCachingActiveForModel } from '../core/llm
 import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 import { HeadlessObserver, makeSafeObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
+import { raceWithSignal } from '../utils/cancellation.ts';
 import { ServiceNames, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
@@ -86,7 +87,15 @@ export class QuickResearchOrchestrator {
           process.env['PI_RESEARCH_SKIP_HEALTHCHECK'] === 'true';
         const health = skipHealthcheck
           ? { success: true as boolean, error: undefined as string | undefined, components: [] as Array<{ component?: string; healthy?: boolean; error?: string }> }
-          : await runHealthCheck({ ctx });
+          // Abort-aware: without the race, a cancel landing inside the probe
+          // waits out the FULL healthcheck budget before the run notices.
+          // The abandoned probe drains in the background (its own timeouts
+          // bound it); the throw lands in the outer catch, which classifies
+          // via signal.aborted as a cancellation, not a fault.
+          : await raceWithSignal(runHealthCheck({ ctx }), signal);
+        if (health === undefined) {
+          throw new Error('Research aborted');
+        }
         if (skipHealthcheck) {
           logger.debug('[QuickOrchestrator] Pre-flight healthcheck skipped (PI_RESEARCH_SKIP_HEALTHCHECK); relying on per-task timeouts.');
         }

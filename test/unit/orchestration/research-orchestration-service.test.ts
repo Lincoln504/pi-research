@@ -208,6 +208,27 @@ describe('ResearchOrchestrationService', () => {
 
       await expect(service.checkHealth(3)).resolves.toBeUndefined();
     });
+
+    it('already-aborted signal: never starts the probe', async () => {
+      const c = new AbortController();
+      c.abort();
+      await expect(service.checkHealth(2, 'res-1', undefined, c.signal)).resolves.toBeUndefined();
+      expect(mockRunAll).not.toHaveBeenCalled();
+    });
+
+    it('signal firing mid-probe: resolves immediately, probe abandoned in background', async () => {
+      let release!: (v: unknown) => void;
+      mockRunAll.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+      const c = new AbortController();
+
+      const pending = service.checkHealth(2, 'res-1', undefined, c.signal);
+      c.abort();
+      await expect(pending).resolves.toBeUndefined();
+
+      // The probe itself keeps draining and must not reject unhandled.
+      release({ status: 'healthy', components: [] });
+      await Promise.resolve();
+    });
   });
 
   // =========================================================================

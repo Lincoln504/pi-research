@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isCancellation } from '../../../src/utils/cancellation.ts';
+import { getEventListeners } from 'node:events';
+import { isCancellation, raceWithSignal } from '../../../src/utils/cancellation.ts';
 
 describe('isCancellation', () => {
   it('recognises an aborted signal regardless of the error', () => {
@@ -62,5 +63,40 @@ describe('isCancellation', () => {
   it('handles a non-Error rejection value', () => {
     expect(isCancellation('Aborted')).toBe(true);
     expect(isCancellation({ nope: true })).toBe(false);
+  });
+});
+
+describe('raceWithSignal', () => {
+  it('passes the op straight through when no signal is handed in', async () => {
+    await expect(raceWithSignal(Promise.resolve('v'))).resolves.toBe('v');
+  });
+
+  it('resolves undefined immediately when the signal is already aborted', async () => {
+    const c = new AbortController();
+    c.abort();
+    let ran = false;
+    const op = (async () => { ran = true; return 'v'; })();
+    await expect(raceWithSignal(op, c.signal)).resolves.toBeUndefined();
+    // Abandon semantics: the loser keeps draining in the background.
+    await op;
+    expect(ran).toBe(true);
+  });
+
+  it('resolves the op value when the op settles first', async () => {
+    const c = new AbortController();
+    await expect(raceWithSignal(Promise.resolve('v'), c.signal)).resolves.toBe('v');
+    expect(getEventListeners(c.signal, 'abort').length).toBe(0);
+  });
+
+  it('resolves undefined when the signal fires while the op is pending, and leaks no listener', async () => {
+    const c = new AbortController();
+    let release!: (v: string) => void;
+    const op = new Promise<string>((resolve) => { release = resolve; });
+    const raced = raceWithSignal(op, c.signal);
+    c.abort();
+    await expect(raced).resolves.toBeUndefined();
+    release('late');
+    await expect(op).resolves.toBe('late');
+    expect(getEventListeners(c.signal, 'abort').length).toBe(0);
   });
 });
