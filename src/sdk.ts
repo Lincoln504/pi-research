@@ -607,8 +607,10 @@ export async function runDeepResearch(
     }
     throw err;
   } finally {
-    // Free the per-run PiSessionState that shouldStopResearch()/getFailedResearchers()
-    // lazily created (keyed by this run's random sessionId). A long-lived SDK/benchmark
+    // Free the per-run PiSessionState that startResearchSession()/registerSessionAbort()
+    // created for this run (keyed by this run's random sessionId; the read accessors —
+    // getFailedResearchers()/getResearcherFailureReasons()/shouldStopResearch() — only
+    // peek). A long-lived SDK/benchmark
     // process doing thousands of runs would otherwise accumulate one never-freed entry
     // (failures/aborts/panels) per run — only full shutdown reclaimed them before.
     try { endResearchSession(sessionId, researchId); } catch { /* best-effort */ }

@@ -78,7 +78,7 @@ export function createScrapeTool(options: {
   });
 
   const ScrapeParamsSchema = Type.Object({
-    urls: Type.Array(Type.String({ description: 'The URLs to scrape' }), { minItems: 1, maxItems: 20 }),
+    urls: Type.Array(Type.String({ description: `The URLs to scrape (only the first ${MAX_SCRAPE_URLS} are fetched per call; extras are reported under "Not Fetched" rather than silently dropped)` }), { minItems: 1, maxItems: 20 }),
     maxConcurrency: Type.Optional(Type.Number({ default: config.MAX_CONCURRENT_SCRAPES, minimum: 1, maximum: 20 })),
   });
 
