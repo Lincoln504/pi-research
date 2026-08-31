@@ -27,6 +27,16 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ONNXRUNTIME_NODE_SKIP_BINARIES: 1
+  # windows-latest migrated its image to Visual Studio 2026 (version 18) in
+  # August 2026 (actions/runner-images#13272). node-gyp 11.2.0 — the version
+  # bundled with npm 11 — has no find-VS entry for version "18" and aborts
+  # with `unknown version "undefined" found at .../Microsoft Visual Studio/18`,
+  # which made better-sqlite3 13 (no prebuilt binaries since 13.0.0, so every
+  # install node-gyp-rebuilds) unbuildable on every Windows leg. Naming the
+  # MSVS generation explicitly is the documented remedy for the detection gap
+  # (runner-images#13272/#14017); gyp ignores the variable outside the MSVS
+  # generator, so the Linux/macOS legs are unaffected. Safe to drop once the
+  # bundled node-gyp learns version 18.
 
 jobs:
   analyze:
