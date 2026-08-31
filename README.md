@@ -82,6 +82,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - An LLM with a 100k+ context window (an API key or a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
+- Local knowledge-store embeddings need `@huggingface/transformers`, which is an **optional dependency**: if its native image chain (sharp) cannot install on your machine, npm skips it with a warning, the install still succeeds, and everything except local embeddings works. The store disables embeddings gracefully with a message telling you how to restore them.
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
 
 ### Channels

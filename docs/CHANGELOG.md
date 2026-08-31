@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - Unreleased
+
+Two threads from the issue tracker collide here: #10 ("Installation via NPM fails")
+turned out to be an install-time sharp build failure we could — and now did — design
+away, while the skew guard shipped across 1.5.x–1.6.6 rested on a premise about pi's
+module loading that is not how pi works.
+
+### Fixed
+
+- **`pi install` no longer fails outright on machines where sharp's native image chain cannot install (#10).** The failure chain, reproduced and pinned: `@huggingface/transformers` (the local-embeddings backend) declared sharp `^0.34.5` as a regular dependency; when npm skipped sharp's platform binary (`@img/sharp-*` optionals — the npm/cli#4828 pruning family on existing trees for npm 10.3.0–11.2.x, or any interrupted install, which the re-resolve then will NOT heal because skipped optionals stay inert), sharp's install script fell back to a source build that itself is broken (node-addon-api is only a devDependency), and the whole install died with `npm error code 1` — the extension never arrived. `@huggingface/transformers` is now an **optional dependency** (the same pattern `@lancedb/lancedb` already uses for it): npm drops a failing optional subtree with a warning and the install succeeds; research, scraping, and the CLI all work without embeddings. The absence is a first-class state at runtime too: `getTransformers()` reclassifies the missing-module rejection as a typed `TRANSFORMERS_UNAVAILABLE` error carrying remediation (`src/knowledge/transformers-loader.ts`), `isNativeStackUnavailableError()` recognizes it (`src/knowledge/embedder-utils.ts`), and the knowledge store therefore memoizes DISABLED on first touch instead of re-running the full init + 5-attempt backoff storm (~15s) on every store use. A transformers-INTERNAL failure (its own onnxruntime import, a corrupt install) still routes through the pre-existing onnxruntime/lancedb arms — a broken install of a PRESENT package is not "the optional was skipped". Retry storms, probe behavior, and startup were verified: the WebGPU probe subprocess already treats a missing module as "no WebGPU" and is unreachable before the env init anyway.
+
+### Removed
+
+- **The pi-ai/pi-coding-agent "skew guard" is gone** (`src/core/pi-ai-skew.ts`; shipped in 1.6.5 as fail-fast, reworked in 1.6.6 to walk node_modules ancestors). The premise does not survive contact with pi's loader: pi resolves EVERY `@earendil-works/*` and `typebox` specifier in extension code to the HOST's own copies via jiti `virtualModules`/`alias` (verified in the 0.84.2 and 0.84.4 loader source — coverage includes the exact four specifiers this package imports), so the on-disk copies the guard compared are never loaded in-host. Under the host the guard measured dependencies nobody executes; its FATAL 'stale' refusal would have blocked a healthy extension after every host upgrade the moment the managed tree's inert copies lagged — and the 1.6.6 ancestor-walk made that state reachable on the primary `pi install npm:` layout (pi's own install code uses `--legacy-peer-deps` precisely because it expects extensions to declare these packages as peers, not dependencies). Host-version compatibility stays where it belongs: `checkPiCompatibility()` against the running host's VERSION — refuse below the 0.84.0 floor, warn once above the tested line — which is now the only startup check. The standalone CLI/SDK never ran the guard (it lived solely in the extension entry), so removal changes nothing there. What actually caused the original 2026-08-30 named-export crash remains unproven — in-host specifier mixing should have been impossible under 0.84.2's alias table — and is recorded here honestly rather than preserved as a false safety net.
+
+### Verified
+
+- 2993 unit tests over 236 files (11 new: the transformers-absent typed error and its classification — ESM and CJS not-found forms, transformers-internal failures passing through untouched, unrelated-package precision, and the DISABLED-memoization handoff to `isNativeStackUnavailableError`), plus lint, all four type-checks (TS6 and TS7 native, src and tests), dependency-cruiser, the audit gate, the full integration suite (57 passed / 8 skipped parallel, 103 serial), and the tarball manifest gate (235 files — one fewer with the deleted guard module). CLI boot verified end-to-end with the entire transformers/sharp/@img subtree physically absent from the install tree.
+
 ## [1.6.6] - 2026-08-31
 
 Issue #9 reported deep-research runs stalling for minutes inside planning salvage

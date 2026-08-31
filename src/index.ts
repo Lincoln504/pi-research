@@ -12,7 +12,6 @@ import { createResearchTool, createHealthTool } from './tool.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { logger } from './logger.ts';
 import { checkPiCompatibility } from './core/pi-version.ts';
-import { checkPiAiSkew } from './core/pi-ai-skew.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
@@ -102,30 +101,20 @@ export default async function (pi: ExtensionAPI) {
   // host auto-building its ModelRuntime. This in-host check is the real
   // enforcement point: when running as an extension the host's version is NOT
   // constrained by npm's resolution of our own package.json range.
-  // Two thresholds, not one — see src/core/pi-version.ts. Below the floor the APIs
-  // we call do not exist, so we refuse. Above the last TESTED line we warn and
-  // continue: pi is pre-1.0, a minor bump can break anything under semver (0.83.0
-  // already extended the ResourceLoader contract), and our own dependency range
-  // cannot constrain the host at all when running as an extension.
+  //
+  // This is the ONLY version check at startup, and it needs to be: pi's extension
+  // loader aliases every @earendil-works/* and typebox specifier to the HOST's own
+  // copies (virtualModules/alias in the loader), so the copies in our install tree
+  // are never loaded in-host and comparing them against the host version — as the
+  // 1.5.x–1.6.6 skew guard did — measures dependencies nobody executes. The 1.6.6
+  // form of that guard false-fataled healthy installs after every host upgrade and
+  // was removed; see docs/CHANGELOG.md [1.6.7].
   const compat = checkPiCompatibility(PI_VERSION);
   if (compat.fatal) {
     throw new Error(compat.message ?? `[pi-research] Unsupported pi-coding-agent version "${PI_VERSION}".`);
   }
   if (compat.message) {
     logger.warn(compat.message);
-  }
-
-  // The gate above classifies the HOST version but cannot see the copies THIS
-  // extension resolves from its own node_modules — the 2026-08-30 incident
-  // (host 0.84.4 vs extension-resolved pi-ai 0.84.2) passed it as 'ok' while
-  // every researcher died at provider load. Detect that skew here and refuse
-  // to start with the actual remediation instead.
-  const skew = checkPiAiSkew();
-  if (skew.fatal) {
-    throw new Error(skew.message ?? '[pi-research] pi-ai version skew.');
-  }
-  if (skew.message) {
-    logger.warn(skew.message);
   }
 
   // Re-register the beforeExit safety net (deactivate() strips event listeners during reload).

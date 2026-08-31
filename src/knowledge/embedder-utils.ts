@@ -73,6 +73,9 @@ export function isEmbedderUnreachable(err: unknown): boolean {
  * Matched signatures (observed in the wild):
  *   - onnxruntime-node:  "Cannot find module '.../bin/napi-v6/darwin/x64/onnxruntime_binding.node'"
  *   - @lancedb/lancedb:  "Cannot find native binding. npm has a bug related to optional dependencies"
+ *   - @huggingface/transformers (optional dep skipped at install time, #10): the typed
+ *                        TRANSFORMERS_UNAVAILABLE error from transformers-loader.ts, or its
+ *                        raw form "Cannot find package '@huggingface/transformers'"
  *   - jiti-masked module-eval failure of the above surfaces as:
  *                        "KnowledgeStoreService is not a constructor"
  */
@@ -89,8 +92,10 @@ export function isNativeStackUnavailableError(err: unknown): boolean {
   // `err` is already known truthy (guarded above), so no `err &&` here.
   const code = (typeof err === 'object' && 'code' in err) ? String((err as { code?: unknown }).code) : '';
   if (code === 'ERR_DLOPEN_FAILED') return true;
+  // The typed error from transformers-loader.ts — unambiguous by construction.
+  if (code === 'TRANSFORMERS_UNAVAILABLE') return true;
   if ((code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') &&
-      (msg.includes('onnxruntime') || msg.includes('lancedb'))) {
+      (msg.includes('onnxruntime') || msg.includes('lancedb') || msg.includes('@huggingface/transformers'))) {
     return true;
   }
 
@@ -99,6 +104,7 @@ export function isNativeStackUnavailableError(err: unknown): boolean {
     msg.includes('onnxruntime_binding.node') ||
     /cannot find module '[^']*onnxruntime/.test(msg) ||
     /cannot find module '[^']*lancedb/.test(msg) ||
+    /cannot find (?:package|module) ['"]@huggingface[/\\]transformers['"]/i.test(msg) ||
     msg.includes('knowledgestoreservice is not a constructor')
   );
 }

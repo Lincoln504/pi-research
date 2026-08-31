@@ -50,6 +50,42 @@ describe('isNativeStackUnavailableError', () => {
     expect(isNativeStackUnavailableError(new Error('WebGPU device lost'))).toBe(false);
   });
 
+  // --- @huggingface/transformers as an OPTIONAL dependency (#10) -------------
+  // The package can be skipped entirely at install time (its sharp native chain
+  // failing to build is the historic trigger). A missing module must be
+  // classified as 'native stack unavailable' so the knowledge store memoizes
+  // DISABLED instead of re-running the init + backoff storm on every touch.
+
+  it('matches the typed TRANSFORMERS_UNAVAILABLE error from transformers-loader', () => {
+    const err = Object.assign(
+      new Error("Optional dependency '@huggingface/transformers' is not installed, so local embeddings are unavailable. …"),
+      { code: 'TRANSFORMERS_UNAVAILABLE' },
+    );
+    expect(isNativeStackUnavailableError(err)).toBe(true);
+  });
+
+  it('matches a raw module-not-found that names @huggingface/transformers (un-wrapped path)', () => {
+    // jiti or another loader boundary can surface the rejection before our
+    // loader wraps it; the raw Node message names the package.
+    const err = Object.assign(
+      new Error("Cannot find package '@huggingface/transformers' imported from /x/transformers-loader.ts"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    expect(isNativeStackUnavailableError(err)).toBe(true);
+    const bare = new Error("Cannot find package '@huggingface/transformers' imported from /x/transformers-loader.ts");
+    expect(isNativeStackUnavailableError(bare)).toBe(true);
+  });
+
+  it('does NOT match a module-not-found naming transformers only as a path fragment of another package', () => {
+    // The scoped name is the discriminator — a missing module that merely lives
+    // under a directory containing "transformers" is unrelated.
+    const err = Object.assign(
+      new Error("Cannot find module '/x/transformers-helper/lib/index.js'"),
+      { code: 'ERR_MODULE_NOT_FOUND' },
+    );
+    expect(isNativeStackUnavailableError(err)).toBe(false);
+  });
+
   it('is null/undefined safe', () => {
     expect(isNativeStackUnavailableError(null)).toBe(false);
     expect(isNativeStackUnavailableError(undefined)).toBe(false);
