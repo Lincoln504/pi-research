@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.8] - 2026-08-31
+
+### Changed
+
+- README npm install note rewritten for clarity (no behavior or claim changes): the three tangled topics (script skipping on npm ≥11.19, better-sqlite3's bundled prebuilds, the browser's first-use download) are now three plain sentences with an explicit do and don't, and the em dashes are gone. This is the README the package site renders, so the entry exists to timestamp that refresh.
+
 ## [1.6.7] - 2026-08-31
 
 Two threads from the issue tracker collide here: #10 ("Installation via NPM fails")
