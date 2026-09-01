@@ -71,6 +71,7 @@ Research
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` (TUI) | `2` | 0–99 | Scrape batches per researcher (0 = unlimited). When prompt caching is known to be active for the resolved research model (Anthropic API models, or a provider route explicitly configured for Anthropic-style cache control), the effective limit is this value plus one — the cached prompt prefix makes the extra batch cheap. |
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Shared web-gathering calls per researcher (`search` + `security_search` + `stackexchange` + `youtube_transcript`). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
+| `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | Maximum URLs fetched per scrape batch. URLs past the cap are listed under "Not Fetched — Over Batch Cap" and must be requested in a later batch. (Promoted from a hardcoded constant so it is env/config-file tunable like every other scrape knob.) |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
 | `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | Unique researcher failures that abort the whole run. Raise to let slower, still-in-flight researchers finish before giving up. |
@@ -121,7 +122,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` (TUI) `[project]` | `global` | none · project · global | Store scope: one shared store across every directory (`global`), scoped to the current directory (`project`), or disabled (`none`). |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` (TUI) `[project]` | `global` | none · project · global | Store scope: one shared store across every directory (`global`), scoped to the current directory (`project`), or disabled (`none`). Independently of this setting, the store is cleanly OFF when its required packages are not installed (optional `@huggingface/transformers` skipped at install, broken `@lancedb/lancedb`): init fails fast instead of retry-storming, and `pi-research knowledge-config`, the `/research-config` menu, and the healthcheck all name the missing package and the repair. |
 | `PI_RESEARCH_EMBEDDING_MODEL` (TUI) | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model. Changing it clears the store and starts fresh. |
 | `PI_RESEARCH_EMBEDDING_DEVICE` (TUI) | `auto` | auto · webgpu · cpu | Inference backend. `auto` probes WebGPU viability out-of-process and falls back to CPU; `cpu` forces CPU; `webgpu` forces the GPU path with no probe (advanced — can hard-crash on a software GPU). The TUI exposes only `auto` (as "GPU") and `cpu`. |
 | `PI_RESEARCH_CACHE_TTL_DAYS` (TUI) | `30` | 1–365 | How long cached findings are kept before eviction. |

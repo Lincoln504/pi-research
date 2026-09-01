@@ -40,7 +40,7 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
 }));
 
 vi.mock('../../../src/core/llm/prompts.ts', () => ({
-  loadPrompt: vi.fn(() => 'researcher prompt {{extra_tool_guidelines}} {{digest_section}}'),
+  loadPrompt: vi.fn(() => 'researcher prompt {{extra_tool_guidelines}} {{max_scrape_urls}} {{digest_section}}'),
 }));
 
 vi.mock('../../../src/core/llm/inject-date.ts', () => ({
@@ -117,6 +117,7 @@ const SYSTEM_CONFIG = {
   RESEARCHER_MAX_RETRIES: 0,
   RESEARCHER_MAX_RETRY_DELAY_MS: 100,
   RESEARCHER_TIMEOUT_MS: 5000,
+  MAX_SCRAPE_URLS: 8,
 };
 
 const STUB_PLANNING_SERVICE = {
@@ -595,6 +596,19 @@ describe('runResearcher', () => {
       expect(sessionCall.systemPrompt).toContain('COVERAGE DIGEST');
       expect(sessionCall.systemPrompt).toContain('END COVERAGE DIGEST');
       expect(sessionCall.systemPrompt).not.toContain('{{digest_section}}');
+    });
+
+    it('substitutes the configured per-batch scrape budget for {{max_scrape_urls}} (prompt tracks the enforced cap)', async () => {
+      // The researcher prompt states the per-call maximum as the batch target. If the
+      // config value and the prompt text ever drifted, the model would plan batches
+      // against a number the tool does not honor. The stub template exercises the
+      // placeholder; the shipped-file render test below proves the real template's
+      // placeholder is wired too.
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      await runResearcher(makeOptions());
+      const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
+      expect(sessionCall.systemPrompt).not.toContain('{{max_scrape_urls}}');
+      expect(sessionCall.systemPrompt).toContain(String(makeOptions().researchConfig.MAX_SCRAPE_URLS));
     });
 
     it('renders the SHIPPED researcher.md with no placeholder left behind', async () => {

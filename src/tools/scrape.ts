@@ -17,9 +17,9 @@ import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { deduplicateUrls, normalizeUrl, getCachedScrapedContent, registerResearcherScrapes, buildSessionPoolFooter } from '../utils/shared-links.ts';
 import {
-  MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
   getMaxScrapeBatches,
+  getMaxScrapeUrls,
   DEFAULT_MODEL_CONTEXT_WINDOW,
   MAX_SCRAPE_CONTENT_CHARS_PER_DOC,
 } from '../constants.ts';
@@ -57,6 +57,10 @@ export function createScrapeTool(options: {
   // enforced — a real, if harmless, missed-opportunity: the model would stop one
   // batch short of what it was actually allowed to use.
   const maxScrapeBatches = options.tracker?.getToolLimit('scrape') ?? getMaxScrapeBatches(config);
+  // One resolved value feeds the tool schema text, the batch-protocol text, the
+  // per-call slice, and the over-cap report — the enforced cap and every string
+  // the model sees are the same number by construction.
+  const maxScrapeUrls = getMaxScrapeUrls(config);
   const container = tryGetServiceContainerFromCtx(options.ctx);
 
   // Fallback global state when no orchestration context is provided
@@ -78,7 +82,7 @@ export function createScrapeTool(options: {
   });
 
   const ScrapeParamsSchema = Type.Object({
-    urls: Type.Array(Type.String({ description: `The URLs to scrape (only the first ${MAX_SCRAPE_URLS} are fetched per call; extras are reported under "Not Fetched" rather than silently dropped)` }), { minItems: 1, maxItems: 20 }),
+    urls: Type.Array(Type.String({ description: `The URLs to scrape (only the first ${maxScrapeUrls} are fetched per call; extras are reported under "Not Fetched" rather than silently dropped)` }), { minItems: 1, maxItems: 20 }),
     maxConcurrency: Type.Optional(Type.Number({ default: config.MAX_CONCURRENT_SCRAPES, minimum: 1, maximum: 20 })),
   });
 
@@ -92,7 +96,7 @@ export function createScrapeTool(options: {
     batchProtocolText = `PROTOCOL: Batch 1 → Batch 2 → ... (up to ${effectiveLimit} batches)`;
   } else {
     const batchNumbers = Array.from({ length: effectiveLimit }, (_, i) => `Batch ${i + 1}`).join(' → ');
-    batchProtocolText = `PROTOCOL: ${batchNumbers} (up to ${MAX_SCRAPE_URLS} URLs each).`;
+    batchProtocolText = `PROTOCOL: ${batchNumbers} (up to ${maxScrapeUrls} URLs each).`;
   }
 
   return {
@@ -102,7 +106,7 @@ export function createScrapeTool(options: {
     promptSnippet: `Read full content of web pages or PDFs (up to ${maxScrapeBatches} batches)`,
     promptGuidelines: [
       batchProtocolText,
-      `Up to ${MAX_SCRAPE_URLS} URLs per batch.`,
+      `Up to ${maxScrapeUrls} URLs per batch.`,
       'Handshake is ELIMINATED. Start scraping immediately.',
       'PDFs are auto-detected and extracted with high fidelity.',
     ],
@@ -175,8 +179,8 @@ export function createScrapeTool(options: {
       // in results nor in Failed-to-Scrape, and the session-pool footer excludes the
       // current batch).
       const fetchCandidates = [...dedupedUrls, ...evictedDuplicates];
-      const finalUrls = fetchCandidates.slice(0, MAX_SCRAPE_URLS);
-      const skippedUrls = fetchCandidates.slice(MAX_SCRAPE_URLS);
+      const finalUrls = fetchCandidates.slice(0, maxScrapeUrls);
+      const skippedUrls = fetchCandidates.slice(maxScrapeUrls);
 
       // Context gate: block if projected token usage would exceed threshold
       if (options.getTokensUsed) {
@@ -364,7 +368,7 @@ export function createScrapeTool(options: {
 
       if (skippedUrls.length > 0) {
         markdown += `## Not Fetched — Over Batch Cap (${skippedUrls.length})\n\n`;
-        markdown += `Only the first ${MAX_SCRAPE_URLS} URLs of a batch are fetched. The following URLs were NOT fetched — no content for them appears above. Request them in a later scrape batch if still needed:\n`;
+        markdown += `Only the first ${maxScrapeUrls} URLs of a batch are fetched. The following URLs were NOT fetched — no content for them appears above. Request them in a later scrape batch if still needed:\n`;
         for (const url of skippedUrls) {
           markdown += `- ${url}\n`;
         }

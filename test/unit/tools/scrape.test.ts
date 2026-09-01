@@ -16,6 +16,11 @@ const mockConfig = {
   AVG_TOKENS_PER_SCRAPE: 10000,
   KNOWLEDGE_STORE_MODE: 'none',
   MAX_CONCURRENT_SCRAPES: 3,
+  // Pinned to the pre-promotion cap so every cap-dependent assertion in this
+  // file (slice math, over-batch-cap counts, gate projections) keeps testing
+  // the same arithmetic it always has. The configured cap is now
+  // config.MAX_SCRAPE_URLS (schema default 8) — see the accessor test below.
+  MAX_SCRAPE_URLS: 6,
 };
 
 vi.mock('../../../src/config.ts', () => ({
@@ -456,7 +461,6 @@ describe('tools/scrape — context gate bills the fetchable slice, over-cap URLs
 
   it('does not block a first batch whose fetchable slice fits the budget', async () => {
     const { scrape } = await import('../../../src/web-research/web-scraper.ts');
-    const { MAX_SCRAPE_URLS } = await import('../../../src/constants.ts');
     const urls = Array.from({ length: 8 }, (_, i) => `https://gate.com/p${i + 1}`);
 
     const tool = createScrapeTool({
@@ -469,8 +473,8 @@ describe('tools/scrape — context gate bills the fetchable slice, over-cap URLs
     const result = await tool.execute('call-1', { urls }, undefined, undefined, {} as any);
 
     expect((result.details as any).blocked).toBeUndefined();
-    // Only the first MAX_SCRAPE_URLS are fetched
-    expect(scrape).toHaveBeenCalledWith(urls.slice(0, MAX_SCRAPE_URLS), expect.anything(), undefined, gateConfig, 'standalone', expect.any(Function), expect.anything());
+    // Only the first configured MAX_SCRAPE_URLS are fetched (fixture pins 6)
+    expect(scrape).toHaveBeenCalledWith(urls.slice(0, gateConfig.MAX_SCRAPE_URLS), expect.anything(), undefined, gateConfig, 'standalone', expect.any(Function), expect.anything());
   });
 
   it('still blocks when tokens already used push the sliced projection over the threshold', async () => {
@@ -491,20 +495,32 @@ describe('tools/scrape — context gate bills the fetchable slice, over-cap URLs
     expect(scrape).not.toHaveBeenCalled();
   });
 
+  it('honors a configured MAX_SCRAPE_URLS above the old hardcoded cap (config-driven, not hardcoded)', async () => {
+    const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+    const urls = Array.from({ length: 9 }, (_, i) => `https://wide.com/p${i + 1}`);
+    const wideConfig = { ...mockConfig, MAX_SCRAPE_URLS: 8 } as any;
+
+    const tool = createScrapeTool({ ctx: {} as any, config: wideConfig });
+    const result = await tool.execute('call-1', { urls }, undefined, undefined, {} as any);
+
+    // All 8 configured URLs fetched; only the 9th is over-cap
+    expect(scrape).toHaveBeenCalledWith(urls.slice(0, 8), expect.anything(), undefined, wideConfig, 'standalone', expect.any(Function), expect.anything());
+    expect((result.details as any).skipped).toBe(1);
+  });
+
   it('lists over-cap URLs explicitly as NOT fetched, requestable in a later batch', async () => {
-    const { MAX_SCRAPE_URLS } = await import('../../../src/constants.ts');
     const urls = Array.from({ length: 8 }, (_, i) => `https://cap.com/p${i + 1}`);
 
     const tool = createScrapeTool({ ctx: {} as any });
     const result = await tool.execute('call-1', { urls }, undefined, undefined, {} as any);
     const text = (result.content[0] as any).text as string;
 
-    expect(text).toContain(`Not Fetched — Over Batch Cap (${8 - MAX_SCRAPE_URLS})`);
+    expect(text).toContain(`Not Fetched — Over Batch Cap (${8 - mockConfig.MAX_SCRAPE_URLS})`);
     expect(text).toContain('NOT fetched');
     expect(text).toContain('later scrape batch');
     expect(text).toContain('https://cap.com/p7');
     expect(text).toContain('https://cap.com/p8');
-    expect((result.details as any).skipped).toBe(8 - MAX_SCRAPE_URLS);
+    expect((result.details as any).skipped).toBe(8 - mockConfig.MAX_SCRAPE_URLS);
     // Skipped URLs never appear as scraped content sections
     expect(text).not.toContain('### https://cap.com/p7');
     expect(text).not.toContain('### https://cap.com/p8');

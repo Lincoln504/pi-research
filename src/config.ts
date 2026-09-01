@@ -71,8 +71,10 @@ export const ConfigSchema = Type.Object({
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: Type.Number({ minimum: 0.05, maximum: 1.0, default: 0.15 }),
   /** Estimated tokens per scrape result for planning (default: 2500) */
   AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 500, maximum: 10000, default: 2500 }),
-  /** Maximum number of concurrent scrapes (default: 3) */
+  /** Maximum concurrent scrapes (default: 3) */
   MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
+  /** Maximum URLs fetched per scrape batch; extras are listed under "Not Fetched — Over Batch Cap" (default: 8, range: 1-20) */
+  MAX_SCRAPE_URLS: Type.Number({ minimum: 1, maximum: 20, default: 8 }),
   /** Max YouTube videos transcribed per youtube_transcript call (default: 3, range 1-5) */
   YOUTUBE_TRANSCRIPT_MAX_VIDEOS: Type.Number({ minimum: 1, maximum: 5, default: 3 }),
   /** Per-video timeout for the youtube_transcript tool in ms (default: 20000, range 5-120s) */
@@ -243,6 +245,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
   'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE',
   'PI_RESEARCH_MAX_CONCURRENT_SCRAPES',
+  'PI_RESEARCH_MAX_SCRAPE_URLS',
   'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS',
   'PI_RESEARCH_SEARCH_TIMEOUT_MS',
   'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS',
@@ -926,6 +929,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
+    PI_RESEARCH_MAX_SCRAPE_URLS: String(config.MAX_SCRAPE_URLS),
     PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS: String(config.YOUTUBE_TRANSCRIPT_MAX_VIDEOS),
     PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS: String(config.YOUTUBE_TRANSCRIPT_TIMEOUT_MS),
     PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG: config.YOUTUBE_TRANSCRIPT_LANG,
@@ -1153,6 +1157,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING, 0.05, 1.0),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE, 500, 10000),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES, 1, 20, true),
+    MAX_SCRAPE_URLS: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_URLS', DEFAULTS.MAX_SCRAPE_URLS, 1, 20, true),
     YOUTUBE_TRANSCRIPT_MAX_VIDEOS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS', DEFAULTS.YOUTUBE_TRANSCRIPT_MAX_VIDEOS, 1, 5, true),
     YOUTUBE_TRANSCRIPT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS', DEFAULTS.YOUTUBE_TRANSCRIPT_TIMEOUT_MS, 5000, 120000),
     YOUTUBE_TRANSCRIPT_LANG: parseEnvString(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG', DEFAULTS.YOUTUBE_TRANSCRIPT_LANG)!,

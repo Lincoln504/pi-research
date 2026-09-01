@@ -162,7 +162,7 @@ export class QuickResearchOrchestrator {
             `For roughly one in ${this.config.YOUTUBE_QUERY_EVERY_N} of your queries, append the word 'youtube' (e.g. "<topic> explained youtube") — DuckDuckGo rarely surfaces YouTube otherwise, and YouTube links let you read video transcripts.\n` +
             'Your goal is to gather a focused, high-quality pool of initial links.\n\n' +
             '## Scrape\n' +
-            `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to 4 URLs each).\n` +
+            `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to ${this.config.MAX_SCRAPE_URLS} URLs each).\n` +
             'Prioritize primary sources and authoritative data.';
         
         // Consume queued steering messages before starting
@@ -187,6 +187,10 @@ export class QuickResearchOrchestrator {
         // turn within this session) reuse it via prompt-cache reads.
         const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
             .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).')
+            // Config-driven, mirroring researcher-executor: the prompt's per-batch
+            // target can never drift from the cap the scrape tool enforces.
+            // replaceAll — the template states the budget more than once.
+            .replaceAll('{{max_scrape_urls}}', String(this.config.MAX_SCRAPE_URLS))
             // Quick research has no research lead and no next round — see
             // RESEARCHER_DIGEST_SECTION. Its report IS the deliverable.
             .replace('{{digest_section}}', '')

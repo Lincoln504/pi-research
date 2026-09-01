@@ -109,6 +109,9 @@ describe('quick research renders the shipped researcher template', () => {
     const prompt = await renderQuickPrompt();
 
     expect(prompt).toContain('Round 1 only');                 // {{extra_tool_guidelines}}
+    // The per-batch budget is interpolated from config, so the prompt's stated
+    // maximum always equals the cap the scrape tool enforces (unit-env default: 8).
+    expect(prompt).toContain(`up to ${getConfig('/test/cwd').MAX_SCRAPE_URLS} URLs per call`);
     // Prompt-cache prefix invariance: the goal is per-run data and belongs in the
     // initial USER message, never the system prompt — any per-run byte here would
     // bust the cacheable system+tools prefix across back-to-back quick runs.

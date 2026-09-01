@@ -71,8 +71,30 @@ export function getMaxScrapeBatches(config?: Config, cachingActive = false): num
   }
 }
 
-/** Maximum URLs to scrape per batch */
-export const MAX_SCRAPE_URLS = 6;
+/**
+ * Maximum URLs fetched per scrape batch — SCHEMA-DEFAULT MIRROR only.
+ *
+ * The configured value lives in the Config schema (`MAX_SCRAPE_URLS`, env
+ * `PI_RESEARCH_MAX_SCRAPE_URLS`); this constant exists so non-config callers
+ * (docs text, test fixtures) and the accessor's fallback below have a name for
+ * the default. Consumers that enforce the cap (src/tools/scrape.ts) MUST go
+ * through {@link getMaxScrapeUrls} with their resolved config so the enforced
+ * cap, the tool schema description, and the over-batch-cap report can never
+ * drift apart.
+ */
+export const MAX_SCRAPE_URLS = 8;
+
+/**
+ * Get the maximum URLs per scrape batch from config (env/config-file driven,
+ * mirrors getMaxScrapeBatches / getMaxGatheringCalls).
+ */
+export function getMaxScrapeUrls(config?: Config): number {
+  try {
+    return (config || getConfig()).MAX_SCRAPE_URLS;
+  } catch {
+    return MAX_SCRAPE_URLS; // Fallback to default
+  }
+}
 
 /**
  * Get the units per researcher for the progress bar.

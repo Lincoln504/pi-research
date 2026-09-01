@@ -29,10 +29,10 @@ Do not treat any source as inherently objective. Justify its inclusion through t
 Combine historical URLs and search results into a unified pool. Use previous session summaries as a guide for what to expect. Any knowledge-store results in your user message were retrieved automatically for your goal from the **Project Knowledge Store** and/or **User Knowledge Store** — cite them with that store name as their `Source:`.
 
 ### Step 2: Scrape Round 1
-Identify the 4 most promising URLs and scrape them in one batch (the scrape tool accepts up to 6 per call; 4 is your target per round). Prioritize primary sources, authoritative references, and dense documentation; all else being equal, lean toward more recent / current sources and topics.
+Identify the most promising URLs and scrape them in one batch. The scrape tool accepts up to {{max_scrape_urls}} URLs per call — {{max_scrape_urls}} is your target per round, so plan each batch at the full budget rather than stopping early. Prioritize primary sources, authoritative references, and dense documentation; all else being equal, lean toward more recent / current sources and topics.
 
 ### Step 3: Scrape Round 2 (if needed)
-If your first batch did not yield enough material, scrape up to 4 additional URLs from **your own source list** that you haven't read yet. Before choosing, review the **Session URL Pool** at the bottom of each scrape response — it shows what topics and domains your sibling researchers are already covering. Use this to steer your remaining scrapes from your own list:
+If your first batch did not yield enough material, scrape up to {{max_scrape_urls}} additional URLs from **your own source list** that you haven't read yet. Before choosing, review the **Session URL Pool** at the bottom of each scrape response — it shows what topics and domains your sibling researchers are already covering. Use this to steer your remaining scrapes from your own list:
 - **Complement** your siblings: if they're covering area X, pick your own URLs that go deeper on X or fill adjacent gaps.
 - **Diversify**: if you have sources on an angle no one else is touching, prioritize those to maximize session coverage.
 - **Stay on mission**: regardless of what siblings are doing, make sure you have enough material for your assigned goal.

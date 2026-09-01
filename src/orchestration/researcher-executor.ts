@@ -203,6 +203,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   // of the retry loop, because nothing in it varies per attempt.
   const researcherSystemPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
     .replace('{{extra_tool_guidelines}}', '')
+    // Config-driven, so the prompt's per-batch target can never drift from the
+    // cap the scrape tool actually enforces (getMaxScrapeUrls in scrape.ts).
+    // replaceAll: the template states the budget more than once (Step 2 target
+    // and Step 3's additional-URLs budget) and String.replace would only swap
+    // the first.
+    .replaceAll('{{max_scrape_urls}}', String(config.MAX_SCRAPE_URLS))
     // Function replacer so `$`-bearing content is inserted literally, not as a
     // String.replace substitution pattern.
     .replace('{{digest_section}}', () => RESEARCHER_DIGEST_SECTION)

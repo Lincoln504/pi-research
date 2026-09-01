@@ -113,7 +113,7 @@ agent to invoke:
 | Tool | Quick | Deep | Backend |
 |------|-------|------|---------|
 | `search` | ✓ | — | DuckDuckGo Lite via the stealth browser |
-| `scrape` | ✓ | ✓ | Batch page fetch → Markdown via the stealth browser (up to 6 URLs per call) |
+| `scrape` | ✓ | ✓ | Batch page fetch → Markdown via the stealth browser (up to MAX_SCRAPE_URLS URLs per call, default 8) |
 | `youtube_transcript` | ✓ | ✓ | YouTube captions via youtubei.js + BotGuard PoToken (≤3 videos by default, configurable 1–5; one call per researcher) |
 | `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
 | `stackexchange` | ✓ | ✓ | Stack Exchange network |
