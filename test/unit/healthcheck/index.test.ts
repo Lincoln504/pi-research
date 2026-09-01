@@ -26,6 +26,17 @@ vi.mock('../../../src/logger.ts', () => ({
   },
 }));
 
+// The availability probe decides which 'disabled' wording the store health check
+// reports: packages-not-resolvable (with the package names) vs the platform
+// capability line. Mock it so these tests never depend on whether the running
+// host happens to have the optional ML deps installed — npm/cli#4828 drops them
+// intermittently, which would flip the wording and redden the wording-pinning
+// assertions below at random.
+const mockProbe = { available: true, missing: [] as string[] };
+vi.mock('../../../src/knowledge/availability.ts', () => ({
+  probeKnowledgeStoreAvailability: vi.fn(() => mockProbe),
+}));
+
 vi.mock('../../../src/infrastructure/browser/config.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/infrastructure/browser/config.ts')>();
   return {
@@ -85,6 +96,11 @@ vi.mock('../../../src/infrastructure/state/state-manager.ts', () => ({
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore the default probe verdict too: clearAllMocks keeps the
+    // vi.fn(() => mockProbe) implementation, but a previous test's
+    // packages-missing mutation must not leak into the next test.
+    mockProbe.available = true;
+    mockProbe.missing = [];
     // clearAllMocks clears call history but not implementations set via
     // mockReturnValue, so restore the default 'none' config each test.
     vi.mocked(getConfig).mockReturnValue({
@@ -311,6 +327,41 @@ describe('healthcheck', () => {
     expect(result.status).not.toBe('unhealthy');
   });
 
+  it('names the missing PACKAGES when the store is OFF because they are not installed', async () => {
+    // A skipped optional dep (@huggingface/transformers) or a broken lancedb
+    // install is a package gap, not a platform gap: 'native embedding/vector
+    // stack unavailable on this platform' sent users platform-hunting when the
+    // actual fix was one npm install. The probe-resolvable case must name the
+    // package; a package that resolves but fails to LOAD keeps the platform line.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    mockProbe.available = false;
+    mockProbe.missing = ['@huggingface/transformers'];
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => {
+        throw new Error(
+          'Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828).'
+        );
+      },
+      { allowOverwrite: true, enableLogging: false }
+    );
+
+    const result = await runHealthCheck({ force: true });
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    const status = String(ks?.diagnostic?.['status']);
+    expect(status).toMatch(/required packages not resolvable/i);
+    expect(status).toContain('@huggingface/transformers');
+    expect(result.status).not.toBe('unhealthy');
+  });
+
   it('reports the knowledge store idle (ready) WITHOUT resolving/initializing it on a non-forced check', async () => {
     // Fix A: a non-forced health check must not resolve a cold store (resolving runs
     // the LanceDB open + ONNX model load + WebGPU probe). It reports a cheap idle
@@ -372,6 +423,48 @@ describe('healthcheck', () => {
     const ks = result.components?.find(c => c.component === 'KnowledgeStore');
     expect(ks?.healthy).toBe(true);
     expect(String(ks?.diagnostic?.['status'])).toBe('disabled');
+    expect(result.status).not.toBe('unhealthy');
+  });
+
+  it('idle path labels a NATIVE-disabled store with the probe verdict — package names when packages are missing', async () => {
+    // Same verdict rule as the forced path: a 'native' disable names the missing
+    // packages when the probe can attribute the gap (one npm install fixes it),
+    // and keeps the platform line only when every package resolves. Forced and
+    // idle paths must never disagree for the same host.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    mockProbe.available = false;
+    mockProbe.missing = ['@lancedb/lancedb'];
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => {
+        const svc: any = {
+          name: 'knowledge-store',
+          lifecycle: ServiceLifecycle.DISABLED,
+          getDisabledReason: () => 'native',
+          isReady: () => false,
+          getCwd: () => process.cwd(),
+          async initialize() { svc.lifecycle = ServiceLifecycle.DISABLED; },
+          async dispose() {},
+        };
+        return svc;
+      },
+      { allowOverwrite: true, enableLogging: false }
+    );
+    await getService(ServiceNames.KNOWLEDGE_STORE);
+
+    const result = await runHealthCheck(); // non-forced -> idle path
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    const status = String(ks?.diagnostic?.['status']);
+    expect(status).toMatch(/required packages not resolvable/i);
+    expect(status).toContain('@lancedb/lancedb');
     expect(result.status).not.toBe('unhealthy');
   });
 

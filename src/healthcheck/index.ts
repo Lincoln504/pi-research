@@ -15,6 +15,7 @@ import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IStateManager, IHealthRegistryService, IKnowledgeStoreService, ISchedulerService } from '../core/service-interfaces.ts';
 import { healthRegistry as globalHealthRegistry } from './registry.ts';
 import { isNativeStackUnavailableError } from '../knowledge/embedder-utils.ts';
+import { probeKnowledgeStoreAvailability } from '../knowledge/availability.ts';
 
 /**
  * Standalone BrowserCapability check, exported so tests can call it directly
@@ -42,6 +43,25 @@ export async function checkBrowserCapability(): Promise<{ healthy: boolean; erro
   } else {
     return { healthy: false, error: 'Camoufox (browser) not found. Run "npx camoufox-js fetch" to install the browser.' };
   }
+}
+
+/**
+ * The diagnostic status for a DISABLED knowledge store whose disable reason is
+ * 'native'. When the availability probe can attribute the gap to a missing
+ * PACKAGE (optional @huggingface/transformers skipped at install, broken
+ * @lancedb/lancedb install), name it — the generic platform line sent users
+ * platform-hunting when the actual fix was one npm install. When every package
+ * resolves, the gap really is the platform's (no prebuilt native binding, e.g.
+ * darwin-x64) and the platform line is the truth. Shared by the idle fast-path
+ * and the full-inspection path so one host always gets ONE verdict regardless
+ * of whether the check is forced.
+ */
+function knowledgeStoreDisabledStatus(): string {
+  const availability = probeKnowledgeStoreAvailability();
+  const detail = availability.available
+    ? 'native embedding/vector stack unavailable on this platform'
+    : `required packages not resolvable — ${availability.missing.join(', ')}`;
+  return `disabled (${detail})`;
 }
 
 /**
@@ -116,9 +136,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       if (existing?.lifecycle === ServiceLifecycle.DISABLED) {
         const reason = existing.getDisabledReason();
         return { healthy: true, diagnostic: {
-          status: reason === 'native'
-            ? 'disabled (native embedding/vector stack unavailable on this platform)'
-            : 'disabled',
+          status: reason === 'native' ? knowledgeStoreDisabledStatus() : 'disabled',
         } };
       }
       // A DISPOSED/DISPOSING service is not "ready" — report it accurately without
@@ -150,13 +168,16 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       return { healthy: true, diagnostic: { status: 'disabled in config' } };
     }
     // The native ML/vector stack ships no prebuilt for some platforms (Intel macOS
-    // / darwin-x64 has no onnxruntime-node binary nor @lancedb native binding). That
-    // is a permanent capability gap, not a fault — report the store as DISABLED
-    // (healthy) so research still runs without the optional cache. Otherwise this
-    // critical component drags overall health to 'unhealthy' and quick (depth-0)
-    // research aborts with "Research cannot start" for any fresh user on such a host.
+    // / darwin-x64 has no onnxruntime-node binary nor @lancedb native binding), and
+    // the optional @huggingface/transformers dep can be skipped at install time
+    // outright. Both are permanent capability gaps, not faults — report the store
+    // as DISABLED (healthy) so research still runs without the optional cache.
+    // Otherwise this critical component drags overall health to 'unhealthy' and
+    // quick (depth-0) research aborts with "Research cannot start" for any fresh
+    // user on such a host. When the gap is a missing PACKAGE (probe-resolvable),
+    // name it — see knowledgeStoreDisabledStatus().
     if (isNativeStackUnavailableError(initError)) {
-      return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
+      return { healthy: true, diagnostic: { status: knowledgeStoreDisabledStatus() } };
     }
     // getService can SUCCEED on a native-unavailable platform: the service memoizes
     // the failure as DISABLED instead of throwing, so initError stays null and the
@@ -166,9 +187,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     if (service?.lifecycle === ServiceLifecycle.DISABLED) {
       const reason = service.getDisabledReason();
       return { healthy: true, diagnostic: {
-        status: reason === 'native'
-          ? 'disabled (native embedding/vector stack unavailable on this platform)'
-          : 'disabled',
+        status: reason === 'native' ? knowledgeStoreDisabledStatus() : 'disabled',
       } };
     }
     try {
@@ -232,7 +251,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       // Same platform-capability gap as above, but surfacing only when the store
       // is touched lazily (getStore/getEmbedder load the native binding here).
       if (isNativeStackUnavailableError(e)) {
-        return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
+        return { healthy: true, diagnostic: { status: knowledgeStoreDisabledStatus() } };
       }
       return { healthy: false, error: `Knowledge store healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
     }

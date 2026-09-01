@@ -144,17 +144,25 @@ platform/architecture pairs:
 | Windows | x64 / arm64 | Supported |
 
 Intel Macs (`darwin-x64`) have no prebuilt binary for either component, so the
-knowledge store cannot run there. The degradation is automatic:
+knowledge store cannot run there. The same clean OFF applies on any platform when a
+required package is not installed at all — optional `@huggingface/transformers` is
+skipped by `npm install --omit=optional` (and by an npm optional-dependency bug), or
+the `@lancedb/lancedb` install is broken. The degradation is automatic and fast:
 
 - Research still works. Search, scraping, YouTube transcripts, the security databases,
   Stack Exchange, planning, and synthesis are unaffected — only the store is missing.
-- The health check reports the store as disabled, not unhealthy: its health component
-  returns disabled (native embedding/vector stack unavailable on this platform) with a
-  healthy status, so the missing component does not drag overall health to "unhealthy"
-  or block a quick (depth-0) run.
-- `research_knowledge_search` does no caching or retrieval; every run goes to the live web.
+- The store fails fast. Missing packages are detected by resolution before any
+  initialization is attempted, so there is no retry storm — the store simply starts OFF.
+- The settings surfaces say why. `pi-research knowledge-config`, the `/research-config`
+  menu, and the health check name the missing package and the repair (install the
+  optional dependencies) instead of advertising a mode the store cannot honor. A
+  `research_knowledge_search` miss reports the package gap rather than pointing at a
+  settings toggle that cannot help.
+- The health check reports the store as disabled, not unhealthy, so the missing
+  component does not drag overall health to "unhealthy" or block a quick (depth-0) run.
 
-No configuration is needed on an Intel Mac.
+No configuration is needed: install the package (a full install including optional
+dependencies) and the store comes up; a mode flip alone cannot revive it mid-process.
 
 ### Retention and eviction
 

@@ -18,6 +18,17 @@ vi.mock('../../../src/infrastructure/embedding/embedding-factory.ts', () => ({
   clearEmbeddingInstance: vi.fn(),
 }));
 
+// The availability probe decides whether a null component result means 'mode'
+// (user choice, revivable) or 'native' (packages missing, permanent). Mock it
+// so these tests never depend on whether the running host happens to have the
+// optional ML deps installed.
+const mockProbe = { available: true, missing: [] as string[] };
+vi.mock('../../../src/knowledge/availability.ts', () => ({
+  probeKnowledgeStoreAvailability: vi.fn(() => mockProbe),
+  describeKnowledgeStoreUnavailability: vi.fn(() => 'probe stub'),
+  clearAvailabilityCache: vi.fn(),
+}));
+
 vi.mock('../../../src/core/service-registry.ts', () => ({
   getService: vi.fn(async (_name: any, _ctx?: any, _container?: any) => {}),
   tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
@@ -91,6 +102,41 @@ describe('KnowledgeStoreService', () => {
     // Live config still 'none' → early-return, no second build.
     await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'none' } } as any);
     expect(knowledge.createKnowledgeStoreComponents).toHaveBeenCalledTimes(1);
+  });
+
+  it('a null component result with packages resolvable is a MODE disable — revivable, not memoized permanent', async () => {
+    mockProbe.available = true;
+    mockProbe.missing = [];
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce(null as any);
+    await service.initialize();
+
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
+    expect(service.getDisabledReason()).toBe('mode');
+
+    // 'mode' is a user choice: re-enabling via /research-config must revive.
+    const mockEmbedder = { getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu' };
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce({
+      embedder: mockEmbedder as any, store: { close: vi.fn() } as any, writerQueue: { dispose: vi.fn() } as any,
+    });
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+  });
+
+  it('a null component result with packages MISSING is a NATIVE disable — memoized permanent, never revived by a config change', async () => {
+    mockProbe.available = false;
+    mockProbe.missing = ['@huggingface/transformers'];
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce(null as any);
+    await service.initialize();
+
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
+    expect(service.getDisabledReason()).toBe('native');
+
+    // Re-enabling the mode must NOT rebuild: the packages are still absent, so
+    // a revive would just re-run the doomed init. Mirrors the catch-path's
+    // permanent memoization of native-stack gaps.
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+    expect(knowledge.createKnowledgeStoreComponents).toHaveBeenCalledTimes(1);
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
   });
 
   it('re-initializes the live store when Knowledge Mode changes project→global at runtime', async () => {

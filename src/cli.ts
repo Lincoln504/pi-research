@@ -916,6 +916,7 @@ export async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeCo
         `  scope:   ${kc.mode === 'none' ? 'disabled here' : kc.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
         `  saved:   per-directory (${cwd})\n` +
         `  db dir:  ${info.dbDir}\n` +
+        (info.available ? '' : `  state:   ${info.unavailableReason}\n`) +
         (overridden
           ? `\nNOTE: the effective mode here is still '${info.mode}' because a higher-precedence ${info.origin} overrides it. Clear that source for this setting to take effect.\n`
           : ''),
@@ -933,6 +934,7 @@ export async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeCo
       `knowledge store mode: ${info.mode}   (source: ${info.origin})\n` +
       `  scope:   ${info.mode === 'none' ? 'disabled here' : info.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
       `  db dir:  ${info.dbDir}\n` +
+      (info.available ? '' : `  state:   ${info.unavailableReason}\n`) +
       `\nchange it for THIS directory:  ${BINARY_NAME} knowledge-config set <none|project|global>\n` +
       `change the machine-wide default: set PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode> in ${resolvedConfigPaths().configEnv}\n`,
     );

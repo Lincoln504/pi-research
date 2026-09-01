@@ -21,6 +21,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { normalizeWorkspacePath } from './utils/text-utils.ts';
 import { replaceFileSync } from './utils/atomic-replace.ts';
+import { probeKnowledgeStoreAvailability, describeKnowledgeStoreUnavailability } from './knowledge/availability.ts';
 
 /**
  * Validates configuration schema using TypeBox.
@@ -594,6 +595,16 @@ export interface KnowledgeStoreModeInfo {
   origin: string;
   /** Physical LanceDB directory backing the store (shared across project/global modes). */
   dbDir: string;
+  /**
+   * Whether the store can actually RUN here — its required packages
+   * (@lancedb/lancedb, optional @huggingface/transformers) resolve. A configured
+   * mode means nothing when this is false: the store is cleanly OFF regardless.
+   * Settings surfaces must show this alongside `mode` so a host that cannot run
+   * the store never advertises a mode it cannot honor.
+   */
+  available: boolean;
+  /** When {@link available} is false: the full human sentence saying what is missing and how to repair it. */
+  unavailableReason: string;
 }
 
 /**
@@ -632,7 +643,27 @@ export function describeKnowledgeStoreMode(
     else if (fileHasKey(getGlobalEnvFilePath())) origin = 'config.env (machine-wide default)';
   }
 
-  return { mode: cfg.KNOWLEDGE_STORE_MODE, origin, dbDir: getDbDir(cfg, cwd) };
+  return {
+    mode: cfg.KNOWLEDGE_STORE_MODE,
+    origin,
+    dbDir: getDbDir(cfg, cwd),
+    ...availabilityFields(),
+  };
+}
+
+/**
+ * The availability half of {@link KnowledgeStoreModeInfo}, computed by the
+ * knowledge module's execution-free package probe. Kept as a helper (not inlined
+ * in every return) so the shape stays defined in exactly one place. Never
+ * throws: the probe catches resolution errors internally and reports them as
+ * `available: false`.
+ */
+function availabilityFields(): { available: boolean; unavailableReason: string } {
+  const availability = probeKnowledgeStoreAvailability();
+  return {
+    available: availability.available,
+    unavailableReason: describeKnowledgeStoreUnavailability(availability),
+  };
 }
 
 /**

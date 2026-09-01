@@ -840,6 +840,9 @@ function missResult(reason: string): AgentToolResult<unknown> {
     case 'store_disabled':
       text = 'No results found (knowledge store is disabled in settings). Live research can get the info.';
       break;
+    case 'store_packages_missing':
+      text = 'No results found (knowledge store is off — its required packages are not installed on this host, so it stays off regardless of settings). Live research can get the info.';
+      break;
     case 'store_not_ready':
       text = 'No results found (knowledge store is initializing). Live research can get the info.';
       break;
@@ -951,10 +954,16 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         // or null when the store is genuinely disabled/failed.
         const store = await storeService.getStore();
         if (!store) {
-          // null = disabled (mode still 'none') or a genuine init failure — distinguish for the
-          // user-facing message so a real failure doesn't read as "disabled in settings".
-          const lifecycle = (storeService as any).lifecycle;
-          return missResult(lifecycle === 'disabled' ? 'store_disabled' : 'store_not_ready');
+          // null = disabled (a settings choice OR a host whose store packages are
+          // missing) or a genuine init failure — distinguish all three in the
+          // user-facing message. A 'native' disable must not read as "disabled in
+          // settings": the repair is installing the package, not a Knowledge Mode
+          // toggle that cannot help (same truth-telling as knowledge-config, the
+          // /research-config menu, and the healthcheck).
+          const disabledReason = storeService.getDisabledReason();
+          if (disabledReason === 'native') return missResult('store_packages_missing');
+          if (disabledReason === 'mode') return missResult('store_disabled');
+          return missResult('store_not_ready');
         }
 
         const count = await store.count();

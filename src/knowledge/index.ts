@@ -6,6 +6,7 @@ import { Chunker } from './chunker.ts';
 import { getConfig, validateConfig, getDbDir, type Config } from '../config.ts';
 import { logger } from '../logger.ts';
 import { getModelChunkConfig } from './model-config.ts';
+import { probeKnowledgeStoreAvailability, describeKnowledgeStoreUnavailability, type KnowledgeStoreAvailability } from './availability.ts';
 import type { MigrationStrategy } from './migration.ts';
 import type { 
   IEmbedder, 
@@ -49,12 +50,27 @@ export async function createKnowledgeStoreComponents(
   reconnectFactory?: () => Promise<IEmbedder>,
   withLock?: <T>(fn: () => Promise<T>) => Promise<T>,
   config: Config = getConfig(),
-  workspace: string = process.cwd()
+  workspace: string = process.cwd(),
+  availability: KnowledgeStoreAvailability = probeKnowledgeStoreAvailability()
 ): Promise<KnowledgeStoreComponents | null> {
   if (config.KNOWLEDGE_STORE_MODE === 'none') {
     logger.debug('[knowledge] Knowledge store is disabled in configuration');
     return null;
   }
+
+  // Clean settings-level OFF when the store's packages are not even resolvable
+  // (optional transformers skipped at install, broken lancedb install). Before
+  // this pre-flight, a permanently missing package was discovered by RUNNING
+  // init — MAX_INIT_RETRIES (5) attempts of exponential backoff, ~31s, every
+  // fresh process — before the service degraded to DISABLED. The verdict here
+  // is the same OFF the mode='none' switch produces, just caused by the host
+  // instead of the user: return null (never throw), so every existing
+  // null-tolerant consumer treats it exactly like a disabled store.
+  if (!availability.available) {
+    logger.warn(`[knowledge] ${describeKnowledgeStoreUnavailability(availability)}`);
+    return null;
+  }
+
   validateConfig(config);
 
   for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {

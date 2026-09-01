@@ -89,6 +89,45 @@ describe('createKnowledgeStoreComponents', () => {
     expect(components).toBeNull();
   });
 
+  it('fails fast to a clean OFF (null, embedder factory never called) when the store packages are not resolvable', async () => {
+    // The availability probe runs BEFORE the retry loop: a missing optional dep
+    // must not burn MAX_INIT_RETRIES (5) attempts of exponential backoff (~31s)
+    // discovering what require.resolve already knows. Same null verdict as
+    // mode='none', so every null-tolerant consumer treats it as a disabled store.
+    const embedderFactory = vi.fn();
+    const components = await createKnowledgeStoreComponents(
+      embedderFactory,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { available: false, missing: ['@huggingface/transformers'] },
+    );
+    expect(components).toBeNull();
+    expect(embedderFactory).not.toHaveBeenCalled();
+  });
+
+  it('applies the real-resolver probe verdict consistently on the default path (no injection)', async () => {
+    // Guard against the pre-flight not consulting the probe at all: whatever the
+    // running host's truth is, init must honor it — available → full build,
+    // missing → null with the embedder factory never invoked. Host-state
+    // independent: CI legs with and without optional deps both pass.
+    const { probeKnowledgeStoreAvailability } = await import('../../../src/knowledge/availability.ts');
+    const expectedAvailable = probeKnowledgeStoreAvailability().available;
+    const mockEmbedder = { initialize: vi.fn(), getDimension: () => 384 };
+    const embedderFactory = vi.fn().mockResolvedValue(mockEmbedder);
+
+    const components = await createKnowledgeStoreComponents(embedderFactory);
+
+    if (expectedAvailable) {
+      expect(embedderFactory).toHaveBeenCalled();
+      expect(components).not.toBeNull();
+    } else {
+      expect(embedderFactory).not.toHaveBeenCalled();
+      expect(components).toBeNull();
+    }
+  });
+
   it('wires the embedder, store and writer-queue together', async () => {
     const mockEmbedder = { initialize: vi.fn(), getDimension: () => 384 };
     const embedderFactory = vi.fn().mockResolvedValue(mockEmbedder);

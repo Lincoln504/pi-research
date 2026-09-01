@@ -25,6 +25,7 @@ import {
 import { getEmbedder, clearEmbeddingInstance } from './embedding/embedding-factory.ts';
 import { getConfig } from '../config.ts';
 import { isNativeStackUnavailableError } from '../knowledge/embedder-utils.ts';
+import { probeKnowledgeStoreAvailability } from '../knowledge/availability.ts';
 
 /**
  * Knowledge Store Service Implementation
@@ -250,9 +251,19 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         }
 
         if (!components) {
-          logger.debug('[KnowledgeStoreService] Knowledge store is disabled. Setting lifecycle to DISABLED.');
+          // `null` now has TWO causes with different revival semantics:
+          //  - KNOWLEDGE_STORE_MODE='none' → 'mode': a user choice, revivable by a
+          //    later /research-config change without a restart.
+          //  - availability probe says the store's packages are not resolvable →
+          //    'native': a host capability gap on this install, permanent for this
+          //    process — memoized like the catch-path below so later getStore()
+          //    calls don't re-run init, and so the healthcheck/config surfaces
+          //    report the package-level reason rather than a user choice the user
+          //    never made.
+          const depsMissing = !probeKnowledgeStoreAvailability().available;
+          logger.debug(`[KnowledgeStoreService] Knowledge store is disabled (${depsMissing ? 'dependencies missing' : 'mode = none'}). Setting lifecycle to DISABLED.`);
           this.lifecycle = ServiceLifecycle.DISABLED;
-          this._disabledReason = 'mode';
+          this._disabledReason = depsMissing ? 'native' : 'mode';
           this._embedder = null;
           this._store = null;
           this._writerQueue = null;

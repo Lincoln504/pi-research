@@ -35,6 +35,7 @@ import type { Theme } from './types/research-panel-types.ts';
 // Import the constant directly from its source module rather than the knowledge
 // barrel (./knowledge/index.ts), which would transitively load lancedb.
 import { SUPPORTED_MODELS } from './knowledge/model-config.ts';
+import { probeKnowledgeStoreAvailability, describeKnowledgeStoreUnavailability } from './knowledge/availability.ts';
 import { metrics } from './utils/metrics.ts';
 import {
   extractRunStats,
@@ -142,7 +143,19 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'KNOWLEDGE_STORE_MODE',
       label: 'Knowledge Mode [project]',
-      description: 'Knowledge store scope — none (disabled), project (scope knowledge per this directory), or global (scope knowledge globally, shared across all projects).\n[project] means configured independently per directory.',
+      description: (() => {
+        const base = 'Knowledge store scope — none (disabled), project (scope knowledge per this directory), or global (scope knowledge globally, shared across all projects).\n[project] means configured independently per directory.';
+        // The configured mode is a lie when the host cannot run the store at all
+        // (optional embedding dep skipped at install, broken lancedb). Surface the
+        // package-level OFF right in the setting, so the menu never advertises a
+        // scope the store cannot honor and the repair path is named where the
+        // user is looking.
+        const availability = probeKnowledgeStoreAvailability();
+        if (!availability.available) {
+          return `${base}\n\n⚠ ${describeKnowledgeStoreUnavailability(availability)}\nThe store stays off — regardless of this setting — until that package is installed.`;
+        }
+        return base;
+      })(),
       currentValue: config.KNOWLEDGE_STORE_MODE,
       values: ['none', 'project', 'global'],
     },
