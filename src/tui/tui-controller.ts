@@ -66,6 +66,23 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
     // Check for specific global cancel keys (Escape and Ctrl+C)
     // We only trigger abort if research is actually running.
     if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
+      // Ctrl+C is pi's app.clear ("Clear editor"), NOT its cancel key — pi's own
+      // handleCtrlC() clears the editor text and never interrupts the agent (Esc
+      // is app.interrupt). Aborting the run on every Ctrl+C stole the key from
+      // users who merely wanted to discard typed text mid-run. Follow pi's
+      // convention: with text in the editor, Ctrl+C only clears (fall through and
+      // let pi do the clearing); an EMPTY editor is an explicit cancel gesture and
+      // aborts the active research.
+      if (matchesKey(data, 'ctrl+c')) {
+        let editorText = '';
+        try {
+          editorText = typeof ui.getEditorText === 'function' ? (ui.getEditorText() ?? '') : '';
+        } catch { /* editor gone mid-run — treat as empty (cancel) */ }
+        if (editorText.length > 0) {
+          logger.debug('[TUI] Ctrl+C with editor text — clearing only, research keeps running.');
+          return undefined;
+        }
+      }
       const activeCount = getActiveSessionCount();
       if (activeCount > 0) {
         // FIX (New Issues B & E): Use abortAllSessions scoped to the current Pi session

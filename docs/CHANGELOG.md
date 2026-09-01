@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.10] - Unreleased
+
+### Fixed
+
+- **Ctrl+C during a research run no longer cancels the run while the editor still holds typed text — it clears the editor first, and only a subsequent Ctrl+C (editor now empty) cancels the research.** The global TUI controller (`src/tui/tui-controller.ts`) treated Ctrl+C and Esc identically as cancel keys, aborting the session's active research runs on every press of either. That fought pi's own keybinding contract: Ctrl+C is `app.clear` ("Clear editor" — pi's `handleCtrlC()` clears the editor text and never interrupts the agent, doubling as the two-press-within-500ms exit), while Esc is `app.interrupt` ("Cancel or abort"), so a user discarding a drafted follow-up mid-run got the whole run killed instead of an empty editor. The controller now reads the editor via `ctx.ui.getEditorText()`: with text present, Ctrl+C falls through untouched (pi clears the text; the run keeps going); with an empty editor it is an explicit cancel gesture and aborts, still scoped to the current pi session as before; Esc keeps its unconditional panic-cancel role; and a throwing `getEditorText()` (ctx gone stale mid-run) is treated as empty — cancel — the safe default. The two gestures coexist with pi's native double-press exit in practice: the clear-then-decide rhythm is naturally slower than the 500ms window, so the human cancel path never trips pi's shutdown. Seven new tests pin the policy (`test/unit/tui/tui-controller.test.ts`): the two-step clear-then-cancel sequence, text-present no-abort, Esc semantics, the stale-ctx fallback, menu-active suppression, and no-active-run suppression.
+
+### Verified
+
+- 3,020 unit tests over 239 files (7 new, above), ESLint clean on the touched module, all four type-checks (TS 6 src + tests, TS 7 native src + tests), and dependency-cruiser clean (238 modules / 1,218 dependencies).
+
 ## [1.6.9] - 2026-09-01
 
 ### Changed
