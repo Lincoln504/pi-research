@@ -44,13 +44,10 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-On npm ≥11.19 (and npm 12), dependency install scripts are skipped by default. This
-package needs none of them: better-sqlite3 13 ships prebuilt bindings for every
-supported platform inside its own tarball, and the stealth browser (~500MB)
-self-provisions on its first use instead of at install time — so the first scrape
-takes a few minutes. Nothing needs approving. (On older npm, which still runs
-scripts, a Windows machine without Visual Studio Build Tools can fail while npm
-needlessly recompiles better-sqlite3; upgrading npm fixes that too.)
+No extra steps. Install scripts: none needed — never approve script prompts or
+install build tools (npm ≥11.19 skips scripts by default; keep it that way).
+The one failure mode is Windows with npm <11.19 — upgrade npm. The stealth
+browser (~500MB) downloads on first use, so the first scrape takes a few minutes.
 
 In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
