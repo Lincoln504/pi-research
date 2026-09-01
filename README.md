@@ -44,10 +44,13 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-No extra steps. Install scripts: none needed — never approve script prompts or
-install build tools (npm ≥11.19 skips scripts by default; keep it that way).
-The one failure mode is Windows with npm <11.19 — upgrade npm. The stealth
-browser (~500MB) downloads on first use, so the first scrape takes a few minutes.
+No extra setup is needed. The package uses no install scripts — it ships
+ready-made bindings for every platform, and the stealth browser (~500MB)
+downloads itself on first use instead of at install time, so the first
+scrape takes a few minutes. On npm ≥11.19, install scripts are skipped by
+default: leave it that way, nothing needs approving or building. Only
+Windows with npm older than 11.19 can fail — the install tries to compile
+from source — and upgrading npm fixes it.
 
 In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
