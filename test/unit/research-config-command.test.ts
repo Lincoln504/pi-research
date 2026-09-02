@@ -119,7 +119,7 @@ const BASE_CONFIG = {
 
 describe('handleResearchConfigCommand host-mode gating', () => {
   let ui: any;
-  let pi: { sendMessage: ReturnType<typeof vi.fn> };
+  let pi: any;
 
   beforeEach(() => {
     vi.clearAllMocks();

@@ -59,8 +59,10 @@ console.error(
   `consumer-interop-probe: arrow ${arrowVersion} (nested/ours) \u00d7 lancedb ${lancedbVersion} (hoisted)`,
 );
 
+const { tmpdir } = require('node:os');
+
 async function main() {
-  const tmp = path.join('/tmp', `pi-research-interop-${process.pid}`);
+  const tmp = path.join(tmpdir(), `pi-research-interop-${process.pid}`);
   fs.mkdirSync(tmp, { recursive: true });
   const dim = 64;
   const schema = new Schema([
