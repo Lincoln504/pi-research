@@ -21,7 +21,7 @@
   ·
   <a href="docs/DOCUMENTATION-ES.md">ES</a>
   ·
-  <a href="docs/DOCUMENTATION-ZH.md">中文研究文档</a>
+  <a href="docs/DOCUMENTATION-ZH.md">中文研究</a>
 </p>
 
 ---
