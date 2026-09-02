@@ -1,10 +1,6 @@
 # Documentación de pi-research (ES)
 
-Este documento reúne en un solo archivo toda la documentación oficial de
-**pi-research** — el motor de investigación web multiagente y almacén de conocimiento
-gratuito e ilimitado para agentes — traducida al español (español de México, registro
-formal de negocios). Agrupa, en orden, los seis documentos oficiales que en inglés existen
-por separado:
+Documentos en español:
 
 1. [Extensión de Pi](#pi-extension)
 2. [Habilidad de agente (Agent Skill)](#agent-skill)
@@ -12,13 +8,6 @@ por separado:
 4. [Almacén de conocimiento](#knowledge-store)
 5. [Configuración](#configuration)
 6. [Arquitectura](#architecture)
-
-Los originales en inglés viven en el directorio
-[`docs/`](https://github.com/Lincoln504/pi-research/tree/main/docs) del repositorio; esta
-versión los combina para lectura continua en un solo documento. Los identificadores
-técnicos — variables de entorno, comandos, rutas, nombres de funciones y valores literales
-de configuración — se conservan en inglés sin traducir, porque son nombres reales del
-software y deben escribirse exactamente igual.
 
 ---
 
