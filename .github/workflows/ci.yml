@@ -668,6 +668,9 @@ jobs:
           ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
         run: |
           WORK="$(mktemp -d)"
+          # Shell variables do not survive across run: steps; downstream steps
+          # (consumer-interop-probe) need the consumer tree root.
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
           cp "$TAR_FILE" "$WORK/"
           cd "$WORK"
           npm init -y >/dev/null
