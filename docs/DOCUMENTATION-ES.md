@@ -1,6 +1,6 @@
 # Documentación de pi-research (ES)
 
-Documentación en español:
+Documentación español:
 
 1. [Extensión de Pi](#pi-extension)
 2. [Habilidad de agente (Agent Skill)](#agent-skill)
