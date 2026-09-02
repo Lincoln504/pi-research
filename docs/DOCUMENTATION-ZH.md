@@ -1,16 +1,5 @@
 # 研究文档（中文）
 
-中文文档：
-
-1. [Pi 扩展](#pi-extension)
-2. [智能体技能](#agent-skill)
-3. [SDK](#sdk)
-4. [知识存储](#knowledge-store)
-5. [配置](#configuration)
-6. [架构](#architecture)
-
----
-
 ## Pi 扩展 {#pi-extension}
 
 pi-research 以 [pi](https://github.com/earendil-works/pi) 的**扩展**形式集成

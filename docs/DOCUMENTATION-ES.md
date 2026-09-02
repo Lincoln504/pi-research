@@ -1,16 +1,5 @@
 # Documentación de pi-research (ES)
 
-Documentación español:
-
-1. [Extensión de Pi](#pi-extension)
-2. [Habilidad de agente (Agent Skill)](#agent-skill)
-3. [SDK](#sdk)
-4. [Almacén de conocimiento](#knowledge-store)
-5. [Configuración](#configuration)
-6. [Arquitectura](#architecture)
-
----
-
 ## Extensión de Pi {#pi-extension}
 
 pi-research se integra como una **extensión** de
