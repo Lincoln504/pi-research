@@ -19,7 +19,7 @@ Three slash commands are also registered:
 | Command | Description |
 |---------|-------------|
 | `/research <query>` | Invokes the `research` tool directly at the configured default depth (`PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`, 1 by default) — a plain live run with no LLM turn. It does not parse an inline depth and does **not** consult the knowledge store; use `/knowledge-store <query>` for a store-only lookup. |
-| `/research-config` | Opens the interactive TUI settings dashboard. |
+| `/research-config` | Opens the interactive TUI settings dashboard. On non-TUI hosts (RPC, web hub, print, JSON, SDK) the menu cannot render, so the command reports why and answers with the headless diagnostics that do work there: `/research-config health` (system health) and `/research-config knowledge-status` (knowledge-store status). |
 | `/knowledge-store <query>` | Searches the local knowledge store for a query and returns a synthesised answer from previously researched findings. Unavailable when Knowledge Mode is `none`. The store auto-manages its own compaction, so there is no maintenance subcommand. |
 
 ![Running a live investigation with the /research slash command](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/01-slash-research.gif)
@@ -57,6 +57,7 @@ During a run pi-research renders a live progress panel:
 | Key | Action |
 |-----|--------|
 | `Escape` | Cancel active research |
+| `Ctrl+C` | With text in the editor: clears the editor only. With an empty editor: cancels the run (same as `Escape`). |
 | Arrow keys | Navigate the `/research-config` menu |
 | `Enter` / `Space` | Cycle a setting's value |
 

@@ -18,6 +18,10 @@
   <a href="docs/CONFIGURATION.md">Configuration</a>
   ·
   <a href="docs/ARCHITECTURE.md">Architecture</a>
+  ·
+  <a href="docs/DOCUMENTATION-ES.md">ES</a>
+  ·
+  <a href="docs/DOCUMENTATION-ZH.md">中文研究文档</a>
 </p>
 
 ---

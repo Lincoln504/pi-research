@@ -12,7 +12,11 @@ environment-variable reference, and finally how the configuration layers resolve
 
 Run `/research-config` in the pi extension to open an interactive menu. Selecting a
 setting and pressing `Enter` / `Space` cycles its value; the change is saved
-immediately. A setting is written to one of two scopes:
+immediately. (On non-TUI hosts — RPC, web hub, print, JSON, SDK — the menu cannot
+render: `/research-config` explains why and answers with the headless diagnostics
+`/research-config health` and `/research-config knowledge-status`. Settings are
+still read from the environment and config files there, and `PI_RESEARCH_*`
+variables still take effect.) A setting is written to one of two scopes:
 
 - `[project]` — saved per working directory in the central project registry, so
   a given repo can carry its own value without changing your global default.
