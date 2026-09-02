@@ -89,12 +89,34 @@ const ENV_KEY_BY_SETTING_ID: Record<string, string> = {
  * Main command handler for /research-config
  */
 export async function handleResearchConfigCommand(
-  _args: string,
+  args: string,
   ctx: ExtensionContext,
   pi: ExtensionAPI
 ): Promise<void> {
-  if (!ctx.hasUI) {
-    ctx.ui.notify('Interactive menu requires UI mode', 'error');
+  const verb = args.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  if (verb === 'health') {
+    await runHealthCheckAction(ctx, pi);
+    return;
+  }
+  if (verb === 'knowledge-status' || verb === 'knowledge_status') {
+    await showKnowledgeStatusAction(ctx, pi);
+    return;
+  }
+  if (ctx.mode !== 'tui' || !ctx.hasUI) {
+    // The interactive menu needs pi's real TUI. In RPC/web-hub/print/json/SDK hosts
+    // ctx.hasUI is true (RPC) and the menu cannot render — awaiting it silently
+    // nudges the host toward a hang and at best does nothing visible. Give a clear
+    // non-interactive answer with the headless diagnostics that DO work here.
+    pi.sendMessage({
+      customType: 'research-config',
+      content: 'The interactive `/research-config` menu requires pi\'s terminal UI (TUI).\n\n' +
+        'In this host, use the headless diagnostics instead:\n' +
+        '- `/research-config health` — system health status\n' +
+        '- `/research-config knowledge-status` — knowledge store status\n\n' +
+        'Configuration is read from the environment and config files; set `PI_RESEARCH_*` ' +
+        'environment variables to change it.',
+      display: true,
+    });
     return;
   }
   await showInteractiveMenu(ctx, pi);
@@ -498,6 +520,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         modelChangeConfirmed = !cancelled && await ctx.ui.confirm(
           'Change Embedding Model',
           `Switch the embedding model to ${config.EMBEDDING_MODEL.split('/').pop()}? This permanently clears the current knowledge store.`,
+          { timeout: 60_000 },
         );
         if (modelChangeConfirmed) {
           logger.info(`[research-config] Embedding model changed from ${initialConfig.EMBEDDING_MODEL} to ${config.EMBEDDING_MODEL}. Clearing knowledge store.`);
@@ -550,7 +573,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             await showKnowledgeStatusAction(ctx, pi);
             break;
           case 'knowledge_clear_global': {
-            const confirmed = await ctx.ui.confirm('Clear User Store', 'Permanently delete all user-scoped store data?');
+            const confirmed = await ctx.ui.confirm('Clear User Store', 'Permanently delete all user-scoped store data?', { timeout: 60_000 });
             if (confirmed) {
               try {
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
@@ -563,7 +586,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             break;
           }
           case 'knowledge_clear_local': {
-            const confirmed = await ctx.ui.confirm('Clear Project Store', 'Permanently delete all project-scoped store data?');
+            const confirmed = await ctx.ui.confirm('Clear Project Store', 'Permanently delete all project-scoped store data?', { timeout: 60_000 });
             if (confirmed) {
               try {
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
@@ -577,13 +600,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           }
           case 'metrics':
             await showMetricsAction(ctx, pi);
-            if (await ctx.ui.confirm('Session Metrics', 'Reset all session counters?')) {
+            if (await ctx.ui.confirm('Session Metrics', 'Reset all session counters?', { timeout: 60_000 })) {
               metrics.clearSession();
               ctx.ui.notify('Session metrics reset.', 'info');
             }
             break;
           case 'logs_clear': {
-            const confirmed = await ctx.ui.confirm('Clear Logs', 'Delete the main diagnostic log file and all archived rotation files?');
+            const confirmed = await ctx.ui.confirm('Clear Logs', 'Delete the main diagnostic log file and all archived rotation files?', { timeout: 60_000 });
             if (confirmed) {
               logger.clear();
               ctx.ui.notify('Diagnostic logs cleared.', 'info');
@@ -704,6 +727,7 @@ async function uninstallSkillAction(ctx: ExtensionContext, pi: ExtensionAPI): Pr
   const confirmed = await ctx.ui.confirm(
     'Uninstall Skill',
     `Remove the pi-research skill from ${names}? (Only symlinks this extension created are removed.)`,
+    { timeout: 60_000 },
   );
   if (!confirmed) return;
   try {

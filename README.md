@@ -53,6 +53,10 @@ tries to compile from source; upgrading npm fixes it.
 
 In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
+### Uninstall
+
+`pi remove npm:@lincoln504/pi-research` removes the extension, and `npm uninstall -g @lincoln504/pi-research` the standalone engine. npm 7+ no longer runs `preuninstall`, so **nothing else is removed on its own**: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents); the shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
+
 ### How it works
 
 A research run loops through agent teams: a coordinator plans and starts with a search, researcher agents scrape and read in parallel, and a research lead decides whether to go another round, then writes the report from every report collected. The result is one cited Markdown report with findings optionally saved to the knowledge store.

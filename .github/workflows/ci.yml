@@ -707,3 +707,15 @@ jobs:
             cmd //c "$(cygpath -w "$BIN_DIR/pi-research.cmd")" --version
             echo "OK: pi-research.cmd executes"
           fi
+      - name: Verify the knowledge-store Arrow/LanceDB boundary in the consumer tree
+        # The dev tree resolves a single apache-arrow 21.1.0 (the override forces it);
+        # a fresh consumer install resolves TWO copies — 21.1.0 nested under the
+        # package (our pin) and 18.1.0 hoisted for @lancedb/lancedb's declared peer
+        # ceiling. docs/ARCHITECTURE.md pins 21.1.0 for a measured reason and warns
+        # mismatched Arrow copies may not interoperate, so this probe replicates
+        # store-schema.ts's createStoreTable shape with the CONSUMER's exact
+        # resolution — the integration suite cannot catch a divergence that only
+        # exists in the consumer layout.
+        run: |
+          node scripts/consumer-interop-probe.cjs "$WORK" "$INSTALLED_DIR"
+          echo "OK: consumer-tree Arrow/LanceDB store boundary verified"
