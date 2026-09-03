@@ -10,6 +10,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+import { setKittyProtocolActive } from '@earendil-works/pi-tui';
+
 const mocks = vi.hoisted(() => ({
   getActiveSessionCount: vi.fn(),
   abortAllSessions: vi.fn(),
@@ -38,6 +40,13 @@ import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 
 const CTRL_C = '\x03';
 const ESC = '\x1b';
+// Real Kitty keyboard protocol (flag 2) sequences — what pi's TUI actually
+// forwards to extension input listeners. Every physical keypress produces a
+// press AND a release event; only the press may drive policy.
+const KITTY_CTRL_C_PRESS = '\x1b[99;5u';
+const KITTY_CTRL_C_RELEASE = '\x1b[99;5:3u';
+const KITTY_CTRL_C_REPEAT = '\x1b[99;5:2u';
+const KITTY_ESC_RELEASE = '\x1b[27;1:3u';
 
 describe('Global TUI controller cancel keys', () => {
   let inputHandler: ((data: string) => unknown) | null = null;
@@ -56,11 +65,14 @@ describe('Global TUI controller cancel keys', () => {
     editorText = '';
     inputHandler = null;
     mocks.getActiveSessionCount.mockReturnValue(1);
+    // Match pi's runtime: the Kitty protocol (with event types) is active.
+    setKittyProtocolActive(true);
   });
 
   afterEach(() => {
     setInteractiveTuiActive(false);
     disposeGlobalTuiController();
+    setKittyProtocolActive(false);
   });
 
   it('Ctrl+C with text in the editor does NOT abort and falls through (pi clears)', () => {
@@ -155,5 +167,59 @@ describe('Global TUI controller cancel keys', () => {
     expect(inputHandler!('x')).toBeUndefined();
 
     expect(mocks.abortAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('Kitty RELEASE event after a clearing press does NOT abort (the one-press two-events regression)', () => {
+    // The exact 2026-09-03 live failure: press cleared the editor, then the
+    // release event 150ms later matched ctrl+c against the now-empty editor
+    // and aborted the run. Releases must be dropped before policy runs.
+    initGlobalTuiController(fakeUi(), 'pi-1');
+
+    // Press with text → falls through, pi clears (simulated by emptying here).
+    editorText = 'draft message';
+    expect(inputHandler!(KITTY_CTRL_C_PRESS)).toBeUndefined();
+    expect(mocks.abortAllSessions).not.toHaveBeenCalled();
+    editorText = ''; // pi's handleCtrlC cleared it synchronously
+
+    // Release 150ms later — even though the editor is NOW empty and a run is
+    // active, the release must be dropped, not treated as a second gesture.
+    expect(inputHandler!(KITTY_CTRL_C_RELEASE)).toBeUndefined();
+    expect(mocks.abortAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('a Kitty ctrl+c RELEASE is dropped even as the very first event (empty editor, active run)', () => {
+    initGlobalTuiController(fakeUi(), 'pi-1');
+    editorText = '';
+
+    expect(inputHandler!(KITTY_CTRL_C_RELEASE)).toBeUndefined();
+    expect(mocks.abortAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('a Kitty Esc RELEASE is dropped (esc releases previously masqueraded as real Esc aborts)', () => {
+    initGlobalTuiController(fakeUi(), 'pi-1');
+    editorText = '';
+
+    expect(inputHandler!(KITTY_ESC_RELEASE)).toBeUndefined();
+    expect(mocks.abortAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('a Kitty ctrl+c PRESS with an empty editor and an active run aborts and consumes (same policy as legacy \x03)', () => {
+    initGlobalTuiController(fakeUi(), 'pi-1');
+    editorText = '';
+
+    const result = inputHandler!(KITTY_CTRL_C_PRESS) as { consume?: boolean };
+
+    expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
+    expect(result.consume).toBe(true);
+  });
+
+  it('a Kitty ctrl+c REPEAT with an empty editor and an active run aborts (held-key intent, like pi receives)', () => {
+    initGlobalTuiController(fakeUi(), 'pi-1');
+    editorText = '';
+
+    const result = inputHandler!(KITTY_CTRL_C_REPEAT) as { consume?: boolean };
+
+    expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
+    expect(result.consume).toBe(true);
   });
 });

@@ -8,7 +8,7 @@
  */
 
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
-import { matchesKey } from '@earendil-works/pi-tui';
+import { isKeyRelease, matchesKey } from '@earendil-works/pi-tui';
 import { getActiveSessionCount, abortAllSessions, refreshAllSessions, hideMasterWidget } from '../orchestration/session-state.ts';
 import { logger } from '../logger.ts';
 
@@ -56,6 +56,26 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
 
    */
   const handleTerminalInput = (data: string) => {
+    // Key-RELEASE events must be ignored. Pi runs the Kitty keyboard protocol
+    // with flag 2 (report event types), so every physical key sends TWO
+    // sequences: the press, then a release ~100-200ms later
+    // (e.g. ctrl+c press \x1b[99;5u, release \x1b[99;5:3u). Tui.handleTerminalInput
+    // filters releases — but ONLY for the focused component, AFTER extension
+    // input listeners run, and matchesKey cannot tell them apart
+    // (matchesKittySequence parses codepoint+modifier but never the event type,
+    // so a RELEASE matches matchesKey(data, 'ctrl+c') just like a press).
+    // Observed live 2026-09-03: one physical Ctrl+C with text in the editor
+    // logged "with editor text — clearing only" and then, 150ms later, the
+    // RELEASE event matched ctrl+c, saw the editor pi had just cleared, and
+    // aborted the research run. The same double-fire misclassified old
+    // ctrl+c releases as "Esc" aborts in the logs. pi's own components never
+    // see releases (tui filters them), so dropping them here matches pi's
+    // semantics exactly. Key REPEATS (\x1b[99;5:2u) are genuine held-key intent
+    // and keep flowing, like they do to pi's own components.
+    if (isKeyRelease(data)) {
+      return undefined;
+    }
+
     // If an interactive TUI is active (like the config menu), 
     // let it handle ALL input. We don't want to trigger a global abort
     // while the user is navigating a menu.
