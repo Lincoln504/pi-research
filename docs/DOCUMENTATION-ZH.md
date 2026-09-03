@@ -715,6 +715,7 @@ TUI 暴露的变量标记为 `(TUI)`。`[project]` 标记表示项目级键（�
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | 每个研究员共享的网络收集调用数（`search` + `security_search` + `stackexchange` + `youtube_transcript`）。 |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | 每个抓取批次中并发获取的 URL 数。 |
 | `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | 每个抓取批次获取的 URL 数上限。超出上限的 URL 会列在 "Not Fetched — Over Batch Cap" 下，必须在后续批次中请求。（由硬编码常量提升而来，使其与其他抓取旋钮一样可通过环境/配置文件调节。） |
+| `PI_RESEARCH_SCRAPE_SECOND_PAGE` | `false` | true/false | 对每个搜索查询同时抓取 DuckDuckGo 结果第 2 页，大约使每个查询贡献的候选链接翻倍。第 2 页会优雅降级——若抓取失败或不存在，则保留第 1 页结果。 |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | 每项研究员请求的重试次数。 |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | 重试之间的基础延迟。 |
 | `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | 中止整个运行的不重复研究员失败数。调高可以让较慢、仍在进行的研究员先跑完再放弃。 |

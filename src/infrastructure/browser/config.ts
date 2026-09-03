@@ -171,6 +171,9 @@ export function getBrowserEnv(config?: Config): NodeJS.ProcessEnv {
     const c = config || getConfig();
     env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] = String(c.SCRAPE_TIMEOUT_MS);
     env['PI_RESEARCH_SEARCH_TIMEOUT_MS'] = String(c.SEARCH_TIMEOUT_MS);
+    // Search results page 2: the thread-worker reads this directly from its
+    // process.env copy inside executeSearchTask.
+    env['PI_RESEARCH_SCRAPE_SECOND_PAGE'] = String(c.SCRAPE_SECOND_PAGE);
     env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'] = String(c.HEALTH_CHECK_TIMEOUT_MS);
     return env;
 }

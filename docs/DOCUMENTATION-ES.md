@@ -827,6 +827,7 @@ Investigación
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Llamadas compartidas de recopilación web por investigador (`search` + `security_search` + `stackexchange` + `youtube_transcript`). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | URLs concurrentes obtenidas por lote de extracción. |
 | `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | Número máximo de URLs obtenidas por lote de extracción. Las URLs sobre el tope se listan bajo "Not Fetched — Over Batch Cap" y deben pedirse en un lote posterior. (Promovido desde una constante fija para que sea ajustable por entorno/archivo de configuración como cualquier otra perilla de extracción.) |
+| `PI_RESEARCH_SCRAPE_SECOND_PAGE` | `false` | true/false | También obtener la página 2 de resultados de DuckDuckGo para cada búsqueda, duplicando aproximadamente los enlaces candidatos que aporta cada consulta. La página 2 degrada con elegancia: si falla o no existe, se conservan los resultados de la página 1. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Reintentos por solicitud de investigador. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Demora base entre reintentos. |
 | `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | Fallos únicos de investigador que abortan toda la ejecución. Súbalo para dejar que investigadores más lentos, aún en vuelo, terminen antes de rendirse. |

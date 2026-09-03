@@ -76,6 +76,7 @@ Research
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Shared web-gathering calls per researcher (`search` + `security_search` + `stackexchange` + `youtube_transcript`). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
 | `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | Maximum URLs fetched per scrape batch. URLs past the cap are listed under "Not Fetched — Over Batch Cap" and must be requested in a later batch. (Promoted from a hardcoded constant so it is env/config-file tunable like every other scrape knob.) |
+| `PI_RESEARCH_SCRAPE_SECOND_PAGE` | `false` | true/false | Also fetch DuckDuckGo results page 2 for every search query, roughly doubling the candidate links each query contributes. Each query's page-2 fetch degrades gracefully — if page 2 fails or does not exist, the page-1 results are kept. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
 | `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | Unique researcher failures that abort the whole run. Raise to let slower, still-in-flight researchers finish before giving up. |

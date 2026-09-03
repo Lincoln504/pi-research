@@ -182,15 +182,33 @@ export async function setupMocking(context: any): Promise<void> {
 
     if (mockSearch && isDuckDuckGo) {
       logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking search response for: ${urlStr}`);
-      route.fulfill({
-        status: 200,
-        contentType: 'text/html',
-        body: `
-          <html><head><title>DuckDuckGo Lite</title></head><body>
-            <form action="/lite/" method="post">
-              <input name="q" type="text">
-              <input type="submit" value="Search">
-            </form>
+      // When SCRAPE_SECOND_PAGE is on, the mock also exposes DDG Lite's next-page
+      // form (hidden `s`/`dc` offsets + a "Next" submit) and serves a DISTINCT
+      // result set when a page-2 POST arrives — identified by the `s=2` form
+      // field in the request body. This mirrors the real Lite flow (page 1 =
+      // POST without `s`, page 2 = POST with `s`), so the second-page scrape is
+      // end-to-end testable without a live network.
+      const isSecondPageRequest = request.method() === 'POST' &&
+        typeof request.postData() === 'string' &&
+        /(?:^|&)s=2(?:&|$)/.test(request.postData()!);
+      const mockResultsHtml = isSecondPageRequest
+        ? `
+            <table class="result-link">
+              <tr>
+                <td><a class="result-link" href="https://example.com/mock-result-3?uddg=https%3A%2F%2Fexample.com%2Ftarget-3">Mock Result 3</a></td>
+              </tr>
+              <tr>
+                <td class="result-snippet">Page-two mocked search result snippet.</td>
+              </tr>
+              <tr>
+                <td><a class="result-link" href="https://example.com/mock-result-4?uddg=https%3A%2F%2Fexample.com%2Ftarget-4">Mock Result 4</a></td>
+              </tr>
+              <tr>
+                <td class="result-snippet">Another page-two mocked snippet to verify second-page extraction.</td>
+              </tr>
+            </table>
+          `
+        : `
             <table class="result-link">
               <tr>
                 <td><a class="result-link" href="https://example.com/mock-result-1?uddg=https%3A%2F%2Fexample.com%2Ftarget-1">Mock Result 1</a></td>
@@ -205,6 +223,23 @@ export async function setupMocking(context: any): Promise<void> {
                 <td class="result-snippet">Another mocked snippet to verify multiple result extraction.</td>
               </tr>
             </table>
+            <form action="/lite/" method="post">
+              <input type="hidden" name="q" value="">
+              <input type="hidden" name="s" value="2">
+              <input type="hidden" name="dc" value="3">
+              <input type="submit" value="Next">
+            </form>
+          `;
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `
+          <html><head><title>DuckDuckGo Lite</title></head><body>
+            <form action="/lite/" method="post">
+              <input name="q" type="text">
+              <input type="submit" value="Search">
+            </form>
+            ${mockResultsHtml}
           </body></html>
         `
       });
@@ -319,6 +354,42 @@ export async function executeSearchTask(
     }
 
     const results = await extractSearchResults(page);
+
+    // Optional second results page (SCRAPE_SECOND_PAGE config setting, threaded
+    // to workers as PI_RESEARCH_SCRAPE_SECOND_PAGE via getBrowserEnv). DuckDuckGo
+    // Lite paginates with a small POST form at the bottom of the results table:
+    // hidden `s`/`dc` offsets plus a submit labelled "Next". Clicking THAT form
+    // (rather than hand-building a page-2 URL) reuses the offsets the site itself
+    // issued, so it stays correct whatever per-page count DDG currently serves.
+    // Failure policy: page-1 results are already in hand and fully usable, so any
+    // page-2 problem (no next control, click/navigation timeout, abort-triggered
+    // page close) degrades to returning page 1 alone with a WARN — it must never
+    // fail a query that succeeded on page 1. Cross-page and cross-query dedup
+    // happen upstream in performSearch's seenUrls set.
+    const scrapeSecondPage = process.env['PI_RESEARCH_SCRAPE_SECOND_PAGE'] === 'true';
+    if (scrapeSecondPage && results.length > 0) {
+      try {
+        const nextButton = page.locator('form input[type="submit"][value*="next" i]').first();
+        if (await nextButton.count() > 0) {
+          logToDebugFile('DEBUG', `[Worker-${workerId}] SCRAPE_SECOND_PAGE: fetching results page 2 for: ${query}`);
+          await Promise.all([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+            nextButton.click(),
+          ]);
+          const seen = new Set(results.map((r: any) => r.url));
+          for (const r of await extractSearchResults(page)) {
+            if (!seen.has(r.url)) {
+              seen.add(r.url);
+              results.push(r);
+            }
+          }
+        } else {
+          logToDebugFile('DEBUG', `[Worker-${workerId}] SCRAPE_SECOND_PAGE: no next-page control (single page of results) for: ${query}`);
+        }
+      } catch (err: any) {
+        logToDebugFile('WARN', `[Worker-${workerId}] SCRAPE_SECOND_PAGE: page-2 fetch failed (keeping page-1 results) for: ${query} — ${err?.message || String(err)}`);
+      }
+    }
 
     await page.close();
     

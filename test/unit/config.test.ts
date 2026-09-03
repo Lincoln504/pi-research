@@ -210,6 +210,14 @@ describe('config (refactored)', () => {
       expect(written).toContain('PI_RESEARCH_YOUTUBE_QUERY_EVERY_N=7');
     });
 
+    it('persists SCRAPE_SECOND_PAGE so it round-trips (regression: saveConfig allowlist)', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      saveConfig({ ...DEFAULTS, SCRAPE_SECOND_PAGE: true }, 'user');
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+      expect(written).toContain('PI_RESEARCH_SCRAPE_SECOND_PAGE=true');
+    });
+
     it('user scope with changedKeys writes ONLY those keys and preserves other existing lines', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue(
@@ -330,6 +338,14 @@ describe('config (refactored)', () => {
         expect(createConfig({}, { PI_RESEARCH_DEBUG: '1' }).DEBUG).toBe(false);
         expect(createConfig({}, { PI_RESEARCH_DEBUG: 'yes' }).DEBUG).toBe(false);
         expect(createConfig({}, { PI_RESEARCH_DEBUG: '' }).DEBUG).toBe(DEFAULTS.DEBUG);
+      });
+
+      it('SCRAPE_SECOND_PAGE defaults to false and coerces strictly like every boolean', () => {
+        expect(createConfig({}, {}).SCRAPE_SECOND_PAGE).toBe(false);
+        expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: 'true' }).SCRAPE_SECOND_PAGE).toBe(true);
+        expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: 'TRUE' }).SCRAPE_SECOND_PAGE).toBe(true);
+        expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: '1' }).SCRAPE_SECOND_PAGE).toBe(false);
+        expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: '' }).SCRAPE_SECOND_PAGE).toBe(false);
       });
 
       it('honors the legacy CACHE_TTL_DAYS env name when the canonical one is absent', () => {
