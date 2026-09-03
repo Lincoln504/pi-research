@@ -18,7 +18,8 @@ import {
   registerOrchestrationServices, 
   initializeOrchestrationServices 
 } from './orchestration/service-initialization.ts';
-import { getService, resetServiceContainer, getServiceContainer } from './core/service-registry.ts';
+import { getService, resetServiceContainer, getServiceContainer, tryGetService } from './core/service-registry.ts';
+import { raceWithDeadline } from './utils/safe-unref.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from './core/interfaces/knowledge-interfaces.ts';
@@ -45,7 +46,7 @@ import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './
 import { scrapeSingle } from './web-research/web-scraper.ts';
 import { validateInitialLinks } from './utils/url-utils.ts';
 import { validateUrlForSSRF, disposeSsrfSafeFetcher } from './web-research/scraper-utils.ts';
-import type { ScrapeResult } from './core/interfaces/scheduler-interfaces.ts';
+import type { ScrapeResult, ISchedulerService } from './core/interfaces/scheduler-interfaces.ts';
 import { randomUUID } from 'node:crypto';
 import type { ResearchDepth } from './types/index.ts';
 
@@ -354,6 +355,30 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
 
     isInitialized = true;
     logger.log('[SDK] Research SDK initialized successfully');
+
+    // Stop the browser scheduler as the FIRST teardown step of a shutdown. This
+    // runs on EVERY teardown path — signal handlers (SIGINT/SIGTERM) and the
+    // cooperative shutdownResearchSDK() alike — which is intended: without it the
+    // sdk_shutdown cleanup list is empty ("No cleanup tasks registered"), and the scheduler's cluster workers died mid-DAG-disposal —
+    // with code null — while the worker pool was still live, which the pool's
+    // exitHandler counted as unexpected deaths ("3 consecutive exits → pool
+    // unhealthy") on a process that was exiting anyway. Shutting down here puts
+    // those deaths inside the pool's intentional-destroy window instead. Both
+    // teardown paths are idempotent (the later DAG dispose no-ops), and the task
+    // is bounded well inside the 15s signal force-exit deadline. Registered per
+    // init: runCleanup detaches the task set after running, so re-init gets a
+    // fresh registration.
+    shutdownManager.register(async () => {
+        if (!globalContainer) return;
+        const schedulerService = tryGetService<ISchedulerService>(ServiceNames.SCHEDULER, globalContainer);
+        const scheduler = schedulerService?.getScheduler?.();
+        if (!scheduler) return;
+        try {
+            await raceWithDeadline(scheduler.shutdown(), 12000);
+        } catch (err) {
+            logger.error('[SDK] Error stopping scheduler during shutdown cleanup:', err);
+        }
+    });
 
     // Register graceful-shutdown signal handlers (SIGINT/SIGTERM).
     // These are a safety net for scripts and long-running embedders —

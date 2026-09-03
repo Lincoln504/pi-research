@@ -284,7 +284,16 @@ export class WorkerPoolManager implements IService {
                         // Every intentional destroy bumps poolEpoch first, so a null-code exit
                         // that still matches the live epoch is an unexpected death and must count
                         // toward auto-recovery like any other abnormal exit.
-                        if (code !== 0 && this.poolEpoch === myEpoch) {
+                        //
+                        // EXCEPT while this instance is mid-shutdown: the SIGTERM path tears the
+                        // process down and workers die with code null while teardown (DAG disposal,
+                        // server stop, browser kill) is still unwinding. Counting those deaths as
+                        // health faults logged ERROR + scheduled a pointless auto-recovery on a
+                        // dying process — every one of the 73 null-code exits across 15 pids in
+                        // the 2026-09-01/02 logs coincided with SDK SIGTERM shutdown, tripping
+                        // "3 consecutive exits → pool unhealthy" once per dying session. Not a
+                        // queue-capacity or OOM problem: zero exits occurred during live research.
+                        if (code !== 0 && !this.isShuttingDown && this.poolEpoch === myEpoch) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {
