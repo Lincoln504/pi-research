@@ -268,10 +268,13 @@ async function extractSearchResults(page: any): Promise<any[]> {
     const found: any[] = [];
     // @ts-ignore - document is available in browser context
     // eslint-disable-next-line no-undef
-    const links = Array.from(document.querySelectorAll('a.result-link'));
+    const links = Array.from(document.querySelectorAll('a.result-link, a.result__a'));
     links.forEach((link: any) => {
-      const row = link.closest('tr');
-      const snippet = row?.nextElementSibling?.querySelector('td.result-snippet')?.textContent?.trim() || '';
+      // lite layout: <a class="result-link"> inside a <tr>; snippet in the next sibling's td.result-snippet.
+      // html layout: <a class="result__a"> inside div.result; snippet in a.result__snippet / .result__snippet.
+      const row = link.closest('tr') || link.closest('.result');
+      const snippetEl = row?.querySelector('td.result-snippet') || row?.querySelector('a.result__snippet') || row?.querySelector('.result__snippet');
+      const snippet = snippetEl?.textContent?.trim() || '';
       const title = link.textContent?.trim() || '';
       let url = link.href;
       try {
@@ -344,13 +347,27 @@ export async function executeSearchTask(
     if (process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true') {
       await page.goto(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, { waitUntil: 'domcontentloaded' });
     } else {
-      // Relaxed timeout to accommodate network latency and concurrent worker load
-      await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
-      await page.fill('input[name="q"]', query);
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-        page.keyboard.press('Enter')
-      ]);
+      // Direct GET with the query inline. The old path (goto the empty lite landing
+      // → fill input[name=q] → Enter → waitForNavigation) broke when DDG changed the
+      // landing interaction: the submit↔navigation race extract()ed the empty form
+      // page, so EVERY search returned zero results for days while the same browsers
+      // fetched real results via a plain ?q= GET (observed 2026-09-02..03). We drive
+      // the html endpoint — its result__a markup is static in the initial HTML and is
+      // what the extractor matches — and wait for the result anchors to actually be
+      // in the DOM (domcontentloaded can fire before DDG paints them).
+      const qurl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const nav = await page.goto(qurl, { waitUntil: 'domcontentloaded' });
+      if ((!nav || (nav.status && nav.status() > 399)) && !(await page.$('a.result__a, a.result-link'))) {
+        // HTTP error or no anchors: fall back to the lite endpoint (result-link
+        // class, also directly GET-able).
+        await page.goto(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, { waitUntil: 'domcontentloaded' });
+      }
+      try {
+        await page.waitForSelector('a.result__a, a.result-link', { timeout: 8000 });
+      } catch {
+        // Results may legitimately be absent (anomaly/no-results page); extract
+        // whatever is there (possibly nothing) rather than throwing.
+      }
     }
 
     const results = await extractSearchResults(page);
