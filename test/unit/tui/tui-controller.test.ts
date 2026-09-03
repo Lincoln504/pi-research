@@ -222,4 +222,31 @@ describe('Global TUI controller cancel keys', () => {
     expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
     expect(result.consume).toBe(true);
   });
+
+  it('modifyOtherKeys ctrl+c (xterm/VTE/tmux xterm-format) aborts — there are no releases in that mode', () => {
+    // Pi falls back to modifyOtherKeys (CSI > 4 ; 2 m) when the terminal lacks
+    // the kitty protocol: xterm, mintty, VTE/GNOME Terminal, tmux with the
+    // default extended-keys-format xterm. Ctrl+C arrives as ESC[27;5;99~ — a
+    // press with NO release counterpart — so the abort policy must fire on it.
+    initGlobalTuiController(fakeUi(), 'pi-1');
+    editorText = '';
+
+    const result = inputHandler!('\x1b[27;5;99~') as { consume?: boolean };
+
+    expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
+    expect(result.consume).toBe(true);
+  });
+
+  it('tmux csi-u extended-keys ctrl+c (ESC[99;5u) aborts — tmux never relays release events', () => {
+    // tmux 3.5+ with extended-keys-format csi-u forwards modified keys in the
+    // kitty PRESS shape but never emits event-type suffixes, so every ctrl+c
+    // through tmux is a genuine press.
+    initGlobalTuiController(fakeUi(), 'pi-1');
+    editorText = '';
+
+    const result = inputHandler!(KITTY_CTRL_C_PRESS) as { consume?: boolean };
+
+    expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
+    expect(result.consume).toBe(true);
+  });
 });
