@@ -66,14 +66,25 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
     // Check for specific global cancel keys (Escape and Ctrl+C)
     // We only trigger abort if research is actually running.
     if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
-      // Ctrl+C is pi's app.clear ("Clear editor"), NOT its cancel key — pi's own
-      // handleCtrlC() clears the editor text and never interrupts the agent (Esc
-      // is app.interrupt). Aborting the run on every Ctrl+C stole the key from
-      // users who merely wanted to discard typed text mid-run. Follow pi's
-      // convention: with text in the editor, Ctrl+C only clears (fall through and
-      // let pi do the clearing); an EMPTY editor is an explicit cancel gesture and
-      // aborts the active research.
       if (matchesKey(data, 'ctrl+c')) {
+        // Ctrl+C is pi's app.clear ("Clear editor"), NOT its cancel key — Esc is
+        // app.interrupt. But pi's handleCtrlC() is TIME-based, not content-based:
+        // first press clears the editor and arms a window, and a SECOND press
+        // within 500ms calls shutdown() — exiting the entire pi process. There is
+        // no "abort research" step anywhere in it. Extension input listeners run
+        // BEFORE the focused editor and may consume keys, so this handler fully
+        // owns the Ctrl+C policy while a run is active:
+        //
+        //   editor has text  → fall through: pi clears the text, run continues
+        //                      (a follow-up press sees an empty editor → abort
+        //                      branch below — the two-step cancel the user asked
+        //                      for: clear first, second press aborts the run)
+        //   editor empty AND → abort the run AND CONSUME the key. Consuming is
+        //   run active         the fix: without it the abort fell through to pi's
+        //                      handleCtrlC, and a double-press within 500ms (the
+        //                      natural way to "abort now") shut down pi itself.
+        //   editor empty AND → fall through untouched: pi's native behavior
+        //   no run active      (clear/arm, double-press exit) must keep working.
         let editorText = '';
         try {
           editorText = typeof ui.getEditorText === 'function' ? (ui.getEditorText() ?? '') : '';
@@ -82,13 +93,27 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
           logger.debug('[TUI] Ctrl+C with editor text — clearing only, research keeps running.');
           return undefined;
         }
+        const activeCount = getActiveSessionCount();
+        if (activeCount > 0) {
+          logger.info('[TUI] Ctrl+C with empty editor — aborting active research (key consumed so pi\'s double-press exit cannot fire).');
+          try {
+            // Scope to this Pi session to avoid cross-session interference
+            abortAllSessions(state.piSessionId);
+          } catch (err) {
+            logger.error('[TUI] Failed to abort sessions on Ctrl+C:', err);
+          }
+          return { consume: true };
+        }
+        // No research running — native pi Ctrl+C (clear editor / double-press exit).
+        return undefined;
       }
+
+      // Esc (pi's app.interrupt): panic-cancel regardless of editor text. Abort the
+      // active run, then let the key fall through so Pi can also respond
+      // (cancelling its own agent loop) and other TUIs can react.
       const activeCount = getActiveSessionCount();
       if (activeCount > 0) {
-        // FIX (New Issues B & E): Use abortAllSessions scoped to the current Pi session
-        // instead of clearAllSessionState() which nukes ALL sessions across ALL Pi instances.
-        logger.info(`[TUI] Global cancel requested (${data === '\x03' ? 'Ctrl+C' : 'Esc'}). Aborting active sessions...`);
-        
+        logger.info('[TUI] Global cancel requested (Esc). Aborting active sessions...');
         try {
           // Scope to this Pi session to avoid cross-session interference
           abortAllSessions(state.piSessionId);
@@ -96,9 +121,6 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
           logger.error('[TUI] Failed to abort sessions on cancel:', err);
         }
       }
-      
-      // Let the key fall through so Pi can handle its own cancellation
-      // or other TUIs can respond.
       return undefined;
     }
 
