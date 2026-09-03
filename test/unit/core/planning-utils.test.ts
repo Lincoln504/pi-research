@@ -284,6 +284,36 @@ describe('parseJsonPlan', () => {
     expect(plan.researchers![0]!.queries).toEqual(['q2', 'q3']);
   });
 
+  it('unwraps a doubly-encoded plan payload (model sent the plan as a JSON string)', () => {
+    // Observed live 2026-09-02: deepseek-v4-flash via OpenRouter called submit_plan with
+    // the plan JSON-encoded INSIDE a string, so the toolCall re-serialization handed us a
+    // doubly-encoded payload whose validation failed with the misleading root error
+    // "undefined: must be object" and fell into the costly agentic-repair path.
+    const inner = JSON.stringify({ action: 'synthesize', title: 'T', content: 'Research complete' });
+    const doublyEncoded = JSON.stringify(inner); // a JSON string literal containing the plan
+    const plan = parseJsonPlan(doublyEncoded);
+    expect(plan.action).toBe('synthesize');
+    expect(plan.content).toBe('Research complete');
+  });
+
+  it('drops explicit nulls for optional fields instead of failing validation', () => {
+    // Observed live 2026-09-02: "research-complete" router answer with researchers:null
+    // and allQueries:null — null optional fields fail TypeBox validation even though
+    // absence passes, and the model clearly meant absence.
+    const text = JSON.stringify({
+      action: 'synthesize',
+      researchers: null,
+      allQueries: null,
+      content: 'Research complete',
+      title: 'T',
+      fallback: false,
+    });
+    const plan = parseJsonPlan(text);
+    expect(plan.action).toBe('synthesize');
+    expect(plan.content).toBe('Research complete');
+    expect(plan.researchers).toBeUndefined();
+  });
+
   it('handles plan with multiple researchers having string IDs', () => {
     const text = JSON.stringify({
       action: 'delegate',

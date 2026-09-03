@@ -160,16 +160,48 @@ You are in the late phase of research. Set a higher threshold for delegation:
  * Parse JSON from LLM response into ResearchPlan
  */
 export function parseJsonPlan(text: string): ResearchPlan {
-  const result = extractJson<unknown>(text, 'object');
+  // Unwrap a doubly-encoded payload up front. Some models (observed: deepseek-v4-flash
+  // via OpenRouter, 2026-09-02) call the submit_plan tool with the plan JSON-encoded
+  // INSIDE a string argument, so the toolCall re-serialization path hands us a
+  // doubly-encoded payload — extractJson('object') then fails outright with the
+  // misleading "No valid JSON found" instead of exposing the plan it contains.
+  let normalized = text.trim();
+  if (normalized.startsWith('"')) {
+    try {
+      const unwrapped = JSON.parse(normalized);
+      if (typeof unwrapped === 'string') normalized = unwrapped.trim();
+    } catch { /* not a JSON string literal — extract below reports the real state */ }
+  }
+
+  const result = extractJson<unknown>(normalized, 'object');
   if (!result.success || !result.value) {
     const preview = text.length > 100 ? text.slice(0, 100) + '...' : text;
     throw new Error(`Failed to extract valid JSON plan: ${result.error}. Raw response preview: "${preview}"`);
   }
 
+  const candidate: unknown = result.value;
+
+  // Normalize explicit nulls for OPTIONAL fields. The schema treats researchers /
+  // allQueries / content / title / action / fallback as optional, but models
+  // frequently emit them as null (observed live 2026-09-02: a "research-complete"
+  // router answer with researchers:null, allQueries:null). With TypeBox 1.3.7 a null
+  // optional field makes Value.Errors report a ROOT error (path undefined, message
+  // "must be object") instead of pointing at the field — reproducing exactly the
+  // "Plan validation failed: undefined: must be object" seen in the logs — and the
+  // plan fell into the costly agentic-repair path even though the model's decision
+  // (synthesize) was perfectly valid. Dropping the key is exactly what the model meant.
+  if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+    for (const key of ['researchers', 'allQueries', 'content', 'title', 'action', 'fallback'] as const) {
+      if ((candidate as Record<string, unknown>)[key] === null) {
+        delete (candidate as Record<string, unknown>)[key];
+      }
+    }
+  }
+
   // Robust validation using TypeBox
   try {
     // 1. Convert/Coerce values (e.g. string numbers to numbers, single values to arrays if possible)
-    const coerced = Value.Convert(ResearchPlanSchema, result.value);
+    const coerced = Value.Convert(ResearchPlanSchema, candidate);
     
     // 2. Validate against schema
     if (!Value.Check(ResearchPlanSchema, coerced)) {
