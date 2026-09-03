@@ -205,11 +205,21 @@ function messageIsTransient(message: string): boolean {
   // here on purpose — the generic classifier keeps "timeout"/"etimedout"; the LLM
   // wrapper's "cancelled or timed out" wording is handled by the planning-service
   // classifier, so a security/youtube caller's abort string isn't reinterpreted.
+  //
+  // "connection error" is the OpenAI SDK's APIConnectionError default message (the
+  // shape pi-ai surfaces for openai-completions providers like OpenRouter when the
+  // fetch itself fails before any response — refused / reset / DNS / TLS). The SDK
+  // only throws this class for fetch-level transport failures (its own 2 internal
+  // retries already exhausted), so the string is a reliable transient signal. Seen
+  // live 2026-09-02: OpenRouter planning call died in 4s with zero retries because
+  // this pattern was missing — and the same miss made isDegradableLlmError throw
+  // instead of degrading to the fallback plan. Both layers gate on this matcher.
   if (
     m.includes('econnrefused') || m.includes('enotfound') || m.includes('timeout') ||
     m.includes('etimedout') || m.includes('econnreset') || m.includes('fetch failed') ||
     m.includes('terminated') || m.includes('other side closed') ||
-    m.includes('socket hang up') || m.includes('und_err')
+    m.includes('socket hang up') || m.includes('und_err') ||
+    m.includes('connection error')
   ) {
     return true;
   }

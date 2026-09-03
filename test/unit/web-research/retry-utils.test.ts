@@ -35,6 +35,20 @@ describe('retry-utils', () => {
       expect(isTransientError(new Error('UND_ERR_SOCKET'))).toBe(true);
     });
 
+    it('returns true for the OpenAI SDK APIConnectionError message', () => {
+      // The openai SDK (used by pi-ai for openai-completions providers like OpenRouter)
+      // throws `APIConnectionError` with the default message "Connection error." when the
+      // fetch itself fails — after its own 2 internal retries are exhausted. It is thrown
+      // ONLY for fetch-level transport failures, never for HTTP-status responses or model
+      // refusals, so the string is a reliable transient signal. Seen live 2026-09-02:
+      // an OpenRouter planning call died in 4s with zero retries and no fallback because
+      // this pattern was missing from messageIsTransient.
+      expect(isTransientError(new Error('Connection error.'))).toBe(true);
+      expect(isTransientError(new Error('Coordinator failed: Connection error.'))).toBe(true);
+      // The longer undici-dispatcher-mismatch variant of the same message.
+      expect(isTransientError(new Error('Connection error. This may be caused by passing an undici dispatcher'))).toBe(true);
+    });
+
     it('walks the cause chain and the error code (undici nests the socket reason under cause)', () => {
       const wrapped = new Error('terminated', { cause: new Error('other side closed') });
       expect(isTransientError(wrapped)).toBe(true);
