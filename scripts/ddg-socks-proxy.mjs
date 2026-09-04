@@ -28,7 +28,7 @@ import net from 'node:net';
 import dns from 'node:dns';
 
 const PORT = Number(process.env.DDG_SOCKS_PORT || 1080);
-const PINS = (process.env.DDG_PIN_IPS || '40.89.244.232').split(',').map((s) => s.trim()).filter(Boolean);
+const PINS = (process.env.DDG_PIN_IPS || '52.250.42.157,40.89.244.232').split(',').map((s) => s.trim()).filter(Boolean);
 
 function isDdgHost(host) {
   return /(^|\.)duckduckgo\.com$/i.test(host);
@@ -53,8 +53,20 @@ function connectWithFallback(addrs, port, cb) {
     if (i >= addrs.length) return cb(new Error('all addresses failed'));
     const addr = addrs[i++];
     const sock = net.connect({ host: addr, port });
-    sock.once('connect', () => cb(null, sock));
+    // DDG's dead front-door can ACCEPT the TCP handshake then stall (no bytes,
+    // no TLS data) — a connect-only probe misses it. Give each address a short
+    // data-arrival deadline: if nothing comes back we destroy it and try the
+    // next pinned IP. dataTimeoutMs=8000 ≈ half the 15s curl default, so
+    // worst case an all-dead edge costs ~16s before failing, and the healthy
+    // front-door usually answers in <1s.
+    const dataDeadline = setTimeout(() => {
+      sock.destroy();
+      tryNext();
+    }, 8000);
+    sock.once('data', () => clearTimeout(dataDeadline));
+    sock.once('connect', () => { clearTimeout(dataDeadline); cb(null, sock); });
     sock.once('error', (err) => {
+      clearTimeout(dataDeadline);
       sock.destroy();
       tryNext();
     });
