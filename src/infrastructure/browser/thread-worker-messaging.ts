@@ -182,11 +182,11 @@ export async function setupMocking(context: any): Promise<void> {
 
     if (mockSearch && isDuckDuckGo) {
       logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking search response for: ${urlStr}`);
-      // When SCRAPE_SECOND_PAGE is on, the mock also exposes DDG Lite's next-page
+      // When SCRAPE_SECOND_PAGE is on, the mock also exposes DDG's next-page
       // form (hidden `s`/`dc` offsets + a "Next" submit) and serves a DISTINCT
       // result set when a page-2 POST arrives — identified by the `s=2` form
-      // field in the request body. This mirrors the real Lite flow (page 1 =
-      // POST without `s`, page 2 = POST with `s`), so the second-page scrape is
+      // field in the request body. This mirrors the real flow (page 1 = a GET,
+      // page 2 = POST with `s`), so the second-page scrape is
       // end-to-end testable without a live network.
       const isSecondPageRequest = request.method() === 'POST' &&
         typeof request.postData() === 'string' &&
@@ -381,10 +381,12 @@ export async function executeSearchTask(
 
     // Optional second results page (SCRAPE_SECOND_PAGE config setting, threaded
     // to workers as PI_RESEARCH_SCRAPE_SECOND_PAGE via getBrowserEnv). DuckDuckGo
-    // Lite paginates with a small POST form at the bottom of the results table:
-    // hidden `s`/`dc` offsets plus a submit labelled "Next". Clicking THAT form
+    // paginates with a small POST form at the bottom of the results table
+    // (hidden `s`/`dc` offsets plus a submit labelled "Next"); clicking THAT form
     // (rather than hand-building a page-2 URL) reuses the offsets the site itself
     // issued, so it stays correct whatever per-page count DDG currently serves.
+    // If the primary endpoint doesn't serve the control (or the click fails),
+    // page-2 degrades to page-1-only — see the failure policy below.
     // Failure policy: page-1 results are already in hand and fully usable, so any
     // page-2 problem (no next control, click/navigation timeout, abort-triggered
     // page close) degrades to returning page 1 alone with a WARN — it must never

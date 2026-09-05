@@ -18,8 +18,9 @@
  *   DDG_PIN_IPS       comma-separated pinned IPs for duckduckgo.com (default
  *                     "52.250.42.157,40.89.244.232"). Which front-door is live
  *                     flips with the egress path, so the starting pin ROTATES
- *                     after every observed stall/failure and sticks to the
- *                     address that last delivered data.
+ *                     past any address observed stalling or failing; a healthy
+ *                     address keeps its position, so the list self-heals toward
+ *                     whichever IP last worked.
  *
  * The worker-side hook is thread-worker-browser.ts: when
  * ~/.pi/research/proxy.json exists with {"port":N,"host":"127.0.0.1"}, the
@@ -102,12 +103,11 @@ function connectWithFallback(client, addrs, port, cb) {
       tryNext();
     }, DATA_DEADLINE_MS);
     sock.once('data', () => {
+      // First upstream byte — the address is healthy. Nothing else to do: the
+      // success reply was already sent on 'connect' (data cannot precede
+      // connect, so 'settled' is always true here); this handler exists to
+      // disarm the stall deadline so a healthy connection is never cut.
       clearTimeout(deadline);
-      if (!settled) {
-        settled = true;
-        pinIndex = (usedIdx + 1) % addrs.length; // sticky: start AFTER the winner next time
-        cb(null, sock);
-      }
     });
     sock.once('connect', () => {
       // Do NOT clear the deadline here — the stall we must catch happens
@@ -122,7 +122,12 @@ function connectWithFallback(client, addrs, port, cb) {
     sock.once('error', (err) => {
       clearTimeout(deadline);
       sock.destroy();
-      if (!settled) tryNext();
+      if (!settled) {
+        // Connection refusal / reset — this address is dead from this egress
+        // too; rotate past it for the next connection, same as a stall.
+        pinIndex = (usedIdx + 1) % addrs.length;
+        tryNext();
+      }
     });
   };
   tryNext();
@@ -197,6 +202,10 @@ const server = net.createServer((client) => {
             // Success reply (IPv4 0.0.0.0:0 is acceptable)
             client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
             upstream.on('error', () => upstream.destroy());
+            // A client that pipelined its payload with the request (instead of
+            // waiting for this reply, as most do) had those bytes buffered in
+            // `buf` — forward them before attaching pipe, or they are lost.
+            if (buf.length) upstream.write(buf);
             client.pipe(upstream);
             upstream.pipe(client);
           });
