@@ -29,9 +29,12 @@ function makeHarness(page1: StubLink[], page2: StubLink[], opts: { hasNextButton
   const makeDom = (links: StubLink[]) => links.map((l) => ({
     href: l.href,
     textContent: l.textContent,
+    // Realistic lite DOM: the link's <tr> holds no snippet; the NEXT sibling
+    // <tr>'s td.result-snippet does. Inside-row selectors miss, sibling hits.
     closest: () => ({
+      querySelector: () => null,
       nextElementSibling: {
-        querySelector: () => ({ textContent: 'snippet text' }),
+        querySelector: (sel: string) => (sel === 'td.result-snippet' ? { textContent: 'snippet text' } : null),
       },
     }),
   }));

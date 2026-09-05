@@ -270,10 +270,17 @@ async function extractSearchResults(page: any): Promise<any[]> {
     // eslint-disable-next-line no-undef
     const links = Array.from(document.querySelectorAll('a.result-link, a.result__a'));
     links.forEach((link: any) => {
-      // lite layout: <a class="result-link"> inside a <tr>; snippet in the next sibling's td.result-snippet.
-      // html layout: <a class="result__a"> inside div.result; snippet in a.result__snippet / .result__snippet.
+      // lite layout: <a class="result-link"> inside a <tr>; the snippet lives in
+      // the NEXT sibling <tr>'s td.result-snippet (each result is a two-row pair:
+      // link row + snippet row). Fall back to inside-row for robustness.
+      // html layout: <a class="result__a"> inside div.result; snippet in
+      // a.result__snippet / .result__snippet inside the same container.
       const row = link.closest('tr') || link.closest('.result');
-      const snippetEl = row?.querySelector('td.result-snippet') || row?.querySelector('a.result__snippet') || row?.querySelector('.result__snippet');
+      const snippetEl =
+        row?.querySelector('td.result-snippet') ||
+        row?.querySelector('a.result__snippet') ||
+        row?.querySelector('.result__snippet') ||
+        row?.nextElementSibling?.querySelector('td.result-snippet');
       const snippet = snippetEl?.textContent?.trim() || '';
       const title = link.textContent?.trim() || '';
       let url = link.href;
