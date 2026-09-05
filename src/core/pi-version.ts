@@ -75,7 +75,7 @@ export function compareVersions(a: SemverParts, b: SemverParts): number {
  * option originally existed to prevent. The floor moved to close that gap,
  * not just because the type changed.
  */
-export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 84, patch: 0 };
+export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 85, patch: 0 };
 
 /**
  * Newest host line this release was actually exercised against (CI + a real run).
@@ -83,7 +83,7 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 84, patch: 0 };
  * Compared on MAJOR.MINOR only: a patch bump within a tested line is not a new
  * surface, and warning on it would be noise.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 84, patch: 4 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 85, patch: 0 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 
