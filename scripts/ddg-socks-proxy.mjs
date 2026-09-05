@@ -14,10 +14,12 @@
  * socket, and is safe to run under cron keepalive.
  *
  * Configuration:
- *   DDG_SOCKS_PORT  port to listen on (default 1080)
- *   DDG_PIN_IPS     comma-separated pinned IPs for duckduckgo.com (default
- *                   40.89.244.232; first that successfully connects is used,
- *                   in order)
+ *   DDG_SOCKS_PORT    port to listen on (default 1080)
+ *   DDG_PIN_IPS       comma-separated pinned IPs for duckduckgo.com (default
+ *                     "52.250.42.157,40.89.244.232"). Which front-door is live
+ *                     flips with the egress path, so the starting pin ROTATES
+ *                     after every observed stall/failure and sticks to the
+ *                     address that last delivered data.
  *
  * The worker-side hook is thread-worker-browser.ts: when
  * ~/.pi/research/proxy.json exists with {"port":N,"host":"127.0.0.1"}, the
@@ -46,29 +48,81 @@ function resolve(host) {
   });
 }
 
-/** Try each address in order until one connects, then hand the socket over. */
-function connectWithFallback(addrs, port, cb) {
-  let i = 0;
+/**
+ * Starting index into the pinned list for the next connection. Rotates past a
+ * front-door the moment it shows the accept-then-stall pattern, and sticks to
+ * the one that last delivered data — the live front-door flips with the
+ * egress path, so no static order stays right for long.
+ */
+let pinIndex = 0;
+
+// 8000ms data deadline ≈ half the 15s curl default: an all-dead edge costs
+// ~16s of client time before failing, and the healthy front-door answers the
+// TLS ClientHello in <1s.
+const DATA_DEADLINE_MS = 8000;
+
+/**
+ * Try each pinned address (starting at the rotated pinIndex) until one
+ * connects, then hand the socket over. The data deadline SPANS the TCP
+ * connect and the post-connect TLS ClientHello wait — DDG's dead front-door
+ * ACCEPTS the TCP handshake then never answers the ClientHello, so a deadline
+ * cleared at connect (the old behavior) never caught it and clients hung
+ * until their own 45s timeout.
+ *
+ * SOCKS has no transparent retry once the success reply is out (the client
+ * speaks first over the tunnel and can't replay), so post-reply we can't
+ * fail over: we cut both ends so the client fails fast, and rotate pinIndex
+ * so the NEXT connection starts at the next front-door. The caller passes the
+ * client socket precisely so it can be cut on that path.
+ */
+function connectWithFallback(client, addrs, port, cb) {
+  let settled = false;
+  let attempts = 0;
   const tryNext = () => {
-    if (i >= addrs.length) return cb(new Error('all addresses failed'));
-    const addr = addrs[i++];
+    if (settled) return;
+    if (attempts >= addrs.length) {
+      settled = true;
+      return cb(new Error('all pinned addresses failed'));
+    }
+    const offset = attempts++;
+    const usedIdx = (pinIndex + offset) % addrs.length;
+    const addr = addrs[usedIdx];
     const sock = net.connect({ host: addr, port });
-    // DDG's dead front-door can ACCEPT the TCP handshake then stall (no bytes,
-    // no TLS data) — a connect-only probe misses it. Give each address a short
-    // data-arrival deadline: if nothing comes back we destroy it and try the
-    // next pinned IP. dataTimeoutMs=8000 ≈ half the 15s curl default, so
-    // worst case an all-dead edge costs ~16s before failing, and the healthy
-    // front-door usually answers in <1s.
-    const dataDeadline = setTimeout(() => {
+    const deadline = setTimeout(() => {
+      if (settled) {
+        // Success reply already sent — no transparent retry is possible.
+        // Fast-fail both ends and rotate the starting pin for next time.
+        sock.destroy();
+        client.destroy();
+        pinIndex = (usedIdx + 1) % addrs.length;
+        console.error(`[ddg-socks] ${addr} connected but sent no data within ${DATA_DEADLINE_MS}ms — client cut, rotating pin`);
+        return;
+      }
       sock.destroy();
       tryNext();
-    }, 8000);
-    sock.once('data', () => clearTimeout(dataDeadline));
-    sock.once('connect', () => { clearTimeout(dataDeadline); cb(null, sock); });
+    }, DATA_DEADLINE_MS);
+    sock.once('data', () => {
+      clearTimeout(deadline);
+      if (!settled) {
+        settled = true;
+        pinIndex = (usedIdx + 1) % addrs.length; // sticky: start AFTER the winner next time
+        cb(null, sock);
+      }
+    });
+    sock.once('connect', () => {
+      // Do NOT clear the deadline here — the stall we must catch happens
+      // after connect. Reply success immediately: the SOCKS client waits
+      // for this reply before sending its first payload (TLS ClientHello),
+      // and the upstream won't send anything until it receives one.
+      if (!settled) {
+        settled = true;
+        cb(null, sock);
+      }
+    });
     sock.once('error', (err) => {
-      clearTimeout(dataDeadline);
+      clearTimeout(deadline);
       sock.destroy();
-      tryNext();
+      if (!settled) tryNext();
     });
   };
   tryNext();
@@ -134,7 +188,7 @@ const server = net.createServer((client) => {
       if (stage === 'connect') {
         stage = 'done';
         resolve(targetHost).then((addrs) => {
-          connectWithFallback(addrs, targetPort, (err, upstream) => {
+          connectWithFallback(client, addrs, targetPort, (err, upstream) => {
             if (err) {
               client.write(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0])); // host unreachable
               client.destroy();
