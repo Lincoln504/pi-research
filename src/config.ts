@@ -143,11 +143,12 @@ export const ConfigSchema = Type.Object({
    *  the model's real maxTokens at call time.
    *  Not exposed in TUI — controlled via PI_RESEARCH_SYNTHESIS_MAX_TOKENS env var. */
   SYNTHESIS_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 32768 }),
-  /** LLM Model override for researcher sub-agents and knowledge synthesis.
+  /** LLM Model override for the evaluator/synthesis rounds and researcher sub-agents.
    *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
-   *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
-   *  and the knowledge synthesis background LLM. The coordinator and the research lead
-   *  always use the caller's model (ctx.model).
+   *  When set, this governs the evaluator/synthesis rounds and the researcher
+   *  sub-agents (both deep and quick) and the knowledge synthesis background LLM.
+   *  The initial coordinator (round 1 planning) uses the parent chat's model (ctx.model)
+   *  for prompt-cache continuity with the conversation that triggered research.
    */
   RESEARCH_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */

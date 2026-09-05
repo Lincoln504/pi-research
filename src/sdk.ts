@@ -279,11 +279,11 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
     let parsedProvider = options.provider || process.env['PI_RESEARCH_PROVIDER'];
 
-    // An EXPLICIT model option must govern the entire run — coordinator (via
-    // ctx.model) AND researchers/synthesis (which resolve through
-    // RESEARCH_MODEL, where config would otherwise outrank the option and split
-    // the run across two models, with the report metadata naming the wrong one).
-    // Pin the config to the explicit choice. No-op when the option was itself
+    // An EXPLICIT model option must govern the entire run — the initial
+    // coordinator (via ctx.model, same provider as the parent chat for prompt
+    // cache continuity), the evaluator/synthesis rounds, and researchers/
+    // synthesis (which resolve through RESEARCH_MODEL). Pin the config to the
+    // explicit choice so the run is consistent. No-op when the option was itself
     // seeded from the config (the CLI does that).
     if (options.model) {
       const explicit = typeof options.model === 'string'
@@ -317,10 +317,12 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     // Resolve the model. Precedence: explicit option (a Model object is used
     // as-is; it need not exist in the registry) → configured RESEARCH_MODEL →
     // provider default → registry fallback. Seeding the resolver with the
-    // configured model is what keeps the coordinator (which runs on ctx.model)
-    // on the SAME model as the researchers/synthesis (which read
-    // RESEARCH_MODEL themselves) — without it a configured model would govern
-    // only the sub-agents and planning would silently run on the fallback.
+    // configured model is what keeps the evaluator/synthesis rounds and
+    // researchers (which read RESEARCH_MODEL themselves) on the same model —
+    // without it a configured model would govern only the sub-agents and
+    // planning would silently run on the fallback. The initial coordinator
+    // (round 1) always uses ctx.model (the parent chat's model) for prompt-
+    // cache continuity, regardless of this seeding.
     if (effectiveModel && typeof effectiveModel === 'object' && (effectiveModel as any).id) {
       globalModel = effectiveModel as Model<any>;
     } else {

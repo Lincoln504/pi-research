@@ -343,7 +343,7 @@ import { safeGetApiKeyAndHeaders } from '../core/llm/model-registry-factory.ts';
 
 /**
  * Resolve the model to use for the background synthesis LLM.
- * Priority: RESEARCH_MODEL → ctx.model
+ * Priority: explicit modelId → RESEARCH_MODEL → ctx.model → fallback
  */
 function resolveSynthesisModel(ctx: ExtensionContext, config: Config): { model?: Model<any>; error?: string } {
   try {

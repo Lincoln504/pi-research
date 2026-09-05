@@ -104,13 +104,15 @@ export class DeepResearchOrchestrator {
     const observer = this.observer;
     const container = tryGetServiceContainerFromCtx(ctx);
 
-    // RESEARCH_MODEL contract (config.ts): the coordinator and evaluator always
-    // use the caller's model (ctx.model); RESEARCH_MODEL overrides only the
-    // researcher sub-agents. `model` is the resolved research model — it equals
-    // ctx.model on the SDK/CLI path, but on the pi-tool path it is the
-    // RESEARCH_MODEL override, so planning must key off ctx.model explicitly.
-    // Fall back to `model` when the host exposes no ctx.model.
-    const coordinatorModel = (ctx.model as Model<any> | undefined) ?? model;
+    // The initial coordinator/evaluator (round 1 planning) uses the
+    // parent chat's model (ctx.model) so the prompt-cache prefix is
+    // shared with the conversation that preceded the research tool call —
+    // same provider, same model, same cache lineage.
+    // Later evaluator rounds (round 2+ routing) and final synthesis
+    // use the research model (RESEARCH_MODEL override or host model),
+    // which is also what the researcher sub-agents use.
+    const initialCoordinatorModel = (ctx.model as Model<any> | undefined) ?? model;
+    const evaluatorModel = model;
     
     const orchestrationService = await this.getOrchestrationService();
     const planningService = await this.getPlanningService();
@@ -249,7 +251,7 @@ export class DeepResearchOrchestrator {
                 sessionId: researchId,
                 query,
                 complexity,
-                model: coordinatorModel,
+                model: initialCoordinatorModel,
                 modelRegistry: ctx.modelRegistry,
                 cwd: ctx.cwd,
                 config: this.config,
@@ -274,7 +276,7 @@ export class DeepResearchOrchestrator {
                 query: query,
                 complexity,
                 round: this.currentRound,
-                model: coordinatorModel,
+                model: evaluatorModel,
                 modelRegistry: ctx.modelRegistry,
                 cwd: ctx.cwd,
                 config: this.config,
@@ -568,7 +570,7 @@ export class DeepResearchOrchestrator {
           query: query,
           complexity,
           round: this.currentRound,
-          model: coordinatorModel,
+          model: evaluatorModel,
           modelRegistry: ctx.modelRegistry,
           cwd: ctx.cwd,
           config: this.config,
