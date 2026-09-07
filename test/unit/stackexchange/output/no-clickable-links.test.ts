@@ -108,7 +108,9 @@ describe('tool outputs contain no clickable hyperlinks', () => {
     let parse: ((s: string) => string) | undefined;
     try {
       const m = await import('marked');
-      parse = m.marked.parse.bind(m.marked);
+      // marked.parse has overloads that confuse .bind's typing — wrap instead.
+      const raw = m.marked.parse as (s: string) => string;
+      parse = (s: string) => raw(s);
     } catch {
       return; // not hoisted — structural tests above still hold
     }
