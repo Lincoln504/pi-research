@@ -70,6 +70,7 @@ export function createStackexchangeTool(options: {
       'Use tags to filter by specific topics.',
       'Use maxPages parameter to control pagination for search results (default: 5 pages).',
       `CRITICAL: You are allowed a maximum of ${getMaxGatheringCalls(options.config)} gathering calls across your web tools (search, security_search, stackexchange). Use them for breadth.`,
+      'URLs in results are wrapped in backticks on purpose: they are data, not clickable links. Never reformat them as markdown links — a click in the terminal opens a real browser tab.',
     ],
     parameters: StackExchangeParamsSchema,
     executionMode: 'parallel',

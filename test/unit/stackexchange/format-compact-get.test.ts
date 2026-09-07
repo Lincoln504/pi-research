@@ -64,8 +64,11 @@ describe('stackexchange — command=get, format=compact', () => {
     // Not the raw JSON.stringify fallback — a literal object-key dump.
     expect(text).not.toContain('"question_id"');
     expect(text).not.toContain('"answer_id"');
-    // The curated formatters' actual output.
-    expect(text).toContain('[How does async work in Rust?](https://stackoverflow.com/q/42)');
+    // The curated formatters' actual output. URLs are code-spanned (data,
+    // not clickable links) — see src/utils/plain-url.ts.
+    expect(text).toContain('How does async work in Rust?');
+    expect(text).toContain('`https://stackoverflow.com/q/42`');
+    expect(text).not.toMatch(/\[[^\]\n]*\]\([^)\s]*\)/);
     expect(text).toContain('by Ferris');
   });
 });

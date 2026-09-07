@@ -54,7 +54,7 @@ describe('stackexchange/output/table', () => {
       expect(result).toContain('## Question with accepted answer');
       expect(result).toContain('**Score:** 10');
       expect(result).toContain('**Answers:** 5 [accepted]');
-      expect(result).toContain('**Body:** Short body text');
+      expect(result).toContain('**Body:**\n\n```text\nShort body text\n```');
       expect(result).toContain('## Unanswered question');
       expect(result).toContain('**Score:** 5');
       expect(result).toContain('**Answers:** 0');
@@ -239,7 +239,7 @@ describe('stackexchange/output/table', () => {
       expect(result).toContain('**Reputation:** 1000');
       expect(result).toContain('**Badges:** gold:5 silver:10 bronze:20');
       expect(result).toContain('**Location:** San Francisco');
-      expect(result).toContain('**Website:** https://example.com');
+      expect(result).toContain('**Website:** `https://example.com`');
       
       expect(result).toContain('## MinimalUser');
       expect(result).toContain('**Reputation:** 100');
@@ -352,11 +352,11 @@ describe('stackexchange/output/table', () => {
       ];
 
       const result = formatCompactQuestions(questions);
-      expect(result).toContain('1. [Accepted question](https://stackoverflow.com/q/123) [accepted]');
+      expect(result).toContain('1. Accepted question [accepted] (score: 10, answers: 5) `https://stackoverflow.com/q/123`');
       expect(result).toContain('(score: 10, answers: 5)');
-      expect(result).toContain('2. [Unanswered question](https://stackoverflow.com/q/124)');
+      expect(result).toContain('2. Unanswered question  (score: 5, answers: 0) `https://stackoverflow.com/q/124`');
       expect(result).toContain('(score: 5, answers: 0)');
-      expect(result).toContain('3. [Downvoted with answers](https://stackoverflow.com/q/125)');
+      expect(result).toContain('3. Downvoted with answers  (score: -3, answers: 2) `https://stackoverflow.com/q/125`');
       expect(result).toContain('(score: -3, answers: 2)');
     });
 
@@ -370,7 +370,7 @@ describe('stackexchange/output/table', () => {
       }] as any;
 
       const result = formatCompactQuestions(questions);
-      expect(result).toContain('[Question 日本語 🎉]');
+      expect(result).toContain('Question 日本語 🎉');
     });
   });
 });

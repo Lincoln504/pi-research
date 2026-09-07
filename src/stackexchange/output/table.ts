@@ -3,6 +3,7 @@
  */
 
 import type { Question, Answer, User, Site } from '../types.ts';
+import { plainUrl, fenceBlock } from '../../utils/plain-url.ts';
 
 export function formatQuestionsTable(questions: Question[]): string {
   if (questions.length === 0) {
@@ -21,7 +22,10 @@ export function formatQuestionsTable(questions: Question[]): string {
     if (q.owner) {
       output += `- **Author:** ${q.owner.display_name} (rep: ${q.owner.reputation})\n`;
     }
-    output += `- **Link:** ${q.link}\n`;
+    // plainUrl: URLs in tool output are data, not interactive links — see
+    // plain-url.ts. Bare URLs would be GFM-autolinked into clickable OSC 8
+    // hyperlinks by markdown renderers (accidental browser-tab opens).
+    output += `- **Link:** ${plainUrl(q.link)}\n`;
     output += `- **Created:** ${new Date(q.creation_date * 1000).toLocaleString()}\n`;
 
     if (q.body) {
@@ -29,7 +33,13 @@ export function formatQuestionsTable(questions: Question[]): string {
       // previous `length < 1000` guard omitted the Body line for the longest
       // questions (the ones most in need of truncation).
       const body = q.body.length > 500 ? `${q.body.substring(0, 500)}...` : q.body;
-      output += `- **Body:** ${body}\n`;
+      // Third-party body text must never be rendered as markdown — it can
+      // carry arbitrary links (markdown injection → clickable browser tabs).
+      // The fence MUST start on its own line: CommonMark only recognizes a
+      // fenced code block when the opening fence begins the line; inline
+      // after "**Body:**" it degrades to paragraph text and marked renders
+      // embedded links clickable (verified against pi's bundled marked).
+      output += `- **Body:**\n\n${fenceBlock(body)}\n`;
     }
 
     output += '\n---\n\n';
@@ -62,7 +72,8 @@ export function formatAnswersTable(answers: Answer[]): string {
       // answers (same class as the question-body fix above; answers get a more
       // generous bound since the body is the whole point of an answer).
       const body = a.body.length > 2000 ? `${a.body.substring(0, 2000)}...` : a.body;
-      output += `\n### Answer Body\n\n${body}\n`;
+      // Same third-party-content rule as the question body above.
+      output += `\n### Answer Body\n\n${fenceBlock(body)}\n`;
     }
 
     output += '\n---\n\n';
@@ -89,9 +100,9 @@ export function formatUsersTable(users: User[]): string {
       output += `- **Location:** ${u.location}\n`;
     }
     if (u.website_url) {
-      output += `- **Website:** ${u.website_url}\n`;
+      output += `- **Website:** ${plainUrl(u.website_url)}\n`;
     }
-    output += `- **Profile:** ${u.link}\n`;
+    output += `- **Profile:** ${plainUrl(u.link)}\n`;
     output += '\n---\n\n';
   }
 
@@ -125,7 +136,7 @@ export function formatCompactQuestions(questions: Question[]): string {
   let index = 1;
   for (const q of questions) {
     const accepted = q.accepted_answer_id ? '[accepted]' : '';
-    output += `${index}. [${q.title}](${q.link}) ${accepted} (score: ${q.score}, answers: ${q.answer_count})\n`;
+    output += `${index}. ${q.title} ${accepted} (score: ${q.score}, answers: ${q.answer_count}) ${plainUrl(q.link)}\n`;
     index++;
   }
   return output;

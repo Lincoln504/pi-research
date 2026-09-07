@@ -3,6 +3,7 @@
  */
 
 import type { Question, Answer, User, Site } from '../types.ts';
+import { plainUrl } from '../../utils/plain-url.ts';
 
 export function formatQuestionsCompact(questions: Question[]): string {
   if (questions.length === 0) {
@@ -13,7 +14,7 @@ export function formatQuestionsCompact(questions: Question[]): string {
   let index = 1;
   for (const q of questions) {
     const accepted = q.accepted_answer_id ? '[accepted]' : '         ';
-    lines.push(`${index}. ${accepted} [${q.title}](${q.link}) (${q.score} pts, ${q.answer_count} ans, ${q.view_count} views)`);
+    lines.push(`${index}. ${accepted} ${q.title} (${q.score} pts, ${q.answer_count} ans, ${q.view_count} views) ${plainUrl(q.link)}`);
     index++;
   }
   return lines.join('\n');

@@ -70,8 +70,8 @@ describe('stackexchange/output/compact', () => {
       ];
       const result = formatQuestionsCompact(questions);
 
-      // Should handle empty title
-      expect(result).toContain('[]');
+      // Empty title: no markdown link anymore — marker + spacing collapse is fine.
+      expect(result).toMatch(/^1\. (\[accepted\] )? +\(-5 pts/);
       // Should handle negative score
       expect(result).toContain('(-5 pts');
       // Should handle special characters
