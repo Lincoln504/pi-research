@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **README: the hero image (the two-parallel-runs screenshot from the pi extension page) is now the README's feature image.** The static frame extracted from the deleted GIF lasted one day; the bundled `docs/media/hero.png` — two simultaneous research runs with the per-researcher panels — is the image actually representative of the tool, and the now-unneeded `prompt-research.png` frame is removed.
+
 ## [1.6.13] - 2026-09-08
 
 ### Changed
