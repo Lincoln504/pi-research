@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.13] - 2026-09-08
+
 ### Changed
 
 - **README: the model recommendation moved to the top and shrank to one sentence.** The long RESEARCH_MODEL paragraph that sat inside Requirements/limitations since the 2026-09-07 commit is now a bold "**Current recommended model:** [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter — cheap, intelligent, and fast." line above Install; the pricing/rate-limit detail was dropped.
@@ -17,9 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`npm ci` under npm 12 rejected the lockfile an `npm update` had rewritten** (this release cycle's own dep refresh): the rewrite dropped the `node-domexception@1.0.28` alias entry backing the `@nolyfill/domexception` override while leaving a stale real `node-domexception@1.0.0` copy nested under `@earendil-works/pi-coding-agent`. npm 11 (the local dev npm) accepted the tree; CI's npm 12 is stricter and failed every `npm ci --legacy-peer-deps` leg. The lockfile was regenerated with npm 12 itself, which collapses the stale nested copy so the override is the only resolution; `npm ci --legacy-peer-deps` now validates clean under both npm 11 and npm 12, and CI is green cross-OS.
+
 - **Stack Exchange tool output can no longer open a real browser tab when clicked.** The tool's formatters emitted markdown links (`[title](link)`) and bare URLs, and question/answer bodies carried third-party markup — any markdown-rendering surface (assistant replies, research reports, the terminal UI, which turns markdown links AND bare URLs into OSC 8 terminal hyperlinks and opens them in the system browser on mouse press+release) turned these into click-to-open-tab targets in the middle of scrolling tool output. New `src/utils/plain-url.ts` fixes this at the source, cross-platform and renderer-independent: `plainUrl()` wraps every emitted URL in backticks (code spans tokenize before autolink/link parsing in every CommonMark renderer, so a code-spanned URL can never become a link but stays byte-exact and copyable for the model), and `fenceBlock()` wraps third-party body content in a fenced code block whose length grows past any backtick run in the content (embedded links, headings and tables render inert; content containing its own ``` fences cannot close the fence early). All stackexchange formatters (questions, answers, users, sites, compact variants, and the `get`+compact path) now emit code-spanned URLs and own-line-fenced bodies — fence placement matters: an opening fence inline after `- **Body:**` is NOT recognized as a code block by CommonMark and was verified (against pi's bundled `marked`) to still render embedded links clickable, so the fence starts on its own line. The tool's prompt guidelines now also instruct the model never to re-emit result URLs as markdown links, covering the assistant-echo path. Pinned by `test/unit/stackexchange/output/no-clickable-links.test.ts`, which scans each formatter's clickable surface (post code-span/fence stripping) for link syntax and — when `marked` is resolvable — renders the actual output and asserts zero anchor elements.
 
 - **CI: declare `vite` as an explicit devDependency.** CI installs with `--legacy-peer-deps`, which skips peer dependency resolution — `vite` was only reachable as a transitive peer and the install could not resolve it. Now declared directly.
+
+### Verified
+
+- 3,064 unit tests over 242 files, ESLint clean, all four type-checks (TS 6 src + tests, TS 7 native src + tests), dependency-cruiser and madge clean (190 modules, no circular dependencies), build, and `npm ci --dry-run` manifest verification; `npm audit` reports 0 vulnerabilities. The packed tarball was installed into a clean project: pi 0.85.1 resolves fresh, the documented dual apache-arrow layout (21.1.0 nested / 18.1.0 hoisted for LanceDB) reproduces, and the installed CLI boots. CI green cross-OS (ubuntu ×2, macOS, Windows) including the consumer fresh-install and Arrow/LanceDB interop legs.
 
 ## [1.6.11] - 2026-09-04
 
