@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.14] - 2026-09-08
+
 ### Changed
 
 - **README: the hero image (the two-parallel-runs screenshot from the pi extension page) is now the README's feature image.** The static frame extracted from the deleted GIF lasted one day; the bundled `docs/media/hero.png` — two simultaneous research runs with the per-researcher panels — is the image actually representative of the tool, and the now-unneeded `prompt-research.png` frame is removed.
@@ -21,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dependency refresh, lockfile-only: `@earendil-works/*` 0.85.0→0.85.1 and `@typescript-eslint/*` 8.69→8.70.** Both are within the existing package.json ranges, so consumer installs are unaffected by the lockfile change itself — a fresh install already resolves 0.85.1 (verified by packing the tarball and installing it into a clean project: pi 0.85.1 resolves, the documented dual apache-arrow layout reproduces, `pi-research --help` boots). `PI_TESTED_MAX_VERSION` compares on major.minor only, so the patch stays inside the tested window with no warning. Deliberate holds unchanged: apache-arrow 21.1.0 (LanceDB IPC), playwright-core 1.60.0 (camoufox < 1.61), typescript < 6.1.0 (eslint peer ceiling).
 
+- **README prose fixes: the last abstraction-speak is gone.** The "Read-only by design" bullet no longer claims the tool is "the right shape" for anything (a metaphor with no referent); it now states the two facts plainly: the research agent cannot run shell commands or write, edit, or delete anything, and prompt injection picked up mid-run has nothing to act on. "Breaks first" on the git-install channel is spelled out as "receives breaking changes first", and the model-recommendation line's stray em dash (the README was purged of them in the 1.6.9 cycle) is a colon now.
+
 ### Fixed
 
 - **`npm ci` under npm 12 rejected the lockfile an `npm update` had rewritten** (this release cycle's own dep refresh): the rewrite dropped the `node-domexception@1.0.28` alias entry backing the `@nolyfill/domexception` override while leaving a stale real `node-domexception@1.0.0` copy nested under `@earendil-works/pi-coding-agent`. npm 11 (the local dev npm) accepted the tree; CI's npm 12 is stricter and failed every `npm ci --legacy-peer-deps` leg. The lockfile was regenerated with npm 12 itself, which collapses the stale nested copy so the override is the only resolution; `npm ci --legacy-peer-deps` now validates clean under both npm 11 and npm 12, and CI is green cross-OS.
@@ -31,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verified
 
-- 3,064 unit tests over 242 files, ESLint clean, all four type-checks (TS 6 src + tests, TS 7 native src + tests), dependency-cruiser and madge clean (190 modules, no circular dependencies), build, and `npm ci --dry-run` manifest verification; `npm audit` reports 0 vulnerabilities. The packed tarball was installed into a clean project: pi 0.85.1 resolves fresh, the documented dual apache-arrow layout (21.1.0 nested / 18.1.0 hoisted for LanceDB) reproduces, and the installed CLI boots. CI green cross-OS (ubuntu ×2, macOS, Windows) including the consumer fresh-install and Arrow/LanceDB interop legs.
+- 3,064 unit tests over 242 files, ESLint clean, all four type-checks (TS 6 src + tests, TS 7 native src + tests), dependency-cruiser and madge clean (190 modules, no circular dependencies), build, and `npm ci --dry-run` manifest verification; `npm audit` reports 0 vulnerabilities. The packed tarball was installed into a clean project: pi 0.85.1 resolves fresh, the documented dual apache-arrow layout (21.1.0 nested / 18.1.0 hoisted for LanceDB) reproduces, and the installed CLI boots. CI green cross-OS (ubuntu ×2, macOS, Windows) including the consumer fresh-install and Arrow/LanceDB interop legs. For this cycle additionally: the tarball installed and the CLI booted under npm 10, npm 11, and npm 12 alike, with the dual apache-arrow layout identical across all three.
 
 ## [1.6.11] - 2026-09-04
 
