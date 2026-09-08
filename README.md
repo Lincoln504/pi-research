@@ -57,7 +57,7 @@ In pi, the extension works out of the box on the session's model and pi's config
 
 ### Uninstall
 
-`pi remove npm:@lincoln504/pi-research` removes the extension. `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. npm 7+ no longer runs `preuninstall`, so **nothing else is removed on its own**: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents). The shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
+`pi remove npm:@lincoln504/pi-research` removes the extension. `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. npm 7+ no longer runs `preuninstall`, so nothing else is removed on its own: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents). The shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
 
 ### How it works
 
@@ -76,10 +76,10 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 ### Why
 
-- **No quota and no monthly fee.** Most AI search providers cap free searches and then charge, serving results from their own index. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
-- **The index is local.** Findings can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs. Repeat questions get faster and cheaper answers.
-- **Read-only by design.** The research agent cannot run shell commands or write, edit, or delete anything. Prompt injection picked up mid-run has nothing to act on.
-- **Search a little or a lot.** Depth levels range from a quick pass to a large-scale investigation.
+- No quota and no monthly fee. Most AI search providers cap free searches and then charge, serving results from their own index. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
+- The index is local. Findings can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs. Repeat questions get faster and cheaper answers.
+- Read-only by design. The research agent cannot run shell commands or write, edit, or delete anything. Prompt injection picked up mid-run has nothing to act on.
+- Search a little or a lot. Depth levels range from a quick pass to a large-scale investigation.
 
 ### Requirements / limitations
 
@@ -87,7 +87,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - An LLM with a 100k+ context window (an API key or a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
-- Local knowledge-store embeddings need `@huggingface/transformers`, an **optional dependency**. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
+- Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
 
 ### Channels

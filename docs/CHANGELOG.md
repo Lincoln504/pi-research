@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **README: the recommended-model line is now the only bold text.** The Why-bullet lead-ins (No quota and no monthly fee / The index is local / Read-only by design / Search a little or a lot), the uninstall emphasis, and the optional-dependency emphasis are plain text now.
+
+### Changed
+
 - **README: full prose pass.** The recommended-model line is just the model name now. Semicolons became ordinary sentences, the staccato all-short-sentence draft was re-mixed into natural sentence rhythm, the How-it-works round loop is spelled out concretely (coordinator plans and starts the search, researchers scrape in parallel, the lead starts another round or writes the report), and the install/uninstall/use-cases/requirements sections were tightened.
 
 ## [1.6.14] - 2026-09-08
