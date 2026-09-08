@@ -34,7 +34,7 @@
 
 Search and scraping run locally through a stealth browser with no search provider and no monthly cap. The only cost is LLM tokens.
 
-**Current recommended model:** [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter — cheap, intelligent, and fast.
+**Current recommended model:** [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter: cheap, intelligent, and fast.
 
 ### Install
 
@@ -83,7 +83,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 - **No quota and no monthly fee.** Most AI search providers cap free searches and then charge, with results served from their index on their servers. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
 - **The index is local.** Every finding can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs, so repeat questions get faster and cheaper answers.
-- **Read-only by design.** The research agent cannot run shell commands or write, edit, or delete anything, which is the right shape for an agent whose whole job is reading untrusted web pages. Prompt injection picked up mid-run has nothing to act on.
+- **Read-only by design.** The research agent cannot run shell commands or write, edit, or delete anything. Prompt injection picked up mid-run has nothing to act on.
 - **Search a little or a lot.** Depth levels range from a quick pass to a large-scale investigation.
 
 ### Requirements / limitations
@@ -97,7 +97,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 ### Channels
 
-npm (`npm:@lincoln504/pi-research`) is the stable channel and is kept current with breaking pi changes. A git install is the development channel. It has the latest commits and breaks first.
+npm (`npm:@lincoln504/pi-research`) is the stable channel and is kept current with breaking pi changes. A git install is the development channel. It has the latest commits, and receives breaking changes first.
 
 ### License
 
