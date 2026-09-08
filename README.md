@@ -34,6 +34,8 @@
 
 Search and scraping run locally through a stealth browser with no search provider and no monthly cap. The only cost is LLM tokens.
 
+**Current recommended model:** [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter — cheap, intelligent, and fast.
+
 ### Install
 
 As a [Pi](https://github.com/earendil-works/pi) Coding Agent extension:
@@ -88,7 +90,6 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 - Node.js >= 22.19.0
 - An LLM with a 100k+ context window (an API key or a local model)
-- On OpenRouter, `inclusionai/ling-3.0-flash` is a proven low-cost workhorse for driving runs: $0.021 input / $0.063 output per Mtok with a 262k context window — the cheapest capable model on the platform at time of writing — with reliable strict-JSON planning output and fast synthesis (verified over extended production use). The `:free` variants (`ling-3.0-flash-fin:free`) work for light usage but are subject to free-tier rate limits. Note: `ling-3.0-tiny` currently has no serving endpoints on OpenRouter and cannot be called.
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
 - Local knowledge-store embeddings need `@huggingface/transformers`, which is an **optional dependency**: if its native image chain (sharp) cannot install on your machine, npm skips it with a warning, the install still succeeds, and everything except local embeddings works. The store disables embeddings gracefully with a message telling you how to restore them.
