@@ -70,7 +70,7 @@ A research run loops through agent teams: a coordinator plans and starts with a 
 
 Three depth levels (normal, deep, ultra) set the team size and number of rounds. A natural-language request is enough; the tool picks the right one:
 
-![Prompt-driven multi-round research in the pi TUI](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/02-prompt-research.gif)
+![Prompt-driven multi-round research in the pi TUI](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/prompt-research.png)
 
 ### Use cases
 
