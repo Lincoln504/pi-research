@@ -32,9 +32,9 @@
 <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-97ca00?style=flat-square" /></a><br />
 <a href="https://github.com/Lincoln504/pi-research"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-Lincoln504%2Fpi--research-181717?style=flat-square&logo=github&logoColor=white" /></a>
 
-Search and scraping run locally through a stealth browser with no search provider and no monthly cap. The only cost is LLM tokens.
+Search and scraping run locally in a stealth browser, with no search provider and no monthly cap. The only cost is LLM tokens.
 
-**Current recommended model:** [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter: cheap, intelligent, and fast.
+**Current recommended model:** [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter.
 
 ### Install
 
@@ -51,38 +51,33 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-No extra setup is needed. The package uses no install scripts: it ships
-ready-made bindings for every platform, and the stealth browser (~500MB)
-downloads on first use, so the first scrape takes a few minutes. npm ≥11.19
-skips install scripts by default; leave it that way, nothing needs approving
-or building. Only Windows with npm older than 11.19 can fail when the install
-tries to compile from source; upgrading npm fixes it.
+No extra setup is needed. The package ships ready-made bindings for every platform and runs no install scripts. The stealth browser (~500MB) downloads on first use, so the first scrape takes a few minutes. npm ≥11.19 skips install scripts by default. Leave it that way: nothing needs approving or building. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
 
-In pi it works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
+In pi, the extension works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
 ### Uninstall
 
-`pi remove npm:@lincoln504/pi-research` removes the extension, and `npm uninstall -g @lincoln504/pi-research` the standalone engine. npm 7+ no longer runs `preuninstall`, so **nothing else is removed on its own**: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents); the shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
+`pi remove npm:@lincoln504/pi-research` removes the extension. `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. npm 7+ no longer runs `preuninstall`, so **nothing else is removed on its own**: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents). The shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
 
 ### How it works
 
-A research run loops through agent teams: a coordinator plans and starts with a search, researcher agents scrape and read in parallel, and a research lead decides whether to go another round, then writes the report from every report collected. The result is one cited Markdown report with findings optionally saved to the knowledge store.
+A research run works in rounds. A coordinator plans each round and starts the first search, researcher agents scrape and read pages in parallel, and a research lead then either starts another round or writes the final report from everything collected. The result is one cited Markdown report, optionally saved to the knowledge store.
 
-Three depth levels (normal, deep, ultra) set the team size and number of rounds. A natural-language request is enough; the tool picks the right one:
+Three depth levels (normal, deep, ultra) set the team size and number of rounds. Just describe what you need in plain language, and the tool picks the right one:
 
 ![Two research runs in parallel in the pi TUI](https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/hero.png)
 
 ### Use cases
 
-- Researching inside pi. Plug and play with no API key needed.
-- Researching from Claude Code, Codex, or another coding agent while a cheaper or local model drives the run, so it doesn't spend the main agent's budget.
-- Keeping a persistent and searchable knowledge store of findings, scoped globally or per project.
-- Building agent systems that find and read web content, or populating a dataset of web sources.
+- Researching inside pi. No API key needed.
+- Researching from Claude Code, Codex, or another coding agent while a cheaper or local model drives the run. The main agent's budget stays untouched.
+- Saving findings to a persistent, searchable knowledge store, scoped globally or per project.
+- Building agent systems that find and read web content, or collecting a dataset of web sources.
 
 ### Why
 
-- **No quota and no monthly fee.** Most AI search providers cap free searches and then charge, with results served from their index on their servers. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
-- **The index is local.** Every finding can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs, so repeat questions get faster and cheaper answers.
+- **No quota and no monthly fee.** Most AI search providers cap free searches and then charge, serving results from their own index. pi-research searches and scrapes locally through DuckDuckGo in a stealth browser.
+- **The index is local.** Findings can be saved to a local [LanceDB](https://lancedb.com) knowledge store that seeds future runs. Repeat questions get faster and cheaper answers.
 - **Read-only by design.** The research agent cannot run shell commands or write, edit, or delete anything. Prompt injection picked up mid-run has nothing to act on.
 - **Search a little or a lot.** Depth levels range from a quick pass to a large-scale investigation.
 
@@ -92,12 +87,12 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - An LLM with a 100k+ context window (an API key or a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
-- Local knowledge-store embeddings need `@huggingface/transformers`, which is an **optional dependency**: if its native image chain (sharp) cannot install on your machine, npm skips it with a warning, the install still succeeds, and everything except local embeddings works. The store disables embeddings gracefully with a message telling you how to restore them.
+- Local knowledge-store embeddings need `@huggingface/transformers`, an **optional dependency**. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
 
 ### Channels
 
-npm (`npm:@lincoln504/pi-research`) is the stable channel and is kept current with breaking pi changes. A git install is the development channel. It has the latest commits, and receives breaking changes first.
+npm (`npm:@lincoln504/pi-research`) is the stable channel and is kept current with breaking pi changes. A git install is the development channel. It has the latest commits and receives breaking changes first.
 
 ### License
 
