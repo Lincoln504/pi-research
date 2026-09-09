@@ -69,7 +69,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 ### Use cases
 
-- Researching inside pi. No API key needed.
+- Researching inside pi. No search subscription needed.
 - Researching from Claude Code, Codex, or another coding agent while a cheaper or local model drives the run. The main agent's budget stays untouched.
 - Saving findings to a persistent, searchable knowledge store, scoped globally or per project.
 - Building agent systems that find and read web content, or collecting a dataset of web sources.
