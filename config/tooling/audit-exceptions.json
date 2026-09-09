@@ -1,4 +1,13 @@
 {
   "comment": "Documented exceptions for the production npm-audit release gate (scripts/audit-gate.cjs). Two shapes: (1) per-GHSA {id,...} allowlists ONE advisory; (2) location-scoped {package, locationContains,...} allowlists ANY advisory for `package` whose EVERY affected install path contains `locationContains` \u2014 for a transitive pinned inside an upstream npm-shrinkwrap.json (unfixable downstream), so each new disclosure for that frozen copy need not be re-listed. The 'every node in scope' rule keeps location-scoping precise: it fires only when no remediable copy is affected. Any advisory NOT matched (per-id or location) still fails the gate at moderate+. Every entry must carry reason, clearsWhen, reviewed. Re-verify at every release; the gate warns on stale entries.",
-  "exceptions": []
+  "exceptions": [
+    {
+      "id": "GHSA-vwc7-r8mq-g2x9",
+      "package": "adm-zip",
+      "severity": "moderate",
+      "reason": "adm-zip 0.5.9-0.6.0 follows symbolic links at the extraction destination (CVE-2026-76845), so an archive whose path component at the destination is a pre-existing symlink pointing outside the root gets written through it. Unfixable here: first_patched_version on the advisory is null and adm-zip 0.6.0 (published 2026-07-10) is the newest release ever published, so no patched version exists to bump or npm-override to — remediation is impossible in this repo until upstream ships a fix. The vulnerable copy enters the production tree as a single deduped node_modules/adm-zip that is a direct dependency of both onnxruntime-node (via @huggingface/transformers, used in this package only for text embeddings) and camoufox-js. Exposure is low: the advisory requires extracting an attacker-controlled archive containing symlink entries, and the archives extracted at this package's runtime are trusted upstream release artifacts fetched over HTTPS (onnxruntime native binaries, the camoufox browser build) — never attacker-controlled input.",
+      "clearsWhen": "adm-zip publishes a release outside the vulnerable range >=0.5.9 <=0.6.0 (a patched 0.6.1+ or 0.7) AND the pinning parents (onnxruntime-node, camoufox-js) resolve to it; at that point remove this entry, add a temporary override if a parent lags, and re-run the gate.",
+      "reviewed": "2026-09-09"
+    }
+  ]
 }
