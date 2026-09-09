@@ -34,7 +34,7 @@
 
 Search and scraping run locally in a stealth browser, with no search provider and no monthly cap. The only cost is LLM tokens.
 
-Currently recommended model to configure for research: [`inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash) on OpenRouter.
+Currently recommended model to configure for research: [`openrouter/inclusionai/ling-3.0-flash`](https://openrouter.ai/inclusionai/ling-3.0-flash).
 
 ### Install
 
