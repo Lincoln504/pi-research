@@ -349,7 +349,7 @@ mismatch.
 Pinned data stack — `apache-arrow` is a direct dependency at `21.1.0`, and `overrides`
 forces the whole tree to that single version so LanceDB and Arrow share one Arrow instance
 (mismatched Arrow copies do not interoperate — arrays built by one are rejected by the
-other). This sits above `@lancedb/lancedb` 0.37's declared Arrow peer ceiling
+other). This sits above `@lancedb/lancedb` 0.38's declared Arrow peer ceiling
 (`>=15.0.0 <=18.1.0`) — npm will not even resolve the pairing without the override — and
 it is verified working, but it should be re-validated whenever `@lancedb/lancedb` is
 upgraded.
@@ -360,13 +360,17 @@ schema that Arrow 21.2 writes, failing every table open with
 `Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer:
 RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` — 56 unit and 36
 integration tests, every one that touches a real table. Do not treat this range as
-caret-safe. Note also that every `@lancedb/lancedb` release through 0.37 declares the same
+caret-safe. Re-verified on 2026-09-09 against `@lancedb/lancedb` 0.38.0 (the knowledge-store
+unit suite fails identically on 21.2.0 there). Note also that every `@lancedb/lancedb` release
+through 0.38 declares the same
 `<=18.1.0` Arrow ceiling, so upgrading LanceDB does not resolve the override; it only
 changes which pairing needs re-validating.
 
 Pinned validation library — `typebox` is pinned to the exact version the pi host packages
 depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` pin `1.3.7` across
-the 0.84.x line). Every
+the 0.84.x AND 0.85.x lines — verified against both 0.85.0 and 0.85.1 on 2026-09-09, after
+an undocumented 1.3.26 drift was caught and realigned; 3,064 unit tests and all four
+type-checks pass against 1.3.7). Every
 tool's parameter schema is built with TypeBox here and handed across the boundary to pi's
 tool system, so the two must agree on `Value.Check`/`Convert` semantics. A floating `^1.1.38`
 range let a fresh consumer install resolve pi-research to a newer TypeBox than pi's, shipping
