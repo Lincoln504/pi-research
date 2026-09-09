@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **README: the adm-zip limitation bullet is trimmed to its essentials.** It no longer walks through the consumer-CI consequence (`npm audit` exiting nonzero until the upstream fix ships) or re-states the verified mechanics — installs succeed, don't run `npm audit fix --force`, details in `docs/AUDIT-GATE.md` — because pi-research is a research tool, not a CI component, and the full verified impact matrix lives in the runbook. No behavioral or dependency change.
+
 ## [1.6.16] - 2026-09-09
 
 ### Added
