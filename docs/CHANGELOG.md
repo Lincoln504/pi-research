@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README: the recommended-model line is now the only bold text.** The Why-bullet lead-ins (No quota and no monthly fee / The index is local / Read-only by design / Search a little or a lot), the uninstall emphasis, and the optional-dependency emphasis are plain text now.
 
+### Added
+
+- **`docs/AUDIT-GATE.md`: the audit-gate runbook, with reinvestigation directions for every allowlisted advisory.** Covers the triage order (remediate, then override, then allowlist), the required evidence and fields for an exception entry, the reinvestigation triggers (stale-entry warnings, every release, new GHSA, upstream fix PR), and the concrete checklist for the current adm-zip entry (watch cthackers/adm-zip PR #575, check parent ranges, and never take the downgrade "fix", which reintroduces the HIGH CVE-2026-39244). It also documents, verified empirically on npm 11.19.0, what consumers of the published package see: installs and `pi install` succeed with a warning, `npm audit` exits 1, and `npm audit fix --force` ping-pongs between two vulnerable adm-zip versions. The README limitations section states the consumer-visible part; the exceptions JSON, `scripts/audit-gate.cjs`, and both workflows point at the runbook.
+
 ### Changed
 
 - **README: full prose pass.** The recommended-model line is just the model name now. Semicolons became ordinary sentences, the staccato all-short-sentence draft was re-mixed into natural sentence rhythm, the How-it-works round loop is spelled out concretely (coordinator plans and starts the search, researchers scrape in parallel, the lead starts another round or writes the report), and the install/uninstall/use-cases/requirements sections were tightened.

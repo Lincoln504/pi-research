@@ -135,6 +135,7 @@ jobs:
           # block releases, but every OTHER advisory still must — a raw
           # `--audit-level` threshold cannot express that; the reviewed allowlist can.
           # Full details still surface (informational) in the job summary below.
+          # Triage runbook and per-exception reinvestigation checklists: docs/AUDIT-GATE.md.
           npm audit --omit=dev --json > /tmp/audit-prod.json 2>&1 || true
           node scripts/audit-gate.cjs || AUDIT_FAILED=$?
           npm audit --json > /tmp/audit-full.json 2>&1 || true

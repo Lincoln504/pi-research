@@ -34,6 +34,9 @@
  *
  * The pure matching logic is exported as `classifyAdvisories` so it can be unit
  * tested without shelling out to `npm audit`.
+ *
+ * Triage runbook, exception-writing rules, and per-exception reinvestigation
+ * checklists: docs/AUDIT-GATE.md.
  */
 
 const { spawnSync } = require('node:child_process');

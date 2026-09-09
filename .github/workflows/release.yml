@@ -155,6 +155,7 @@ jobs:
       # publish on any moderate+ advisory in the SHIPPED tree that is not explicitly
       # allowlisted (with a reviewed upstream-blocked justification) in
       # config/tooling/audit-exceptions.json. See scripts/audit-gate.cjs.
+      # Triage runbook and per-exception reinvestigation checklists: docs/AUDIT-GATE.md.
       - name: Audit production dependencies
         run: node scripts/audit-gate.cjs
       - run: npm run type-check

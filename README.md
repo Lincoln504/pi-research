@@ -89,6 +89,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
 - Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
+- npm reports 1 moderate advisory (adm-zip, pulled in by onnxruntime and the camoufox browser downloader) for anything that installs this package. Installs themselves succeed; only a `npm audit` step in your own CI will exit nonzero until the upstream fix ships. See [docs/AUDIT-GATE.md](docs/AUDIT-GATE.md) for the verified details, and do not run `npm audit fix --force` against it (npm's suggested downgrade reintroduces a high-severity advisory).
 
 ### Channels
 
