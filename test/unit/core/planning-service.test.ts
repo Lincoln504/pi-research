@@ -500,8 +500,9 @@ describe('PlanningService', () => {
       // Coordinator uses PLANNING_MAX_TOKENS (default 16384), clamped to the model ceiling
       // (STUB_MODEL has no maxTokens so the default is the binding cap) — no longer the old 4096.
       expect(callOptions.maxTokens).toBe(16384);
-      // Thinking is off by default for the engine's structured-JSON calls.
-      expect(callOptions.reasoning).toBe('off');
+      // Thinking is off by default for the engine's structured-JSON calls;
+      // off crosses into the compat API as undefined, not a literal string.
+      expect(callOptions.reasoning).toBeUndefined();
     });
   });
 
