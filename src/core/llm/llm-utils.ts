@@ -14,10 +14,8 @@ import { completeSimple } from './pi-ai-completion.ts';
  *
  * - Ensures maxTokens is always set (satisfies providers that reject a null cap),
  *   clamped to the model's own ceiling so a large requested cap is never invalid.
- * - Sets the chain-of-thought "thinking" level, defaulting to 'off'. This is passed
- *   straight to pi-ai, which clamps it to whatever the specific model/provider
- *   supports (disabling thinking where an off state exists, omitting the parameter
- *   where it does not). The fix is therefore model-agnostic — pi-ai owns the
+ * - Sets the chain-of-thought "thinking" level, defaulting to 'off' (normalized to
+ *   undefined at the compat boundary, see the reasoning line below). pi-ai owns the
  *   per-provider translation; this code never hardcodes a provider-specific payload.
  *   'off' is deliberate: these engine calls emit structured JSON / cited reports, so a
  *   thinking block only consumes the output-token budget (often truncating before the
@@ -47,9 +45,9 @@ export function buildSafeOptions(
     ...options,
     // Ensure maxTokens is never null/None to avoid provider-side crashes
     maxTokens: options.maxTokens ?? Math.min(defaultCap, model.maxTokens || defaultCap),
-    // 'off' is a valid ModelThinkingLevel that pi-ai accepts at runtime even though the
-    // public SimpleStreamOptions.reasoning type narrows to the non-off ThinkingLevel.
-    reasoning: effective as unknown as SimpleStreamOptions['reasoning'],
+    // compat API treats any truthy reasoning as thinking-enabled; 'off' has no budget
+    // entry, so it would send maxTokens as NaN. undefined is its no-reasoning value.
+    reasoning: effective === 'off' ? undefined : (effective as SimpleStreamOptions['reasoning']),
   };
 }
 
