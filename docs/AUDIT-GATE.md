@@ -76,7 +76,25 @@ Re-examine every exception entry when any of these happens:
 
 ## Current exceptions and their reinvestigation checklists
 
-### adm-zip: GHSA-vwc7-r8mq-g2x9 (CVE-2026-76845, moderate, allowlisted 2026-09-09)
+None. The audit gate runs with an empty allowlist: `npm audit --omit=dev` reports zero
+vulnerabilities as of 2026-09-16.
+
+### Cleared: adm-zip GHSA-vwc7-r8mq-g2x9 (CVE-2026-76845) — fixed upstream, entry removed 2026-09-16
+
+The worked example below is retained because it documents the triage method, but the exception
+itself is GONE: adm-zip **0.6.1** (published 2026-09-11, tag `cb2cf9b`) contains the upstream fix
+(cthackers/adm-zip PR #575, commit `eaa35fa` "Blocked extraction from writing through symlinks
+inside the target", plus hardening: setuid/setgid/sticky bits stripped from extracted permissions,
+addLocalFolder no longer follows symlinks out of the archived folder). The GitHub advisory page
+currently still reads "patched versions: None" (last reviewed 2026-09-08, three days before the
+release), but the affected range `>=0.5.9 <=0.6.0` excludes 0.6.1, so `npm audit` is clean. Both
+pinning parents (`onnxruntime-node` and `camoufox-js`, each requiring `^0.6.0`) resolve 0.6.1
+without any override; the `adm-zip` override in `package.json` was moved to `^0.6.1` to pin the
+floor explicitly. Consumers clear the advisory as soon as their lockfiles re-resolve adm-zip
+(a fresh `npm install` suffices — no override needed on their side, and any consumer-side
+allowlist or suppression for this GHSA can be removed).
+
+### adm-zip: GHSA-vwc7-r8mq-g2x9 (CVE-2026-76845, moderate, allowlisted 2026-09-09 — CLEARED, see above)
 
 Symlink following at the extraction destination (CWE-59) in adm-zip 0.5.9 through 0.6.0. Reaches
 the shipped tree as one deduped copy required by `onnxruntime-node` (via
@@ -96,7 +114,12 @@ the shipped tree as one deduped copy required by `onnxruntime-node` (via
    override), delete this entry, re-run the gate and its unit tests, and re-run
    `npm audit --omit=dev` to confirm zero blocking advisories.
 
-## What consumers of the published package see (verified empirically, npm 11.19.0, 2026-09-09)
+## What consumers of the published package see (verified empirically, npm 11.19.0, 2026-09-16)
+
+Clean since adm-zip 0.6.1 reached the tree (2026-09-16): `npm audit --omit=dev` reports zero
+vulnerabilities and this package contributes none. The historical findings below are kept because
+they document how the advisory behaved while the vulnerable tree was present (before consumer
+lockfiles re-resolve adm-zip):
 
 - `npm install` (project or global) with this package in the tree **succeeds, exit 0**. npm prints
   "1 moderate severity vulnerability" as a warning; nothing blocks or fails.

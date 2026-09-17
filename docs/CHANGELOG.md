@@ -5,11 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.18]
+
+### Fixed
+
+- **`buildSafeOptions` no longer sends the literal `'off'` reasoning level into pi-ai's compat API (merged PR #13 by @lukey03).** pi-ai 0.85.1's compat path treats any truthy `reasoning` as thinking-enabled, and `'off'` has no entry in its thinking-budget table, so `maxTokens` was computed as `NaN` and serialized as `max_tokens: null` — every coordinator/plan call 400'd on providers that validate the cap (observed on Fireworks' anthropic-messages endpoint, where research never got past the first planning call). `'off'` now crosses the boundary as `undefined`, pi-ai's no-reasoning value; explicit non-off levels, caller precedence, and the maxTokens cap are unchanged. The new `build-safe-options.test.ts` drives the real compat `completeSimple` against a stubbed transport and asserts on the actual request body (5 of its 9 tests fail pre-patch); the one coordinator-boundary assertion that expected the literal `'off'` was updated to the compat contract.
+
+### Security
+
+- **The adm-zip allowlist exception is REMOVED — the advisory is fixed upstream and the production audit is clean.** `adm-zip` 0.6.1 (published 2026-09-11) contains the fix for GHSA-vwc7-r8mq-g2x9 / CVE-2026-76845 (cthackers/adm-zip PR #575, commit `eaa35fa`: extraction no longer writes through destination symlinks, plus setuid/setgid/sticky-bit stripping and related symlink hardening) — the exact `clearsWhen` condition the 1.6.16 exception documented. The `adm-zip` override moves `^0.6.0` → `^0.6.1` to pin the floor explicitly; both parents (`onnxruntime-node`, `camoufox-js`) already resolve 0.6.1 from their own `^0.6.0` ranges, so consumers clear the advisory with a fresh install and can drop any suppression they added. `config/tooling/audit-exceptions.json` is now empty and `npm audit --omit=dev` reports zero vulnerabilities; `docs/AUDIT-GATE.md` keeps the worked example as the triage runbook and records the clearance (the GitHub advisory page still read "patched versions: None" as of 2026-09-16 — its last review predates the release by three days).
 
 ### Changed
 
-- **README: the adm-zip limitation bullet is trimmed to its essentials.** It no longer walks through the consumer-CI consequence (`npm audit` exiting nonzero until the upstream fix ships) or re-states the verified mechanics — installs succeed, don't run `npm audit fix --force`, details in `docs/AUDIT-GATE.md` — because pi-research is a research tool, not a CI component, and the full verified impact matrix lives in the runbook. No behavioral or dependency change.
+- **README: the "Currently recommended model" line is removed** (leaving the README with no model endorsement), and the leftover double blank line it left behind is fixed.
+- **Dev dependency lockfile refresh, all in-range: `vitest` 5.0.0 → 5.0.1, `@vitest/coverage-v8` 5.0.0 → 5.0.1, `vite` 8.2.2 → 8.3.0, `dependency-cruiser` 18.2.0 → 18.3.1, `jsdom` 30.0.1 → 30.1.0, `webgpu` 0.6.0 → 0.6.1.** Deliberate holds re-verified and unchanged: `typebox` stays 1.3.7 (lockstep with the host pi 0.85.1 line), `apache-arrow` stays 21.1.0 (21.2.0 breaks LanceDB IPC), `playwright-core` stays 1.60.0 (camoufox-js 0.12.0 peers `<1.61.0`), `typescript` stays `<6.1.0` (@typescript-eslint peer ceiling), and `@huggingface/transformers` stays 4.2.0 (4.3.0 pulls an `onnxruntime-web` dev build, `1.31.0-dev.20260914`, and reshuffles the optional native stack for no needed gain). The full gate suite is green: lint, all four type-checks (TS 6 and TS 7 native, src and tests), 3,073 unit tests, dependency-cruiser, build + manifest verify, and the audit gate with an empty allowlist.
 
 ## [1.6.16] - 2026-09-09
 

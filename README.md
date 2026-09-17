@@ -34,7 +34,6 @@
 
 Search and scraping run locally in a stealth browser, with no search provider and no monthly cap. The only cost is LLM tokens.
 
-
 ### Install
 
 As a [Pi](https://github.com/earendil-works/pi) Coding Agent extension:
@@ -88,7 +87,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
 - Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
-- npm reports 1 moderate advisory (adm-zip, pulled in by onnxruntime and the camoufox browser downloader). Installs are unaffected; just don't run `npm audit fix --force` (its suggested downgrade reintroduces a high-severity advisory). Details: [docs/AUDIT-GATE.md](docs/AUDIT-GATE.md).
+- No open advisories: adm-zip 0.6.1 (which fixes the 2026 symlink-extraction advisory in the 0.5.9-0.6.0 line) reaches the tree directly, so `npm audit` is clean. History and the full triage runbook: [docs/AUDIT-GATE.md](docs/AUDIT-GATE.md).
 
 ### Channels
 
