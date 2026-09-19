@@ -40,6 +40,18 @@ function binDirsFor(prefix, platform = process.platform) {
   return [primary, secondary];
 }
 
+/**
+ * Candidate locations of npm's CLI inside a global prefix, platform-correct one
+ * first. POSIX nests modules under `<prefix>/lib/node_modules`; Windows puts
+ * them directly in `<prefix>/node_modules`.
+ */
+function cliCandidatesFor(prefix, platform = process.platform) {
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  const libLayout = p.join(prefix, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const flatLayout = p.join(prefix, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  return platform === 'win32' ? [flatLayout, libLayout] : [libLayout, flatLayout];
+}
+
 function main() {
   const base = process.env.RUNNER_TEMP || os.tmpdir();
   const prefix = path.join(base, 'npm12');
@@ -48,9 +60,13 @@ function main() {
   // Quote the prefix: RUNNER_TEMP can contain spaces on some images.
   execFileSync(`npm install -g npm@12 --prefix "${prefix}"`, { stdio: 'inherit', shell: true });
 
-  const cli = path.join(prefix, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  if (!fs.existsSync(cli)) {
-    console.error(`[use-npm12] npm 12 CLI not found at ${cli} after install; prefix layout unexpected`);
+  // npm's global prefix layout differs by platform (see cliCandidatesFor).
+  const cliCandidates = cliCandidatesFor(prefix);
+  const cli = cliCandidates.find((f) => fs.existsSync(f));
+  if (!cli) {
+    console.error(
+      `[use-npm12] npm 12 CLI not found after install; looked in:\n  ${cliCandidates.join('\n  ')}`,
+    );
     process.exit(1);
   }
   const version = execFileSync(process.execPath, [cli, '-v'], { encoding: 'utf8' }).trim();
@@ -69,4 +85,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { binDirsFor };
+module.exports = { binDirsFor, cliCandidatesFor };

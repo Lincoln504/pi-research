@@ -4,8 +4,9 @@ import { createRequire } from 'node:module';
 // use-npm12.cjs is a CommonJS script (runs as a CLI in CI, exports its pure
 // path logic for tests). Import it via createRequire from the ESM test.
 const require = createRequire(import.meta.url);
-const { binDirsFor } = require('../../../scripts/use-npm12.cjs') as {
+const { binDirsFor, cliCandidatesFor } = require('../../../scripts/use-npm12.cjs') as {
   binDirsFor: (prefix: string, platform?: string) => string[];
+  cliCandidatesFor: (prefix: string, platform?: string) => string[];
 };
 
 describe('use-npm12.cjs — binDirsFor', () => {
@@ -22,5 +23,22 @@ describe('use-npm12.cjs — binDirsFor', () => {
     // The same call must return the same result whatever OS the test runs on.
     expect(binDirsFor('C:\\npm12', 'win32')).toEqual(binDirsFor('C:\\npm12', 'win32'));
     expect(binDirsFor('/tmp/npm12', 'linux')[0]).toBe('/tmp/npm12/bin');
+  });
+});
+
+describe('use-npm12.cjs — cliCandidatesFor', () => {
+  it('checks <prefix>/lib/node_modules first on POSIX', () => {
+    expect(cliCandidatesFor('/tmp/npm12', 'linux')[0]).toBe('/tmp/npm12/lib/node_modules/npm/bin/npm-cli.js');
+    expect(cliCandidatesFor('/tmp/npm12', 'darwin')[0]).toBe('/tmp/npm12/lib/node_modules/npm/bin/npm-cli.js');
+  });
+
+  it('checks <prefix>/node_modules first on Windows', () => {
+    expect(cliCandidatesFor('C:\\npm12', 'win32')[0]).toBe('C:\\npm12\\node_modules\\npm\\bin\\npm-cli.js');
+    expect(cliCandidatesFor('C:\\npm12', 'win32')).toContain('C:\\npm12\\lib\\node_modules\\npm\\bin\\npm-cli.js');
+  });
+
+  it('returns both layouts on every platform (so a layout drift still resolves)', () => {
+    expect(cliCandidatesFor('/tmp/npm12', 'linux')).toHaveLength(2);
+    expect(cliCandidatesFor('C:\\npm12', 'win32')).toHaveLength(2);
   });
 });
