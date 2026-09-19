@@ -23,9 +23,12 @@ const isLinux = process.platform === 'linux';
 const isDarwin = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
-const [nodeMajor, nodeMinor] = process.version.replace('v', '').split('.').map((n) => parseInt(n, 10));
-if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 19)) {
-  console.warn(`WARNING: Node.js ${process.version} is below the minimum (>=22.19.0). Upgrade to 22.19.0+.`);
+const [nodeMajor, nodeMinor, nodePatch] = process.version.replace('v', '').split('.').map((n) => parseInt(n, 10));
+// Minimum is 22.22.2 — the floor `jsdom` 30 (a runtime dependency) and npm 12 both declare.
+const belowMinimum =
+  nodeMajor < 22 || (nodeMajor === 22 && (nodeMinor < 22 || (nodeMinor === 22 && nodePatch < 2)));
+if (belowMinimum) {
+  console.warn(`WARNING: Node.js ${process.version} is below the minimum (>=22.22.2). Upgrade to 22.22.2+.`);
 }
 
 /**

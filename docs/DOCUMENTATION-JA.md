@@ -225,7 +225,7 @@ pi-research エンジン  —  CLI（dist/cli.mjs）
 
 ### 前提条件
 
-- Node.js >= 22.19.0
+- Node.js >= 22.22.2
 - ランチャーから見つけられる場所にインストールされた `pi-research` に加え、設定済みのモデル
   （`PI_RESEARCH_MODEL`）と API キー。[設定](#configuration)を参照してください。
 
@@ -293,7 +293,7 @@ approve してもスキップされたスクリプトを実行できません。
 > 拒否し、`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` で失敗します。これは
 > `--experimental-transform-types` でも `--experimental-strip-types` でも同じなので、
 > どのフラグも役に立ちません。ローダー（または pi ホスト）が必須です。
-> （`engines.node` は `>=22.19.0` です。）
+> （`engines.node` は `>=22.22.2` です。）
 
 ```typescript
 import {

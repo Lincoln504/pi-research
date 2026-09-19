@@ -5,8 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.18]
+## [Unreleased]
 
+### Added
+
+- **`scripts/verify-changelog.cjs`: a release gate that the tagged commit carries a dated changelog section for its version.** The release path validated the tag against `package.json` and `SKILL.md` but never against `docs/CHANGELOG.md`, so a release could be tagged with its changes still sitting under `## [Unreleased]` — which happened twice. `v1.6.12`'s block was later folded into `[1.6.13]` (misattributing it), and `v1.6.17`'s was overwritten by the next release and lost outright. The gate fails closed on a missing, undated, empty, duplicated, or non-newest section; it is unit-tested (`test/unit/scripts/verify-changelog.test.ts`, 11 cases) and runs in CI's lint job and in the release workflow's pre-publish job. The two historical gaps are repaired in the same pass: `[1.6.17]` is restored from git, `[1.6.12]` is reconstructed from the commits in `v1.6.11..v1.6.12` (the Stack Exchange clickable-link fix and the explicit `vite` devDependency, both of which `[1.6.13]` had absorbed, plus the previously undocumented Japanese translation), and `[1.6.18]` gains its missing date.
+
+### Changed
+
+- **README: the adm-zip advisory bullet is removed from the requirements/limitations list.** It only asserted the absence of advisories, which is the audit gate's job (`docs/AUDIT-GATE.md`), not a user-facing limitation. The stealth-browser size claim is corrected from "~500MB" to "1GB+ installed" (the Linux asset downloads at ~630MB and unpacks to ~1.3GB).
+- **Supported Node floor raised from 22.19.0 to 22.22.2** (`engines.node`, `.nvmrc`, README, `docs/AGENT-SKILL.md`, `docs/SDK.md`, all three translations, the `agent-skill` README, and the `scripts/setup.cjs` warning). `jsdom` 30 — a production dependency — and `npm` 12, which CI and the release path run, both declare `^22.22.2 || ^24.15.0 || >=26.0.0`, so the old floor installed a tree outside its own dependency's and its own toolchain's support. The CI npm-12 self-upgrade drops its `--force` as a result: 22.22.2 satisfies npm 12's floor directly, and the node-24 matrix leg satisfies the `^24.15.0` arm.
+- **Two stale in-code comments that still named the pre-0.85.0 pi floor are corrected to 0.85.0** (`src/core/pi-version.ts`, `src/index.ts`). No behavioral or dependency change.
+
+## [1.6.18] - 2026-09-16
 ### Fixed
 
 - **`buildSafeOptions` no longer sends the literal `'off'` reasoning level into pi-ai's compat API (merged PR #13 by @lukey03).** pi-ai 0.85.1's compat path treats any truthy `reasoning` as thinking-enabled, and `'off'` has no entry in its thinking-budget table, so `maxTokens` was computed as `NaN` and serialized as `max_tokens: null` — every coordinator/plan call 400'd on providers that validate the cap (observed on Fireworks' anthropic-messages endpoint, where research never got past the first planning call). `'off'` now crosses the boundary as `undefined`, pi-ai's no-reasoning value; explicit non-off levels, caller precedence, and the maxTokens cap are unchanged. The new `build-safe-options.test.ts` drives the real compat `completeSimple` against a stubbed transport and asserts on the actual request body (5 of its 9 tests fail pre-patch); the one coordinator-boundary assertion that expected the literal `'off'` was updated to the compat contract.
@@ -19,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README: the "Currently recommended model" line is removed** (leaving the README with no model endorsement), and the leftover double blank line it left behind is fixed.
 - **Dev dependency lockfile refresh, all in-range: `vitest` 5.0.0 → 5.0.1, `@vitest/coverage-v8` 5.0.0 → 5.0.1, `vite` 8.2.2 → 8.3.0, `dependency-cruiser` 18.2.0 → 18.3.1, `jsdom` 30.0.1 → 30.1.0, `webgpu` 0.6.0 → 0.6.1.** Deliberate holds re-verified and unchanged: `typebox` stays 1.3.7 (lockstep with the host pi 0.85.1 line), `apache-arrow` stays 21.1.0 (21.2.0 breaks LanceDB IPC), `playwright-core` stays 1.60.0 (camoufox-js 0.12.0 peers `<1.61.0`), `typescript` stays `<6.1.0` (@typescript-eslint peer ceiling), and `@huggingface/transformers` stays 4.2.0 (4.3.0 pulls an `onnxruntime-web` dev build, `1.31.0-dev.20260914`, and reshuffles the optional native stack for no needed gain). The full gate suite is green: lint, all four type-checks (TS 6 and TS 7 native, src and tests), 3,073 unit tests, dependency-cruiser, build + manifest verify, and the audit gate with an empty allowlist.
+
+## [1.6.17] - 2026-09-09
+
+### Changed
+
+- **README: the adm-zip limitation bullet is trimmed to its essentials.** It no longer walks through the consumer-CI consequence (`npm audit` exiting nonzero until the upstream fix ships) or re-states the verified mechanics — installs succeed, don't run `npm audit fix --force`, details in `docs/AUDIT-GATE.md` — because pi-research is a research tool, not a CI component, and the full verified impact matrix lives in the runbook. No behavioral or dependency change.
 
 ## [1.6.16] - 2026-09-09
 
@@ -64,13 +81,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`npm ci` under npm 12 rejected the lockfile an `npm update` had rewritten** (this release cycle's own dep refresh): the rewrite dropped the `node-domexception@1.0.28` alias entry backing the `@nolyfill/domexception` override while leaving a stale real `node-domexception@1.0.0` copy nested under `@earendil-works/pi-coding-agent`. npm 11 (the local dev npm) accepted the tree; CI's npm 12 is stricter and failed every `npm ci --legacy-peer-deps` leg. The lockfile was regenerated with npm 12 itself, which collapses the stale nested copy so the override is the only resolution; `npm ci --legacy-peer-deps` now validates clean under both npm 11 and npm 12, and CI is green cross-OS.
 
-- **Stack Exchange tool output can no longer open a real browser tab when clicked.** The tool's formatters emitted markdown links (`[title](link)`) and bare URLs, and question/answer bodies carried third-party markup — any markdown-rendering surface (assistant replies, research reports, the terminal UI, which turns markdown links AND bare URLs into OSC 8 terminal hyperlinks and opens them in the system browser on mouse press+release) turned these into click-to-open-tab targets in the middle of scrolling tool output. New `src/utils/plain-url.ts` fixes this at the source, cross-platform and renderer-independent: `plainUrl()` wraps every emitted URL in backticks (code spans tokenize before autolink/link parsing in every CommonMark renderer, so a code-spanned URL can never become a link but stays byte-exact and copyable for the model), and `fenceBlock()` wraps third-party body content in a fenced code block whose length grows past any backtick run in the content (embedded links, headings and tables render inert; content containing its own ``` fences cannot close the fence early). All stackexchange formatters (questions, answers, users, sites, compact variants, and the `get`+compact path) now emit code-spanned URLs and own-line-fenced bodies — fence placement matters: an opening fence inline after `- **Body:**` is NOT recognized as a code block by CommonMark and was verified (against pi's bundled `marked`) to still render embedded links clickable, so the fence starts on its own line. The tool's prompt guidelines now also instruct the model never to re-emit result URLs as markdown links, covering the assistant-echo path. Pinned by `test/unit/stackexchange/output/no-clickable-links.test.ts`, which scans each formatter's clickable surface (post code-span/fence stripping) for link syntax and — when `marked` is resolvable — renders the actual output and asserts zero anchor elements.
-
-- **CI: declare `vite` as an explicit devDependency.** CI installs with `--legacy-peer-deps`, which skips peer dependency resolution — `vite` was only reachable as a transitive peer and the install could not resolve it. Now declared directly.
-
 ### Verified
 
 - 3,064 unit tests over 242 files, ESLint clean, all four type-checks (TS 6 src + tests, TS 7 native src + tests), dependency-cruiser and madge clean (190 modules, no circular dependencies), build, and `npm ci --dry-run` manifest verification; `npm audit` reports 0 vulnerabilities. The packed tarball was installed into a clean project: pi 0.85.1 resolves fresh, the documented dual apache-arrow layout (21.1.0 nested / 18.1.0 hoisted for LanceDB) reproduces, and the installed CLI boots. CI green cross-OS (ubuntu ×2, macOS, Windows) including the consumer fresh-install and Arrow/LanceDB interop legs. For this cycle additionally: the tarball installed and the CLI booted under npm 10, npm 11, and npm 12 alike, with the dual apache-arrow layout identical across all three.
+
+## [1.6.12] - 2026-09-07
+
+### Added
+
+- **Consolidated Japanese translation** (`docs/DOCUMENTATION-JA.md`), listed after the zh-CN doc in the README.
+
+### Fixed
+
+- **Stack Exchange tool output can no longer open a real browser tab when clicked.** The tool's formatters emitted markdown links (`[title](link)`) and bare URLs, and question/answer bodies carried third-party markup — any markdown-rendering surface (assistant replies, research reports, the terminal UI, which turns markdown links AND bare URLs into OSC 8 terminal hyperlinks and opens them in the system browser on mouse press+release) turned these into click-to-open-tab targets in the middle of scrolling tool output. New `src/utils/plain-url.ts` fixes this at the source, cross-platform and renderer-independent: `plainUrl()` wraps every emitted URL in backticks (code spans tokenize before autolink/link parsing in every CommonMark renderer, so a code-spanned URL can never become a link but stays byte-exact and copyable for the model), and `fenceBlock()` wraps third-party body content in a fenced code block whose length grows past any backtick run in the content (embedded links, headings and tables render inert; content containing its own ``` fences cannot close the fence early). All stackexchange formatters (questions, answers, users, sites, compact variants, and the `get`+compact path) now emit code-spanned URLs and own-line-fenced bodies — fence placement matters: an opening fence inline after `- **Body:**` is NOT recognized as a code block by CommonMark and was verified (against pi's bundled `marked`) to still render embedded links clickable, so the fence starts on its own line. The tool's prompt guidelines now also instruct the model never to re-emit result URLs as markdown links, covering the assistant-echo path. Pinned by `test/unit/stackexchange/output/no-clickable-links.test.ts`, which scans each formatter's clickable surface (post code-span/fence stripping) for link syntax and — when `marked` is resolvable — renders the actual output and asserts zero anchor elements.
+
+- **CI: declare `vite` as an explicit devDependency.** CI installs with `--legacy-peer-deps`, which skips peer dependency resolution — `vite` was only reachable as a transitive peer and the install could not resolve it. Now declared directly.
 
 ## [1.6.11] - 2026-09-04
 

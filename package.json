@@ -73,7 +73,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.22.2"
   },
   "scripts": {
     "lint": "npx eslint --config config/tooling/eslint.config.js src/",
@@ -104,6 +104,7 @@
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "deps:check": "depcruise --config config/tooling/dependency-cruiser.cjs --output-type err-long src",
     "deps:generate": "npx --yes madge@8.0.0 --image docs/deps.svg src/index.ts",
+    "verify:changelog": "node scripts/verify-changelog.cjs",
     "analyze:dependencies": "ncu",
     "analyze:compatibility": "depngn"
   },

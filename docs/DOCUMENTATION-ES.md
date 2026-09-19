@@ -229,7 +229,7 @@ Manual. Enlace simbólicamente el directorio en la carpeta de habilidades de cua
 
 ### Requisitos previos
 
-- Node.js >= 22.19.0
+- Node.js >= 22.22.2
 - `pi-research` instalado donde el lanzador pueda encontrarlo, además de un modelo
   configurado (`PI_RESEARCH_MODEL`) y una clave de API. Consulte
   [Configuración](#configuration).
@@ -297,7 +297,7 @@ global y ejecutarse únicamente con valores predeterminados + `process.env` + `o
 > `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`. Eso aplica a
 > `--experimental-transform-types` exactamente igual que a `--experimental-strip-types`, así
 > que ninguna bandera ayuda aquí; un cargador (o el host pi) es obligatorio.
-> (`engines.node` es `>=22.19.0`.)
+> (`engines.node` es `>=22.22.2`.)
 
 ```typescript
 import {

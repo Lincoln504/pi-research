@@ -49,7 +49,7 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-No extra setup is needed. The package ships ready-made bindings for every platform and runs no install scripts. The stealth browser (~500MB) downloads on first use, so the first scrape takes a few minutes. npm ≥11.19 skips install scripts by default. Leave it that way: nothing needs approving or building. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
+No extra setup is needed. The package ships ready-made bindings for every platform and runs no install scripts. The stealth browser (1GB+ installed) downloads on first use, so the first scrape takes a few minutes. npm ≥11.19 skips install scripts by default. Leave it that way: nothing needs approving or building. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
 
 In pi, the extension works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
@@ -81,13 +81,12 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 
 ### Requirements / limitations
 
-- Node.js >= 22.19.0
+- Node.js >= 22.22.2
 - An LLM with a 100k+ context window (an API key or a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
 - Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
-- No open advisories: adm-zip 0.6.1 (which fixes the 2026 symlink-extraction advisory in the 0.5.9-0.6.0 line) reaches the tree directly, so `npm audit` is clean. History and the full triage runbook: [docs/AUDIT-GATE.md](docs/AUDIT-GATE.md).
 
 ### Channels
 

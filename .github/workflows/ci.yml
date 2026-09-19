@@ -118,6 +118,10 @@ jobs:
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - run: npm run lint
+      # The release record must exist before a tag can point at the commit. This
+      # gate has failed twice in practice (v1.6.12 and v1.6.17 shipped with no
+      # section of their own); see scripts/verify-changelog.cjs.
+      - run: npm run verify:changelog
       - name: Audit Dependencies
         run: |
           # The release gate audits the PRODUCTION dependency tree only (`--omit=dev`)
@@ -218,8 +222,8 @@ jobs:
           # Visual Studio 2026, and better-sqlite3 13's dependency rebuild then
           # fails `npm ci` outright. Unit tests never build it themselves, but
           # `npm ci` installs it, so the leg needs a node-gyp that works.
-          # package.json declares `engines.node: ">=22.19.0"`, but every job pinned
-          # .nvmrc (22.19.0) — so the ONLY Node version ever tested was the floor,
+          # package.json declares `engines.node: ">=22.22.2"`, but every job pinned
+          # .nvmrc (22.22.2) — so the ONLY Node version ever tested was the floor,
           # while consumers on a newer major were unverified. One extra leg on the
           # current LTS covers the top of the declared range without tripling the
           # matrix; a break there means either the code or `engines` is wrong.
@@ -245,11 +249,10 @@ jobs:
       # npm 12 on every leg: its node-gyp 13 recognizes the VS2026 image on
       # windows-latest (npm ≤11's node-gyp 11.2 cannot — see the matrix comment).
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        # --force: npm's self-upgrade enforces npm 12's engines floor
-        # (^22.22.2) against .nvmrc's 22.19.0; npm 12 otherwise RUNS fine on
-        # 22.19 (measured end-to-end: tarball installs, prebuilt better-sqlite3
-        # loads). The engines line is a support window, not a technical floor.
-        run: npm install -g npm@12 --force
+        # npm 12's own engines floor (^22.22.2 || ^24.15.0 || >=26.0.0) is
+        # satisfied by .nvmrc (22.22.2) and by the node-24 matrix leg, so the
+        # self-upgrade no longer needs --force.
+        run: npm install -g npm@12
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -332,11 +335,10 @@ jobs:
       # (GYP_MSVS_VERSION=2026 was tried first and does NOT help: the 11.2 crash
       # is in version DETECTION, before that variable is consulted.)
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        # --force: npm's self-upgrade enforces npm 12's engines floor
-        # (^22.22.2) against .nvmrc's 22.19.0; npm 12 otherwise RUNS fine on
-        # 22.19 (measured end-to-end: tarball installs, prebuilt better-sqlite3
-        # loads). The engines line is a support window, not a technical floor.
-        run: npm install -g npm@12 --force
+        # npm 12's own engines floor (^22.22.2 || ^24.15.0 || >=26.0.0) is
+        # satisfied by .nvmrc (22.22.2) and by the node-24 matrix leg, so the
+        # self-upgrade no longer needs --force.
+        run: npm install -g npm@12
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -617,11 +619,10 @@ jobs:
       # script-skip semantics are what this job's clean-project install step
       # must model for real consumers.
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        # --force: npm's self-upgrade enforces npm 12's engines floor
-        # (^22.22.2) against .nvmrc's 22.19.0; npm 12 otherwise RUNS fine on
-        # 22.19 (measured end-to-end: tarball installs, prebuilt better-sqlite3
-        # loads). The engines line is a support window, not a technical floor.
-        run: npm install -g npm@12 --force
+        # npm 12's own engines floor (^22.22.2 || ^24.15.0 || >=26.0.0) is
+        # satisfied by .nvmrc (22.22.2) and by the node-24 matrix leg, so the
+        # self-upgrade no longer needs --force.
+        run: npm install -g npm@12
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:

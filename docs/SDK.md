@@ -50,7 +50,7 @@ global file entirely and run purely from defaults + `process.env` + `options.con
 > `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`. That applies to
 > `--experimental-transform-types` exactly as it does to
 > `--experimental-strip-types`, so neither flag helps here; a loader (or the pi
-> host) is mandatory. (`engines.node` is `>=22.19.0`.)
+> host) is mandatory. (`engines.node` is `>=22.22.2`.)
 
 ```typescript
 import {

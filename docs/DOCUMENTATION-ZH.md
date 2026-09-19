@@ -201,7 +201,7 @@ pi-research 引擎  ——  CLI（dist/cli.mjs）
 
 ### 前置要求
 
-- Node.js >= 22.19.0
+- Node.js >= 22.22.2
 - `pi-research` 安装到启动器能找到的位置，并配置好模型（`PI_RESEARCH_MODEL`）和 API
   密钥。见[配置](#configuration)。
 
@@ -257,7 +257,7 @@ better-sqlite3 13 为所有受支持平台携带预编译绑定，运行时直�
 > TypeScript —— 已安装依赖的源码正是如此 —— 并以
 > `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` 失败。这一点对
 > `--experimental-transform-types` 和 `--experimental-strip-types` 一视同仁，所以任何
-> 标志都帮不上忙；必须用加载器（或 pi 宿主）。（`engines.node` 为 `>=22.19.0`。）
+> 标志都帮不上忙；必须用加载器（或 pi 宿主）。（`engines.node` 为 `>=22.22.2`。）
 
 ```typescript
 import {

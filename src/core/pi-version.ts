@@ -7,7 +7,7 @@
  *
  *   - As a pi EXTENSION, the host supplies `@earendil-works/*`. Our package.json
  *     range never constrains it, so an in-process check is the only enforcement.
- *   - As a standalone CLI/SDK, the range is `>=0.84.0 <1` and published tarballs
+ *   - As a standalone CLI/SDK, the range is `>=0.85.0 <1` and published tarballs
  *     carry no lockfile, so every fresh install resolves the newest 0.x at that
  *     instant. pi is pre-1.0: a minor bump may break anything under semver, and
  *     already has (0.83.0 extended the ResourceLoader contract).

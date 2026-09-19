@@ -128,6 +128,12 @@ jobs:
           grep -q "\"version\": \"$VERSION\"" agent-skill/pi-research/SKILL.md || { echo "ERROR: agent-skill/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
           echo "OK: package.json and SKILL.md both at v$VERSION"
 
+      # The tagged commit must carry its own dated changelog section. Two releases
+      # (v1.6.12, v1.6.17) were tagged without one; v1.6.17's change was then lost
+      # when the next release rewrote [Unreleased]. See scripts/verify-changelog.cjs.
+      - name: Verify changelog has a dated section for this version
+        run: node scripts/verify-changelog.cjs
+
       # Skip the camoufox/native downloads during install — the release jobs
       # never launch a browser, so a live fetch only adds latency and flake.
       - env:

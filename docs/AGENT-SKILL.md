@@ -125,7 +125,7 @@ Manual. Symlink the directory into any agent's skills folder yourself:
 
 ### Prerequisites
 
-- Node.js >= 22.19.0
+- Node.js >= 22.22.2
 - `pi-research` installed where the launcher can find it, plus a configured model
   (`PI_RESEARCH_MODEL`) + API key. See [Configuration](CONFIGURATION.md).
 
