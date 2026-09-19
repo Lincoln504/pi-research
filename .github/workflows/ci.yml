@@ -249,14 +249,15 @@ jobs:
       # npm 12 on every leg: its node-gyp 13 recognizes the VS2026 image on
       # windows-latest (npm ≤11's node-gyp 11.2 cannot — see the matrix comment).
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        # --force is required for the npm 10.x -> 12 self-upgrade on the Node
-        # 22.22.2 legs: without it npm reifies the global tree while replacing
-        # its own files and dies with `Cannot find module 'promise-retry'`
-        # (observed on the ubuntu/macOS unit-test and validate legs, CI run
-        # 35414345489). It is NOT an engines check — 22.22.2 satisfies npm 12's
-        # floor. npm 11.x (the Node 24 leg) and the Windows leg happen to
-        # survive without it, so keep --force on every leg for parity.
-        run: npm install -g npm@12 --force
+        # The Node 22.22.2 legs bundle npm 10.9.7, which cannot install a new npm
+        # over itself: the reify deletes npm's own node_modules entries while the
+        # running process still needs them, and it dies with `Cannot find module
+        # 'promise-retry'` (CI runs 35414345489/35414867837, the ubuntu/macOS
+        # unit-test and validate legs). --force, --ignore-scripts and --no-audit
+        # all reproduce it, so no flag fixes it. scripts/use-npm12.cjs installs
+        # npm 12 into a separate prefix and puts it on PATH instead; see that file
+        # for the full story.
+        run: node scripts/use-npm12.cjs
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -339,14 +340,15 @@ jobs:
       # (GYP_MSVS_VERSION=2026 was tried first and does NOT help: the 11.2 crash
       # is in version DETECTION, before that variable is consulted.)
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        # --force is required for the npm 10.x -> 12 self-upgrade on the Node
-        # 22.22.2 legs: without it npm reifies the global tree while replacing
-        # its own files and dies with `Cannot find module 'promise-retry'`
-        # (observed on the ubuntu/macOS unit-test and validate legs, CI run
-        # 35414345489). It is NOT an engines check — 22.22.2 satisfies npm 12's
-        # floor. npm 11.x (the Node 24 leg) and the Windows leg happen to
-        # survive without it, so keep --force on every leg for parity.
-        run: npm install -g npm@12 --force
+        # The Node 22.22.2 legs bundle npm 10.9.7, which cannot install a new npm
+        # over itself: the reify deletes npm's own node_modules entries while the
+        # running process still needs them, and it dies with `Cannot find module
+        # 'promise-retry'` (CI runs 35414345489/35414867837, the ubuntu/macOS
+        # unit-test and validate legs). --force, --ignore-scripts and --no-audit
+        # all reproduce it, so no flag fixes it. scripts/use-npm12.cjs installs
+        # npm 12 into a separate prefix and puts it on PATH instead; see that file
+        # for the full story.
+        run: node scripts/use-npm12.cjs
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:
@@ -627,14 +629,15 @@ jobs:
       # script-skip semantics are what this job's clean-project install step
       # must model for real consumers.
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
-        # --force is required for the npm 10.x -> 12 self-upgrade on the Node
-        # 22.22.2 legs: without it npm reifies the global tree while replacing
-        # its own files and dies with `Cannot find module 'promise-retry'`
-        # (observed on the ubuntu/macOS unit-test and validate legs, CI run
-        # 35414345489). It is NOT an engines check — 22.22.2 satisfies npm 12's
-        # floor. npm 11.x (the Node 24 leg) and the Windows leg happen to
-        # survive without it, so keep --force on every leg for parity.
-        run: npm install -g npm@12 --force
+        # The Node 22.22.2 legs bundle npm 10.9.7, which cannot install a new npm
+        # over itself: the reify deletes npm's own node_modules entries while the
+        # running process still needs them, and it dies with `Cannot find module
+        # 'promise-retry'` (CI runs 35414345489/35414867837, the ubuntu/macOS
+        # unit-test and validate legs). --force, --ignore-scripts and --no-audit
+        # all reproduce it, so no flag fixes it. scripts/use-npm12.cjs installs
+        # npm 12 into a separate prefix and puts it on PATH instead; see that file
+        # for the full story.
+        run: node scripts/use-npm12.cjs
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         id: cache-modules
         with:

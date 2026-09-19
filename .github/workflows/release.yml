@@ -267,8 +267,17 @@ jobs:
       # but the job's whole design is to never run installable code here on
       # trust alone — --ignore-scripts makes that hold even if a future npm
       # release, or a compromised one, added one.
+      # --prefix + PATH: .nvmrc's Node 22.22.2 bundles npm 10.9.7, which cannot
+      # install a new npm over itself — the reify deletes npm's own node_modules
+      # entries mid-run and the process dies with `Cannot find module
+      # 'promise-retry'` (reproduced locally on v22.22.2). Installing into a
+      # separate prefix never touches the running npm. The publish job's sparse
+      # checkout has no scripts/, so this cannot reuse scripts/use-npm12.cjs.
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@11 --ignore-scripts
+        run: |
+          npm install -g npm@11 --ignore-scripts --prefix "$RUNNER_TEMP/npm11"
+          echo "$RUNNER_TEMP/npm11/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/npm11/bin/npm" -v
 
       # No NODE_AUTH_TOKEN: trusted publishing authenticates via OIDC and emits
       # provenance automatically (the --provenance flag is now redundant but kept
