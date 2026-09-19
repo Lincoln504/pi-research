@@ -14,8 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **README: the adm-zip advisory bullet is removed from the requirements/limitations list.** It only asserted the absence of advisories, which is the audit gate's job (`docs/AUDIT-GATE.md`), not a user-facing limitation. The stealth-browser size claim is corrected from "~500MB" to "1GB+ installed" (the Linux asset downloads at ~630MB and unpacks to ~1.3GB).
-- **Supported Node floor raised from 22.19.0 to 22.22.2** (`engines.node`, `.nvmrc`, README, `docs/AGENT-SKILL.md`, `docs/SDK.md`, all three translations, the `agent-skill` README, and the `scripts/setup.cjs` warning). `jsdom` 30 — a production dependency — and `npm` 12, which CI and the release path run, both declare `^22.22.2 || ^24.15.0 || >=26.0.0`, so the old floor installed a tree outside its own dependency's and its own toolchain's support. The CI npm-12 self-upgrade drops its `--force` as a result: 22.22.2 satisfies npm 12's floor directly, and the node-24 matrix leg satisfies the `^24.15.0` arm.
+- **Supported Node floor raised from 22.19.0 to 22.22.2** (`engines.node`, `.nvmrc`, README, `docs/AGENT-SKILL.md`, `docs/SDK.md`, all three translations, the `agent-skill` README, the `scripts/setup.cjs` check + warning, and the lockfile root). `jsdom` 30 — a production dependency — and `npm` 12, which CI's install jobs run, both declare `^22.22.2 || ^24.15.0 || >=26.0.0`, so the old floor installed a tree outside its own dependency's support. CI's npm-12 self-upgrade keeps `--force` (see Fixed).
 - **Two stale in-code comments that still named the pre-0.85.0 pi floor are corrected to 0.85.0** (`src/core/pi-version.ts`, `src/index.ts`). No behavioral or dependency change.
+
+### Fixed
+
+- **The npm-12 self-upgrade keeps `--force`; the earlier removal in this cycle was wrong.** It was removed on the theory that the raised floor satisfied npm 12's engines — engines were never the reason. Without `--force` npm reifies the global tree while replacing its own files and dies with `Cannot find module 'promise-retry'` on the Node 22.22.2 Linux/macOS legs (CI run 35414345489, both the unit-test and validate jobs), while the Node 24 leg and the Windows leg happened to survive. Restored on all three CI legs, with the comment corrected.
 
 ## [1.6.18] - 2026-09-16
 ### Fixed
