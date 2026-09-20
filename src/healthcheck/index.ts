@@ -196,7 +196,24 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       }
       const store = await service.getStore();
       const counts = store ? await store.countScoped() : { local: 0, global: 0, projects: 0 };
+      const retrieval = getConfig(service.getCwd()).KNOWLEDGE_STORE_RETRIEVAL;
       const embedder = await service.getEmbedder();
+
+      if (retrieval === 'bm25') {
+        // Lexical mode: no embedding model exists — null is the healthy state, not
+        // a failure. Report BM25-specific diagnostics instead of the embedder's.
+        return {
+            healthy: true,
+            diagnostic: {
+                status: 'initialized',
+                retrieval: 'bm25',
+                model: 'none (lexical BM25)',
+                localEntries: counts.local,
+                globalEntries: counts.global,
+                totalProjects: counts.projects
+            }
+        };
+      }
 
       if (!embedder) {
         return { healthy: false, error: 'Embedder service not available' };
@@ -240,6 +257,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
           healthy: true, 
           diagnostic: { 
               status: 'initialized',
+              retrieval,
               device,
               model: config.EMBEDDING_MODEL,
               localEntries: counts.local,

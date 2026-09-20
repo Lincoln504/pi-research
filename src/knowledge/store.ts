@@ -21,8 +21,8 @@ import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
 import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
-import { createStoreTable, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
-import { addDocumentsToStore, assertValidEmbeddingVectors, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
+import { createStoreTable, createBm25StoreTable, BM25_TABLE_NAME, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
+import { addDocumentsToStore, assertValidEmbeddingVectors, addDocumentsBm25ToStore, searchStore, searchStoreBm25, findDocumentsByUrl, findRelevantUrls, findRelevantUrlsBm25 } from './store-operations.ts';
 import type { AddDocumentsOutcome } from './store-operations.ts';
 import { isEmbedderUnreachable } from './embedder-utils.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
@@ -54,8 +54,20 @@ export function isLanceCommitConflict(err: unknown): boolean {
 
 export interface StoreOptions {
   dbDir: string;
-  embedder: IEmbedder;
+  /** The embedding backend. REQUIRED in 'vector' (hybrid) retrieval mode; MUST be
+   *  null in 'bm25' mode — this is the hard dependency boundary that keeps
+   *  @huggingface/transformers out of the lexical path entirely (no resolution,
+   *  no download, no initialization, no inference). */
+  embedder: IEmbedder | null;
   modelName: string;
+  /** Retrieval strategy. 'vector' (default) = today's hybrid dense+sparse search
+   *  (embedding similarity + BM25/FTS fused via RRF). 'bm25' = pure lexical BM25
+   *  over the Tantivy FTS indexes — no embedding model anywhere; uses a separate
+   *  lexical table (BM25_TABLE_NAME) in the same dbDir so existing vector stores
+   *  are untouched and no migration is needed in either direction. Optional and
+   *  defaulting to 'vector' so constructors predating the retrieval axis (tests,
+   *  external embedders of the class) keep the exact historical behavior. */
+  retrieval?: 'vector' | 'bm25';
   migrationStrategy?: MigrationStrategy;
   /** Called when embedder connection fails — should return a fresh IEmbedder. */
   reconnectFactory?: () => Promise<IEmbedder>;
@@ -83,7 +95,12 @@ export class KnowledgeStore implements IKnowledgeStore {
   // Coalesces concurrent open() calls (see open()).
   private _openPromise: Promise<void> | null = null;
   private options: StoreOptions;
-  private tableName = 'knowledge';
+  private tableName: string;
+  // The OTHER retrieval mode's active table name, preserved across manifest
+  // save/load so the two modes can share one dbDir without clobbering each
+  // other's migration-renamed tables ('vector' owns activeTableName,
+  // 'bm25' owns activeBm25TableName).
+  private otherModeTableName: string | null = null;
   private manifestPath: string;
   private isClosing = false;
   private activeWrites = new Set<Promise<any>>();
@@ -113,7 +130,24 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   constructor(options: StoreOptions) {
     this.options = options;
+    this.tableName = this.retrieval === 'bm25' ? BM25_TABLE_NAME : 'knowledge';
     this.manifestPath = path.join(this.options.dbDir, 'store-manifest.json');
+  }
+
+  /** Normalized retrieval strategy: an unset option means the historical
+   *  'vector' (hybrid) behavior, not bm25. Every mode check goes through this. */
+  private get retrieval(): 'vector' | 'bm25' {
+    return this.options.retrieval ?? 'vector';
+  }
+
+  /** The embedding backend. Only callable on the vector (hybrid) path — the
+   *  single choke point that makes a null embedder in bm25 mode fail loud here
+   *  instead of surfacing as a mysterious TypeError deep in an embed call. */
+  private get embedder(): IEmbedder {
+    if (this.retrieval === 'bm25' || !this.options.embedder) {
+      throw new Error('[store] embedder accessed in bm25 (lexical) mode — internal invariant violated');
+    }
+    return this.options.embedder;
   }
 
   private getScopeFilter(): string {
@@ -145,10 +179,17 @@ export class KnowledgeStore implements IKnowledgeStore {
       if (fs.existsSync(this.manifestPath)) {
         const content = await fsPromises.readFile(this.manifestPath, 'utf-8');
         const manifest = JSON.parse(content);
-        if (manifest.activeTableName) {
-          this.tableName = manifest.activeTableName;
+        const savedVectorTable = typeof manifest.activeTableName === 'string' ? manifest.activeTableName : null;
+        const savedBm25Table = typeof manifest.activeBm25TableName === 'string' ? manifest.activeBm25TableName : null;
+        this.otherModeTableName = this.retrieval === 'bm25' ? savedVectorTable : savedBm25Table;
+        const savedOwnTable = this.retrieval === 'bm25' ? savedBm25Table : savedVectorTable;
+        if (savedOwnTable) {
+          this.tableName = savedOwnTable;
           logger.debug(`[store] Loaded active table name from manifest: ${this.tableName}`);
         }
+        // Migration history is vector-only (bm25 has no model to migrate); the
+        // values are loaded regardless and preserved verbatim by saveManifest so
+        // a bm25 open never erases the vector mode's alternation detector.
         if (manifest.lastMigration && typeof manifest.lastMigration.model === 'string') {
           this.lastMigration = { model: manifest.lastMigration.model, ts: Number(manifest.lastMigration.ts) || 0 };
         }
@@ -166,7 +207,11 @@ export class KnowledgeStore implements IKnowledgeStore {
     const tempPath = `${this.manifestPath}.tmp`;
     try {
       const content = JSON.stringify({
-        activeTableName: this.tableName,
+        activeTableName: this.retrieval === 'vector' ? this.tableName : this.otherModeTableName,
+        // bm25 keeps its OWN manifest key so a lexical store can share the dbDir
+        // with a vector store — neither mode's table renames (migrations,
+        // backups) can strand the other's manifest pointer.
+        activeBm25TableName: this.retrieval === 'bm25' ? this.tableName : this.otherModeTableName,
         // Record of the two most recent model/schema migrations. Read back on open
         // to detect ALTERNATION (two configurations sharing this dbDir each
         // migrating the table back and forth) — previously that thrash was
@@ -189,6 +234,13 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async open(): Promise<void> {
     if (this.db) return;
+    // Load the manifest BEFORE anything reads this.tableName / otherModeTableName.
+    // The service path reaches here via initialize() (which already loaded it —
+    // this idempotent re-read is cheap), but direct open() callers previously
+    // skipped the manifest entirely: with per-mode manifest keys, saving without
+    // loading would overwrite the OTHER mode's table pointer with null and strand
+    // its store. Loading here makes both entry points safe.
+    await this.loadManifest();
     // close() is irreversible in this class (isClosing latches the operation
     // no-op path), so an open() after it must not "succeed" and hand back a
     // zombie whose every operation silently no-ops — the service layer always
@@ -232,7 +284,17 @@ export class KnowledgeStore implements IKnowledgeStore {
       this.db = await (await getLancedb()).connect(this.options.dbDir);
 
       const tableNames = await this.db.tableNames();
-      if (tableNames.includes(this.tableName)) {
+      if (this.retrieval === 'bm25') {
+        // Lexical mode: there is no embedding model here — no model/schema
+        // migration machinery, no dimension seeding, no embedder warm-up. The
+        // table's schema carries no vector column at all (see store-schema.ts);
+        // lexical ranking comes entirely from the FTS indexes.
+        if (tableNames.includes(this.tableName)) {
+          this.table = await this.db.openTable(this.tableName);
+        } else {
+          this.table = await this.createTable();
+        }
+      } else if (tableNames.includes(this.tableName)) {
         this.table = await this.db.openTable(this.tableName);
 
         // Tracks whether we've moved past schema-reading into migration. A failure
@@ -271,8 +333,8 @@ export class KnowledgeStore implements IKnowledgeStore {
             const vectorField = schema.fields.find(f => f.name === 'vector');
             if (vectorField && (vectorField.type as any).constructor.name === 'FixedSizeList') {
               const dim = (vectorField.type as any).listSize;
-              if (this.options.embedder.getDimension() === null) {
-                this.options.embedder.setDimension(dim);
+              if (this.embedder.getDimension() === null) {
+                this.embedder.setDimension(dim);
                 logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
               }
             }
@@ -291,7 +353,7 @@ export class KnowledgeStore implements IKnowledgeStore {
             // (local Embedder, EmbeddingServer, EmbeddingClient) and makes
             // getDimension() report the correct new width. (re-embed needs the warm
             // embedder regardless.)
-            if (this.options.embedder.getDimension() === null) {
+            if (this.embedder.getDimension() === null) {
               // Reconnect-wrapped: after a service re-scope this warm-up can be
               // the FIRST embed against a stale cached instance (a stepped-down
               // leader fast-fails with ECONNREFUSED); without the wrapper that
@@ -368,7 +430,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         // that when the embedding factory handed back its model-mismatch local
         // fallback, which is constructed but never initialize()d: every one of
         // the caller's init retries burned against the same cached instance.
-        if (this.options.embedder.getDimension() === null) {
+        if (this.embedder.getDimension() === null) {
           await this.withEmbedderReconnect(embedder => embedder.embedMany([' ']));
         }
         this.table = await this.createTable();
@@ -525,7 +587,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         const vectors = await this.withEmbedderReconnect(embedder => embedder.embedMany(texts));
         // Same last-gate integrity check as addDocumentsToStore: this path
         // writes vectors through its own table handle and previously had none.
-        assertValidEmbeddingVectors(vectors, batchDocs.length, this.options.embedder.getDimension?.());
+        assertValidEmbeddingVectors(vectors, batchDocs.length, this.embedder.getDimension?.());
 
         const records = batchDocs.map((doc, idx) => ({
           vector: Array.from(vectors[idx]!),
@@ -689,12 +751,18 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   private async createTable(name: string = this.tableName): Promise<lancedb.Table> {
     if (!this.db) throw new Error('Database not connected');
-    const dim = this.options.embedder.getDimension();
+    if (this.retrieval === 'bm25') {
+      return createBm25StoreTable(this.db, name);
+    }
+    const dim = this.embedder.getDimension();
     if (dim === null) throw new Error('[store] Cannot create table: embedder dimension unknown (not yet initialized)');
     return createStoreTable(this.db, name, dim, this.options.modelName);
   }
 
   private async withEmbedderReconnect<T>(fn: (embedder: IEmbedder) => Promise<T>): Promise<T> {
+    if (this.retrieval === 'bm25' || !this.options.embedder) {
+      throw new Error('[store] withEmbedderReconnect called without an embedder (bm25 mode?) — internal invariant violated');
+    }
     try {
       return await fn(this.options.embedder);
     } catch (err) {
@@ -788,7 +856,10 @@ export class KnowledgeStore implements IKnowledgeStore {
       let table = await this.getFreshTable();
       const workspace = this.getWorkspace();
 
-      const outcome = await this.withEmbedderReconnect<AddDocumentsOutcome>(async (embedder) => {
+      // The write attempt (with its Lance commit-conflict retry loop) is shared
+      // by both retrieval modes; only the embedding step differs. bm25 mode runs
+      // it WITHOUT the embedder-reconnect wrapper — there is no embedder there.
+      const runWriteAttempt = async (): Promise<AddDocumentsOutcome> => {
         let retryCount = 0;
         const MAX_RETRIES = 5;
         const BASE_DELAY = 100;
@@ -796,10 +867,19 @@ export class KnowledgeStore implements IKnowledgeStore {
         while (retryCount <= MAX_RETRIES) {
           try {
             const isGlobal = this.options.knowledgeMode === 'global';
+            if (this.retrieval === 'bm25') {
+              return await addDocumentsBm25ToStore(
+                table,
+                docs,
+                () => this.isClosing,
+                workspace,
+                isGlobal
+              );
+            }
             return await addDocumentsToStore(
-              table, 
-              docs, 
-              embedder, 
+              table,
+              docs,
+              this.embedder,
               () => this.isClosing,
               workspace,
               isGlobal
@@ -829,7 +909,11 @@ export class KnowledgeStore implements IKnowledgeStore {
         // Unreachable: the loop only exits via return or throw. Present so the
         // outcome type stays non-optional for the accounting below.
         throw new Error('[store] addDocuments retry loop exited without result');
-      });
+      };
+
+      const outcome = this.retrieval === 'bm25'
+        ? await runWriteAttempt()
+        : await this.withEmbedderReconnect<AddDocumentsOutcome>(runWriteAttempt);
 
       // Exactly one outcome per logical addDocuments call. Attempts that failed and
       // were then recovered by the reconnect/conflict retries are not counted here
@@ -864,6 +948,11 @@ export class KnowledgeStore implements IKnowledgeStore {
     return this.trackOperation('search', [] as StoreDocument[], async () => {
       const table = await this.getFreshTable();
       const scopeFilter = this.getScopeFilter();
+      if (this.retrieval === 'bm25') {
+        // Pure lexical: BM25 over the FTS index — no embed, no RRF fusion, no
+        // embedder reconnect (there is no embedding signal to fuse with).
+        return this.circuitBreaker.execute(() => searchStoreBm25(table, query, options.limit ?? 5, scopeFilter));
+      }
       return this.circuitBreaker.execute(() =>
         this.withEmbedderReconnect(embedder =>
           searchStore(table, embedder, query, this.getReranker.bind(this), options.limit ?? 5, scopeFilter)
@@ -1060,8 +1149,11 @@ export class KnowledgeStore implements IKnowledgeStore {
         url: r.url as string,
         // The text is the summary/description
         text: r.text as string,
-        // The vector is the model-dimension embedding
-        v: Array.from(r.vector as Float32Array),
+        // The vector is the model-dimension embedding — vector/hybrid mode only;
+        // a bm25 store has no vector column, so the export omits it entirely.
+        ...(this.retrieval === 'vector'
+          ? { v: Array.from(r.vector as Float32Array) }
+          : {}),
         // Minimal metadata needed for the UI
         m: {
           d: metadata['description'] || '',
@@ -1194,6 +1286,11 @@ export class KnowledgeStore implements IKnowledgeStore {
     return this.trackOperation('findRelevantUrls', [] as { url: string; description: string; provenance?: string }[], async () => {
       const table = await this.getFreshTable();
       const scopeFilter = this.getScopeFilter();
+      if (this.retrieval === 'bm25') {
+        // Pure lexical: BM25 over the FTS index — no embed, no RRF fusion, no
+        // embedder reconnect (there is no embedding signal to fuse with).
+        return this.circuitBreaker.execute(() => findRelevantUrlsBm25(table, query, options.limit ?? 20, scopeFilter));
+      }
       return this.circuitBreaker.execute(() =>
         this.withEmbedderReconnect(embedder =>
           findRelevantUrls(table, embedder, query, this.getReranker.bind(this), options.limit ?? 20, scopeFilter)

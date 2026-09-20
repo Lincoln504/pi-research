@@ -33,7 +33,9 @@ function getMigrationStrategy(config: Config): MigrationStrategy | undefined {
  * Result of knowledge store initialization
  */
 export interface KnowledgeStoreComponents {
-  embedder: IEmbedder;
+  /** null in bm25 (lexical) retrieval mode — the store runs with NO embedding
+   *  model; non-null in 'vector' (hybrid) mode. */
+  embedder: IEmbedder | null;
   store: IKnowledgeStore;
   writerQueue: WriterQueue;
 }
@@ -51,7 +53,7 @@ export async function createKnowledgeStoreComponents(
   withLock?: <T>(fn: () => Promise<T>) => Promise<T>,
   config: Config = getConfig(),
   workspace: string = process.cwd(),
-  availability: KnowledgeStoreAvailability = probeKnowledgeStoreAvailability()
+  availability: KnowledgeStoreAvailability = probeKnowledgeStoreAvailability(config.KNOWLEDGE_STORE_RETRIEVAL)
 ): Promise<KnowledgeStoreComponents | null> {
   if (config.KNOWLEDGE_STORE_MODE === 'none') {
     logger.debug('[knowledge] Knowledge store is disabled in configuration');
@@ -76,15 +78,20 @@ export async function createKnowledgeStoreComponents(
   for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
     let store: KnowledgeStore | undefined;
     try {
-      logger.info(`[knowledge] Creating Knowledge Store components (attempt ${attempt}/${MAX_INIT_RETRIES})...`);
+      logger.info(`[knowledge] Creating Knowledge Store components (attempt ${attempt}/${MAX_INIT_RETRIES}, retrieval=${config.KNOWLEDGE_STORE_RETRIEVAL})...`);
 
-      const embedder = await embedderFactory();
+      // Hard dependency boundary: in bm25 (lexical) retrieval mode the embedder
+      // factory is NEVER invoked — no @huggingface/transformers resolution, no
+      // model download, no initialization, no inference. The store runs purely
+      // on LanceDB's FTS/BM25 engine.
+      const embedder = config.KNOWLEDGE_STORE_RETRIEVAL === 'bm25' ? null : await embedderFactory();
       const migrationStrategy = getMigrationStrategy(config);
 
       store = new KnowledgeStore({
         dbDir: getDbDir(config, workspace),
         embedder,
         modelName: config.EMBEDDING_MODEL,
+        retrieval: config.KNOWLEDGE_STORE_RETRIEVAL,
         migrationStrategy: migrationStrategy,
         reconnectFactory,
         withLock,
@@ -149,8 +156,12 @@ export async function forceDeleteKnowledgeStore(config?: Config, workspace?: str
   const manifestPath = path.join(dbDir, 'store-manifest.json');
   try {
     if (fs.existsSync(manifestPath)) {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { activeTableName?: string };
-      if (manifest.activeTableName) tableName = manifest.activeTableName;
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { activeTableName?: string; activeBm25TableName?: string };
+      // Read the manifest key that belongs to the CONFIGURED retrieval mode —
+      // each mode owns its own key so a shared dbDir never cross-wires them.
+      const key = config?.KNOWLEDGE_STORE_RETRIEVAL === 'bm25' ? 'activeBm25TableName' : 'activeTableName';
+      const saved = key === 'activeBm25TableName' ? manifest.activeBm25TableName : manifest.activeTableName;
+      if (saved) tableName = saved;
     }
   } catch (err) {
     logger.warn(`[knowledge] Failed to read manifest before forced delete, defaulting to table '${tableName}':`, err);

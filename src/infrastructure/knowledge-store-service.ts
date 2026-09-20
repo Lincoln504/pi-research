@@ -50,6 +50,10 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   // mode change (project↔global re-scope, or enabled→none) and re-initialize so a /research-config
   // change applies without a Pi restart — not just the DISABLED→enabled revival.
   private _initializedMode: string | undefined = undefined;
+  // The retrieval strategy the current build reflects ('vector' hybrid / 'bm25'
+  // lexical) — drives the embedder-optional invariants below and the live
+  // re-init detection on a /research-config retrieval change.
+  private _initializedRetrieval: 'vector' | 'bm25' | undefined = undefined;
 
   // Initialization promise to prevent concurrent initialization
   private _initializationPromise: Promise<void> | null = null;
@@ -88,7 +92,12 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     //  - INITIALIZED and mode != the built mode        : project↔global re-scope, or enabled→'none'.
     // A native-unavailable DISABLED ('native') stays memoized — retrying is futile on that platform.
     if ((this.lifecycle === ServiceLifecycle.INITIALIZED || this.lifecycle === ServiceLifecycle.DISABLED) && this._cwd === newCwd) {
-      const liveMode: string = (ctx?.config || getConfig(this._cwd)).KNOWLEDGE_STORE_MODE;
+      const liveConfig = ctx?.config || getConfig(this._cwd);
+      const liveMode: string = liveConfig.KNOWLEDGE_STORE_MODE;
+      // Retrieval strategy ('vector' hybrid / 'bm25' lexical) participates in the same
+      // live-change detection: a /research-config switch must re-scope the store onto
+      // the OTHER table (lexical vs vector schema) without a Pi restart.
+      const liveRetrieval: string = liveConfig.KNOWLEDGE_STORE_RETRIEVAL;
       // Reviving a DISABLED store creates handles (no live state to tear down), so it is safe even
       // from a lazy call and uses the live config. Re-scoping/disabling a LIVE (INITIALIZED) store,
       // however, disposes handles — restrict that to an EXPLICIT ctx.config (mirrors the ctx.cwd
@@ -101,10 +110,15 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         ctx?.config !== undefined &&
         this._initializedMode !== undefined &&
         this._initializedMode !== ctx.config.KNOWLEDGE_STORE_MODE;
-      if (!reviveFromMode && !modeChanged) {
+      const retrievalChanged =
+        this.lifecycle === ServiceLifecycle.INITIALIZED &&
+        ctx?.config !== undefined &&
+        this._initializedRetrieval !== undefined &&
+        this._initializedRetrieval !== ctx.config.KNOWLEDGE_STORE_RETRIEVAL;
+      if (!reviveFromMode && !modeChanged && !retrievalChanged) {
         return;
       }
-      logger.log(`[KnowledgeStoreService] Knowledge Mode changed (${this._initializedMode ?? this._disabledReason} → ${liveMode}); re-initializing store (no restart needed).`);
+      logger.log(`[KnowledgeStoreService] Knowledge config changed (${this._initializedMode ?? this._disabledReason} → ${liveMode}, retrieval ${this._initializedRetrieval ?? '?'} → ${liveRetrieval}); re-initializing store (no restart needed).`);
       // An INITIALIZED store holds live handles (embedder/LanceDB/writer) — dispose before rebuilding.
       if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
         await this.dispose();
@@ -170,6 +184,7 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         const config = ctx?.config || getConfig(this._cwd);
         // Record the mode this build reflects so a later runtime mode change is detected above.
         this._initializedMode = config.KNOWLEDGE_STORE_MODE;
+        this._initializedRetrieval = config.KNOWLEDGE_STORE_RETRIEVAL;
         const embedderFactory = () => getEmbedder(config);
         const reconnectFactory = async () => {
           // MUST await: clearEmbeddingInstance() only nulls the cached instance AFTER its
@@ -260,7 +275,7 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
           //    calls don't re-run init, and so the healthcheck/config surfaces
           //    report the package-level reason rather than a user choice the user
           //    never made.
-          const depsMissing = !probeKnowledgeStoreAvailability().available;
+          const depsMissing = !probeKnowledgeStoreAvailability(config.KNOWLEDGE_STORE_RETRIEVAL).available;
           logger.debug(`[KnowledgeStoreService] Knowledge store is disabled (${depsMissing ? 'dependencies missing' : 'mode = none'}). Setting lifecycle to DISABLED.`);
           this.lifecycle = ServiceLifecycle.DISABLED;
           this._disabledReason = depsMissing ? 'native' : 'mode';
@@ -431,6 +446,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
    * Check if the knowledge store is ready
    */
   isReady(): boolean {
+    // bm25 mode has no embedder by design — the store+writer pair is the readiness
+    // contract there. Vector mode keeps the original three-way check.
+    if (this._initializedRetrieval === 'bm25') {
+      return this._store !== null && this._writerQueue !== null;
+    }
     return this._embedder !== null && this._store !== null && this._writerQueue !== null;
   }
 
@@ -456,6 +476,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   async getEmbedder(): Promise<IEmbedder | null> {
     await this.initialize();
     if (this.lifecycle === ServiceLifecycle.DISABLED) {
+      return null;
+    }
+    if (this._initializedRetrieval === 'bm25') {
+      // Lexical mode has no embedder — null is the CORRECT answer here, not an
+      // error. Callers must treat it as 'no embedding model configured'.
       return null;
     }
     if (!this._embedder) {

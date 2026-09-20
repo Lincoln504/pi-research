@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **BM25-only (lexical) knowledge-store retrieval mode: the store can now run entirely without an embedding model.** A new project-scoped setting, `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` (`vector` — the default and unchanged hybrid behavior — or `bm25`), selects how stored findings are retrieved. In `bm25` mode, retrieval is pure BM25 over LanceDB's Tantivy full-text indexes (the same lexical half the hybrid path already used, now standing alone over the summary text and full page Markdown) — the `@huggingface/transformers` dependency is never resolved, loaded, downloaded, or invoked, so a bm25-only installation works with `--omit=optional` and no model download. Each strategy keeps its own table in the same database directory (`knowledge` vs `knowledge-bm25`), so switching requires no migration and existing vector stores are untouched. The mode is exposed everywhere the scoping mode is: `knowledge-config set retrieval <vector|bm25>` and `show` on the CLI, a Knowledge Retrieval entry in the `/research-config` menu (embedding model/device entries hide in bm25 mode), the healthcheck, and the availability probe — which in bm25 mode no longer demands the optional embedding package. New tests cover the lexical round-trip, BM25 ranking sanity, scope isolation, cross-mode coexistence, per-mode availability probing, config parsing, and a hard embedder-factory-never-called isolation assertion; docs (KNOWLEDGE-STORE.md, CONFIGURATION.md, `.env.example`) document the three-way scoping × retrieval story.
+
 ## [1.6.19] - 2026-09-18
 
 ### Added
