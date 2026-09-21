@@ -509,6 +509,30 @@ const result = await getResearchHealth();
 嵌入模型是惰性初始化的 —— 只在知识存储第一次真正被写入或搜索时才下载并初始化，因此
 `global` 这个默认值在运行缓存到第一页之前，不会带来任何启动开销。
 
+### 检索策略：vector（混合）与 bm25（词法）
+
+与作用域无关，知识存储的检索策略由 `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL`
+（项目级设置，默认 `vector`）决定：
+
+| 策略 | 行为 |
+|----------|----------|
+| `vector`（默认） | 混合搜索：嵌入相似度 + BM25 关键词匹配，通过 reciprocal rank fusion（RRF）融合。匹配最丰富，尤其适合改写后的表达。需要可选依赖 `@huggingface/transformers` 以及一个已下载的嵌入模型。 |
+| `bm25` | 纯词法搜索：仅对已存的摘要和整页文本做 BM25 排序。**没有嵌入模型** —— 从不下载、初始化或调用，因此仅使用 bm25 的安装可以配合 `--omit=optional`，不会增加任何模型下载。 |
+
+在 pi 扩展里用 `/research-config` TUI（知识检索策略）更改当前目录的策略，或在独立 CLI 上
+运行 `pi-research knowledge-config set retrieval <vector|bm25>`。与知识模式一样，该设置
+持久化到按目录的项目注册表，且无需重启即可生效。
+
+两种策略在同一个数据库目录下使用**独立的表**（vector 用 `knowledge`，bm25 用
+`knowledge-bm25`）。已有的 vector 存储不会被 bm25 模式触碰，反之亦然 —— 切换策略无需
+迁移，且另一模式处于活动状态时,每种模式都保留自己的历史。在 `bm25` 模式下，
+`exportKnowledge()` 会省略向量，嵌入相关设置（`PI_RESEARCH_EMBEDDING_MODEL`、
+`PI_RESEARCH_EMBEDDING_DEVICE`、`PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS`）
+则完全被忽略。
+
+BM25 排序使用 Tantivy（LanceDB 的全文引擎），采用其默认的 Unicode 分词与小写化，
+同时覆盖摘要文本和整页 Markdown —— 因此词法模式匹配的字段与混合模式关键词那一半完全相同。
+
 ### 运行如何使用知识存储
 
 知识存储由编排器驱动，而不是研究员智能体随意调用，这保证了使用方式的确定性：
@@ -638,6 +662,7 @@ Intel Mac（`darwin-x64`）上两个组件都没有预编译二进制，所以�
 | 设置项 | 变量 | 默认值 |
 |---------|----------|---------|
 | 知识模式（项目级） | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` |
+| 知识检索策略（项目级） | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` | `vector` |
 | 嵌入模型 | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` |
 | 嵌入设备 | `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` |
 | 缓存保留（天） | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` |
@@ -673,6 +698,7 @@ SDK —— 上，菜单无法渲染：`/research-config` 会说明原因，并�
 |---------|-------|--------|---------|
 | `/research` 深度 | 项目 | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
 | 知识模式 | 项目 | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
+| 知识检索策略 | 项目 | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | 研究员超时 | 用户 | 3 · 5 · 10 · 15 · 20 · 30（分钟） | `PI_RESEARCH_TIMEOUT_MS` |
 | 最大并发 | 用户 | 1 – 5 | `PI_RESEARCH_MAX_RESEARCHERS` |
 | 抓取批次 | 用户 | unlimited · 1 · 2 · 3 · 5 · 10 · 15 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` |
@@ -767,7 +793,8 @@ LLM 输出与推理
 | 变量 | 默认值 | 范围 | 说明 |
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_KNOWLEDGE_STORE_MODE`（TUI）`[project]` | `global` | none · project · global | 知识存储作用域：所有目录共享一个（`global`）、限定当前目录（`project`）、或禁用（`none`）。与此设置无关，当必需包未安装（安装时跳过可选的 `@huggingface/transformers`、`@lancedb/lancedb` 损坏）时，知识存储干净地 OFF：init 快速失败而不是重试风暴，`pi-research knowledge-config`、`/research-config` 菜单和健康检查都会点名缺失的包和修复方法。 |
-| `PI_RESEARCH_EMBEDDING_MODEL`（TUI） | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | 嵌入模型。更换会清空知识存储并重新开始。 |
+| `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL`（TUI）`[project]` | `vector` | vector · bm25 | 知识存储的检索策略。`vector` = 混合搜索（嵌入相似度 + BM25 关键词，通过 RRF 融合）；需要 `@huggingface/transformers` 并下载嵌入模型。`bm25` = 仅对已存的发现做纯词法 BM25 排序 —— 没有嵌入模型，从不下载、初始化或调用；可在 `--omit=optional` 的安装中使用。每种策略在同一数据库目录下使用自己独立的表，因此切换模式不会丢失数据（各自保留自己的历史）。 |
+| `PI_RESEARCH_EMBEDDING_MODEL`（TUI） | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | 嵌入模型。仅在 `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=vector` 时使用，bm25 模式下被忽略。更换会清空知识存储并重新开始。 |
 | `PI_RESEARCH_EMBEDDING_DEVICE`（TUI） | `auto` | auto · webgpu · cpu | 推理后端。`auto` 在进程外探测 WebGPU 可行性并回退到 CPU；`cpu` 强制 CPU；`webgpu` 强制 GPU 路径、不探测（高级 —— 在软件 GPU 上可能硬崩溃）。TUI 只暴露 `auto`（显示为"GPU"）和 `cpu`。 |
 | `PI_RESEARCH_CACHE_TTL_DAYS`（TUI） | `30` | 1–365 | 缓存发现在被淘汰前保留多久。 |
 | `PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS` | `0` | 0–3650 | 读取时缓存抓取可被*伺服*的最大年龄，超过则视为未命中并重新抓取。`0` = 禁用（在 TTL 内按任意年龄伺服）。无论此值如何，缓存年龄始终呈现给模型。 |
@@ -849,6 +876,7 @@ API 密钥
 ```sh
 # ~/.pi/research/config.env   （共享基线）
 PI_RESEARCH_KNOWLEDGE_STORE_MODE=project
+PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25
 
 # ~/.pi/research/cli.env       （仅独立 CLI / 智能体技能）
 PI_RESEARCH_MODEL=openrouter/anthropic/claude-sonnet-4-6

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.21] - 2026-09-21
+
+### Fixed
+
+- **Translation docs (ES/JA/ZH) were missing the whole BM25/retrieval-strategy story added in 1.6.20.** `DOCUMENTATION-ES.md`, `DOCUMENTATION-JA.md`, and `DOCUMENTATION-ZH.md` each now carry the "Retrieval strategies: vector (hybrid) and bm25 (lexical)" subsection (mirroring `KNOWLEDGE-STORE.md`), a Knowledge Retrieval row in both the quick-reference and `/research-config` settings tables, the full `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` environment-variable reference entry, and a sample `config.env` line — matching the English docs, which were already complete. No code changes; docs-only release.
+
 ## [1.6.20] - 2026-09-21
 
 ### Added

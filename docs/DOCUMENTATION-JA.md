@@ -572,6 +572,32 @@ URL は重複排除されます。変更のないページはスキップされ�
 ダウンロード・初期化されるため、デフォルトの `global` は、実行が最初のページをキャッシュする
 までは起動コストを一切追加しません。
 
+### 検索戦略: vector（ハイブリッド）と bm25（レキシカル）
+
+スコープとは独立に、ストアの検索戦略は `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL`
+（プロジェクトスコープの設定、デフォルト `vector`）で決まります。
+
+| 戦略 | 動作 |
+|----------|----------|
+| `vector`（デフォルト） | ハイブリッド検索: 埋め込み類似度と BM25 キーワードマッチングを reciprocal rank fusion（RRF）で融合します。言い換えにも強い、最も豊かなマッチング。オプションの `@huggingface/transformers` 依存関係と、ダウンロード済みの埋め込みモデルが必要です。 |
+| `bm25` | 純粋なレキシカル検索: 保存された要約とページ全文に対する BM25 ランキングのみ。**埋め込みモデルなし** — ダウンロード・初期化・呼び出しのいずれも行われないため、bm25 専用インストールは `--omit=optional` で動作し、モデルのダウンロードを一切追加しません。 |
+
+現在のディレクトリの戦略は、pi 拡張機能の `/research-config` TUI（ナレッジ検索戦略）か、
+スタンドアロン CLI では `pi-research knowledge-config set retrieval <vector|bm25>` で変更します。
+ナレッジモードと同様、ディレクトリごとのプロジェクトレジストリに保存され、再起動なしで
+適用されます。
+
+2 つの戦略は同じデータベースディレクトリ内で**別々のテーブル**を使います（vector は
+`knowledge`、bm25 は `knowledge-bm25`）。既存の vector ストアは bm25 モードから一切変更されず、
+その逆も同様です — 戦略の切り替えに移行は不要で、それぞれのモードは他方が有効な間も自分の
+履歴を保持します。`bm25` モードでは、`exportKnowledge()` はベクトルを省略し、埋め込み関連の設定
+（`PI_RESEARCH_EMBEDDING_MODEL`、`PI_RESEARCH_EMBEDDING_DEVICE`、
+`PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS`）は完全に無視されます。
+
+BM25 ランキングは Tantivy（LanceDB の全文検索エンジン）を使い、デフォルトの Unicode
+トークナイズと小文字化により、要約テキストとページ全文の Markdown の両方に対して動作します —
+そのため、レキシカルモードはハイブリッドモードのキーワード側と同じフィールドにマッチします。
+
 ### 実行がストアをどう使うか
 
 ストアを駆動するのはオーケストレーターであり、リサーチャーエージェントが随意に呼び出すもの
@@ -721,6 +747,7 @@ Intel Mac（`darwin-x64`）にはどちらのコンポーネントのプリビ�
 | 設定 | 変数 | デフォルト |
 |---------|----------|---------|
 | ナレッジモード（プロジェクトスコープ） | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` |
+| ナレッジ検索戦略（プロジェクトスコープ） | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` | `vector` |
 | 埋め込みモデル | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` |
 | 埋め込みデバイス | `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` |
 | キャッシュ保持（日） | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` |
@@ -760,6 +787,7 @@ RPC、web hub、print、JSON、SDK — ではメニューを表示できませ�
 |---------|-------|--------|---------|
 | `/research` の深度 | プロジェクト | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
 | ナレッジモード | プロジェクト | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
+| ナレッジ検索戦略 | プロジェクト | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | リサーチャータイムアウト | ユーザー | 3 · 5 · 10 · 15 · 20 · 30（分） | `PI_RESEARCH_TIMEOUT_MS` |
 | 最大並列数 | ユーザー | 1 – 5 | `PI_RESEARCH_MAX_RESEARCHERS` |
 | スクレイプバッチ数 | ユーザー | unlimited · 1 · 2 · 3 · 5 · 10 · 15 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` |
@@ -858,7 +886,8 @@ LLM 出力と推論
 | 変数 | デフォルト | 範囲 | 説明 |
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_KNOWLEDGE_STORE_MODE`（TUI）`[project]` | `global` | none · project · global | ストアのスコープ: すべてのディレクトリで共有（`global`）、現在のディレクトリに限定（`project`）、無効化（`none`）。この設定とは無関係に、必要なパッケージがインストールされていないとき（オプションの `@huggingface/transformers` がインストール時に省略された、`@lancedb/lancedb` が壊れている）は、ストアはクリーンに OFF になります: init はリトライストームではなくフェイルファストし、`pi-research knowledge-config`、`/research-config` メニュー、ヘルスチェックが欠けているパッケージと修復方法を指名します。 |
-| `PI_RESEARCH_EMBEDDING_MODEL`（TUI） | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | 埋め込みモデル。変更するとストアが消去され、ゼロから始まります。 |
+| `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL`（TUI）`[project]` | `vector` | vector · bm25 | ストアの検索戦略。`vector` = ハイブリッド検索（埋め込み類似度 + BM25 キーワード、RRF で融合）。`@huggingface/transformers` が必要で、埋め込みモデルをダウンロードします。`bm25` = 保存された成果に対する純粋な BM25 レキシカルランキングのみ — 埋め込みモデルなし、ダウンロード・初期化・呼び出しなし。`--omit=optional` のインストールでも動作します。各戦略は同じデータベースディレクトリ内で自分専用のテーブルを使うため、モードの切り替えでデータが失われることはありません（それぞれが自分の履歴を保持します）。 |
+| `PI_RESEARCH_EMBEDDING_MODEL`（TUI） | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | 埋め込みモデル。`PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=vector` の場合のみ使用され、bm25 モードでは無視されます。変更するとストアが消去され、ゼロから始まります。 |
 | `PI_RESEARCH_EMBEDDING_DEVICE`（TUI） | `auto` | auto · webgpu · cpu | 推論バックエンド。`auto` はプロセス外で WebGPU の実行可能性をプローブし CPU にフォールバックします。`cpu` は CPU を強制します。`webgpu` はプローブなしで GPU 経路を強制します（上級 — ソフトウェア GPU ではハードクラッシュする可能性）。TUI は `auto`（"GPU" と表示）と `cpu` だけを露出します。 |
 | `PI_RESEARCH_CACHE_TTL_DAYS`（TUI） | `30` | 1–365 | キャッシュされた成果が排出されるまで保持される期間。 |
 | `PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS` | `0` | 0–3650 | 読み取り時に、キャッシュ済みの取得を*提供*できる最大の年齢。超えるとミスとして扱われ、新鮮に再取得されます。`0` = 無効（TTL までなら何歳でも提供）。キャッシュの年齢はこの値に関係なく、常にモデルに提示されます。 |
@@ -945,6 +974,7 @@ TUI はこのファイル（とプロジェクトレジストリ）だけを編�
 ```sh
 # ~/.pi/research/config.env   （共有ベースライン）
 PI_RESEARCH_KNOWLEDGE_STORE_MODE=project
+PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25
 
 # ~/.pi/research/cli.env       （スタンドアロン CLI / エージェントスキルのみ）
 PI_RESEARCH_MODEL=openrouter/anthropic/claude-sonnet-4-6

@@ -585,6 +585,35 @@ El modelo de incrustación es perezoso — solo se descarga e inicializa la prim
 almacén se escribe o se consulta de verdad, de modo que el valor `global` predeterminado no
 añade costo de arranque hasta que una ejecución guarda en caché su primera página.
 
+### Estrategias de recuperación: vector (híbrida) y bm25 (léxica)
+
+Independiente del alcance, la estrategia de recuperación del almacén la fija
+`PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` (un ajuste con alcance de proyecto,
+predeterminado `vector`):
+
+| Estrategia | Comportamiento |
+|----------|----------|
+| `vector` (predeterminado) | Búsqueda híbrida: similitud de incrustación + coincidencia de palabras clave BM25 sobre los resúmenes guardados y el texto completo de la página, fusionadas mediante reciprocal rank fusion (RRF). La coincidencia más completa, especialmente para paráfrasis. Requiere la dependencia opcional `@huggingface/transformers` y un modelo de incrustación descargado. |
+| `bm25` | Búsqueda léxica pura: ranking BM25 sobre los mismos resúmenes guardados y el texto completo de la página. **Sin modelo de incrustación** — nunca se descarga, inicializa ni invoca — de modo que una instalación solo-bm25 funciona con `--omit=optional` y no añade descarga de modelo alguna. |
+
+Cambie la estrategia del directorio actual con la TUI de `/research-config`
+(Recuperación de Conocimiento), o con `pi-research knowledge-config set retrieval
+<vector|bm25>` en la CLI independiente. Igual que el Modo de Conocimiento, persiste en
+el registro de proyectos por directorio y aplica sin reinicio.
+
+Las dos estrategias mantienen **tablas separadas** en el mismo directorio de base de datos
+(`knowledge` para vector, `knowledge-bm25` para bm25). Un almacén vector existente nunca es
+tocado por el modo bm25 y viceversa — cambiar de estrategia no requiere migración, y cada
+modo conserva su propio historial mientras el otro está activo. En modo `bm25`,
+`exportKnowledge()` omite los vectores, y los ajustes de incrustación
+(`PI_RESEARCH_EMBEDDING_MODEL`, `PI_RESEARCH_EMBEDDING_DEVICE`,
+`PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS`) se ignoran por completo.
+
+El ranking BM25 usa Tantivy (el motor de texto completo de LanceDB) con su tokenización
+Unicode y minúsculas predeterminadas, sobre el texto del resumen y el Markdown completo de
+la página — de modo que el modo léxico coincide con los mismos campos que la mitad de
+palabras clave del modo híbrido.
+
 ### Cómo usa el almacén una ejecución
 
 El almacén lo impulsa el orquestador, no los agentes investigadores a demanda, lo que
@@ -740,6 +769,7 @@ comando manual de mantenimiento.
 | Ajuste | Variable | Predeterminado |
 |---------|----------|---------|
 | Modo de Conocimiento (alcance de proyecto) | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` |
+| Recuperación de Conocimiento (alcance de proyecto) | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` | `vector` |
 | Modelo de incrustación | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` |
 | Dispositivo de incrustación | `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` |
 | Retención de caché (días) | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` |
@@ -779,6 +809,7 @@ ajustes se siguen leyendo del entorno y de los archivos de configuración, y las
 |---------|-------|--------|---------|
 | Profundidad de `/research` | proyecto | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
 | Modo de Conocimiento | proyecto | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
+| Recuperación de Conocimiento | proyecto | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | Tiempo de espera del investigador | usuario | 3 · 5 · 10 · 15 · 20 · 30 (minutos) | `PI_RESEARCH_TIMEOUT_MS` |
 | Máxima concurrencia | usuario | 1 – 5 | `PI_RESEARCH_MAX_RESEARCHERS` |
 | Lotes de extracción | usuario | unlimited · 1 · 2 · 3 · 5 · 10 · 15 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` |
@@ -880,7 +911,8 @@ cada valor.
 | Variable | Predeterminado | Rango | Descripción |
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` (TUI) `[project]` | `global` | none · project · global | Alcance del almacén: un almacén compartido en todos los directorios (`global`), limitado al directorio actual (`project`) o deshabilitado (`none`). Independientemente de este ajuste, el almacén está en OFF limpio cuando sus paquetes requeridos no están instalados (`@huggingface/transformers` opcional omitido en la instalación, `@lancedb/lancedb` roto): init falla rápido en lugar de tormenta de reintentos, y `pi-research knowledge-config`, el menú de `/research-config` y la verificación de estado nombran el paquete faltante y la reparación. |
-| `PI_RESEARCH_EMBEDDING_MODEL` (TUI) | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Modelo de incrustación. Cambiarlo limpia el almacén y empieza de cero. |
+| `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` (TUI) `[project]` | `vector` | vector · bm25 | Estrategia de recuperación del almacén. `vector` = búsqueda híbrida (similitud de incrustación + palabras clave BM25, fusionadas por RRF); requiere `@huggingface/transformers` y descarga el modelo de incrustación. `bm25` = ranking BM25 léxico puro sobre los mismos hallazgos guardados — sin modelo de incrustación, nunca descargado, inicializado ni invocado; funciona con `--omit=optional`. Cada estrategia usa su propia tabla en el mismo directorio de base de datos, así que cambiar de modo nunca pierde datos (cada uno conserva su propio historial). |
+| `PI_RESEARCH_EMBEDDING_MODEL` (TUI) | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Modelo de incrustación. Solo se usa cuando `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=vector`; se ignora en modo bm25. Cambiarlo limpia el almacén y empieza de cero. |
 | `PI_RESEARCH_EMBEDDING_DEVICE` (TUI) | `auto` | auto · webgpu · cpu | Backend de inferencia. `auto` comprueba la viabilidad de WebGPU fuera de proceso y cae a CPU; `cpu` fuerza CPU; `webgpu` fuerza la ruta de GPU sin prueba (avanzado — puede bloquearse en una GPU por software). La TUI expone solo `auto` (como "GPU") y `cpu`. |
 | `PI_RESEARCH_CACHE_TTL_DAYS` (TUI) | `30` | 1–365 | Cuánto se conservan los hallazgos en caché antes de la expulsión. |
 | `PI_RESEARCH_KNOWLEDGE_STORE_MAX_SERVE_AGE_DAYS` | `0` | 0–3650 | Edad máxima que una extracción en caché puede *servirse* al leer antes de tratarse como fallo (miss) y re-extraerse fresca. `0` = deshabilitado (servir a cualquier edad hasta el TTL). La edad de la caché siempre se muestra al modelo, sin importar esto. |
@@ -969,6 +1001,7 @@ tocar la extensión de pi:
 ```sh
 # ~/.pi/research/config.env   (línea base compartida)
 PI_RESEARCH_KNOWLEDGE_STORE_MODE=project
+PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25
 
 # ~/.pi/research/cli.env       (solo CLI / habilidad de agente independiente)
 PI_RESEARCH_MODEL=openrouter/anthropic/claude-sonnet-4-6
