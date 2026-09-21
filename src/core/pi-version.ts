@@ -7,7 +7,7 @@
  *
  *   - As a pi EXTENSION, the host supplies `@earendil-works/*`. Our package.json
  *     range never constrains it, so an in-process check is the only enforcement.
- *   - As a standalone CLI/SDK, the range is `>=0.85.0 <1` and published tarballs
+ *   - As a standalone CLI/SDK, the range is `>=0.87.0 <1` and published tarballs
  *     carry no lockfile, so every fresh install resolves the newest 0.x at that
  *     instant. pi is pre-1.0: a minor bump may break anything under semver, and
  *     already has (0.83.0 extended the ResourceLoader contract).
@@ -74,8 +74,17 @@ export function compareVersions(a: SemverParts, b: SemverParts): number {
  * indefinite-hang-in-network-restricted-environments bug that explicit
  * option originally existed to prevent. The floor moved to close that gap,
  * not just because the type changed.
+ *
+ * 0.86.0 changed the pi-ai provider stream input from Context to normalized
+ * TranscriptContext values, restricted ToolCall.arguments / ToolResultMessage
+ * details to JSON-compatible values, and made user_bash fail closed; 0.87.0
+ * added ContextEditEntry to the SessionEntry union, made SessionManager the
+ * canonical provider-context source, and replaced shouldStopAfterTurn with the
+ * finishTurn boundary. The SDK paths (session service, model-registry factory)
+ * are written against that surface; an older host may resolve but is not a
+ * tested or supported target.
  */
-export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 85, patch: 0 };
+export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 87, patch: 0 };
 
 /**
  * Newest host line this release was actually exercised against (CI + a real run).
@@ -83,7 +92,7 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 85, patch: 0 };
  * Compared on MAJOR.MINOR only: a patch bump within a tested line is not a new
  * surface, and warning on it would be noise.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 85, patch: 0 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 87, patch: 0 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 
