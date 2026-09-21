@@ -71,6 +71,7 @@ import * as path from 'node:path';
 const ENV_KEY_BY_SETTING_ID: Record<string, string> = {
   DEFAULT_RESEARCH_DEPTH: 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH',
   KNOWLEDGE_STORE_MODE: 'PI_RESEARCH_KNOWLEDGE_STORE_MODE',
+  KNOWLEDGE_STORE_RETRIEVAL: 'PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL',
   RESEARCHER_TIMEOUT_MS: 'PI_RESEARCH_TIMEOUT_MS',
   MAX_CONCURRENT_RESEARCHERS: 'PI_RESEARCH_MAX_RESEARCHERS',
   MAX_SCRAPE_BATCHES: 'PI_RESEARCH_MAX_SCRAPE_BATCHES',
@@ -171,8 +172,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         // (optional embedding dep skipped at install, broken lancedb). Surface the
         // package-level OFF right in the setting, so the menu never advertises a
         // scope the store cannot honor and the repair path is named where the
-        // user is looking.
-        const availability = probeKnowledgeStoreAvailability();
+        // user is looking. The probe is retrieval-aware: bm25 does not need the
+        // optional embedding package at all.
+        const availability = probeKnowledgeStoreAvailability(config.KNOWLEDGE_STORE_RETRIEVAL);
         if (!availability.available) {
           return `${base}\n\n⚠ ${describeKnowledgeStoreUnavailability(availability)}\nThe store stays off — regardless of this setting — until that package is installed.`;
         }
@@ -181,6 +183,25 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       currentValue: config.KNOWLEDGE_STORE_MODE,
       values: ['none', 'project', 'global'],
     },
+    ...(anyKnowledgeStore ? [
+      {
+        id: 'KNOWLEDGE_STORE_RETRIEVAL',
+        label: 'Knowledge Retrieval [project]',
+        description: (() => {
+          const base = "Retrieval strategy for the knowledge store — 'vector' (hybrid: embedding similarity + BM25 fused, richest matching, needs the optional embedding model) or 'bm25' (pure lexical BM25 — no embedding model, nothing downloaded, lighter install).\n[project] means configured independently per directory.";
+          // Same honesty rule as Knowledge Mode: in vector mode, a missing
+          // optional embedding package means the configured strategy cannot run;
+          // point at the bm25 switch as the repair.
+          const availability = probeKnowledgeStoreAvailability(config.KNOWLEDGE_STORE_RETRIEVAL);
+          if (!availability.available && config.KNOWLEDGE_STORE_RETRIEVAL === 'vector') {
+            return `${base}\n\n⚠ ${describeKnowledgeStoreUnavailability(availability)}\nSwitching to 'bm25' runs the store without the embedding package.`;
+          }
+          return base;
+        })(),
+        currentValue: config.KNOWLEDGE_STORE_RETRIEVAL,
+        values: ['vector', 'bm25'],
+      },
+    ] as SettingItem[] : []),
     {
       id: 'RESEARCHER_TIMEOUT_MS',
       label: 'Researcher Timeout',
@@ -213,20 +234,24 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // environment-only setting (PI_RESEARCH_WORKER_THREADS, default 4) so that
     // CPU/RAM-sensitive concurrency is not casually changed from the menu.
     ...(anyKnowledgeStore ? [
-      {
-        id: 'EMBEDDING_MODEL',
-        label: 'Embedding Model',
-        description: 'Vector model for semantic search. Changing it clears the current knowledge store and starts fresh.',
-        currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
-        values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
-      },
-      {
-        id: 'EMBEDDING_DEVICE',
-        label: 'Embedding Device',
-        description: 'Hardware backend for the embedding model. GPU probes whether WebGPU actually runs on this machine and automatically falls back to CPU if it does not (safe everywhere). CPU forces CPU-only inference. (Raw forced-GPU is available via the PI_RESEARCH_EMBEDDING_DEVICE=webgpu env var for benchmarking.)',
-        currentValue: config.EMBEDDING_DEVICE === 'cpu' ? 'CPU' : 'GPU',
-        values: ['GPU', 'CPU'],
-      },
+      // Embedding knobs are only meaningful in 'vector' (hybrid) retrieval mode —
+      // bm25 runs with NO embedding model, so there is nothing to select here.
+      ...(config.KNOWLEDGE_STORE_RETRIEVAL !== 'bm25' ? [
+        {
+          id: 'EMBEDDING_MODEL',
+          label: 'Embedding Model',
+          description: 'Vector model for semantic search. Changing it clears the current knowledge store and starts fresh.',
+          currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
+          values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
+        },
+        {
+          id: 'EMBEDDING_DEVICE',
+          label: 'Embedding Device',
+          description: 'Hardware backend for the embedding model. GPU probes whether WebGPU actually runs on this machine and automatically falls back to CPU if it does not (safe everywhere). CPU forces CPU-only inference. (Raw forced-GPU is available via the PI_RESEARCH_EMBEDDING_DEVICE=webgpu env var for benchmarking.)',
+          currentValue: config.EMBEDDING_DEVICE === 'cpu' ? 'CPU' : 'GPU',
+          values: ['GPU', 'CPU'],
+        },
+      ] as SettingItem[] : []),
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
         label: 'Cache Retention',
@@ -398,6 +423,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_MODE') {
               config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project' | 'global';
+            } else if (id === 'KNOWLEDGE_STORE_RETRIEVAL') {
+              config.KNOWLEDGE_STORE_RETRIEVAL = newValue as 'vector' | 'bm25';
             } else if (id === 'EMBEDDING_MODEL') {
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             // DESTRUCTIVE + DEFERRED: changing the model clears the knowledge store, so it is
@@ -441,6 +468,16 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               void getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, kmContainer)
                 .then((s) => s.getStore())
                 .catch((e) => logger.debug('[research-config] knowledge-store warm-up failed:', e));
+            }
+
+            // A retrieval switch re-scopes the store onto the other table (lexical
+            // vs vector schema) — same background warm-up as a mode change, so the
+            // first search after the switch doesn't pay the init cost.
+            if (id === 'KNOWLEDGE_STORE_RETRIEVAL') {
+              const kmContainer = tryGetServiceContainerFromCtx(ctx);
+              void getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, kmContainer)
+                .then((s) => s.getStore())
+                .catch((e) => logger.debug('[research-config] retrieval-switch warm-up failed:', e));
             }
 
             // 2. Handle Actions
@@ -825,10 +862,13 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
     }
     const counts = await store.countScoped(cwd);
     const dbDir = getDbDir(config, cwd);
-    
+    const retrievalLines = config.KNOWLEDGE_STORE_RETRIEVAL === 'bm25'
+      ? `- Retrieval: bm25 (lexical — no embedding model)`
+      : `- Retrieval: vector (hybrid embedding + BM25)\n- Model: ${config.EMBEDDING_MODEL}\n- Device: ${config.EMBEDDING_DEVICE}`;
+
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- Status: Operational\n- Project Entries: ${counts.local}\n- User Entries: ${counts.global}\n- Total Projects: ${counts.projects}\n- Model: ${config.EMBEDDING_MODEL}\n- Device: ${config.EMBEDDING_DEVICE}\n- Path: \`${dbDir}\``,
+      content: `## Knowledge Store\n\n- Status: Operational\n- Project Entries: ${counts.local}\n- User Entries: ${counts.global}\n- Total Projects: ${counts.projects}\n${retrievalLines}\n- Path: \`${dbDir}\``,
       display: true,
     });
   } catch (error: unknown) {

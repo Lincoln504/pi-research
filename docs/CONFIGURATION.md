@@ -27,6 +27,7 @@ variables still take effect.) A setting is written to one of two scopes:
 |---------|-------|--------|---------|
 | `/research` depth | project | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
 | Knowledge Mode | project | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
+| Knowledge Retrieval | project | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | Researcher Timeout | user | 3 · 5 · 10 · 15 · 20 · 30 (minutes) | `PI_RESEARCH_TIMEOUT_MS` |
 | Max Concurrency | user | 1 – 5 | `PI_RESEARCH_MAX_RESEARCHERS` |
 | Scrape Batches | user | unlimited · 1 · 2 · 3 · 5 · 10 · 15 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` |
@@ -127,7 +128,8 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` (TUI) `[project]` | `global` | none · project · global | Store scope: one shared store across every directory (`global`), scoped to the current directory (`project`), or disabled (`none`). Independently of this setting, the store is cleanly OFF when its required packages are not installed (optional `@huggingface/transformers` skipped at install, broken `@lancedb/lancedb`): init fails fast instead of retry-storming, and `pi-research knowledge-config`, the `/research-config` menu, and the healthcheck all name the missing package and the repair. |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` (TUI) `[project]` | `global` | none · project · global | Store scope: one shared store across every directory (`global`), scoped to the current directory (`project`), or disabled (`none`). Independently of this setting, the store is cleanly OFF when its required packages are not installed (optional `@huggingface/transformers` skipped at install, broken `@lancedb/lancedb`): init fails fast instead of retry-storming, and `pi-research knowledge-config`, the `/research-config` menu, and the healthcheck all name the missing package and the repair. In `bm25` retrieval mode the embedding package is not required at all. |
+| `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` (TUI) `[project]` | `vector` | vector · bm25 | Retrieval strategy: `vector` = hybrid (embedding similarity + BM25 fused via RRF; needs the optional embedding model), `bm25` = pure lexical BM25 (no embedding model — never downloaded or initialized; works with `--omit=optional`). Each strategy keeps its own table in the same database directory, so switching requires no migration. |
 | `PI_RESEARCH_EMBEDDING_MODEL` (TUI) | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model. Changing it clears the store and starts fresh. |
 | `PI_RESEARCH_EMBEDDING_DEVICE` (TUI) | `auto` | auto · webgpu · cpu | Inference backend. `auto` probes WebGPU viability out-of-process and falls back to CPU; `cpu` forces CPU; `webgpu` forces the GPU path with no probe (advanced — can hard-crash on a software GPU). The TUI exposes only `auto` (as "GPU") and `cpu`. |
 | `PI_RESEARCH_CACHE_TTL_DAYS` (TUI) | `30` | 1–365 | How long cached findings are kept before eviction. |

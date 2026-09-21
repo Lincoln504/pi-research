@@ -85,7 +85,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - An LLM with a 100k+ context window (an API key or a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency.
-- Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them.
+- Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them. Prefer no embedding model at all? Set `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25` for a pure lexical (BM25) knowledge store — see [KNOWLEDGE-STORE.md](docs/KNOWLEDGE-STORE.md).
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
 
 ### Channels

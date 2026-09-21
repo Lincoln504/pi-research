@@ -30,21 +30,43 @@ describe('probeKnowledgeStoreAvailability', () => {
   };
 
   it('reports available when every required package resolves', () => {
-    const result = probeKnowledgeStoreAvailability(resolving);
+    const result = probeKnowledgeStoreAvailability('vector', resolving);
     expect(result.available).toBe(true);
     expect(result.missing).toEqual([]);
   });
 
   it('names the skipped optional transformers package when only it is missing', () => {
-    const result = probeKnowledgeStoreAvailability(missingTransformers);
+    const result = probeKnowledgeStoreAvailability('vector', missingTransformers);
     expect(result.available).toBe(false);
     expect(result.missing).toEqual(['@huggingface/transformers']);
   });
 
   it('reports every missing package when the install is broken', () => {
-    const result = probeKnowledgeStoreAvailability(missingBoth);
+    const result = probeKnowledgeStoreAvailability('vector', missingBoth);
     expect(result.available).toBe(false);
     expect(result.missing).toEqual(['@lancedb/lancedb', '@huggingface/transformers']);
+  });
+
+  // bm25 is the HARD dependency boundary: the embedding package must not even be
+  // RESOLVED in lexical mode, so a bm25-only host (install with --omit=optional)
+  // runs the store fully.
+  it('bm25 mode is available without @huggingface/transformers — the boundary is hard', () => {
+    const result = probeKnowledgeStoreAvailability('bm25', missingTransformers);
+    expect(result.available).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
+
+  it('bm25 mode still requires @lancedb/lancedb (it backs the store in every mode)', () => {
+    const result = probeKnowledgeStoreAvailability('bm25', missingBoth);
+    expect(result.available).toBe(false);
+    expect(result.missing).toEqual(['@lancedb/lancedb']);
+  });
+
+  it('bm25 mode never even tries to resolve the transformers package', () => {
+    const spy = vi.fn(resolving);
+    probeKnowledgeStoreAvailability('bm25', spy);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith('@lancedb/lancedb');
   });
 
   it('resolves both packages through the default resolver and memoizes the verdict (settings paths run often)', async () => {
@@ -58,25 +80,54 @@ describe('probeKnowledgeStoreAvailability', () => {
     const { probeKnowledgeStoreAvailability: freshProbe, clearAvailabilityCache: freshClear } =
       await import('../../../src/knowledge/availability.ts');
 
-    freshProbe();
-    freshProbe(); // memo hit — no second resolution round
+    freshProbe('vector');
+    freshProbe('vector'); // memo hit — no second resolution round
     // 2 packages × 1 probe call; the second call must add nothing.
     expect(resolveSpy).toHaveBeenCalledTimes(2);
     expect(resolveSpy).toHaveBeenNthCalledWith(1, '@lancedb/lancedb');
     expect(resolveSpy).toHaveBeenNthCalledWith(2, '@huggingface/transformers');
 
     freshClear();
-    freshProbe();
+    freshProbe('vector');
     expect(resolveSpy).toHaveBeenCalledTimes(4);
 
     vi.doUnmock('node:module');
     clearAvailabilityCache();
   });
 
+  it('memoizes the verdict PER retrieval mode — the modes have different package requirements', async () => {
+    vi.resetModules();
+    // Use the DEFAULT resolver (via the node:module mock) — injected resolvers are
+    // deliberately never memoized, so per-mode memoization is only observable here.
+    const resolveSpy = vi.fn((spec: string) => `/node_modules/${spec}/index.js`);
+    vi.doMock('node:module', () => ({
+      createRequire: vi.fn(() => ({ resolve: resolveSpy })),
+    }));
+    const { probeKnowledgeStoreAvailability: freshProbe, clearAvailabilityCache: freshClear } =
+      await import('../../../src/knowledge/availability.ts');
+
+    // bm25 resolves ONLY lancedb; vector resolves lancedb + transformers. Each
+    // mode's memo hit must add zero resolution rounds, and neither mode's cache
+    // entry may serve the other.
+    expect(freshProbe('bm25').available).toBe(true);
+    expect(resolveSpy).toHaveBeenCalledTimes(1);
+    expect(freshProbe('bm25').available).toBe(true);
+    expect(resolveSpy).toHaveBeenCalledTimes(1); // memo hit — bm25
+
+    expect(freshProbe('vector').available).toBe(true);
+    expect(resolveSpy).toHaveBeenCalledTimes(3); // bm25's cached verdict NOT reused
+    expect(freshProbe('vector').available).toBe(true);
+    expect(resolveSpy).toHaveBeenCalledTimes(3); // memo hit — vector
+
+    vi.doUnmock('node:module');
+    freshClear();
+    clearAvailabilityCache();
+  });
+
   it('never memoizes injected resolvers — each call re-consults them (keeps tests hermetic)', () => {
     const spy = vi.fn(resolving);
-    probeKnowledgeStoreAvailability(spy);
-    probeKnowledgeStoreAvailability(spy);
+    probeKnowledgeStoreAvailability('vector', spy);
+    probeKnowledgeStoreAvailability('vector', spy);
     // 2 packages × 2 calls — an injected resolver is never answered from cache.
     expect(spy).toHaveBeenCalledTimes(4);
   });

@@ -600,6 +600,29 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
     });
 
+    it('defaults KNOWLEDGE_STORE_RETRIEVAL to "vector" when unset (backward compat)', () => {
+      const config = createConfig({}, {});
+      expect(config.KNOWLEDGE_STORE_RETRIEVAL).toBe('vector');
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('parses PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25 (lexical, embedding-free mode)', () => {
+      const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL: 'bm25' }, {});
+      expect(config.KNOWLEDGE_STORE_RETRIEVAL).toBe('bm25');
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('coerces an invalid KNOWLEDGE_STORE_RETRIEVAL env value to the default ("vector")', () => {
+      const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL: 'lexical-squared' }, {});
+      expect(config.KNOWLEDGE_STORE_RETRIEVAL).toBe('vector');
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('KNOWLEDGE_STORE_RETRIEVAL is project-scoped like KNOWLEDGE_STORE_MODE', async () => {
+      const { isProjectScopedKey } = await import('../../src/config');
+      expect(isProjectScopedKey('PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL')).toBe(true);
+    });
+
     it('should accept valid MIGRATION_STRATEGY values', () => {
       for (const strategy of ['drop', 're-embed', 'backup'] as const) {
         const config = createConfig({ PI_RESEARCH_MIGRATION_STRATEGY: strategy }, {});

@@ -8,6 +8,7 @@
  *   pi-research research "<query>" [--depth N] [--model provider/id]
  *   pi-research knowledge "<q>" ["<q2>" ...]
  *   pi-research knowledge-config [set <none|project|global>]
+ *   pi-research knowledge-config set retrieval <vector|bm25>
  *   pi-research status [--json]
  *   pi-research help
  *
@@ -895,6 +896,32 @@ export async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeCo
   // silently breaking the documented `--json: Emit a JSON object` contract for
   // this one subcommand.
   try {
+    if (kc.action === 'set-retrieval') {
+      const before = getConfig(cwd, 'cli').KNOWLEDGE_STORE_RETRIEVAL;
+      const cfg = { ...getConfig(cwd, 'cli'), KNOWLEDGE_STORE_RETRIEVAL: kc.retrieval! };
+      // Persist ONLY the retrieval strategy for this directory — mirrors the
+      // scoping-mode `set` branch above (changedKeys-scoped registry write).
+      saveConfig(cfg, 'local', cwd, ['PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL']);
+      resetConfig();
+      const info = describeKnowledgeStoreMode(cwd, 'cli');
+      const overridden = info.retrieval !== kc.retrieval;
+      if (kc.json) {
+        toStdout(pretty({ command: 'knowledge-config', action: 'set-retrieval', requested: kc.retrieval, previous: before, saved: true, effectiveOverriddenBy: overridden ? info.retrievalOrigin : null, ...info, cwd }));
+        return EXIT.OK;
+      }
+      toStdout(
+        `knowledge store retrieval for this directory: ${before} -> ${kc.retrieval}  (saved per-directory)\n` +
+        `  strategy: ${kc.retrieval === 'bm25' ? 'lexical BM25 — no embedding model needed' : 'hybrid (embedding + BM25, fused) — needs the optional embedding dependency'}\n` +
+        `  saved:    per-directory (${cwd})\n` +
+        `  db dir:   ${info.dbDir}\n` +
+        (info.available ? '' : `  state:    ${info.unavailableReason}\n`) +
+        (overridden
+          ? `\nNOTE: the effective retrieval here is still '${info.retrieval}' because a higher-precedence ${info.retrievalOrigin} overrides it. Clear that source for this setting to take effect.\n`
+          : ''),
+      );
+      return EXIT.OK;
+    }
+
     if (kc.action === 'set') {
       const before = getConfig(cwd, 'cli').KNOWLEDGE_STORE_MODE;
       const cfg = { ...getConfig(cwd, 'cli'), KNOWLEDGE_STORE_MODE: kc.mode! };
@@ -932,11 +959,14 @@ export async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeCo
     }
     toStdout(
       `knowledge store mode: ${info.mode}   (source: ${info.origin})\n` +
-      `  scope:   ${info.mode === 'none' ? 'disabled here' : info.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
-      `  db dir:  ${info.dbDir}\n` +
-      (info.available ? '' : `  state:   ${info.unavailableReason}\n`) +
-      `\nchange it for THIS directory:  ${BINARY_NAME} knowledge-config set <none|project|global>\n` +
-      `change the machine-wide default: set PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode> in ${resolvedConfigPaths().configEnv}\n`,
+      `knowledge store retrieval: ${info.retrieval}   (source: ${info.retrievalOrigin})\n` +
+      `  scope:     ${info.mode === 'none' ? 'disabled here' : info.mode === 'project' ? 'this directory only' : 'shared across all directories'}\n` +
+      `  strategy:  ${info.retrieval === 'bm25' ? 'lexical BM25 — no embedding model needed' : 'hybrid (embedding + BM25, fused)'}\n` +
+      `  db dir:    ${info.dbDir}\n` +
+      (info.available ? '' : `  state:     ${info.unavailableReason}\n`) +
+      `\nchange scope for THIS directory:     ${BINARY_NAME} knowledge-config set <none|project|global>\n` +
+      `change retrieval for THIS directory: ${BINARY_NAME} knowledge-config set retrieval <vector|bm25>\n` +
+      `change the machine-wide defaults: set PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode> and/or PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=<vector|bm25> in ${resolvedConfigPaths().configEnv}\n`,
     );
     return EXIT.OK;
   } catch (err) {
@@ -1235,7 +1265,7 @@ interface ParsedArgs {
   command?: string;
   research?: ResearchArgs;
   knowledge?: { queries: string[]; json?: boolean };
-  knowledgeConfig?: { action: 'show' | 'set'; mode?: 'none' | 'project' | 'global'; json?: boolean };
+  knowledgeConfig?: { action: 'show' | 'set' | 'set-retrieval'; mode?: 'none' | 'project' | 'global'; retrieval?: 'vector' | 'bm25'; json?: boolean };
   status?: { json?: boolean };
   skill?: { action: 'install' | 'uninstall' | 'status'; json?: boolean; dryRun?: boolean; copy?: boolean };
   configPath?: string;
@@ -1270,6 +1300,10 @@ COMMANDS
     --json                       Emit a JSON object.
   knowledge-config set <mode>    Set the mode for THIS directory (none | project | global);
                                  persisted per-directory. Takes effect on the next run.
+  knowledge-config set retrieval <vector|bm25>
+                                 Set the retrieval strategy for THIS directory: 'vector'
+                                 (hybrid embedding+BM25, default) or 'bm25' (pure lexical,
+                                 no embedding model). Persisted per-directory.
 
   status                         Show detected config, model/key, and readiness.
     --config <path>              Layer this config file on top (highest file precedence; base
@@ -1303,6 +1337,7 @@ CONFIGURE
 
   Knowledge store — ON by default in every directory (mode 'global', one shared store).
     per-directory:  ${BINARY_NAME} knowledge-config set <none|project|global>
+                    ${BINARY_NAME} knowledge-config set retrieval <vector|bm25>
     machine-wide:   PI_RESEARCH_KNOWLEDGE_STORE_MODE=<mode>  in ${p.configEnv}
     'project' scopes the store to the current directory; 'none' disables it here.
 
@@ -1421,6 +1456,24 @@ export function parseArgs(argv: string[]): ParsedArgs {
       return out;
     }
     if (action === 'set') {
+      // Extended form: `knowledge-config set retrieval <vector|bm25>` — switches the
+      // retrieval STRATEGY (the scoping mode uses the original single-arg form).
+      if (positional[1] === 'retrieval') {
+        const retrieval = positional[2];
+        if (retrieval === undefined) {
+          throw new UsageError('knowledge-config set retrieval requires a strategy: vector | bm25.');
+        }
+        if (retrieval !== 'vector' && retrieval !== 'bm25') {
+          throw new UsageError(`invalid retrieval strategy "${retrieval}". Use one of: vector | bm25.`);
+        }
+        if (positional.length > 3) {
+          throw new UsageError(`unexpected argument "${positional[3]}" after "knowledge-config set retrieval ${retrieval}".`);
+        }
+        out.command = 'knowledge-config';
+        out.knowledgeConfig = { action: 'set-retrieval', retrieval, json };
+        out.configPath = configPath;
+        return out;
+      }
       const mode = positional[1];
       if (mode === undefined) {
         throw new UsageError('knowledge-config set requires a mode: none | project | global.');
@@ -1436,7 +1489,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       out.configPath = configPath;
       return out;
     }
-    throw new UsageError(`unknown knowledge-config action "${action}". Use: show | set <none|project|global>.`);
+    throw new UsageError(`unknown knowledge-config action "${action}". Use: show | set <none|project|global> | set retrieval <vector|bm25>.`);
   }
 
   if (cmd === 'skill') {

@@ -58,6 +58,35 @@ The embedding model is lazy — it only downloads and initializes the first time
 the store is actually written or searched, so the `global` default adds no startup
 cost until a run caches its first page.
 
+### Retrieval strategies: vector (hybrid) and bm25 (lexical)
+
+Independent of scope, the store's retrieval strategy is set by
+`PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` (a project-scoped setting, default
+`vector`):
+
+| Strategy | Behavior |
+|----------|----------|
+| `vector` (default) | Hybrid search: embedding similarity + BM25 keyword matching over the stored summaries and full page text, fused via reciprocal rank fusion (RRF). Richest matching, especially for paraphrases. Requires the optional `@huggingface/transformers` dependency and a downloaded embedding model. |
+| `bm25` | Pure lexical search: BM25 ranking over the same stored summaries and full page text. **No embedding model** — never downloaded, initialized, or invoked — so a bm25-only installation works with `--omit=optional` and adds no model download. |
+
+Change the strategy for the current directory with the `/research-config` TUI
+(Knowledge Retrieval), or with `pi-research knowledge-config set retrieval
+<vector|bm25>` on the standalone CLI. Like Knowledge Mode, it persists to the
+per-directory project registry and applies without a restart.
+
+The two strategies keep **separate tables** in the same database directory
+(`knowledge` for vector, `knowledge-bm25` for bm25). An existing vector store is
+never touched by bm25 mode and vice versa — switching strategies requires no
+migration, and each mode keeps its own history while the other is active. In
+`bm25` mode, `exportKnowledge()` omits vectors, and the embedding settings
+(`PI_RESEARCH_EMBEDDING_MODEL`, `PI_RESEARCH_EMBEDDING_DEVICE`,
+`PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS`) are ignored entirely.
+
+BM25 ranking uses Tantivy (LanceDB's full-text engine) with its default Unicode
+tokenization and lowercasing, over both the summary text and the full page
+Markdown — so lexical mode matches the same fields the hybrid mode's keyword
+half does.
+
 ### How a run uses the store
 
 The store is driven by the orchestrator, not called ad hoc by researcher agents,
@@ -75,6 +104,9 @@ documents, asks a background LLM whether they answer the question, and returns a
 synthesized answer with citations — or reports that live research is needed.
 
 ### Embeddings and the model
+
+Applies to the `vector` (hybrid) retrieval strategy only — `bm25` mode runs with
+no embedding model at all.
 
 Embeddings are computed locally with
 [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) over
@@ -173,7 +205,8 @@ keep history longer.
 
 ### Changing the model: migration
 
-When the configured embedding model differs from the one the stored vectors were
+Applies to the `vector` retrieval strategy. When the configured embedding model
+differs from the one the stored vectors were
 built with, the store is migrated according to `PI_RESEARCH_MIGRATION_STRATEGY`:
 
 | Strategy | What happens |
@@ -209,12 +242,13 @@ indices are pruned to keep it bounded. There is no manual maintenance command.
 | Setting | Variable | Default |
 |---------|----------|---------|
 | Knowledge Mode (project-scoped) | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` |
-| Embedding model | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` |
-| Embedding device | `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` |
+| Retrieval strategy (project-scoped) | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` | `vector` |
+| Embedding model (vector mode only) | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` |
+| Embedding device (vector mode only) | `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` |
 | Cache retention (days) | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` |
 | Migration strategy | `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` |
 | Database directory | `PI_RESEARCH_KNOWLEDGE_DIR` | `~/.pi/research/knowledge_db` |
-| Model init timeout (ms) | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` |
+| Model init timeout, vector mode only (ms) | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` |
 | Re-probe WebGPU | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ |
 
 See [CONFIGURATION.md](CONFIGURATION.md) for the full configuration model, and

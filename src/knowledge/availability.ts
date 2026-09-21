@@ -46,17 +46,36 @@ export interface KnowledgeStoreAvailability {
 }
 
 /**
- * The packages the store cannot run without. `@lancedb/lancedb` is the vector
- * store itself; `@huggingface/transformers` is the only embedding backend
- * (see transformers-loader.ts — there is no remote-embedding fallback).
+ * The packages the store cannot run without, per retrieval mode.
+ *
+ * Every mode needs `@lancedb/lancedb` — it backs the store in ALL modes (its
+ * native FTS/Tantivy engine provides BM25 ranking in lexical mode too).
+ *
+ * Only the 'vector' (hybrid) retrieval mode additionally needs
+ * `@huggingface/transformers` (the only embedding backend — see
+ * transformers-loader.ts, there is no remote-embedding fallback). Selecting
+ * retrieval='bm25' is a HARD dependency boundary: the embedding package is
+ * never resolved, loaded, or downloaded in lexical mode, so a bm25-only host
+ * (e.g. an install with --omit=optional) runs the store fully.
  */
-const REQUIRED_PACKAGES: readonly string[] = ['@lancedb/lancedb', '@huggingface/transformers'];
+function requiredPackages(retrieval: KnowledgeStoreRetrieval): readonly string[] {
+  return retrieval === 'bm25'
+    ? ['@lancedb/lancedb']
+    : ['@lancedb/lancedb', '@huggingface/transformers'];
+}
+
+/** Knowledge store retrieval strategy. 'vector' = hybrid dense+sparse (default,
+ *  embedding-backed); 'bm25' = pure lexical, no embedding model. */
+export type KnowledgeStoreRetrieval = 'vector' | 'bm25';
 
 // Memoized per-process: resolution touches the filesystem on every miss, the
 // answer cannot change within a live process without a reinstall mid-flight,
 // and the probe sits on settings/health paths that run often. Tests reset it
 // via clearAvailabilityCache.
 let _cached: KnowledgeStoreAvailability | null = null;
+// The retrieval mode the cached probe answer was computed for — the cache must
+// be keyed on it because the required-package set differs between modes.
+let _cachedRetrieval: KnowledgeStoreRetrieval | null = null;
 
 /** Resolver signature — injectable so tests never need the real filesystem. */
 export type PackageResolver = (specifier: string) => string;
@@ -75,10 +94,10 @@ const defaultResolver: PackageResolver = (specifier) =>
  * Probe whether the knowledge store's required packages are resolvable.
  * Memoized after the first call; {@link clearAvailabilityCache} resets.
  */
-export function probeKnowledgeStoreAvailability(resolver: PackageResolver = defaultResolver): KnowledgeStoreAvailability {
-  if (cachedIsValidFor(resolver)) return _cached!;
+export function probeKnowledgeStoreAvailability(retrieval: KnowledgeStoreRetrieval = 'vector', resolver: PackageResolver = defaultResolver): KnowledgeStoreAvailability {
+  if (cachedIsValidFor(retrieval, resolver)) return _cached!;
   const missing: string[] = [];
-  for (const pkg of REQUIRED_PACKAGES) {
+  for (const pkg of requiredPackages(retrieval)) {
     try {
       resolver(pkg);
     } catch {
@@ -88,17 +107,21 @@ export function probeKnowledgeStoreAvailability(resolver: PackageResolver = defa
     }
   }
   const result: KnowledgeStoreAvailability = { available: missing.length === 0, missing };
-  if (resolver === defaultResolver) _cached = result;
+  if (resolver === defaultResolver) {
+    _cached = result;
+    _cachedRetrieval = retrieval;
+  }
   return result;
 }
 
-function cachedIsValidFor(resolver: PackageResolver): boolean {
-  return _cached !== null && resolver === defaultResolver;
+function cachedIsValidFor(retrieval: KnowledgeStoreRetrieval, resolver: PackageResolver): boolean {
+  return _cached !== null && _cachedRetrieval === retrieval && resolver === defaultResolver;
 }
 
 /** Reset the memoized probe result (test isolation). */
 export function clearAvailabilityCache(): void {
   _cached = null;
+  _cachedRetrieval = null;
 }
 
 /**

@@ -50,6 +50,13 @@ export const ConfigSchema = Type.Object({
   WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
   /** Knowledge store isolation mode (default: 'global' — one shared store across every directory) */
   KNOWLEDGE_STORE_MODE: Type.Union([Type.Literal('none'), Type.Literal('project'), Type.Literal('global')], { default: 'global' }),
+  /** Knowledge store retrieval strategy (default: 'vector' — current hybrid dense+sparse behavior).
+   *  'vector' = hybrid search (embedding similarity + BM25/FTS fused via RRF; requires the
+   *  optional @huggingface/transformers dependency and a downloaded embedding model).
+   *  'bm25'   = pure lexical/BM25 retrieval over the same stored findings — NO embedding model:
+   *  never initialized, downloaded, or invoked. Uses a separate lexical table in the same
+   *  LanceDB database, so existing vector stores are untouched (no migration). */
+  KNOWLEDGE_STORE_RETRIEVAL: Type.Union([Type.Literal('vector'), Type.Literal('bm25')], { default: 'vector' }),
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: Type.String({ default: 'onnx-community/granite-embedding-small-english-r2-ONNX' }),
   /** Hardware backend for embeddings: 'auto' (probe WebGPU viability out-of-process, fall back to CPU), 'webgpu' (force), or 'cpu' (force).
@@ -211,6 +218,7 @@ export const DEFAULTS: Config = Value.Create(ConfigSchema);
 const LOCAL_SCOPE_KEYS = new Set([
   'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH',
   'PI_RESEARCH_KNOWLEDGE_STORE_MODE',
+  'PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL',
 ]);
 
 /**
@@ -600,6 +608,10 @@ export interface KnowledgeStoreModeInfo {
   mode: 'none' | 'project' | 'global';
   /** Human-readable source of the EFFECTIVE value (highest-precedence source that set it). */
   origin: string;
+  /** Knowledge store retrieval strategy ('vector' hybrid — default, or 'bm25' lexical-only). */
+  retrieval: 'vector' | 'bm25';
+  /** Human-readable source of the EFFECTIVE retrieval value (same precedence walk as `origin`). */
+  retrievalOrigin: string;
   /** Physical LanceDB directory backing the store (shared across project/global modes). */
   dbDir: string;
   /**
@@ -627,34 +639,40 @@ export function describeKnowledgeStoreMode(
   iface?: ConfigInterface,
 ): KnowledgeStoreModeInfo {
   const cfg = getConfig(cwd, iface);
-  const KEY = 'PI_RESEARCH_KNOWLEDGE_STORE_MODE';
-  const fileHasKey = (p: string): boolean => {
+  const fileHasKey = (key: string, p: string): boolean => {
     try {
-      return fs.existsSync(p) && parseDotEnv(fs.readFileSync(p, 'utf-8'))[KEY] !== undefined;
+      return fs.existsSync(p) && parseDotEnv(fs.readFileSync(p, 'utf-8'))[key] !== undefined;
     } catch {
       return false;
     }
   };
 
-  let origin = 'built-in default';
-  if (process.env[KEY] !== undefined) {
-    origin = 'environment variable';
-  } else {
+  /**
+   * Walk the same precedence createConfig applies, highest first, for one env key:
+   *   env var  >  per-directory project registry  >  {iface}.env overlay  >  config.env  >  default.
+   */
+  const originFor = (KEY: string): string => {
+    if (process.env[KEY] !== undefined) {
+      return 'environment variable';
+    }
     let registryHasKey = false;
     try {
       const registry = loadProjectSettingsRegistry();
       registryHasKey = findRegistryEntry(registry, normalizeWorkspacePath(cwd))?.[KEY] !== undefined;
     } catch { /* unreadable registry → not the origin */ }
-    if (registryHasKey) origin = 'this directory (project settings)';
-    else if (iface && fileHasKey(getInterfaceEnvFilePath(iface))) origin = `${iface}.env overlay`;
-    else if (fileHasKey(getGlobalEnvFilePath())) origin = 'config.env (machine-wide default)';
-  }
+    if (registryHasKey) return 'this directory (project settings)';
+    if (iface && fileHasKey(KEY, getInterfaceEnvFilePath(iface))) return `${iface}.env overlay`;
+    if (fileHasKey(KEY, getGlobalEnvFilePath())) return 'config.env (machine-wide default)';
+    return 'built-in default';
+  };
 
   return {
     mode: cfg.KNOWLEDGE_STORE_MODE,
-    origin,
+    origin: originFor('PI_RESEARCH_KNOWLEDGE_STORE_MODE'),
+    retrieval: cfg.KNOWLEDGE_STORE_RETRIEVAL,
+    retrievalOrigin: originFor('PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL'),
     dbDir: getDbDir(cfg, cwd),
-    ...availabilityFields(),
+    ...availabilityFields(cfg),
   };
 }
 
@@ -665,8 +683,8 @@ export function describeKnowledgeStoreMode(
  * throws: the probe catches resolution errors internally and reports them as
  * `available: false`.
  */
-function availabilityFields(): { available: boolean; unavailableReason: string } {
-  const availability = probeKnowledgeStoreAvailability();
+function availabilityFields(cfg?: Config): { available: boolean; unavailableReason: string } {
+  const availability = probeKnowledgeStoreAvailability(cfg?.KNOWLEDGE_STORE_RETRIEVAL ?? getConfig().KNOWLEDGE_STORE_RETRIEVAL);
   return {
     available: availability.available,
     unavailableReason: describeKnowledgeStoreUnavailability(availability),
@@ -924,6 +942,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
     PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
     PI_RESEARCH_KNOWLEDGE_STORE_MODE: config.KNOWLEDGE_STORE_MODE,
+    PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL: config.KNOWLEDGE_STORE_RETRIEVAL,
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
@@ -1147,6 +1166,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS, 1, 10, true),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY, 1, 10, true),
     KNOWLEDGE_STORE_MODE: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', ['none', 'project', 'global'] as const, 'global'),
+    KNOWLEDGE_STORE_RETRIEVAL: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL', ['vector', 'bm25'] as const, 'vector'),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvEnum(e, 'PI_RESEARCH_EMBEDDING_DEVICE', ['auto', 'webgpu', 'cpu'] as const, DEFAULTS.EMBEDDING_DEVICE),
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS, 5000, 120000),

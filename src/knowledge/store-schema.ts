@@ -41,6 +41,38 @@ function createStoreSchema(dim: number, modelName: string): Schema {
 }
 
 /**
+ * Schema metadata for BM25 (lexical) tables.
+ *
+ * BM25 tables carry NO vector column at all — rows are stored without any
+ * embedding and ranking comes entirely from the Tantivy FTS inverted indexes
+ * over 'text' and 'content' (computed at query time, nothing score-shaped is
+ * persisted). The schema is otherwise identical to the vector schema, so the
+ * same store operations, scope filters, and result mapping apply.
+ */
+export const BM25_TABLE_NAME = 'knowledge-bm25';
+export const BM25_EMBEDDING_MODEL_TAG = 'bm25-lexical';
+
+/**
+ * Create the BM25 (lexical) store table schema — the vector schema minus the
+ * 'vector' column, tagged so the two table kinds are distinguishable on disk.
+ */
+function createBm25StoreSchema(): Schema {
+  return new Schema([
+    new Field('url', new Utf8(), false),
+    new Field('text', new Utf8(), false),
+    new Field('content', new Utf8(), true), // full page markdown, nullable
+    new Field('metadata', new Utf8(), false), // JSON stringified
+    new Field('workspace', new Utf8(), false), // local workspace path or 'global'
+    new Field('is_global', new Bool(), false), // boolean indicating if it's shared globally
+    new Field('ingestion_type', new Utf8(), false), // e.g. 'synthesis-description'
+    new Field('timestamp', new Int64(), false),
+  ], new Map([
+    ['embedding_model', BM25_EMBEDDING_MODEL_TAG],
+    ['schema_version', CURRENT_SCHEMA_VERSION]
+  ]));
+}
+
+/**
  * Create an empty table with the knowledge store schema
  */
 export async function createStoreTable(
@@ -50,6 +82,32 @@ export async function createStoreTable(
   modelName: string
 ): Promise<lancedb.Table> {
   const schema = createStoreSchema(dim, modelName);
+  return createKnowledgeTable(db, name, schema);
+}
+
+/**
+ * Create an empty BM25 (lexical) table — same indexes as the vector table, no
+ * vector column. Used by retrieval mode 'bm25' (separate table so existing
+ * vector stores are never touched — no migration either way).
+ */
+export async function createBm25StoreTable(
+  db: lancedb.Connection,
+  name: string = BM25_TABLE_NAME
+): Promise<lancedb.Table> {
+  const schema = createBm25StoreSchema();
+  return createKnowledgeTable(db, name, schema);
+}
+
+/**
+ * Shared table creation: FTS indexes for lexical search + btree scalar indexes
+ * for scope/eviction performance. Identical for both table kinds — the ONLY
+ * difference between them is the presence of the 'vector' column.
+ */
+async function createKnowledgeTable(
+  db: lancedb.Connection,
+  name: string,
+  schema: Schema
+): Promise<lancedb.Table> {
   const { Index } = await getLancedb();
 
   // Create empty table with schema and metadata
