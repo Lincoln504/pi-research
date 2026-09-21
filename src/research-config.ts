@@ -70,6 +70,7 @@ import * as path from 'node:path';
  */
 const ENV_KEY_BY_SETTING_ID: Record<string, string> = {
   DEFAULT_RESEARCH_DEPTH: 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH',
+  QUICK_RESEARCH: 'PI_RESEARCH_QUICK_RESEARCH',
   KNOWLEDGE_STORE_MODE: 'PI_RESEARCH_KNOWLEDGE_STORE_MODE',
   KNOWLEDGE_STORE_RETRIEVAL: 'PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL',
   RESEARCHER_TIMEOUT_MS: 'PI_RESEARCH_TIMEOUT_MS',
@@ -142,7 +143,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const initialConfig = { ...getConfig(cwd) };
   const config = { ...getConfig(cwd) };
   const container = tryGetServiceContainerFromCtx(ctx);
-  const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
+  const depthLabels: Record<number, string> = { 0: 'quick', 1: 'normal', 2: 'deep', 3: 'ultra' };
+  // Quick mode (depth 0) is opt-in: when QUICK_RESEARCH is off (default), the
+  // depth menu must not advertise a 'quick' choice the tool would clamp away.
+  const quickResearchEnabled = config.QUICK_RESEARCH === true;
 
   const anyKnowledgeStore = config.KNOWLEDGE_STORE_MODE !== 'none';
 
@@ -157,11 +161,18 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const initialItems: SettingItem[] = [
     // ── Project-scoped settings (saved per-directory) ──
     {
+      id: 'QUICK_RESEARCH',
+      label: 'Quick research [project]',
+      description: 'Opt-in gate for depth-0 (quick) research — a single-pass run with no researcher team, for one-fact lookups. When disabled (default), agents cannot use depth 0 at all (upstream behavior). Takes effect on the next session.\n[project] means configured independently per directory.',
+      currentValue: config.QUICK_RESEARCH ? 'enabled' : 'disabled',
+      values: ['disabled', 'enabled'],
+    },
+    {
       id: 'DEFAULT_RESEARCH_DEPTH',
       label: '/research depth [project]',
-      description: 'Default depth for the /research command (normal, deep, ultra).\n[project] means configured independently per directory.',
+      description: 'Default depth for the /research command (quick, normal, deep, ultra).\n[project] means configured independently per directory.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
-      values: ['normal', 'deep', 'ultra'],
+      values: quickResearchEnabled ? ['quick', 'normal', 'deep', 'ultra'] : ['normal', 'deep', 'ultra'],
     },
     {
       id: 'KNOWLEDGE_STORE_MODE',
@@ -403,8 +414,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             let changed = true;
             let scope: 'local' | 'user' = 'local';
 
-            if (id === 'DEFAULT_RESEARCH_DEPTH') {
-              const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
+            if (id === 'QUICK_RESEARCH') {
+              config.QUICK_RESEARCH = newValue === 'enabled';
+            } else if (id === 'DEFAULT_RESEARCH_DEPTH') {
+              const depthMap: Record<string, number> = { 'quick': 0, 'normal': 1, 'deep': 2, 'ultra': 3 };
               config.DEFAULT_RESEARCH_DEPTH = depthMap[newValue] || 1;
             } else if (id === 'MAX_CONCURRENT_RESEARCHERS') {
               config.MAX_CONCURRENT_RESEARCHERS = parseInt(newValue, 10);

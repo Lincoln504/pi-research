@@ -38,8 +38,10 @@ export const ConfigSchema = Type.Object({
   RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 100, maximum: 10000, default: 2000 }),
   /** Unique researcher failures that abort the entire run (default: 2, range: 1-10) */
   MAX_FAILED_RESEARCHERS: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
-  /** Target depth for recursive research (default: 1, range: 1-3) */
-  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
+  /** Target depth for recursive research (default: 1, range: 0-3; 0 = quick mode, requires QUICK_RESEARCH) */
+  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 0, maximum: 3, default: 1 }),
+  /** Opt-in gate for depth-0 (quick mode) research. When false (default), depth 0 is invisible to the agent-facing tool and any depth-0 default resolves to 1 — upstream behavior. When true, agents can pass depth: 0 and DEFAULT_RESEARCH_DEPTH=0 is honored. */
+  QUICK_RESEARCH: Type.Boolean({ default: false }),
   /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
   MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
   /** Max shared web-gathering calls per researcher (search + security_search + stackexchange + youtube_transcript). Default 12. */
@@ -217,6 +219,7 @@ export const DEFAULTS: Config = Value.Create(ConfigSchema);
  */
 const LOCAL_SCOPE_KEYS = new Set([
   'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH',
+  'PI_RESEARCH_QUICK_RESEARCH',
   'PI_RESEARCH_KNOWLEDGE_STORE_MODE',
   'PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL',
 ]);
@@ -937,6 +940,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_SEARCH_TIMEOUT_MS: String(config.SEARCH_TIMEOUT_MS),
     PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS: String(config.TUI_REFRESH_DEBOUNCE_MS),
     PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: String(config.DEFAULT_RESEARCH_DEPTH),
+    PI_RESEARCH_QUICK_RESEARCH: String(config.QUICK_RESEARCH),
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_MAX_GATHERING_CALLS: String(config.MAX_GATHERING_CALLS),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
@@ -1160,7 +1164,8 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     RESEARCHER_MAX_RETRIES: parseEnvNumber(e, 'PI_RESEARCH_MAX_RETRIES', DEFAULTS.RESEARCHER_MAX_RETRIES, 0, 5, true),
     RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS, 100, 10000),
     MAX_FAILED_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_FAILED_RESEARCHERS', DEFAULTS.MAX_FAILED_RESEARCHERS, 1, 10, true),
-    DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH, 1, 3, true),
+    DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH, 0, 3, true),
+    QUICK_RESEARCH: parseEnvBool(e, 'PI_RESEARCH_QUICK_RESEARCH', DEFAULTS.QUICK_RESEARCH),
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES, 0, 99, true),
     MAX_GATHERING_CALLS: parseEnvNumber(e, 'PI_RESEARCH_MAX_GATHERING_CALLS', DEFAULTS.MAX_GATHERING_CALLS, 1, 100, true),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS, 1, 10, true),

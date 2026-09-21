@@ -323,6 +323,16 @@ export default async function (pi: ExtensionAPI) {
   const researchTool: ToolDefinition = createResearchTool('pi');
   pi.registerTool(researchTool);
 
+  // Session-static snapshot of the quick-mode gate, taken at the SAME moment the
+  // tool schema is built (createResearchTool resolves QUICK_RESEARCH internally).
+  // The system prompt must advertise quick mode only when the registered schema
+  // can actually accept it: tool schemas are session-static, so a mid-session
+  // /research-config toggle updates the prompt on the next turn but the schema —
+  // and therefore this snapshot — only on the next session. Gating the prompt on
+  // live config here would tell the agent depth 0 exists while the tool still
+  // rejects it with invalid_parameters until restart.
+  const quickResearchEnabledAtRegistration = getConfig(process.cwd(), 'pi').QUICK_RESEARCH === true;
+
   // Create and register the health check tool
   const healthTool: ToolDefinition = createHealthTool();
   pi.registerTool(healthTool);
@@ -602,7 +612,17 @@ export default async function (pi: ExtensionAPI) {
       (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name));
 
     if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
+      // Quick-mode (depth 0) prompt documentation is gated on the SAME session-
+      // static snapshot the tool schema was built from (see
+      // quickResearchEnabledAtRegistration) — not live config — so the prompt can
+      // never advertise a depth the registered schema rejects. A mid-session
+      // QUICK_RESEARCH toggle therefore fully applies on the next session, both
+      // schema and prompt together.
+      const quickModeDoc = quickResearchEnabledAtRegistration
+        ? '**Quick mode (`depth: 0`) is available on this host.** Use it when the user wants a single verifiable fact, a URL, a price, a version number, or a yes/no with a source — or says "quick lookup", "just check", "one-liner", or "don\'t overdo it". Depth 0 runs one search-and-read pass with no researcher team and answers concisely. When in doubt, use depth 1 instead.\n'
+        : '';
       let researchPrompt = loadPrompt('research-tool-usage')
+        .replace(/\n?\{\{QUICK_MODE_DOC\}\}\n?/, '\n' + quickModeDoc)
         .replace('{{max_team_size_l1}}', MAX_TEAM_SIZE_LEVEL_1.toString())
         .replace('{{max_team_size_l2}}', MAX_TEAM_SIZE_LEVEL_2.toString())
         .replace('{{max_team_size_l3}}', MAX_TEAM_SIZE_LEVEL_3.toString());

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Depth 0 (quick mode) as an opt-in for the pi extension `research` tool.** A single-pass quick orchestrator (`QuickResearchOrchestrator`) already existed behind the SDK and the CLI's `--depth 0`, but the agent-facing tool schema clamped depth to `minimum: 1`, so the agent could never choose it even when the user asked for a one-fact lookup. Depth 0 stays invisible by default — the tool surface is byte-identical to the upstream `minimum: 1` schema — and is enabled per-directory with the new `QUICK_RESEARCH` setting (`PI_RESEARCH_QUICK_RESEARCH`, default `false`, exposed in `/research-config` as **Quick research [project]**). When enabled, the tool schema accepts 0, the research tool-usage prompt documents when depth 0 is appropriate (a single verifiable fact, a URL, a price, a version number), and the `/research-config` depth item offers a `quick` choice; `DEFAULT_RESEARCH_DEPTH` (`PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`) accepts 0 for a quick default. Because tool schemas are session-static, toggling applies on the next session. The CLI and SDK are unchanged (explicit `--depth 0` was already upstream behavior).
+
 ## [1.6.21] - 2026-09-21
 
 ### Fixed
@@ -14,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.6.20] - 2026-09-21
 
 ### Added
+
 
 - **BM25-only (lexical) knowledge-store retrieval mode: the store can now run entirely without an embedding model** (merged PR #14 by @akmalayari). A new project-scoped setting, `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` (`vector` — the default and unchanged hybrid behavior — or `bm25`), selects how stored findings are retrieved. In `bm25` mode, retrieval is pure BM25 over LanceDB's Tantivy full-text indexes (the same lexical half the hybrid path already used, now standing alone over the summary text and full page Markdown) — the `@huggingface/transformers` dependency is never resolved, loaded, downloaded, or invoked, so a bm25-only installation works with `--omit=optional` and no model download. Each strategy keeps its own table in the same database directory (`knowledge` vs `knowledge-bm25`), so switching requires no migration and existing vector stores are untouched. The mode is exposed everywhere the scoping mode is: `knowledge-config set retrieval <vector|bm25>` and `show` on the CLI, a Knowledge Retrieval entry in the `/research-config` menu (embedding model/device entries hide in bm25 mode), the healthcheck, and the availability probe — which in bm25 mode no longer demands the optional embedding package. New tests cover the lexical round-trip, BM25 ranking sanity, scope isolation, cross-mode coexistence, per-mode availability probing, config parsing, and a hard embedder-factory-never-called isolation assertion; docs (KNOWLEDGE-STORE.md, CONFIGURATION.md, `.env.example`) document the three-way scoping × retrieval story.
 

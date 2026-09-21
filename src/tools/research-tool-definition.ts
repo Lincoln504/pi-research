@@ -2,10 +2,10 @@
  * Research Tool Definition
  *
  * Defines the research tool that orchestrates web/internet research.
+ * Depth 0: quick mode — a single-pass run with no researcher team. Opt-in via
+ * QUICK_RESEARCH (PI_RESEARCH_QUICK_RESEARCH): when disabled (the default), the
+ * tool surface is the upstream minimum: 1 schema and depth 0 is unreachable.
  * Depth 1-3: AI-orchestrated multi-session research (coordinator → researchers → evaluator).
- *
- * Note: Depth 0 (quick mode) is only available via the SDK / CLI (`--depth 0`,
- * which the agent skill can pass). The pi extension tool has minimum: 1.
  */
 
 import type {
@@ -88,15 +88,24 @@ function appendResearchSummary(
  * Create the research tool definition
  */
 export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
+  // Quick-mode (depth 0) visibility is resolved ONCE, at tool-creation time,
+  // from the launching directory's config: tool schemas are session-static, so
+  // a mid-session QUICK_RESEARCH toggle takes effect on the next session. When
+  // disabled (the default) the schema is byte-identical to the upstream
+  // minimum: 1 surface — agents can neither see nor send depth 0.
+  const quickEnabled = getConfig(undefined, iface).QUICK_RESEARCH === true;
+  const depthMin = quickEnabled ? 0 : 1;
+
   const parameters = Type.Object({
     query: Type.String({
       description: 'The research topic or query to investigate.',
     }),
     depth: Type.Optional(Type.Integer({
-      minimum: 1,
+      minimum: depthMin,
       maximum: 3,
       description: [
-        'Research depth (1-3).',
+        `Research depth (${depthMin}-3).`,
+        ...(quickEnabled ? ['0: Quick (single-pass, no researcher team).'] : []),
         '1: Normal (coordinated, thorough).',
         '2: Deep (multi-round, exhaustive).',
         '3: Ultra (maximum depth, extreme rigor).',
@@ -129,7 +138,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
   // array of strings) is kept, since validateInitialLinks assumes that shape.
   const executeShapeCheck = Type.Object({
     query: Type.String(),
-    depth: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
+    depth: Type.Optional(Type.Integer({ minimum: depthMin, maximum: 3 })),
     model: Type.Optional(Type.String()),
     excludeTools: Type.Optional(Type.Array(Type.String())),
     initialLinks: Type.Optional(Type.Array(Type.String())),
@@ -157,9 +166,9 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
       if (rawDepth !== undefined && rawDepth !== null) {
         if (typeof rawDepth === 'string') {
           const parsed = parseInt(rawDepth, 10);
-          normalized['depth'] = isNaN(parsed) ? 1 : Math.max(1, Math.min(3, parsed));
+          normalized['depth'] = isNaN(parsed) ? 1 : Math.max(depthMin, Math.min(3, parsed));
         } else if (typeof rawDepth === 'number') {
-          normalized['depth'] = Math.max(1, Math.min(3, rawDepth));
+          normalized['depth'] = Math.max(depthMin, Math.min(3, rawDepth));
         } else {
           normalized['depth'] = 1;
         }
@@ -213,7 +222,12 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         }
       }
 
-      const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd, iface).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
+      // Defense-in-depth: prepareArguments already clamps depth into
+      // [depthMin, 3], but execute() re-clamps so the gate holds even for
+      // callers that bypass prepareArguments (e.g. the /research command
+      // passing a config-derived depth). When QUICK_RESEARCH is off (default),
+      // depth 0 resolves to 1 here — quick mode is unreachable, upstream behavior.
+      const depth = Math.max(depthMin, Math.min(3, rawDepth ?? Math.max(depthMin, getConfig(ctx.cwd, iface).DEFAULT_RESEARCH_DEPTH))) as ResearchDepth;
       const eCtx = ctx as ExtendedExtensionContext;
       const parentExcludeTools = eCtx.excludeTools || [];
       const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
