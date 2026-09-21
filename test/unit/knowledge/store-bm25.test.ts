@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { KnowledgeStore } from '../../../src/knowledge/store.ts';
 import { BM25_TABLE_NAME } from '../../../src/knowledge/store-schema.ts';
 import * as fs from 'node:fs';
