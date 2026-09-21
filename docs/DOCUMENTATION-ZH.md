@@ -525,7 +525,7 @@ const result = await getResearchHealth();
 
 两种策略在同一个数据库目录下使用**独立的表**（vector 用 `knowledge`，bm25 用
 `knowledge-bm25`）。已有的 vector 存储不会被 bm25 模式触碰，反之亦然 —— 切换策略无需
-迁移，且另一模式处于活动状态时,每种模式都保留自己的历史。在 `bm25` 模式下，
+迁移，且另一模式处于活动状态时，每种模式都保留自己的历史。在 `bm25` 模式下，
 `exportKnowledge()` 会省略向量，嵌入相关设置（`PI_RESEARCH_EMBEDDING_MODEL`、
 `PI_RESEARCH_EMBEDDING_DEVICE`、`PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS`）
 则完全被忽略。
@@ -792,7 +792,7 @@ LLM 输出与推理
 
 | 变量 | 默认值 | 范围 | 说明 |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE`（TUI）`[project]` | `global` | none · project · global | 知识存储作用域：所有目录共享一个（`global`）、限定当前目录（`project`）、或禁用（`none`）。与此设置无关，当必需包未安装（安装时跳过可选的 `@huggingface/transformers`、`@lancedb/lancedb` 损坏）时，知识存储干净地 OFF：init 快速失败而不是重试风暴，`pi-research knowledge-config`、`/research-config` 菜单和健康检查都会点名缺失的包和修复方法。 |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE`（TUI）`[project]` | `global` | none · project · global | 知识存储作用域：所有目录共享一个（`global`）、限定当前目录（`project`）、或禁用（`none`）。与此设置无关，当必需包未安装（安装时跳过可选的 `@huggingface/transformers`、`@lancedb/lancedb` 损坏）时，知识存储干净地 OFF：init 快速失败而不是重试风暴，`pi-research knowledge-config`、`/research-config` 菜单和健康检查都会点名缺失的包和修复方法。在 `bm25` 检索模式下，完全不需要嵌入包。 |
 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL`（TUI）`[project]` | `vector` | vector · bm25 | 知识存储的检索策略。`vector` = 混合搜索（嵌入相似度 + BM25 关键词，通过 RRF 融合）；需要 `@huggingface/transformers` 并下载嵌入模型。`bm25` = 仅对已存的发现做纯词法 BM25 排序 —— 没有嵌入模型，从不下载、初始化或调用；可在 `--omit=optional` 的安装中使用。每种策略在同一数据库目录下使用自己独立的表，因此切换模式不会丢失数据（各自保留自己的历史）。 |
 | `PI_RESEARCH_EMBEDDING_MODEL`（TUI） | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | 嵌入模型。仅在 `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=vector` 时使用，bm25 模式下被忽略。更换会清空知识存储并重新开始。 |
 | `PI_RESEARCH_EMBEDDING_DEVICE`（TUI） | `auto` | auto · webgpu · cpu | 推理后端。`auto` 在进程外探测 WebGPU 可行性并回退到 CPU；`cpu` 强制 CPU；`webgpu` 强制 GPU 路径、不探测（高级 —— 在软件 GPU 上可能硬崩溃）。TUI 只暴露 `auto`（显示为"GPU"）和 `cpu`。 |

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Translation docs (ES/JA/ZH) were missing the whole BM25/retrieval-strategy story added in 1.6.20.** `DOCUMENTATION-ES.md`, `DOCUMENTATION-JA.md`, and `DOCUMENTATION-ZH.md` each now carry the "Retrieval strategies: vector (hybrid) and bm25 (lexical)" subsection (mirroring `KNOWLEDGE-STORE.md`), a Knowledge Retrieval row in both the quick-reference and `/research-config` settings tables, the full `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` environment-variable reference entry, and a sample `config.env` line — matching the English docs, which were already complete. No code changes; docs-only release.
+- **Translation docs (ES/JA/ZH) were missing the whole BM25/retrieval-strategy story added in 1.6.20.** `DOCUMENTATION-ES.md`, `DOCUMENTATION-JA.md`, and `DOCUMENTATION-ZH.md` each now carry the "Retrieval strategies: vector (hybrid) and bm25 (lexical)" subsection (mirroring `KNOWLEDGE-STORE.md`), a Knowledge Retrieval row in both the quick-reference and `/research-config` settings tables, the full `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` environment-variable reference entry, the bm25 note on the Knowledge Mode row and the "only used in `vector` mode" note on the embedding-model row, and a sample `config.env` line — matching the English docs, which were already complete. No code changes; docs-only release.
 
 ## [1.6.20] - 2026-09-21
 
