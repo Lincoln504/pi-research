@@ -92,7 +92,7 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 87, patch: 0 };
  * Compared on MAJOR.MINOR only: a patch bump within a tested line is not a new
  * surface, and warning on it would be noise.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 87, patch: 0 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 87, patch: 1 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 
