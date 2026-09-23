@@ -43,6 +43,8 @@ export interface CreateResearcherSessionOptions {
   /** List of tool names to disable for this researcher. */
   excludeTools?: string[];
   config?: Config;
+  /** Overrides the search tool's query cap (default 30). Quick research passes QUICK_MAX_QUERIES. */
+  maxSearchQueries?: number;
 }
 
 export interface ResolvedResearcherSession {
@@ -65,6 +67,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     onUrlScrapeResult,
     excludeTools = [],
     config,
+    maxSearchQueries,
   } = options;
 
   if (!systemPrompt || typeof systemPrompt !== 'string') {
@@ -100,6 +103,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       researcherId,
       onSearchProgress: onSearchProgress,
       onUrlScrapeResult: onUrlScrapeResult,
+      maxSearchQueries,
       getTokensUsed: () => {
         if (!sessionRef.session) return 0;
         

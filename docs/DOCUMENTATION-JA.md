@@ -785,7 +785,8 @@ RPC、web hub、print、JSON、SDK — ではメニューを表示できませ�
 
 | 設定 | スコープ | 値 | 変数 |
 |---------|-------|--------|---------|
-| `/research` の深度 | プロジェクト | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
+| `/research` の深度 | プロジェクト | quick（オプトイン）· normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
+| クイックリサーチ | プロジェクト | 無効（デフォルト）· 有効 | `PI_RESEARCH_QUICK_RESEARCH` |
 | ナレッジモード | プロジェクト | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
 | ナレッジ検索戦略 | プロジェクト | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | リサーチャータイムアウト | ユーザー | 3 · 5 · 10 · 15 · 20 · 30（分） | `PI_RESEARCH_TIMEOUT_MS` |
@@ -829,7 +830,9 @@ TUI に露出している変数には `(TUI)` が付きます。`[project]` の�
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_TIMEOUT_MS`（TUI） | `300000` | 180000–1800000 | リサーチャーごとのタイムアウト（3–30 分）。 |
 | `PI_RESEARCH_MAX_RESEARCHERS`（TUI） | `3` | 1–5 | 並列で動くリサーチャーの数。 |
-| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`（TUI）`[project]` | `1` | 1–3 | `--depth` を省略したときの `/research` と CLI の深度（1=normal、2=deep、3=ultra）。 |
+| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`（TUI）`[project]` | `1` | 0–3 | `--depth` を省略したときの `/research` と CLI の深度（0=単一パスのクイック — `PI_RESEARCH_QUICK_RESEARCH` が必要 —、1=normal、2=deep、3=ultra）。 |
+| `PI_RESEARCH_QUICK_RESEARCH`（TUI）`[project]` | `false` | `true` · `false` | クイック（深度 0）リサーチのオプトイン。`false`（デフォルト）のとき、エージェント向け `research` ツールは元の `minimum: 1` スキーマを保ち — エージェントは深度 0 を見ることも送ることもできません —、`DEFAULT_RESEARCH_DEPTH` の 0 は 1 に解決されます。切り替えは次回セッションで反映されます。 |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `5` | 1–10 | クイック（深度 0）リサーチにおける `search` 呼び出しあたりの最大クエリ数。pi 拡張機能のツール、CLI、SDK の `--depth 0` は同じリサーチャーセッションファクトリを共有しているため、すべてのクイック実行に適用されます。ディープリサーチの 30 クエリ上限より意図的に低く、上限 10 によりクイックモードが従来の 5–10 の指針を超えないようにしています。 |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES`（TUI） | `2` | 0–99 | リサーチャーごとのスクレイプバッチ数（0 = 無制限）。解決済みリサーチモデルでプロンプトキャッシュが有効だと分かっている場合（Anthropic API モデル、または Anthropic 風キャッシュ制御を明示設定した経路）は、実効上限はこの値 + 1 です — キャッシュ済みのプロンプト接頭辞によって追加バッチが安くなるためです。 |
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | リサーチャーごとの共有ウェブ収集呼び出し数（`search` + `security_search` + `stackexchange` + `youtube_transcript`）。 |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | スクレイプバッチごとに並列取得する URL 数。 |

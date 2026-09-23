@@ -154,10 +154,11 @@ export class QuickResearchOrchestrator {
         const maxScrapeBatches = getMaxScrapeBatches(this.config, cachingActiveForBudget);
         const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
 
+        const maxQueries = this.config.QUICK_MAX_QUERIES;
         const quickEvidenceSection =
             '## Search\n' +
-            'You have access to the `search` tool. You get EXACTLY ONE search call — make it count.\n' +
-            'Submit **5–10 diverse, specific, and non-overlapping queries** covering the most important angles of the topic.\n' +
+            `You have access to the \`search\` tool. You get EXACTLY ONE search call — make it count.\n` +
+            `Submit up to **${maxQueries} diverse, specific, and non-overlapping ${maxQueries === 1 ? 'query' : 'queries'}** covering the most important angles of the topic.\n` +
             'Each query must target a distinct piece of information. Avoid generic queries.\n' +
             `For roughly one in ${this.config.YOUTUBE_QUERY_EVERY_N} of your queries, append the word 'youtube' (e.g. "<topic> explained youtube") — DuckDuckGo rarely surfaces YouTube otherwise, and YouTube links let you read video transcripts.\n` +
             'Your goal is to gather a focused, high-quality pool of initial links.\n\n' +
@@ -217,6 +218,7 @@ export class QuickResearchOrchestrator {
           extensionCtx: ctx,
           excludeTools: resolveExcludedTools(this.options.excludeTools),
           config: this.config,
+          maxSearchQueries: this.config.QUICK_MAX_QUERIES,
           getGlobalState: (): SystemResearchState => ({
             version: 1,
             researchId: this.options.researchId,

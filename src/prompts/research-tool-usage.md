@@ -49,6 +49,7 @@ The `research` tool retrieves from the internet. Do NOT use it when the answer c
 
 **Always specify a depth.** Judge it from the user's language and task complexity.
 
+{{QUICK_MODE_DOC}}
 **User says a depth word (highest priority):**
 - "quick" / "brief" / "simple" → `depth: 1`
 - "normal" / "moderate" / "standard" → `depth: 1`

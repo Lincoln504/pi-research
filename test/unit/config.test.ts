@@ -218,6 +218,21 @@ describe('config (refactored)', () => {
       expect(written).toContain('PI_RESEARCH_SCRAPE_SECOND_PAGE=true');
     });
 
+    it('persists QUICK_RESEARCH so it round-trips (regression: saveConfig allowlist)', () => {
+      // QUICK_RESEARCH is project-scoped (LOCAL_SCOPE_KEYS), so only the local
+      // write path can carry it — mirror the exact TUI toggle call: local scope
+      // + changedKeys narrowed to this one key.
+      saveConfig({ ...DEFAULTS, QUICK_RESEARCH: true }, 'local', '/test', ['PI_RESEARCH_QUICK_RESEARCH']);
+      const registryWrite = vi.mocked(fs.writeFileSync).mock.calls.at(-1)![1] as string;
+      expect(registryWrite).toContain('"PI_RESEARCH_QUICK_RESEARCH": "true"');
+
+      // And the user-scope write must NOT carry it (scope isolation).
+      vi.mocked(fs.writeFileSync).mockClear();
+      saveConfig({ ...DEFAULTS, QUICK_RESEARCH: true }, 'user');
+      const userWrite = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+      expect(userWrite).not.toContain('PI_RESEARCH_QUICK_RESEARCH');
+    });
+
     it('user scope with changedKeys writes ONLY those keys and preserves other existing lines', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue(
@@ -346,6 +361,14 @@ describe('config (refactored)', () => {
         expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: 'TRUE' }).SCRAPE_SECOND_PAGE).toBe(true);
         expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: '1' }).SCRAPE_SECOND_PAGE).toBe(false);
         expect(createConfig({}, { PI_RESEARCH_SCRAPE_SECOND_PAGE: '' }).SCRAPE_SECOND_PAGE).toBe(false);
+      });
+
+      it('QUICK_RESEARCH defaults to false (depth 0 hidden) and coerces like every boolean', () => {
+        expect(createConfig({}, {}).QUICK_RESEARCH).toBe(false);
+        expect(createConfig({}, { PI_RESEARCH_QUICK_RESEARCH: 'true' }).QUICK_RESEARCH).toBe(true);
+        expect(createConfig({}, { PI_RESEARCH_QUICK_RESEARCH: 'TRUE' }).QUICK_RESEARCH).toBe(true);
+        expect(createConfig({}, { PI_RESEARCH_QUICK_RESEARCH: '1' }).QUICK_RESEARCH).toBe(false);
+        expect(createConfig({}, { PI_RESEARCH_QUICK_RESEARCH: '' }).QUICK_RESEARCH).toBe(false);
       });
 
       it('honors the legacy CACHE_TTL_DAYS env name when the canonical one is absent', () => {
@@ -519,10 +542,13 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should clamp DEFAULT_RESEARCH_DEPTH to range 1–3', () => {
-      const low = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
-      expect(low.DEFAULT_RESEARCH_DEPTH).toBe(1);
-      expect(() => validateConfig(low)).not.toThrow();
+    it('should clamp DEFAULT_RESEARCH_DEPTH to range 0–3 (0 = quick mode)', () => {
+      const negative = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '-1' }, {});
+      expect(negative.DEFAULT_RESEARCH_DEPTH).toBe(0);
+      expect(() => validateConfig(negative)).not.toThrow();
+      const zero = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
+      expect(zero.DEFAULT_RESEARCH_DEPTH).toBe(0);
+      expect(() => validateConfig(zero)).not.toThrow();
       const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '4' }, {});
       expect(high.DEFAULT_RESEARCH_DEPTH).toBe(3);
       expect(() => validateConfig(high)).not.toThrow();
@@ -573,6 +599,23 @@ describe('config (refactored)', () => {
     it('should clamp SCRAPE_TIMEOUT_MS to maximum (120000) when above range', () => {
       const config = createConfig({ PI_RESEARCH_SCRAPE_TIMEOUT_MS: '999999' }, {});
       expect(config.SCRAPE_TIMEOUT_MS).toBe(120000);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('defaults QUICK_MAX_QUERIES to 5', () => {
+      const config = createConfig({}, {});
+      expect(config.QUICK_MAX_QUERIES).toBe(5);
+    });
+
+    it('should clamp QUICK_MAX_QUERIES to minimum (1) when below range', () => {
+      const config = createConfig({ PI_RESEARCH_QUICK_MAX_QUERIES: '0' }, {});
+      expect(config.QUICK_MAX_QUERIES).toBe(1);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should clamp QUICK_MAX_QUERIES to maximum (10) when above range', () => {
+      const config = createConfig({ PI_RESEARCH_QUICK_MAX_QUERIES: '999' }, {});
+      expect(config.QUICK_MAX_QUERIES).toBe(10);
       expect(() => validateConfig(config)).not.toThrow();
     });
 

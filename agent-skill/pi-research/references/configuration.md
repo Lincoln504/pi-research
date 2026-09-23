@@ -27,7 +27,8 @@ over `config.env` for the CLI only. Precedence:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PI_RESEARCH_MODEL` | _(required)_ | The `provider/model-id` all research runs on. |
-| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | `1` | Default depth (1–3) when `--depth` omitted. |
+| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | `1` | Default depth (0–3) when `--depth` omitted. `0` is quick (single-pass, no researcher team) and requires `PI_RESEARCH_QUICK_RESEARCH` on the pi extension. |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `5` | Max queries per `search` call in quick (depth 0) research (1–10). Applies to the CLI and SDK `--depth 0` runs too. |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5). |
 | `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher timeout (180000–1800000). |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | Scrape batches per researcher (0 = unlimited). |

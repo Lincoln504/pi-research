@@ -39,6 +39,8 @@ interface CreateToolsOptions {
   /** Context window size in tokens. */
   contextWindowSize?: number;
   config?: Config;
+  /** Overrides the search tool's query cap (default 30). Quick researchers pass QUICK_MAX_QUERIES. */
+  maxSearchQueries?: number;
 }
 
 /**
@@ -74,6 +76,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createSearchTool({
       ...resolvedOptions,
       onProgress: options.onSearchProgress,
+      maxQueries: options.maxSearchQueries,
     }),
     createScrapeTool({
       ...resolvedOptions,

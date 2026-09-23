@@ -47,9 +47,14 @@ vi.mock('../../src/logger.ts', () => ({
   runWithLogger: vi.fn(async (_logger, fn) => await fn()),
 }));
 
+const mockConfig = vi.hoisted(() => ({
+  RESEARCHER_TIMEOUT_MS: 360000,
+  DEFAULT_RESEARCH_DEPTH: 1,
+  QUICK_RESEARCH: false,
+}));
 vi.mock('../../src/config.ts', () => ({
   validateConfig: vi.fn(),
-  getConfig: vi.fn(() => ({ RESEARCHER_TIMEOUT_MS: 360000, DEFAULT_RESEARCH_DEPTH: 1 })),
+  getConfig: vi.fn(() => mockConfig),
 }));
 
 vi.mock('../../src/utils/metrics.ts', () => ({
@@ -313,6 +318,37 @@ describe('createResearchTool', () => {
         expect.any(AbortSignal),
       );
     });
+
+    it('routes an explicit depth 0 to runResearch when QUICK_RESEARCH is enabled', async () => {
+      mockConfig.QUICK_RESEARCH = true;
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      expect(mockRunResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ depth: 0 }),
+        expect.any(AbortSignal),
+      );
+      mockConfig.QUICK_RESEARCH = false;
+    });
+
+    it('rejects a depth-0 caller with invalid_parameters when quick mode is disabled (default)', async () => {
+      mockConfig.QUICK_RESEARCH = false;
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      expect((result.details as any)?.error).toBe('invalid_parameters');
+      expect(mockRunResearch).not.toHaveBeenCalled();
+    });
+
+    it('resolves a DEFAULT_RESEARCH_DEPTH of 0 to 1 when quick mode is disabled (bypass clamp)', async () => {
+      mockConfig.QUICK_RESEARCH = false;
+      mockConfig.DEFAULT_RESEARCH_DEPTH = 0;
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test' }, undefined, undefined, createMockContext());
+      expect(mockRunResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ depth: 1 }),
+        expect.any(AbortSignal),
+      );
+      mockConfig.DEFAULT_RESEARCH_DEPTH = 1;
+    });
   });
 
   describe('Error Handling', () => {
@@ -395,6 +431,31 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       const args = tool.prepareArguments!({ query: 'test', depth: '2' }) as any;
       expect(args.depth).toBe(2);
+    });
+
+    it('hides depth 0 by default: schema minimum 1, depth 0 clamps to 1 (upstream surface)', () => {
+      mockConfig.QUICK_RESEARCH = false;
+      const tool = createResearchTool();
+      const schema = JSON.parse(JSON.stringify(tool.parameters));
+      expect(schema.properties.depth.minimum).toBe(1);
+      expect(schema.properties.depth.description).not.toContain('Quick');
+      expect((tool.prepareArguments!({ query: 'test', depth: 0 }) as any).depth).toBe(1);
+      expect((tool.prepareArguments!({ query: 'test', depth: '0' }) as any).depth).toBe(1);
+      expect((tool.prepareArguments!({ query: 'test', depth: -4 }) as any).depth).toBe(1);
+      expect((tool.prepareArguments!({ query: 'test', depth: 9 }) as any).depth).toBe(3);
+    });
+
+    it('exposes depth 0 when QUICK_RESEARCH is enabled (schema + normalization)', () => {
+      mockConfig.QUICK_RESEARCH = true;
+      const tool = createResearchTool();
+      const schema = JSON.parse(JSON.stringify(tool.parameters));
+      expect(schema.properties.depth.minimum).toBe(0);
+      expect(schema.properties.depth.description).toContain('0: Quick (single-pass, no researcher team).');
+      expect((tool.prepareArguments!({ query: 'test', depth: 0 }) as any).depth).toBe(0);
+      expect((tool.prepareArguments!({ query: 'test', depth: '0' }) as any).depth).toBe(0);
+      expect((tool.prepareArguments!({ query: 'test', depth: -4 }) as any).depth).toBe(0);
+      expect((tool.prepareArguments!({ query: 'test', depth: 9 }) as any).depth).toBe(3);
+      mockConfig.QUICK_RESEARCH = false;
     });
 
     it('leaves depth undefined when not provided (resolved in execute)', () => {
