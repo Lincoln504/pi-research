@@ -619,7 +619,7 @@ export default async function (pi: ExtensionAPI) {
       // QUICK_RESEARCH toggle therefore fully applies on the next session, both
       // schema and prompt together.
       const quickModeDoc = quickResearchEnabledAtRegistration
-        ? '**Quick mode (`depth: 0`) is available on this host.** Use it when the user wants a single verifiable fact, a URL, a price, a version number, or a yes/no with a source — or says "quick lookup", "just check", "one-liner", or "don\'t overdo it". Depth 0 runs one search-and-read pass with no researcher team and answers concisely. When in doubt, use depth 1 instead.\n'
+        ? '**Depth 0 (quick) is available on this host.** Use `depth: 0` for a single verifiable fact, a URL, a price, a version number, or a yes/no with a source — or when the user says "just check", "one-liner", or "don\'t overdo it". It runs one search-and-read pass with no researcher team and answers concisely.\n\n`depth: 1` remains the normal choice. `depth: 2` is the escalation for complex or multi-faceted questions; `depth: 3` only on explicit request.\n'
         : '';
       let researchPrompt = loadPrompt('research-tool-usage')
         .replace(/\n?\{\{QUICK_MODE_DOC\}\}\n?/, '\n' + quickModeDoc)

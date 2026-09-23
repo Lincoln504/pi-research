@@ -1,7 +1,9 @@
 /**
  * search Tool
  *
- * Perform comprehensive browser-based searches (5-30 queries).
+ * Perform comprehensive browser-based searches. The query cap is 30 for deep
+ * research and QUICK_MAX_QUERIES (default 5) for quick (depth 0) research —
+ * see the `maxQueries` option below.
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
@@ -10,7 +12,6 @@ import { Value } from 'typebox/value';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { logger } from '../logger.ts';
 import { type Config, getConfig } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
 import { isCancellation } from '../utils/cancellation.ts';
@@ -23,17 +24,31 @@ export function createSearchTool(options: {
   /** Research state accessor; its researchId keys the per-session circuit breaker (mirrors scrape). */
   getGlobalState?: () => SystemResearchState;
   config?: Config;
+  /**
+   * Overrides the schema/runtime query cap (default 30, the deep-research
+   * ceiling). Quick (depth 0) researchers pass QUICK_MAX_QUERIES here so the
+   * cap that reaches the model matches the cap the tool actually enforces —
+   * resolved once by the caller (session-static, like quickEnabled/depthMin
+   * in research-tool-definition.ts), not read from config on every call.
+   */
+  maxQueries?: number;
 }): ToolDefinition {
-  const youtubeEveryN = (options.config ?? getConfig(options.ctx.cwd)).YOUTUBE_QUERY_EVERY_N;
+  const config = options.config ?? getConfig(options.ctx.cwd);
+  const youtubeEveryN = config.YOUTUBE_QUERY_EVERY_N;
+  const maxQueries = options.maxQueries ?? 30;
+  // "5-N" preserves the original coverage-floor recommendation (aim for at
+  // least 5 queries) when there's room for it; a small quick-mode cap can't
+  // sensibly recommend a floor above its own ceiling.
+  const rangeDescription = maxQueries > 5 ? `5-${maxQueries}` : `1-${maxQueries}`;
 
   const SearchParamsSchema = Type.Object({
     queries: Type.Array(Type.String(), {
         minItems: 1,
-        // Honest schema: the runtime cap is 30 (hard-coded below), so the
-        // advertised max must be 30 — a host reading maxItems 50 would compose
-        // up to 50 queries and silently lose 20 of them at the cap.
-        maxItems: 30,
-        description: 'A list of 5-30 search queries to execute (minimum 1).'
+        // Honest schema: the advertised max must equal the runtime cap below —
+        // a host reading a higher maxItems would compose more queries than the
+        // tool will ever execute and silently lose the rest.
+        maxItems: maxQueries,
+        description: `A list of ${rangeDescription} search queries to execute (minimum 1).`
     }),
   });
 
@@ -42,10 +57,10 @@ export function createSearchTool(options: {
   return {
     name: 'search',
     label: 'Search',
-    description: 'Search the web using a list of queries (5-30, minimum 1) for targeted coverage.',
-    promptSnippet: 'Web search (5-30 queries, minimum 1)',
+    description: `Search the web using a list of queries (${rangeDescription}, minimum 1) for targeted coverage.`,
+    promptSnippet: `Web search (${rangeDescription} queries, minimum 1)`,
     promptGuidelines: [
-      'CRITICAL: Provide 5-30 queries per call (minimum 1).',
+      `CRITICAL: Provide ${rangeDescription} queries per call (minimum 1).`,
       'COVERAGE: Include query variations, related concepts, and specific data points.',
       'EFFICIENT: The system processes all queries in one call — maximize each call.',
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
@@ -59,24 +74,17 @@ export function createSearchTool(options: {
       if (!Value.Check(SearchParamsSchema, params)) {
           metrics.increment('tool_search_calls_total', 1, { status: 'invalid_params' });
           return {
-            content: [{ type: 'text', text: 'Invalid parameters for search tool. Expected an array of 5-30 queries (minimum 1).' }],
+            content: [{ type: 'text', text: `Invalid parameters for search tool. Expected an array of ${rangeDescription} queries (minimum 1).` }],
             details: { error: 'invalid_parameters' },
           };
       }
 
       const p = params as SearchParams;
-      let queries = p.queries;
+      const queries = p.queries;
       metrics.increment('tool_search_queries_total', queries.length);
 
-      // (No min-length check needed: Value.Check above enforces minItems: 1, so
-      // an under-length call is already rejected as invalid_parameters.)
-      // Hard cap at the documented 30-query maximum
-      let submittedQueries = queries.length;
-      if (queries.length > 30) {
-          logger.warn(`[search tool] Capping tool call queries: ${queries.length} → 30`);
-          metrics.increment('tool_search_capped_queries_total', queries.length - 30);
-          queries = queries.slice(0, 30);
-      }
+      // No over-cap truncation path: maxItems above already made an over-cap
+      // call fail Value.Check and return invalid_parameters before this line.
 
       const allowed = options.tracker.recordCall('search');
       if (!allowed) {
@@ -108,11 +116,6 @@ export function createSearchTool(options: {
 
         let markdown = `# Web Search Results (${queries.length} queries)\n\n`;
         markdown += `**Source: Web Search**\n\n`;
-        if (submittedQueries > queries.length) {
-          // In-band so the calling agent knows its input was truncated and can
-          // re-plan with a follow-up search — mirrors scrape.ts's over-cap note.
-          markdown += `> NOTE: ${submittedQueries - queries.length} of ${submittedQueries} submitted queries were dropped by the 30-query cap. Re-run a follow-up search with the remainder if those topics matter.\n\n`;
-        }
         // Untrusted-data boundary: result titles/snippets below are attacker-influenceable (via a
         // page's own <title>/meta). Remind the model in-band that they are data, not instructions —
         // mirrors the scrape tool's banner; defense-in-depth alongside the researcher prompt.

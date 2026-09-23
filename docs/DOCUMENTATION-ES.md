@@ -807,7 +807,8 @@ ajustes se siguen leyendo del entorno y de los archivos de configuración, y las
 
 | Ajuste | Alcance | Valores | Variable |
 |---------|-------|--------|---------|
-| Profundidad de `/research` | proyecto | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
+| Profundidad de `/research` | proyecto | quick (opcional) · normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
+| Investigación rápida | proyecto | desactivada (predeterminado) · activada | `PI_RESEARCH_QUICK_RESEARCH` |
 | Modo de Conocimiento | proyecto | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
 | Recuperación de Conocimiento | proyecto | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | Tiempo de espera del investigador | usuario | 3 · 5 · 10 · 15 · 20 · 30 (minutos) | `PI_RESEARCH_TIMEOUT_MS` |
@@ -853,7 +854,9 @@ Investigación
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_TIMEOUT_MS` (TUI) | `300000` | 180000–1800000 | Tiempo de espera por investigador (3–30 min). |
 | `PI_RESEARCH_MAX_RESEARCHERS` (TUI) | `3` | 1–5 | Investigadores en paralelo. |
-| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` (TUI) `[project]` | `1` | 1–3 | Profundidad para `/research` y la CLI cuando se omite `--depth` (1=normal, 2=deep, 3=ultra). |
+| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` (TUI) `[project]` | `1` | 0–3 | Profundidad para `/research` y la CLI cuando se omite `--depth` (0=rápida de una sola pasada — requiere `PI_RESEARCH_QUICK_RESEARCH` —, 1=normal, 2=deep, 3=ultra). |
+| `PI_RESEARCH_QUICK_RESEARCH` (TUI) `[project]` | `false` | `true` · `false` | Activación opcional de la investigación rápida (profundidad 0). Cuando es `false` (predeterminado), la herramienta `research` orientada a agentes conserva su esquema `minimum: 1` original — los agentes no pueden ver ni enviar profundidad 0 — y un `DEFAULT_RESEARCH_DEPTH` de 0 se resuelve a 1. El cambio aplica en la próxima sesión. |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `5` | 1–10 | Máximo de consultas por llamada a `search` en investigación rápida (profundidad 0). Se aplica a toda ejecución rápida — la herramienta de la extensión pi, la CLI y el `--depth 0` del SDK — ya que comparten la misma fábrica de sesiones de investigador. Deliberadamente por debajo del límite de 30 consultas de la investigación profunda; el techo de 10 evita que el modo rápido supere la antigua guía de 5–10. |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` (TUI) | `2` | 0–99 | Lotes de extracción por investigador (0 = sin límite). Cuando se sabe que el caché de prompts está activo para el modelo de investigación resuelto (modelos de API de Anthropic, o una ruta de proveedor configurada explícitamente para control de caché estilo Anthropic), el límite efectivo es este valor más uno — el prefijo de prompt en caché hace que el lote adicional sea barato. |
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Llamadas compartidas de recopilación web por investigador (`search` + `security_search` + `stackexchange` + `youtube_transcript`). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | URLs concurrentes obtenidas por lote de extracción. |

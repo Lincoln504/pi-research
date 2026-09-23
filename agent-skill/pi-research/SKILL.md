@@ -49,10 +49,16 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
    - Partial → note it, fill gaps with `research`.
    - Exit 78 → store is off in this directory; proceed with `research`. Don't mention it
      unless the user asks — then see *Knowledge store scope* below to turn it on.
-2. **Live research — always depth `1`.** It's the default and correct for
+2. **Live research — depth `1` by default.** It's the default and correct for
    effectively every request; depth 1 already decomposes and parallelises
    internally, so it covers big/broad/complex/important topics too. Do NOT raise
    depth on your own judgment.
+   - **Depth `0` — available for single-fact lookups.** `--depth 0` runs one
+     search-and-read pass with no researcher team. Use it only when the user wants
+     a single verifiable fact, a URL, a price, a version number, or a yes/no with a
+     source — or says "just check", "one-liner", or "don't overdo
+     it" — on a request narrow enough that a single search call can cover it.
+     Depth 1 is still the default; when in doubt, use depth 1.
    - **Depth `2` — super rare:** only a genuinely ultra-broad or unusually detailed
      topic where the user signalled they want deeper/thorough work. Unsure → depth 1.
    - **Depth `3` — never** unless the user explicitly asks for ludicrously deep /

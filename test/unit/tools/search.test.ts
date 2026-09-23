@@ -80,4 +80,28 @@ describe('tools/search', () => {
     const result = await tool.execute('id2', { queries: ['q2'] }, undefined, undefined, {} as any);
     expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
   });
+
+  describe('maxQueries override (quick-mode query cap)', () => {
+    it('lowers the schema maxItems and advertised range to the override', () => {
+      const tool = createSearchTool({ ...mockOptions, maxQueries: 5 });
+      const queriesProp = (tool.parameters as any).properties.queries;
+      expect(queriesProp.maxItems).toBe(5);
+      expect(queriesProp.minItems).toBe(1);
+      expect(tool.promptGuidelines![0]).toContain('1-5 queries');
+    });
+
+    it('rejects a call over the overridden cap with invalid_parameters (not the 30-query cap)', async () => {
+      const { search } = await import('../../../src/web-research/search.ts');
+      const tool = createSearchTool({ ...mockOptions, maxQueries: 5 });
+      const result = await tool.execute('id', { queries: Array(6).fill('q') }, undefined, undefined, {} as any);
+      expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+      expect(search).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly the overridden cap', async () => {
+      const tool = createSearchTool({ ...mockOptions, maxQueries: 5 });
+      const result = await tool.execute('id', { queries: Array(5).fill('q') }, undefined, undefined, {} as any);
+      expect(result.details).not.toMatchObject({ error: 'invalid_parameters' });
+    });
+  });
 });

@@ -96,6 +96,12 @@ export const ConfigSchema = Type.Object({
    *  (default: 5; 1 = every query). Configured via env/config file; not surfaced
    *  in the config TUI. */
   YOUTUBE_QUERY_EVERY_N: Type.Number({ minimum: 1, maximum: 100, default: 5 }),
+  /** Max queries per `search` call in quick (depth 0) research (default: 5, range: 1-10).
+   *  Applies to every quick run — the pi extension tool, the CLI, and the SDK's
+   *  `--depth 0` — since all three share the same researcher session factory. The
+   *  ceiling is 10 so quick mode can never exceed the old 5–10 prompt guidance.
+   *  Configured via env/config file; not surfaced in the config TUI. */
+  QUICK_MAX_QUERIES: Type.Number({ minimum: 1, maximum: 10, default: 5 }),
   /** Health check timeout in milliseconds (default: 10000ms) */
   HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** Default timeout for browser page operations like search (default: 45000ms) */
@@ -275,6 +281,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS',
   'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG',
   'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N',
+  'PI_RESEARCH_QUICK_MAX_QUERIES',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
   'PI_RESEARCH_KNOWLEDGE_DIR',
@@ -962,6 +969,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS: String(config.YOUTUBE_TRANSCRIPT_TIMEOUT_MS),
     PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG: config.YOUTUBE_TRANSCRIPT_LANG,
     PI_RESEARCH_YOUTUBE_QUERY_EVERY_N: String(config.YOUTUBE_QUERY_EVERY_N),
+    PI_RESEARCH_QUICK_MAX_QUERIES: String(config.QUICK_MAX_QUERIES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
     PI_RESEARCH_LLM_THINKING_LEVEL: config.LLM_THINKING_LEVEL,
@@ -1193,6 +1201,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     YOUTUBE_TRANSCRIPT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS', DEFAULTS.YOUTUBE_TRANSCRIPT_TIMEOUT_MS, 5000, 120000),
     YOUTUBE_TRANSCRIPT_LANG: parseEnvString(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG', DEFAULTS.YOUTUBE_TRANSCRIPT_LANG)!,
     YOUTUBE_QUERY_EVERY_N: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N', DEFAULTS.YOUTUBE_QUERY_EVERY_N, 1, 100, true),
+    QUICK_MAX_QUERIES: parseEnvNumber(e, 'PI_RESEARCH_QUICK_MAX_QUERIES', DEFAULTS.QUICK_MAX_QUERIES, 1, 10, true),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS, 2000, 120000),
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),

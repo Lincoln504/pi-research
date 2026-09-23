@@ -602,6 +602,23 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
+    it('defaults QUICK_MAX_QUERIES to 5', () => {
+      const config = createConfig({}, {});
+      expect(config.QUICK_MAX_QUERIES).toBe(5);
+    });
+
+    it('should clamp QUICK_MAX_QUERIES to minimum (1) when below range', () => {
+      const config = createConfig({ PI_RESEARCH_QUICK_MAX_QUERIES: '0' }, {});
+      expect(config.QUICK_MAX_QUERIES).toBe(1);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should clamp QUICK_MAX_QUERIES to maximum (10) when above range', () => {
+      const config = createConfig({ PI_RESEARCH_QUICK_MAX_QUERIES: '999' }, {});
+      expect(config.QUICK_MAX_QUERIES).toBe(10);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
     it('should clamp WORKER_CONCURRENCY to maximum (10) when above range', () => {
       const config = createConfig({ PI_RESEARCH_WORKER_CONCURRENCY: '999' }, {});
       expect(config.WORKER_CONCURRENCY).toBe(10);

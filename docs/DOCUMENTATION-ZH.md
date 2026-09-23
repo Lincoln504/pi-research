@@ -696,7 +696,8 @@ SDK —— 上，菜单无法渲染：`/research-config` 会说明原因，并�
 
 | 设置项 | 作用域 | 取值 | 环境变量 |
 |---------|-------|--------|---------|
-| `/research` 深度 | 项目 | normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
+| `/research` 深度 | 项目 | quick（可选）· normal · deep · ultra | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` |
+| 快速研究 | 项目 | 禁用（默认）· 启用 | `PI_RESEARCH_QUICK_RESEARCH` |
 | 知识模式 | 项目 | none · project · global | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` |
 | 知识检索策略 | 项目 | vector · bm25 | `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL` |
 | 研究员超时 | 用户 | 3 · 5 · 10 · 15 · 20 · 30（分钟） | `PI_RESEARCH_TIMEOUT_MS` |
@@ -736,7 +737,9 @@ TUI 暴露的变量标记为 `(TUI)`。`[project]` 标记表示项目级键（�
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_TIMEOUT_MS`（TUI） | `300000` | 180000–1800000 | 单个研究员超时（3–30 分钟）。 |
 | `PI_RESEARCH_MAX_RESEARCHERS`（TUI） | `3` | 1–5 | 并行研究员数。 |
-| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`（TUI）`[project]` | `1` | 1–3 | 省略 `--depth` 时 `/research` 和 CLI 使用的深度（1=normal，2=deep，3=ultra）。 |
+| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`（TUI）`[project]` | `1` | 0–3 | 省略 `--depth` 时 `/research` 和 CLI 使用的深度（0=单次快速 —— 需要 `PI_RESEARCH_QUICK_RESEARCH` ——，1=normal，2=deep，3=ultra）。 |
+| `PI_RESEARCH_QUICK_RESEARCH`（TUI）`[project]` | `false` | `true` · `false` | 快速（深度 0）研究的可选开关。为 `false`（默认）时，面向 agent 的 `research` 工具保持原 `minimum: 1` 模式 —— agent 既看不到也不能发送深度 0 —— 且 `DEFAULT_RESEARCH_DEPTH` 为 0 时解析为 1。切换在下次会话生效。 |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `5` | 1–10 | 快速（深度 0）研究中每次 `search` 调用的最大查询数。适用于所有快速运行——pi 扩展工具、CLI 和 SDK 的 `--depth 0`——因为它们共享同一个研究员会话工厂。刻意低于深度研究 30 条查询的上限；上限 10 确保快速模式不会超过旧的 5–10 指引。 |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES`（TUI） | `2` | 0–99 | 每个研究员的抓取批次（0 = 不限）。当已知解析出的研究模型启用了提示缓存（Anthropic API 模型，或显式配置为 Anthropic 风格缓存控制的路由）时，有效上限为该值加一 —— 已缓存的提示前缀让额外批次很便宜。 |
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | 每个研究员共享的网络收集调用数（`search` + `security_search` + `stackexchange` + `youtube_transcript`）。 |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | 每个抓取批次中并发获取的 URL 数。 |

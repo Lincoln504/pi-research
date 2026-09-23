@@ -156,7 +156,7 @@ describe('quick research renders the shipped researcher template', () => {
       query: 'what is a coverage digest',
       sessionId: 'quick-prompt-session',
       researchId: 'quick-prompt-research',
-      config: { ...getConfig('/test/cwd'), KNOWLEDGE_STORE_MODE: 'none' } as any,
+      config: { ...getConfig('/test/cwd'), KNOWLEDGE_STORE_MODE: 'none', QUICK_MAX_QUERIES: 7 } as any,
     });
     await expect(orchestrator.run()).rejects.toThrow();
     // vi.clearAllMocks() clears calls, not implementations — restore the module-scope
@@ -167,6 +167,8 @@ describe('quick research renders the shipped researcher template', () => {
     const userMessage = captured[0]!;
     expect(userMessage).toContain('Goal: what is a coverage digest');
     expect(userMessage).toContain('EXACTLY ONE search call');   // quick evidence section
+    expect(userMessage).toContain('up to **7 diverse');         // cap comes from QUICK_MAX_QUERIES, not a hard-coded number
+    expect(userMessage).not.toContain('5–10');                  // the old fixed guidance is gone
     expect(userMessage).toContain('Perform your research and submit your full report now.');
   });
 });
