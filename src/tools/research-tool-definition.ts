@@ -93,8 +93,16 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
   // a mid-session QUICK_RESEARCH toggle takes effect on the next session. When
   // disabled (the default) the schema is byte-identical to the upstream
   // minimum: 1 surface — agents can neither see nor send depth 0.
-  const quickEnabled = getConfig(undefined, iface).QUICK_RESEARCH === true;
+  const toolConfig = getConfig(undefined, iface);
+  const quickEnabled = toolConfig.QUICK_RESEARCH === true;
   const depthMin = quickEnabled ? 0 : 1;
+  // The depth execute() applies to an omitted depth: Math.max(depthMin,
+  // configured DEFAULT_RESEARCH_DEPTH) — the same value the agent-facing DEPTH
+  // guidance renders relative to (buildResearchDepthGuidance). The annotation
+  // must match it, or a user who configured e.g. default 2 sees `default: 1`
+  // in the model-facing schema while the prompt says "depth 2 is the ordinary
+  // choice (your configured default)".
+  const effectiveDefault = Math.max(depthMin, toolConfig.DEFAULT_RESEARCH_DEPTH);
 
   const parameters = Type.Object({
     query: Type.String({
@@ -110,7 +118,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         '2: Deep (multi-round, exhaustive).',
         '3: Ultra (maximum depth, extreme rigor).',
       ].join('\n'),
-      default: 1,
+      default: effectiveDefault,
     })),
     model: Type.Optional(Type.String({
       description: 'Optional model ID override for coordination.',

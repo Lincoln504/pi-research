@@ -20,7 +20,7 @@ import { getConfig, validateConfig } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './core/llm/prompts.ts';
-import { buildResearchDepthGuidance } from './prompts/research-depth-guidance.ts';
+import { buildResearchDepthGuidance, buildEscalationNudge } from './prompts/research-depth-guidance.ts';
 import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, requeuePoppedMessage, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
@@ -626,6 +626,7 @@ export default async function (pi: ExtensionAPI) {
       // session, both schema and prompt together.
       let researchPrompt = loadPrompt('research-tool-usage')
         .replace('{{DEPTH_GUIDANCE}}', buildResearchDepthGuidance(quickResearchEnabledAtRegistration, defaultDepthAtRegistration))
+        .replace('{{ESCALATION_NUDGE}}', buildEscalationNudge(quickResearchEnabledAtRegistration, defaultDepthAtRegistration))
         .replace('{{max_team_size_l1}}', MAX_TEAM_SIZE_LEVEL_1.toString())
         .replace('{{max_team_size_l2}}', MAX_TEAM_SIZE_LEVEL_2.toString())
         .replace('{{max_team_size_l3}}', MAX_TEAM_SIZE_LEVEL_3.toString());

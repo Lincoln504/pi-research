@@ -16,7 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildResearchDepthGuidance } from '../../../src/prompts/research-depth-guidance.ts';
+import { buildResearchDepthGuidance, buildEscalationNudge, resolveEffectiveDefault } from '../../../src/prompts/research-depth-guidance.ts';
 
 // --- The prior static text, captured byte-for-byte, keyed by effective default 1 ---
 
@@ -94,6 +94,39 @@ describe('buildResearchDepthGuidance — relative to the configured default', ()
   });
 });
 
+const NUDGE_1 = 'depth 1 handles most cases well, and the higher depths have their own internal decomposition.';
+const NUDGE_CONFIGURED = 'your configured default handles most cases well, and the higher depths have their own internal decomposition.';
+
+describe('buildEscalationNudge — relative to the effective default', () => {
+  it('effective default 1 reproduces the prior static text (quick off and quick on)', () => {
+    expect(buildEscalationNudge(false, 1)).toBe(NUDGE_1);
+    expect(buildEscalationNudge(true, 1)).toBe(NUDGE_1);
+  });
+
+  it('non-default effective defaults name the configured default instead of depth 1', () => {
+    for (const [q, d] of [[true, 0], [false, 2], [false, 3], [true, 2], [true, 3]] as Array<[boolean, number]>) {
+      expect(buildEscalationNudge(q, d)).toBe(NUDGE_CONFIGURED);
+    }
+  });
+
+  it('quick off, default 0 clamps to 1 like the guidance does', () => {
+    expect(buildEscalationNudge(false, 0)).toBe(NUDGE_1);
+  });
+});
+
+describe('resolveEffectiveDefault — matches the depth execute() applies to an omitted depth', () => {
+  it('is max(depthMin, configured) where depthMin = quickEnabled ? 0 : 1', () => {
+    expect(resolveEffectiveDefault(false, 0)).toBe(1);
+    expect(resolveEffectiveDefault(false, 1)).toBe(1);
+    expect(resolveEffectiveDefault(false, 2)).toBe(2);
+    expect(resolveEffectiveDefault(false, 3)).toBe(3);
+    expect(resolveEffectiveDefault(true, 0)).toBe(0);
+    expect(resolveEffectiveDefault(true, 1)).toBe(1);
+    expect(resolveEffectiveDefault(true, 2)).toBe(2);
+    expect(resolveEffectiveDefault(true, 3)).toBe(3);
+  });
+});
+
 // End-to-end: mirror index.ts's substitution against the real template and confirm
 // the rendered DEPTH PARAMETER section is byte-identical at effective default 1.
 describe('rendered DEPTH PARAMETER section (template integration)', () => {
@@ -117,5 +150,24 @@ describe('rendered DEPTH PARAMETER section (template integration)', () => {
 
   it('quick ON, default 1 renders byte-identically to the prior text', () => {
     expect(renderedDepthSection(true, 1)).toBe(QUICK_DOC_1 + '\n' + WORD_BLOCK_1 + '\n\n' + NOTHING_BLOCK_1);
+  });
+
+  const renderedEscalationLine = (quick: boolean, def: number): string =>
+    md
+      .replace('{{DEPTH_GUIDANCE}}', buildResearchDepthGuidance(quick, def))
+      .replace('{{ESCALATION_NUDGE}}', buildEscalationNudge(quick, def))
+      .split('\n')
+      .find((l) => l.startsWith('**Do NOT escalate'))!;
+
+  it('Do NOT escalate line renders byte-identically to the prior text at effective default 1', () => {
+    const prior = '**Do NOT escalate depth just because a topic is broad** — depth 1 handles most cases well, and the higher depths have their own internal decomposition.';
+    expect(renderedEscalationLine(false, 1)).toBe(prior);
+    expect(renderedEscalationLine(true, 1)).toBe(prior);
+  });
+
+  it('Do NOT escalate line names the configured default at non-default effective defaults', () => {
+    for (const [quick, def] of [[true, 0], [false, 2], [true, 3]] as Array<[boolean, number]>) {
+      expect(renderedEscalationLine(quick, def)).toContain('your configured default handles most cases well');
+    }
   });
 });

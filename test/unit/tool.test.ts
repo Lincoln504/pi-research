@@ -458,6 +458,21 @@ describe('createResearchTool', () => {
       mockConfig.QUICK_RESEARCH = false;
     });
 
+    it('annotates depth with the effective default execute() applies to an omitted depth', () => {
+      const schemaDefault = () => JSON.parse(JSON.stringify(createResearchTool().parameters)).properties.depth.default;
+      mockConfig.QUICK_RESEARCH = false;
+      mockConfig.DEFAULT_RESEARCH_DEPTH = 2;
+      expect(schemaDefault()).toBe(2);
+      mockConfig.QUICK_RESEARCH = true;
+      mockConfig.DEFAULT_RESEARCH_DEPTH = 0;
+      expect(schemaDefault()).toBe(0);
+      mockConfig.QUICK_RESEARCH = false;
+      mockConfig.DEFAULT_RESEARCH_DEPTH = 0;
+      expect(schemaDefault()).toBe(1);
+      mockConfig.DEFAULT_RESEARCH_DEPTH = 1;
+      expect(schemaDefault()).toBe(1);
+    });
+
     it('leaves depth undefined when not provided (resolved in execute)', () => {
       const toolInstance = createResearchTool();
       const args = toolInstance.prepareArguments!({ query: 'test' }) as any;

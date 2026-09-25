@@ -82,4 +82,4 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 - **Group related topics**: If topics share ANY scope or could inform each other, combine them into a single `research` call. The internal coordinator will decompose them into parallel researcher agents. Do NOT split related sub-topics into separate calls.
 - Example: `research("Python async performance and Rust async performance comparison")` — NOT separate calls for Python and Rust, since the comparison IS the research goal.
 
-**Do NOT escalate depth just because a topic is broad** — depth 1 handles most cases well, and the higher depths have their own internal decomposition.
+**Do NOT escalate depth just because a topic is broad** — {{ESCALATION_NUDGE}}

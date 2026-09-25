@@ -27,6 +27,17 @@
  */
 
 /**
+ * The depth `execute()` applies when the agent omits depth — `Math.max(depthMin,
+ * configured)` where `depthMin = quickEnabled ? 0 : 1` (see
+ * research-tool-definition.ts). This is "the ordinary choice" every rendered
+ * surface steers to, and the value the tool schema's `default` annotation must
+ * match.
+ */
+export function resolveEffectiveDefault(quickEnabled: boolean, defaultDepth: number): number {
+  return quickEnabled ? defaultDepth : Math.max(1, defaultDepth);
+}
+
+/**
  * Build the DEPTH PARAMETER guidance block (everything between the
  * "Always specify a depth." lead-in and the "How depth works internally:"
  * section). The returned string has no leading or trailing newlines; the
@@ -37,9 +48,7 @@
  * @param defaultDepth The user-configured `DEFAULT_RESEARCH_DEPTH` (0–3).
  */
 export function buildResearchDepthGuidance(quickEnabled: boolean, defaultDepth: number): string {
-  // The depth execute() applies when the agent omits depth. This is "the
-  // ordinary choice" the guidance steers to.
-  const effectiveDefault = quickEnabled ? defaultDepth : Math.max(1, defaultDepth);
+  const effectiveDefault = resolveEffectiveDefault(quickEnabled, defaultDepth);
 
   if (!quickEnabled) {
     return wordBlock(effectiveDefault) + '\n\n' + nothingBlock(effectiveDefault);
@@ -132,4 +141,19 @@ function quickDoc(effectiveDefault: number): string {
       break;
   }
   return first + '\n\n' + second;
+}
+
+/**
+ * The closing escalation nudge — the tail of the "Do NOT escalate depth just
+ * because a topic is broad" line in the MULTIPLE RESEARCH CALLS section,
+ * rendered relative to the effective default the same way the DEPTH PARAMETER
+ * block is. effectiveDefault === 1 reproduces the prior static text
+ * byte-for-byte, so a user who keeps the default (1) — quick on or off — sees
+ * an unchanged prompt.
+ */
+export function buildEscalationNudge(quickEnabled: boolean, defaultDepth: number): string {
+  const effectiveDefault = resolveEffectiveDefault(quickEnabled, defaultDepth);
+  return effectiveDefault === 1
+    ? 'depth 1 handles most cases well, and the higher depths have their own internal decomposition.'
+    : 'your configured default handles most cases well, and the higher depths have their own internal decomposition.';
 }
