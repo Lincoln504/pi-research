@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The agent-facing `research` tool-usage prompt now renders its depth guidance relative to the user's configured `DEFAULT_RESEARCH_DEPTH`.** The DEPTH PARAMETER block was static and always steered to `depth: 1` — the "Always specify a depth" prompt mapped ~95% of queries there — so a user-configured default (e.g. quick/0) was effectively never honored for agent-initiated research: even with quick set as the default the agent still sent `depth: 1` (only `/research` and the CLI honored it). The block is now rendered by `buildResearchDepthGuidance` (new `src/prompts/research-depth-guidance.ts`) against the same session-static snapshots the tool schema is built from, so it can never advertise a depth the registered schema rejects. When quick is the configured default, depth 0 becomes the ordinary choice and depth 1+ reads as the escalation — a real cost lever. A user who keeps the default (1) sees **byte-identical** guidance, for both the quick-on and quick-off renderings (the green-light condition on PR #16); `test/unit/prompts/research-depth-guidance.test.ts` pins that byte-identity and the `effectiveDefault` the guidance anchors on (`quickEnabled ? defaultDepth : max(1, defaultDepth)`, the depth `execute()` applies to an omitted depth).
+
 ## [1.7.0] - 2026-09-22
 
 ### Added

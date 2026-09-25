@@ -49,17 +49,7 @@ The `research` tool retrieves from the internet. Do NOT use it when the answer c
 
 **Always specify a depth.** Judge it from the user's language and task complexity.
 
-{{QUICK_MODE_DOC}}
-**User says a depth word (highest priority):**
-- "quick" / "brief" / "simple" → `depth: 1`
-- "normal" / "moderate" / "standard" → `depth: 1`
-- "deep" / "thorough" / "in-depth" → `depth: 2` (never depth 3)
-- "ultra" / "exhaustive" / "comprehensive" / "deep-dive" / "maximum" → `depth: 3`
-
-**User says nothing about depth — judge complexity:**
-- `depth: 1` — Simple facts, lookups, news, definitions, "what is X", overviews, background research. This covers ~95%+ of queries.
-- `depth: 2` — Complex multi-faceted topics: policy analysis, tech evaluations, academic-style research.
-- `depth: 3` — **ABSOLUTELY NEVER without explicit user request.** The user MUST use trigger words like "ultra", "exhaustive", "comprehensive deep-dive", or "maximum research". If the user does not explicitly request this level, use depth 1 or depth 2.
+{{DEPTH_GUIDANCE}}
 
 **How depth works internally:**
 - `depth: 1-3` — AI-orchestrated: coordinator plans a team, researchers execute, a research lead decides whether to continue deeper and writes the final report. Team size and number of rounds scale with complexity. The coordinator and the lead dynamically determine how many researchers are needed each round — it's not a fixed number.

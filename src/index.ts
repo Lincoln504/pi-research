@@ -20,6 +20,7 @@ import { getConfig, validateConfig } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './core/llm/prompts.ts';
+import { buildResearchDepthGuidance } from './prompts/research-depth-guidance.ts';
 import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, requeuePoppedMessage, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
@@ -332,6 +333,10 @@ export default async function (pi: ExtensionAPI) {
   // live config here would tell the agent depth 0 exists while the tool still
   // rejects it with invalid_parameters until restart.
   const quickResearchEnabledAtRegistration = getConfig(process.cwd(), 'pi').QUICK_RESEARCH === true;
+  // Session-static snapshot of the user's configured DEFAULT_RESEARCH_DEPTH, taken
+  // at the same moment as quickResearchEnabledAtRegistration so the depth guidance
+  // (rendered relative to it) agrees with the schema the session was built with.
+  const defaultDepthAtRegistration = getConfig(process.cwd(), 'pi').DEFAULT_RESEARCH_DEPTH;
 
   // Create and register the health check tool
   const healthTool: ToolDefinition = createHealthTool();
@@ -612,17 +617,15 @@ export default async function (pi: ExtensionAPI) {
       (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name));
 
     if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
-      // Quick-mode (depth 0) prompt documentation is gated on the SAME session-
-      // static snapshot the tool schema was built from (see
-      // quickResearchEnabledAtRegistration) — not live config — so the prompt can
-      // never advertise a depth the registered schema rejects. A mid-session
-      // QUICK_RESEARCH toggle therefore fully applies on the next session, both
-      // schema and prompt together.
-      const quickModeDoc = quickResearchEnabledAtRegistration
-        ? '**Depth 0 (quick) is available on this host.** Use `depth: 0` for a single verifiable fact, a URL, a price, a version number, or a yes/no with a source — or when the user says "just check", "one-liner", or "don\'t overdo it". It runs one search-and-read pass with no researcher team and answers concisely.\n\n`depth: 1` remains the normal choice. `depth: 2` is the escalation for complex or multi-faceted questions; `depth: 3` only on explicit request.\n'
-        : '';
+      // The DEPTH PARAMETER guidance is rendered relative to the user's configured
+      // DEFAULT_RESEARCH_DEPTH (buildResearchDepthGuidance), gated on the SAME
+      // session-static snapshots the tool schema was built from (see
+      // quickResearchEnabledAtRegistration / defaultDepthAtRegistration) — not live
+      // config — so the prompt can never advertise a depth the registered schema
+      // rejects. A mid-session config toggle therefore fully applies on the next
+      // session, both schema and prompt together.
       let researchPrompt = loadPrompt('research-tool-usage')
-        .replace(/\n?\{\{QUICK_MODE_DOC\}\}\n?/, '\n' + quickModeDoc)
+        .replace('{{DEPTH_GUIDANCE}}', buildResearchDepthGuidance(quickResearchEnabledAtRegistration, defaultDepthAtRegistration))
         .replace('{{max_team_size_l1}}', MAX_TEAM_SIZE_LEVEL_1.toString())
         .replace('{{max_team_size_l2}}', MAX_TEAM_SIZE_LEVEL_2.toString())
         .replace('{{max_team_size_l3}}', MAX_TEAM_SIZE_LEVEL_3.toString());
