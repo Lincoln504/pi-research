@@ -102,6 +102,20 @@ export const ConfigSchema = Type.Object({
    *  ceiling is 10 so quick mode can never exceed the old 5–10 prompt guidance.
    *  Configured via env/config file; not surfaced in the config TUI. */
   QUICK_MAX_QUERIES: Type.Number({ minimum: 1, maximum: 10, default: 5 }),
+  /** Opt-in gate for the main-agent `fetch_url` tool (fetch one URL, paged, framed as
+   *  untrusted). When false (default) the tool stays registered but inactive, so the
+   *  agent never sees it; toggling applies from the next agent turn. */
+  FETCH_URL_ENABLED: Type.Boolean({ default: false }),
+  /** Default characters per `fetch_url` chunk (default: 40000 ≈ 10k tokens). No upper
+   *  bound: the agent may also pass its own `maxChars`. */
+  FETCH_URL_MAX_CHARS: Type.Number({ minimum: 1, default: 40000 }),
+  /** Let `fetch_url` escalate to the stealth browser when a plain GET fails or returns a
+   *  stub/bot wall (default: true). Configured via env/config file. */
+  FETCH_URL_BROWSER_FALLBACK: Type.Boolean({ default: true }),
+  /** What `fetch_url` does with a request URL that looks like it carries data out
+   *  (long encoded values, secret-shaped tokens): 'ask' the user (default; refused when
+   *  no dialog is available), 'block', or 'off'. */
+  FETCH_URL_OUTBOUND_CHECK: Type.Union([Type.Literal('ask'), Type.Literal('block'), Type.Literal('off')], { default: 'ask' }),
   /** Health check timeout in milliseconds (default: 10000ms) */
   HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** Default timeout for browser page operations like search (default: 45000ms) */
@@ -282,6 +296,10 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG',
   'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N',
   'PI_RESEARCH_QUICK_MAX_QUERIES',
+  'PI_RESEARCH_FETCH_URL_ENABLED',
+  'PI_RESEARCH_FETCH_URL_MAX_CHARS',
+  'PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK',
+  'PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
   'PI_RESEARCH_KNOWLEDGE_DIR',
@@ -970,6 +988,10 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG: config.YOUTUBE_TRANSCRIPT_LANG,
     PI_RESEARCH_YOUTUBE_QUERY_EVERY_N: String(config.YOUTUBE_QUERY_EVERY_N),
     PI_RESEARCH_QUICK_MAX_QUERIES: String(config.QUICK_MAX_QUERIES),
+    PI_RESEARCH_FETCH_URL_ENABLED: String(config.FETCH_URL_ENABLED),
+    PI_RESEARCH_FETCH_URL_MAX_CHARS: String(config.FETCH_URL_MAX_CHARS),
+    PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK: String(config.FETCH_URL_BROWSER_FALLBACK),
+    PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK: config.FETCH_URL_OUTBOUND_CHECK,
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
     PI_RESEARCH_LLM_THINKING_LEVEL: config.LLM_THINKING_LEVEL,
@@ -1202,6 +1224,10 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     YOUTUBE_TRANSCRIPT_LANG: parseEnvString(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG', DEFAULTS.YOUTUBE_TRANSCRIPT_LANG)!,
     YOUTUBE_QUERY_EVERY_N: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N', DEFAULTS.YOUTUBE_QUERY_EVERY_N, 1, 100, true),
     QUICK_MAX_QUERIES: parseEnvNumber(e, 'PI_RESEARCH_QUICK_MAX_QUERIES', DEFAULTS.QUICK_MAX_QUERIES, 1, 10, true),
+    FETCH_URL_ENABLED: parseEnvBool(e, 'PI_RESEARCH_FETCH_URL_ENABLED', DEFAULTS.FETCH_URL_ENABLED),
+    FETCH_URL_MAX_CHARS: parseEnvNumber(e, 'PI_RESEARCH_FETCH_URL_MAX_CHARS', DEFAULTS.FETCH_URL_MAX_CHARS, 1, undefined, true),
+    FETCH_URL_BROWSER_FALLBACK: parseEnvBool(e, 'PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK', DEFAULTS.FETCH_URL_BROWSER_FALLBACK),
+    FETCH_URL_OUTBOUND_CHECK: parseEnvEnum(e, 'PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK', ['ask', 'block', 'off'] as const, DEFAULTS.FETCH_URL_OUTBOUND_CHECK),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS, 2000, 120000),
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),

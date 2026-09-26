@@ -10,6 +10,7 @@ import { Key } from '@earendil-works/pi-tui';
 import type { ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
+import { createFetchUrlTool, sharedPageCache, FETCH_URL_TOOL_NAME } from './tools/fetch-url.ts';
 import { logger } from './logger.ts';
 import { checkPiCompatibility } from './core/pi-version.ts';
 import { randomUUID } from 'node:crypto';
@@ -124,9 +125,43 @@ export default async function (pi: ExtensionAPI) {
   // This ensures the ONNX pipeline is disposed even after extension reloads.
   registerBeforeExitSafetyNet();
 
+  // fetch_url active-tool sync. It must run BEFORE pi assembles the prompt: a
+  // setActiveTools() call makes pi rebuild its base system prompt (tool list and
+  // snippets included), and before_agent_start handlers receive that prompt —
+  // syncing inside before_agent_start instead left the tool listed in the prompt
+  // text even though it was no longer active. So: on session start and on each
+  // user input (the first event of a prompt), never on mid-run steering.
+  //
+  // fetchUrlDeactivatedByUs: re-activating is only ours to do when WE removed it.
+  // If it was never active (e.g. the host launched with an explicit tool list),
+  // a config toggle must not force it into the session.
+  let fetchUrlDeactivatedByUs = false;
+  const syncFetchUrlActive = (ctx: ExtensionContext | undefined): void => {
+    try {
+      const enabled = getConfig(ctx?.cwd ?? (pi as any).cwd, 'pi').FETCH_URL_ENABLED === true;
+      const active = pi.getActiveTools();
+      const isActive = active.includes(FETCH_URL_TOOL_NAME);
+      if (!enabled && isActive) {
+        pi.setActiveTools(active.filter((n) => n !== FETCH_URL_TOOL_NAME));
+        fetchUrlDeactivatedByUs = true;
+      } else if (enabled && !isActive && fetchUrlDeactivatedByUs) {
+        pi.setActiveTools([...active, FETCH_URL_TOOL_NAME]);
+        fetchUrlDeactivatedByUs = false;
+      }
+    } catch (err) {
+      logger.debug('[pi-research] could not sync fetch_url active state:', err);
+    }
+  };
+  pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
+    syncFetchUrlActive(ctx);
+  });
+
   // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY
   // This ensures we capture steering even if initialization takes time.
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
+    // A new prompt (not steering typed while the agent runs): align fetch_url's
+    // active state with live config before pi builds this turn's prompt.
+    if (!event.streamingBehavior) syncFetchUrlActive(ctx);
     // Only intercept genuine interactive keystrokes. Programmatic sends originate
     // from this extension (source 'extension') — e.g. the Alt+P pop handler forwards
     // a popped message as 'steer'. Without this guard that forward would be captured
@@ -351,6 +386,15 @@ export default async function (pi: ExtensionAPI) {
   // startup-gated registration could never be added back after enabling mid-session anyway.
   const researchKnowledgeSearchTool: ToolDefinition = createResearchKnowledgeSearchTool('pi');
   pi.registerTool(researchKnowledgeSearchTool);
+
+  // fetch_url (main agent only). Registered unconditionally (pi has no
+  // unregisterTool) and switched on/off in the ACTIVE tool set from live config
+  // (see syncFetchUrlActive, called on session_start and on each user input), so
+  // a disabled tool is never shown to the model and a /research-config toggle
+  // applies from the next prompt, without a restart. Its execute() also checks
+  // the gate. Its page cache is process-local and dropped on shutdown.
+  pi.registerTool(createFetchUrlTool('pi'));
+  shutdownManager.register(async () => sharedPageCache.clear());
 
   // Alt+P — Pop queued steering messages out of the research queue and steer pi with them.
   pi.registerShortcut(Key.alt('p'), {

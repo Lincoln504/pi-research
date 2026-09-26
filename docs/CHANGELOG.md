@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`fetch_url` — an opt-in main-agent tool to read one known URL without a research run.** Enabled with `PI_RESEARCH_FETCH_URL_ENABLED` (default `false`; **fetch_url tool** in `/research-config`). While disabled the tool is removed from the session's active tools (pi has no unregister API), so the model never sees it, and the toggle applies from the next agent turn. Researchers never get it — they keep `scrape`.
+  - *Fetching* reuses the research scraper: plain GET first, stealth-browser escalation when the page needs it (`PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK`, default `true`), connect-time private-address blocking on every hop. HTTPS only: `http://` is upgraded, URLs with embedded credentials are refused, a redirect to `http:` is refused (without a pointless browser retry), and so is a browser page that ends on `http:`. The result names the final URL and redirect count, so content behind an open redirect on a trusted site is attributed to the host it really came from.
+  - *Paging* instead of truncation or summarization: chunks of `PI_RESEARCH_FETCH_URL_MAX_CHARS` (default 40,000 ≈ 10k tokens, no upper bound; the agent may pass `maxChars`), cut at a paragraph and not inside a code block when avoidable, with a footer giving the next `start` and, on the first chunk, a heading outline with offsets. A 10-minute in-memory page cache means paging never re-downloads and every chunk comes from one version of the page.
+  - *Untrusted framing*: an untrusted-content banner, content between `[BEGIN/END UNTRUSTED CONTENT <nonce>]` markers with a random per-call nonce (a page cannot forge its own end marker; outline headings get their own untrusted block), and no page-controlled free text in the metadata header (URLs capped, MIME type validated). Invisible Unicode used to smuggle text to AI readers — tag characters, zero-width runs, bidi controls, variation-selector runs — is stripped, with the decoded hidden text kept in `details` for the user. Heuristic risk hints (instruction-override phrasing, text addressed to AI readers, chat-template/role markup, tool-call look-alikes, prompt-leak and secret requests, exfiltration-shaped links, decode-and-run instructions, look-alike letters, entity-encoded text, and text hidden from human readers by inline styles) are listed with offsets — as hints, never verdicts.
+  - *Outbound check* before any network activity (DNS included): a request URL with long encoded values, secret-shaped tokens (API keys, GitHub/GitLab/Slack/npm tokens, JWTs, private keys) or an unusually long host label is held — `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK=ask` (default) asks the user in a dialog with a 10-minute timeout and refuses when no dialog is available; `block` refuses; `off` allows.
+- **`scrapeSingle` options for callers that need them** (`ScrapeOptions`: `httpsOnly`, `rawText`, `keepHtml`, `browserFallback`) and result metadata (`finalUrl`, `redirects`, `contentType`, `raw`, `html`). Research scrapes pass no options and behave as before. The browser worker now reports the main frame's final URL (after server redirects and client-side hops).
+
 ## [1.7.2] - 2026-09-27
 
 ### Changed

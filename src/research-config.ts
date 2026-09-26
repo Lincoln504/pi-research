@@ -241,6 +241,22 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
+    {
+      id: 'FETCH_URL_ENABLED',
+      label: 'fetch_url tool',
+      description: 'Give the main agent a `fetch_url` tool: fetch one https URL (plain GET, stealth browser if needed), paged, framed as untrusted content. Applies from the next agent turn.',
+      currentValue: config.FETCH_URL_ENABLED ? 'enabled' : 'disabled',
+      values: ['disabled', 'enabled'],
+    },
+    ...(config.FETCH_URL_ENABLED ? [
+      {
+        id: 'FETCH_URL_OUTBOUND_CHECK',
+        label: 'fetch_url outbound check',
+        description: 'A request URL can carry data out (query string). When the URL fetch_url is asked for looks like it does — long encoded values, secret-shaped tokens — ask you first (ask; refused when no dialog is available), refuse it (block), or allow it (off).',
+        currentValue: config.FETCH_URL_OUTBOUND_CHECK,
+        values: ['ask', 'block', 'off'],
+      },
+    ] as SettingItem[] : []),
     // Browser Workers is intentionally NOT exposed here. It is an
     // environment-only setting (PI_RESEARCH_WORKER_THREADS, default 4) so that
     // CPU/RAM-sensitive concurrency is not casually changed from the menu.
@@ -433,6 +449,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             scope = 'user';
             } else if (id === 'RESEARCH_REPORT_EXPORT_ENABLED') {
             config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
+            scope = 'user';
+            } else if (id === 'FETCH_URL_ENABLED') {
+            config.FETCH_URL_ENABLED = newValue === 'enabled';
+            scope = 'user';
+            } else if (id === 'FETCH_URL_OUTBOUND_CHECK') {
+            config.FETCH_URL_OUTBOUND_CHECK = newValue as 'ask' | 'block' | 'off';
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_MODE') {
               config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project' | 'global';

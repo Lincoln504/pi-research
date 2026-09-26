@@ -26,13 +26,14 @@ Three slash commands are also registered:
 
 ### Tools
 
-The extension registers three tools:
+The extension registers four tools:
 
 | Tool | Registered |
 |------|-----------|
 | `research` | always |
 | `health` | always |
 | `research_knowledge_search` | always (see note) |
+| `fetch_url` | always; active only when enabled (see below) |
 
 `research_knowledge_search` is registered unconditionally so a Knowledge Mode
 change takes effect without restarting pi (pi has no unregister API). When
@@ -43,6 +44,51 @@ the store's read/write paths are gated on the live mode, not on this registratio
 
 Tool exclusion — the `research` tool honors an `excludeTools` list taken from
 the pi session context when the host forwards one.
+
+#### `fetch_url`
+
+Opt-in (`PI_RESEARCH_FETCH_URL_ENABLED`, or **fetch_url tool** in
+`/research-config`). Gives the main agent a direct way to read one known URL —
+a docs page, a README, an API response, a PDF — without a research run.
+Researchers never get it (they keep `scrape`). While disabled the tool is removed
+from the session's active tools, so the model never sees it; the toggle applies
+from the next agent turn.
+
+- **Fetching.** Plain GET first, the stealth browser when the page needs it
+  (`PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK`), with the same connect-time
+  private-address blocking as research scrapes. HTTPS only: `http://` is
+  upgraded, a redirect to `http:` is refused, and so is a browser page that ends
+  on `http:`. The result always names the final URL and the redirect count:
+  after an open redirect on a trusted site, the content is from the final host.
+  Text-like responses (plain text, Markdown, JSON, CSV, XML, YAML) come back
+  verbatim (JSON pretty-printed); HTML and PDFs are converted to Markdown.
+- **Paging.** Chunks of `PI_RESEARCH_FETCH_URL_MAX_CHARS` characters (default
+  40,000 ≈ 10k tokens; the agent may pass its own `maxChars`), cut at a
+  paragraph, never inside a code block when avoidable. The footer gives the
+  `start` for the next chunk; the first chunk lists the page's headings with
+  offsets. Pages are cached for 10 minutes, so paging never re-downloads and
+  every chunk comes from one version of the page.
+- **Untrusted framing.** Content sits between `[BEGIN/END UNTRUSTED CONTENT <nonce>]`
+  markers with a random per-call nonce (a page cannot fake its own end marker),
+  under an untrusted-content banner. Invisible Unicode used to smuggle text to AI
+  readers (tag characters, zero-width runs, bidi controls, variation-selector
+  runs) is removed, and the count is reported. Heuristic *risk hints* —
+  instruction-override phrasing, chat-template markup, tool-call look-alikes,
+  exfiltration-shaped links, text hidden from human readers by inline styles —
+  are listed with their offsets. They are hints, not verdicts: pages *about* AI
+  or security trigger them too.
+- **Outbound check.** The request URL itself can carry data out (a query string
+  is enough, no request body needed). Before any network activity, a URL with
+  long encoded values, secret-shaped tokens (API keys, JWTs, private keys) or an
+  unusually long host label is held: `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK=ask`
+  (default) asks you in a dialog (10-minute timeout, refused when no dialog is
+  available), `block` refuses, `off` allows.
+
+`fetch_url` is an outbound channel like `curl`: if you restrict the agent's
+shell but enable `fetch_url`, the outbound check is what stands between an
+injected instruction and a request carrying your data. The untrusted framing and
+risk hints lower the chance that a fetched page steers the agent; they are not a
+guarantee.
 
 ### TUI
 

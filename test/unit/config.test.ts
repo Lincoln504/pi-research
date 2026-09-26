@@ -371,6 +371,28 @@ describe('config (refactored)', () => {
         expect(createConfig({}, { PI_RESEARCH_QUICK_RESEARCH: '' }).QUICK_RESEARCH).toBe(false);
       });
 
+      it('fetch_url settings: opt-in, 40k chars with no upper bound, outbound check enum', () => {
+        const d = createConfig({}, {});
+        expect(d.FETCH_URL_ENABLED).toBe(false);
+        expect(d.FETCH_URL_MAX_CHARS).toBe(40000);
+        expect(d.FETCH_URL_BROWSER_FALLBACK).toBe(true);
+        expect(d.FETCH_URL_OUTBOUND_CHECK).toBe('ask');
+
+        const c = createConfig({}, {
+          PI_RESEARCH_FETCH_URL_ENABLED: 'true',
+          PI_RESEARCH_FETCH_URL_MAX_CHARS: '250000',
+          PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK: 'false',
+          PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK: 'block',
+        });
+        expect(c.FETCH_URL_ENABLED).toBe(true);
+        expect(c.FETCH_URL_MAX_CHARS).toBe(250000);
+        expect(c.FETCH_URL_BROWSER_FALLBACK).toBe(false);
+        expect(c.FETCH_URL_OUTBOUND_CHECK).toBe('block');
+
+        expect(createConfig({}, { PI_RESEARCH_FETCH_URL_MAX_CHARS: '0' }).FETCH_URL_MAX_CHARS).toBe(1);
+        expect(createConfig({}, { PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK: 'maybe' }).FETCH_URL_OUTBOUND_CHECK).toBe('ask');
+      });
+
       it('honors the legacy CACHE_TTL_DAYS env name when the canonical one is absent', () => {
         const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: '30' }, {});
         expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(30);

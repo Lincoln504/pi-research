@@ -659,7 +659,7 @@ export async function executeScrapeTask(
   _context: any,
   url: string,
   signal?: AbortSignal
-): Promise<{ contentType: string; html?: string; bufferB64?: string; jitter: number }> {
+): Promise<{ contentType: string; html?: string; bufferB64?: string; jitter: number; finalUrl?: string }> {
   const page = await createPageSafe(_context);
   const SCRAPE_TIMEOUT = parseTimeoutMs(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'], 15000);
   page.setDefaultTimeout(SCRAPE_TIMEOUT);
@@ -954,7 +954,7 @@ export async function executeScrapeTask(
       // {type:'Buffer',data:[...]} — and the follower path adds a second JSON hop
       // through the leader's browser-server. A base64 string survives both hops
       // verbatim (and is ~3x smaller on the wire than the data-array form).
-      return { contentType, bufferB64: buffer.toString('base64'), jitter: 0 };
+      return { contentType, bufferB64: buffer.toString('base64'), jitter: 0, finalUrl };
     }
 
     // If it's HTML, check if we need to wait longer (JS-heavy sites)
@@ -1049,8 +1049,12 @@ export async function executeScrapeTask(
     await Promise.allSettled(pendingAddrChecks);
     if (poisonedError) throw poisonedError;
 
+    // The main frame's URL now — after server redirects AND client-side hops
+    // (meta refresh, window.location) — so callers can report where the content
+    // actually came from (and fetch_url can refuse a downgrade to http).
+    const renderedUrl = String(page.url?.() ?? finalUrl);
     await page.close();
-    return { contentType, html, jitter };
+    return { contentType, html, jitter, finalUrl: renderedUrl };
   } catch (error) {
     await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
     // An early-abort-triggered page.close() (oversized PDF, or SSRF poisoning) makes

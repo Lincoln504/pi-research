@@ -9,7 +9,7 @@
  */
 
 import type { ScrapeLayerResult } from './scraper-types.ts';
-import type { ScrapeResult } from './types.ts';
+import type { ScrapeResult, ScrapeOptions } from './types.ts';
 import { checkModule } from './utils.ts';
 import { logger } from '../logger.ts';
 import { runBrowserTask } from '../infrastructure/browser/task-execution-service.ts';
@@ -36,6 +36,49 @@ import { extractPdfToMarkdown } from './pdf-extraction.ts';
 
 /** Backoff before the fetch layer's single transient retry. */
 const FETCH_RETRY_DELAY_MS = 250;
+
+/**
+ * A document that is not served over https while ScrapeOptions.httpsOnly is set
+ * (the requested URL, a redirect hop, or the browser's final URL). Never falls
+ * back to the browser layer: it would follow the same redirect.
+ */
+export class InsecureUrlError extends Error {
+  constructor(readonly insecureUrl: string, where: 'request' | 'redirect' | 'final') {
+    super(
+      where === 'request'
+        ? `Refused non-https URL: ${insecureUrl}`
+        : where === 'redirect'
+          ? `Refused redirect to a non-https URL: ${insecureUrl}`
+          : `Refused: the page ended on a non-https URL: ${insecureUrl}`,
+    );
+    this.name = 'InsecureUrlError';
+  }
+}
+
+/** Text-like MIME types returned verbatim under ScrapeOptions.rawText. */
+const RAW_TEXT_TYPES = new Set([
+  'text/plain', 'text/markdown', 'text/x-markdown', 'text/csv', 'text/xml', 'text/yaml', 'text/x-yaml',
+  'application/json', 'application/xml', 'application/yaml', 'application/x-yaml', 'application/x-ndjson',
+]);
+
+/** MIME type without parameters, lowercased (`text/html; charset=utf-8` → `text/html`). */
+function mimeOf(contentTypeHeader: string): string {
+  return (contentTypeHeader.split(';')[0] ?? '').trim().toLowerCase();
+}
+
+export function isRawTextType(mime: string): boolean {
+  // XHTML is a document to convert, not data to show verbatim.
+  if (mime === 'application/xhtml+xml') return false;
+  return RAW_TEXT_TYPES.has(mime) || /^application\/[\w.+-]+\+(json|xml)$/.test(mime);
+}
+
+/** Pretty-print JSON bodies; anything unparseable is returned unchanged. */
+function formatRawText(text: string, mime: string): string {
+  if (mime === 'application/json' || mime.endsWith('+json')) {
+    try { return JSON.stringify(JSON.parse(text), null, 2); } catch { /* not strict JSON — keep as served */ }
+  }
+  return text;
+}
 
 let playwrightAvailable: boolean = false;
 let markdownConverterPromise: Promise<(html: string) => Promise<string>> | null = null;
@@ -131,7 +174,7 @@ function trackFetchLayerFailure(url: string, error: unknown): void {
   });
 }
 
-async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
+async function scrapeWithFetch(url: string, signal?: AbortSignal, options: ScrapeOptions = {}): Promise<ScrapeLayerResult> {
   await validateUrlForSSRF(url);
 
   // Connect-time SSRF pin: the socket connects only to a validated public IP,
@@ -166,6 +209,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     // Using redirect:'follow' would bypass validateUrlForSSRF on 3xx targets.
     const MAX_REDIRECTS = 10;
     let currentUrl = url;
+    const redirects: string[] = [];
     let response!: Response;
     // One UA for the whole redirect chain. Picked per hop, a request could
     // present as Chrome on Windows and then as Firefox on macOS while following
@@ -189,7 +233,12 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
         const location = response.headers.get('location');
         if (!location) break; // No Location header — treat as final response
         const resolved = new URL(location, currentUrl).href;
+        if (options.httpsOnly && new URL(resolved).protocol !== 'https:') {
+          try { await response.body?.cancel(); } catch { /* best-effort */ }
+          throw new InsecureUrlError(resolved, 'redirect');
+        }
         await validateUrlForSSRF(resolved); // Block SSRF targets in redirects
+        redirects.push(resolved);
         // Drain the redirect response before following: an unconsumed body pins
         // its socket (undici keeps it open until read/cancelled or GC).
         try { await response.body?.cancel(); } catch { /* best-effort */ }
@@ -248,7 +297,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       validateContent('', markdown, url);
       metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'pdf', status: 'success' });
       metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'pdf', status: 'success' });
-      return { source: 'fetch', layer: 'fetch', markdown };
+      return { source: 'fetch', layer: 'fetch', markdown, finalUrl: currentUrl, redirects, contentType: 'application/pdf' };
     }
 
     // Read the raw bytes and decode with the DECLARED charset. response.text() blindly UTF-8-decodes,
@@ -278,7 +327,17 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     }
 
     const html = decodeHtmlBody(bodyBytes, contentType);
-    
+    const mime = mimeOf(contentType);
+
+    if (options.rawText && isRawTextType(mime)) {
+      // Verbatim body: no HTML conversion, no stub check (a short JSON/CSV
+      // response is legitimate data, not a nav-only stub).
+      if (!html.trim()) throw new Error('Empty response body');
+      metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'text', status: 'success' });
+      metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'text', status: 'success' });
+      return { source: 'fetch', layer: 'fetch', markdown: formatRawText(html, mime), raw: true, finalUrl: currentUrl, redirects, contentType: mime };
+    }
+
     let markdown: string;
     try {
       markdown = await convertToMarkdown(html);
@@ -290,7 +349,10 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     validateContent(html, markdown, url);
     metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'html', status: 'success' });
     metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'html', status: 'success' });
-    return { source: 'fetch', layer: 'fetch', markdown };
+    return {
+      source: 'fetch', layer: 'fetch', markdown, finalUrl: currentUrl, redirects, contentType: mime || 'text/html',
+      ...(options.keepHtml ? { html } : {}),
+    };
   } catch (error) {
     // Attempt-scoped metrics stay here (they count fetch operations, and a retried
     // attempt IS a second operation). Error TRACKING does not: scrapeSingle wraps this
@@ -318,11 +380,20 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 // client-side hops. The residual is the TCP connection itself (not prevented) and
 // cached/service-worker responses that report no serverAddr; the rendered body is
 // still withheld whenever a private/metadata IP is observed.
-async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeLayerResult> {
+async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string, container: ServiceContainer = getServiceContainer(), options: ScrapeOptions = {}): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {
     const result = await runBrowserTask<any>({ url: _url, sessionId }, 'scrape', config, signal, 1, container);
     const browserDuration = Date.now() - browserStart;
+
+    // The worker reports the main frame's final URL (after server and client-side
+    // redirects). Absent from an older leader in a mixed-version pair — then the
+    // https check cannot run; the page's navigations were still SSRF-validated
+    // worker-side.
+    const finalUrl: string | undefined = typeof result.finalUrl === 'string' && result.finalUrl ? result.finalUrl : undefined;
+    if (options.httpsOnly && finalUrl && !finalUrl.startsWith('https:')) {
+      throw new InsecureUrlError(finalUrl, 'final');
+    }
 
     // PDF bytes travel base64-encoded (bufferB64): the worker result crosses the
     // cluster-IPC JSON hop (and, for followers, a second JSON hop through the
@@ -350,7 +421,7 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
       validateContent('', markdown, _url);
       metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'pdf', status: 'success' });
       metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'pdf', status: 'success' });
-      return { source: 'playwright', layer: 'playwright+camoufox', markdown };
+      return { source: 'playwright', layer: 'playwright+camoufox', markdown, contentType: 'application/pdf', ...(finalUrl ? { finalUrl } : {}) };
     }
 
     let html = result.html || '';
@@ -376,7 +447,11 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
     validateContent(html, markdown, _url);
     metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'html', status: 'success' });
     metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'html', status: 'success' });
-    return { source: 'playwright', layer: 'playwright+camoufox', markdown };
+    return {
+      source: 'playwright', layer: 'playwright+camoufox', markdown, contentType: 'text/html',
+      ...(finalUrl ? { finalUrl } : {}),
+      ...(options.keepHtml ? { html } : {}),
+    };
   } catch (error) {
     // A caller cancellation is not a scrape failure: no layer error metrics and
     // no tracker entry — the search path applies the same 'Aborted' special case
@@ -396,7 +471,7 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
   }
 }
 
-export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeResult> {
+export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string, container: ServiceContainer = getServiceContainer(), options: ScrapeOptions = {}): Promise<ScrapeResult> {
   // Cancellation short-circuit: after a user abort each remaining URL would
   // otherwise still pay for SSRF DNS validation, a doomed fetch, and a browser
   // fallback — all logged/counted as failures the user never had. 'Aborted' is
@@ -419,6 +494,15 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     // returns previously did not, so blocked/invalid URLs were invisible in the rollup.
     metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
+  }
+
+  if (options.httpsOnly) {
+    let protocol = '';
+    try { protocol = new URL(url).protocol; } catch { /* invalid — the SSRF check below reports it */ }
+    if (protocol && protocol !== 'https:') {
+      metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
+      return { url, success: false, error: new InsecureUrlError(url, 'request').message, markdown: '' };
+    }
   }
 
   // FIX (New Issue A): Validate SSRF BEFORE any fetch attempt, so the blocked URL
@@ -456,7 +540,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     // blocked scrapes would otherwise emit one WARN per URL.
     const res = await (async () => {
       try {
-        return await scrapeWithFetch(url, signal);
+        return await scrapeWithFetch(url, signal, options);
       } catch (firstErr) {
         if (!isTransientError(firstErr) || signal?.aborted) throw firstErr;
         logger.debug(`[Scrapers] fetch transient failure for ${url}, retrying once: ${formatErrorWithCause(firstErr)}`);
@@ -469,7 +553,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
         } catch {
           throw firstErr; // aborted during backoff — surface the real cause
         }
-        return await scrapeWithFetch(url, signal);
+        return await scrapeWithFetch(url, signal, options);
       }
     })();
     const duration = Date.now() - start;
@@ -495,10 +579,16 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     // one transient failure must file one error, not one per attempt.
     trackFetchLayerFailure(url, e1);
 
-    if (playwrightAvailable) {
+    // A refused insecure redirect is final: the browser would follow the same hop.
+    if (e1 instanceof InsecureUrlError) {
+      metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
+      return { url, success: false, error: e1.message, markdown: '' };
+    }
+
+    if (playwrightAvailable && options.browserFallback !== false) {
       try {
         const browserStart = Date.now();
-        const res = await scrapeWithStealthBrowser(url, config, signal, sessionId, container);
+        const res = await scrapeWithStealthBrowser(url, config, signal, sessionId, container, options);
         const browserDuration = Date.now() - browserStart;
         const totalDuration = Date.now() - start;
         logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${totalDuration}ms)`);

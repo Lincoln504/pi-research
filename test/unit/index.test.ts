@@ -58,6 +58,7 @@ vi.mock('node:fs', async (importOriginal) => ({
 
 import activate from '../../src/index.ts';
 import { resetServiceContainer } from '../../src/core/service-registry.ts';
+import { resetConfig } from '../../src/config.ts';
 
 type CommandHandler = (args: string, ctx: Record<string, unknown>) => Promise<void>;
 
@@ -386,6 +387,68 @@ describe('extension entrypoint', () => {
           details: { error: 'store exploded' },
         }),
       );
+    });
+  });
+
+  describe('fetch_url tool', () => {
+    const KEY = 'PI_RESEARCH_FETCH_URL_ENABLED';
+    let saved: string | undefined;
+    beforeEach(() => { saved = process.env[KEY]; });
+    afterEach(() => {
+      if (saved === undefined) delete process.env[KEY]; else process.env[KEY] = saved;
+      resetConfig();
+    });
+
+    function withActiveTools(pi: any, initial: string[]) {
+      let active = [...initial];
+      pi.getActiveTools = vi.fn(() => [...active]);
+      pi.setActiveTools = vi.fn((names: string[]) => { active = [...names]; });
+      return () => active;
+    }
+
+    it('is registered', async () => {
+      const { pi } = createPiMock();
+      await activate(pi as any);
+      expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'fetch_url', execute: expect.any(Function) }));
+    });
+
+    it('is taken out of the active tools while disabled (default), and put back once enabled', async () => {
+      delete process.env[KEY];
+      resetConfig();
+      const { pi, handlers } = createPiMock();
+      const active = withActiveTools(pi, ['read', 'research', 'fetch_url']);
+      await activate(pi as any);
+
+      // session_start and each new prompt (input) sync BEFORE pi builds the prompt.
+      await handlers.get('session_start')?.({ type: 'session_start' }, {});
+      expect(active()).toEqual(['read', 'research']);
+
+      process.env[KEY] = 'true';
+      resetConfig();
+      await handlers.get('input')?.({ type: 'input', text: 'hi', source: 'interactive' }, {});
+      expect(active()).toEqual(['read', 'research', 'fetch_url']);
+    });
+
+    it('never forces itself into a session that did not have it active', async () => {
+      process.env[KEY] = 'true';
+      resetConfig();
+      const { pi, handlers } = createPiMock();
+      const active = withActiveTools(pi, ['read']);
+      await activate(pi as any);
+      await handlers.get('input')?.({ type: 'input', text: 'hi', source: 'interactive' }, {});
+      expect(active()).toEqual(['read']);
+      expect((pi as any).setActiveTools).not.toHaveBeenCalled();
+    });
+
+    it('does not touch the tool set on mid-run steering input or in before_agent_start', async () => {
+      delete process.env[KEY];
+      resetConfig();
+      const { pi, handlers } = createPiMock();
+      withActiveTools(pi, ['fetch_url']);
+      await activate(pi as any);
+      await handlers.get('input')?.({ type: 'input', text: 'steer', source: 'interactive', streamingBehavior: 'steer' }, {});
+      await handlers.get('before_agent_start')?.({ systemPrompt: 'S' }, {});
+      expect((pi as any).setActiveTools).not.toHaveBeenCalled();
     });
   });
 });

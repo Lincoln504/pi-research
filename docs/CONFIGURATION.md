@@ -33,6 +33,8 @@ variables still take effect.) A setting is written to one of two scopes:
 | Max Concurrency | user | 1 – 5 | `PI_RESEARCH_MAX_RESEARCHERS` |
 | Scrape Batches | user | unlimited · 1 · 2 · 3 · 5 · 10 · 15 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` |
 | Auto-export Report | user | true · false | `PI_RESEARCH_REPORT_EXPORT_ENABLED` |
+| fetch_url tool | user | disabled (default) · enabled | `PI_RESEARCH_FETCH_URL_ENABLED` |
+| fetch_url outbound check | user | ask · block · off (shown when fetch_url is enabled) | `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK` |
 | Embedding Model | user | one of the supported models | `PI_RESEARCH_EMBEDDING_MODEL` |
 | Embedding Device | user | GPU · CPU | `PI_RESEARCH_EMBEDDING_DEVICE` |
 | Cache Retention | user | 7 · 14 · 30 · 60 · 90 · 180 · 365 (days) | `PI_RESEARCH_CACHE_TTL_DAYS` |
@@ -94,6 +96,15 @@ Research
 | `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the agent skill, which runs from the host agent's arbitrary directory. |
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
 | `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape result, used for planning. |
+
+fetch_url (pi extension, main agent)
+
+| Variable | Default | Range | Description |
+|----------|---------|-------|-------------|
+| `PI_RESEARCH_FETCH_URL_ENABLED` (TUI) | `false` | `true` · `false` | Opt-in gate for the `fetch_url` tool (fetch one https URL, paged, framed as untrusted — see [PI-EXTENSION.md](PI-EXTENSION.md#fetch_url)). While `false` the tool is removed from the session's active tools; toggling applies from the next agent turn. |
+| `PI_RESEARCH_FETCH_URL_MAX_CHARS` | `40000` | ≥1 | Characters per chunk when the agent does not pass `maxChars` (40,000 ≈ 10k tokens). No upper bound. |
+| `PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK` | `true` | `true` · `false` | Escalate to the stealth browser when a plain GET fails or returns a stub/bot wall. With `false`, pages that need JavaScript or have bot protection fail. |
+| `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK` (TUI) | `ask` | `ask` · `block` · `off` | What to do with a request URL that looks like it carries data out (long encoded values, secret-shaped tokens, long host labels): ask in a dialog (10-minute timeout; refused when no dialog is available), refuse, or allow. |
 
 YouTube transcripts
 

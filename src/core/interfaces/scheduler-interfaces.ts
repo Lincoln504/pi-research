@@ -65,6 +65,18 @@ export interface ScrapeResult {
   source?: string;
   layer?: string;
   duration?: number;
+  // Optional fields populated for callers that pass ScrapeOptions (see
+  // web-research/types.ts); ordinary research scrapes leave them unset.
+  /** URL of the document actually returned, after redirects. */
+  finalUrl?: string;
+  /** Redirect hops followed by the fetch layer, in order (excludes the requested URL). */
+  redirects?: string[];
+  /** MIME type of the returned document, without parameters. */
+  contentType?: string;
+  /** True when `markdown` holds the raw decoded body (ScrapeOptions.rawText), not HTML→Markdown. */
+  raw?: boolean;
+  /** Pre-conversion HTML (ScrapeOptions.keepHtml). */
+  html?: string;
 }
 
 /**
