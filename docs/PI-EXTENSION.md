@@ -83,11 +83,36 @@ from the next agent turn.
   unusually long host label is held: `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK=ask`
   (default) asks you in a dialog (10-minute timeout, refused when no dialog is
   available), `block` refuses, `off` allows.
+- **Safety check.** Every chunk is reviewed by a model before the agent sees it
+  (`PI_RESEARCH_FETCH_URL_SAFETY_CHECK`, default on; one model call per chunk
+  read, cached with the page). The model is `PI_RESEARCH_SAFETY_MODEL`, else the
+  session model (not `PI_RESEARCH_MODEL`, which is often a cheaper model). The checker decides one thing:
+  does the page try to steer an AI agent that reads it? Pages *about* prompt
+  injection, API docs with system-role JSON, or a README with `curl … | sh` are
+  allowed. The checker has no tools except the one it answers with, sees the
+  page as numbered paragraphs inside a tag named with a random code (a page
+  cannot fake the end of its own content), and gets the risk hints as evidence.
+  - *Allowed*: the chunk is shown, marked `Safety check: passed`.
+  - *Denied*: you see a dialog with the finding, a short reason and the flagged
+    paragraphs, cut from the page itself, never written by the checker. You
+    decide whether the agent sees the chunk (10-minute timeout, then no). The
+    agent can't override a deny. Without a dialog (print/JSON mode) the chunk is
+    withheld. The agent is told what kind of attempt was found, never the
+    flagged text, and can still read the page's other chunks.
+  - *Refused*: when the review model's provider refuses to process the page
+    (its own safety filter), that counts as a deny, with the same dialog.
+  - *Check failed* (no model or key, provider error, no valid verdict): withheld
+    by default; `PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR=warn` shows it marked
+    `Safety check: FAILED`.
+
+  The flagged excerpts are kept in the tool result's `details` (shown to you,
+  never sent to the model), which pi saves in the session file.
 
 `fetch_url` is an outbound channel like `curl`: if you restrict the agent's
 shell but enable `fetch_url`, the outbound check is what stands between an
-injected instruction and a request carrying your data. The untrusted framing and
-risk hints lower the chance that a fetched page steers the agent; they are not a
+injected instruction and a request carrying your data. The safety check reviews
+responses, not requests. Framing, risk hints and the safety check lower the
+chance that a fetched page steers the agent; they are defence in depth, not a
 guarantee.
 
 ### TUI

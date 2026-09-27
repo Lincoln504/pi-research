@@ -97,7 +97,12 @@ function assertNoLlmError(response: AssistantMessage, label: string): void {
     
     // Handle 500 [object Object] cases by ensuring we show something readable
     const cleanMsg = typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg);
-    throw new Error(`${label} failed: ${cleanMsg}`);
+    // Keep the provider's raw stop reason (e.g. Anthropic 'refusal', OpenAI
+    // 'content_filter', Google 'SAFETY') so callers can tell a refusal from a
+    // failure without matching provider-specific message text.
+    throw Object.assign(new Error(`${label} failed: ${cleanMsg}`), {
+      ...(response.rawStopReason ? { rawStopReason: response.rawStopReason } : {}),
+    });
   }
 }
 

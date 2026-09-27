@@ -91,6 +91,7 @@
     "test:all": "npm run test:unit && npm run test:integration",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.unit.ts --coverage",
+    "eval:fetch-safety": "vitest run --config config/tooling/vitest.config.eval.ts test/evals/fetch-safety",
     "build:cli": "node scripts/build.cjs cli",
     "build:skill": "node scripts/build.cjs skill",
     "build": "node scripts/build.cjs all",

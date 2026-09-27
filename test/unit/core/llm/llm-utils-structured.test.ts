@@ -137,6 +137,19 @@ describe('completeSimpleStructured', () => {
     ).rejects.toThrow('API Rate Limit Exhausted');
   });
 
+  it('attaches the raw provider stop reason to the error (refusal detection)', async () => {
+    vi.mocked(completeSimple).mockResolvedValue({
+      ...textResponse(''),
+      stopReason: 'error',
+      rawStopReason: 'refusal',
+      errorMessage: "This request was blocked under Anthropic's Usage Policy.",
+    } as unknown as AssistantMessage);
+
+    await expect(
+      completeSimpleStructured(STUB_MODEL, { messages: [] as any }, TOOL, {}, 'Checker'),
+    ).rejects.toMatchObject({ rawStopReason: 'refusal', message: expect.stringContaining('Checker failed: This request was blocked') });
+  });
+
   it('throws an actionable error when neither the tool call nor text arrives', async () => {
     vi.mocked(completeSimple).mockResolvedValue(textResponse('   '));
 

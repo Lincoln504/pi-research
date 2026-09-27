@@ -2,7 +2,7 @@
  * fetch_url tool — end-to-end through execute(), scraper mocked.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createFetchUrlTool, CONFIRM_TIMEOUT_MS, type ReviewFn } from '../../../src/tools/fetch-url.ts';
+import { createFetchUrlTool as createTool, CONFIRM_TIMEOUT_MS, passThroughReview, type ReviewFn, type FetchUrlDeps } from '../../../src/tools/fetch-url.ts';
 import { PageCache } from '../../../src/web-fetch/cache.ts';
 import { DEFAULTS, type Config } from '../../../src/config.ts';
 import { UNTRUSTED_BANNER } from '../../../src/web-fetch/format.ts';
@@ -37,6 +37,10 @@ async function run(tool: ReturnType<typeof createFetchUrlTool>, params: unknown,
   return { text: (r.content[0] as any).text as string, details: r.details as any };
 }
 
+// These tests cover fetching and formatting: the review step is the pass-through
+// unless a test passes its own (the safety checker has its own tests).
+const createFetchUrlTool = (iface: 'pi', deps: FetchUrlDeps = {}) => createTool(iface, { review: passThroughReview, ...deps });
+
 const tags = (s: string) => Array.from(s, (c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
 
 describe('fetch_url tool', () => {
@@ -47,6 +51,24 @@ describe('fetch_url tool', () => {
     const tool = createFetchUrlTool('pi', { scrape: okScrape(''), cache });
     const text = (tool.promptGuidelines ?? []).join('\n');
     expect(text).toMatch(/rather than `curl`, `wget`/);
+  });
+
+  it('uses the safety checker by default, failing closed when it cannot run', async () => {
+    const tool = createTool('pi', { scrape: okScrape(ARTICLE), cache });
+    const { ctx } = makeCtx(); // no model registry: the check cannot run
+    const { text, details } = await run(tool, { url: 'https://example.com/a' }, ctx);
+    expect(text).toMatch(/safety check could not run/);
+    expect(text).not.toContain('First paragraph');
+    expect(details.safetyCheck).toBe('failed');
+  });
+
+  it('shows content marked "off" when the safety check is disabled', async () => {
+    const tool = createTool('pi', { scrape: okScrape(ARTICLE), cache });
+    const { ctx } = makeCtx({ config: { FETCH_URL_SAFETY_CHECK: false } });
+    const { text, details } = await run(tool, { url: 'https://example.com/a' }, ctx);
+    expect(text).toContain('First paragraph');
+    expect(text).toContain('Safety check: off');
+    expect(details.safetyCheck).toBe('off');
   });
 
   describe('gates and URL policy', () => {

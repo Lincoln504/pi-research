@@ -104,7 +104,7 @@ agent to invoke:
 | `research` | Run a full multi-source research session and return the cited Markdown report |
 | `research_knowledge_search` | Instant local search of the knowledge store — checked before live research; always registered, reports why when the store is disabled |
 | `health` | Verify system status (browser pool, knowledge store, GPU lock); optional liveness probe |
-| `fetch_url` | Opt-in: fetch one https URL for the main agent (plain GET, stealth-browser escalation), paged with an outline, framed as untrusted with nonce-delimited markers, invisible Unicode stripped, heuristic risk hints, outbound-URL check before any request. Never given to researchers. See [PI-EXTENSION.md](PI-EXTENSION.md#fetch_url) |
+| `fetch_url` | Opt-in: fetch one https URL for the main agent (plain GET, stealth-browser escalation), paged with an outline, framed as untrusted with nonce-delimited markers, invisible Unicode stripped, heuristic risk hints, outbound-URL check before any request, and a safety check of every chunk by the safety model (`PI_RESEARCH_SAFETY_MODEL`, else the session model) (on a deny the user decides; withheld without a dialog). Never given to researchers. See [PI-EXTENSION.md](PI-EXTENSION.md#fetch_url) |
 
 **Researcher-agent tools** — the fixed set each researcher sub-agent works with
 (`src/tools/index.ts`). `search`, `security_search`, `stackexchange`, and

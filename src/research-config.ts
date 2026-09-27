@@ -256,6 +256,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         currentValue: config.FETCH_URL_OUTBOUND_CHECK,
         values: ['ask', 'block', 'off'],
       },
+      {
+        id: 'FETCH_URL_SAFETY_CHECK',
+        label: 'fetch_url safety check',
+        description: 'Review every fetched chunk with the safety model before the agent sees it (one model call per chunk). If it finds an attempt to steer the agent, you decide whether to show it. Off: content is still marked untrusted, with heuristic hints.',
+        currentValue: config.FETCH_URL_SAFETY_CHECK ? 'on' : 'off',
+        values: ['on', 'off'],
+      },
     ] as SettingItem[] : []),
     // Browser Workers is intentionally NOT exposed here. It is an
     // environment-only setting (PI_RESEARCH_WORKER_THREADS, default 4) so that
@@ -455,6 +462,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             scope = 'user';
             } else if (id === 'FETCH_URL_OUTBOUND_CHECK') {
             config.FETCH_URL_OUTBOUND_CHECK = newValue as 'ask' | 'block' | 'off';
+            scope = 'user';
+            } else if (id === 'FETCH_URL_SAFETY_CHECK') {
+            config.FETCH_URL_SAFETY_CHECK = newValue === 'on';
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_MODE') {
               config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project' | 'global';

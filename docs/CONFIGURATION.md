@@ -35,6 +35,7 @@ variables still take effect.) A setting is written to one of two scopes:
 | Auto-export Report | user | true · false | `PI_RESEARCH_REPORT_EXPORT_ENABLED` |
 | fetch_url tool | user | disabled (default) · enabled | `PI_RESEARCH_FETCH_URL_ENABLED` |
 | fetch_url outbound check | user | ask · block · off (shown when fetch_url is enabled) | `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK` |
+| fetch_url safety check | user | on (default) · off (shown when fetch_url is enabled) | `PI_RESEARCH_FETCH_URL_SAFETY_CHECK` |
 | Embedding Model | user | one of the supported models | `PI_RESEARCH_EMBEDDING_MODEL` |
 | Embedding Device | user | GPU · CPU | `PI_RESEARCH_EMBEDDING_DEVICE` |
 | Cache Retention | user | 7 · 14 · 30 · 60 · 90 · 180 · 365 (days) | `PI_RESEARCH_CACHE_TTL_DAYS` |
@@ -105,6 +106,9 @@ fetch_url (pi extension, main agent)
 | `PI_RESEARCH_FETCH_URL_MAX_CHARS` | `40000` | ≥1 | Characters per chunk when the agent does not pass `maxChars` (40,000 ≈ 10k tokens). No upper bound. |
 | `PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK` | `true` | `true` · `false` | Escalate to the stealth browser when a plain GET fails or returns a stub/bot wall. With `false`, pages that need JavaScript or have bot protection fail. |
 | `PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK` (TUI) | `ask` | `ask` · `block` · `off` | What to do with a request URL that looks like it carries data out (long encoded values, secret-shaped tokens, long host labels): ask in a dialog (10-minute timeout; refused when no dialog is available), refuse, or allow. |
+| `PI_RESEARCH_FETCH_URL_SAFETY_CHECK` (TUI) | `true` | `true` · `false` | Review every `fetch_url` chunk with the safety model before the agent sees it (one model call per chunk read; verdicts cached with the page). On a deny you decide in a dialog; without a dialog the chunk is withheld. With `false`, content is still framed as untrusted with heuristic hints. |
+| `PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR` | `withhold` | `withhold` · `warn` | When the safety check cannot run (no model or API key, provider error, no valid verdict): withhold the chunk, or show it marked `Safety check: FAILED`. A refusal by the review model is a deny, never a failure, so `warn` does not show refused pages. |
+| `PI_RESEARCH_SAFETY_MODEL` | _(session model)_ | — | Model for the `fetch_url` safety check, `provider/id` or a bare id. Unset: the session model — deliberately not `PI_RESEARCH_MODEL`, which is often set to a cheaper model. If set but not found, the session model is used, with a warning (logged, and shown once in the TUI). User-level only: a project's files cannot set it. |
 
 YouTube transcripts
 

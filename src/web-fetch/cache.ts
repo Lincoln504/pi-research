@@ -3,8 +3,8 @@
  *
  * Paging (`start`) must not re-download the page: every chunk of one page comes
  * from the SAME fetched version (a live page could change between calls and make
- * the offsets meaningless), and per-chunk safety verdicts are cached on the entry
- * (phase 2). Keyed by both the requested and the final URL. Process-local, bounded
+ * the offsets meaningless), and per-chunk safety-check outcomes are cached on the
+ * entry. Keyed by both the requested and the final URL. Process-local, bounded
  * by entry count, total size and TTL; cleared on session shutdown.
  */
 
@@ -28,7 +28,7 @@ export interface CachedPage {
   unicode: UnicodeFindings;
   outline: { entries: OutlineEntry[]; truncated: boolean };
   fetchedAt: number;
-  /** Per-chunk review outcomes, keyed `${start}:${end}` (phase 2). */
+  /** Per-chunk safety-check records, keyed `${start}:${end}` (owned by tools/fetch-url-safety.ts). */
   reviews: Map<string, unknown>;
 }
 

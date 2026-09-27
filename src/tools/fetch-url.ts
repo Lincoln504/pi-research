@@ -10,7 +10,8 @@
  *      raw text for text-like types), then invisible-Unicode stripping, heuristic
  *      flags, hidden-text detection, outline
  *   5. slice the requested chunk at a natural boundary
- *   6. review step — a pass-through here; the safety checker plugs in here
+ *   6. review step — the safety checker (tools/fetch-url-safety.ts): a model
+ *      reviews the chunk; on a deny the user decides, the agent never can
  *   7. format: untrusted banner, provenance, risk hints, nonce-delimited content,
  *      paging footer
  *
@@ -31,14 +32,18 @@ import { assessOutboundUrl } from '../web-fetch/outbound-check.ts';
 import { stripInvisibleUnicode } from '../web-fetch/unicode.ts';
 import { scanText } from '../web-fetch/heuristics.ts';
 import { findHiddenPassages, type HiddenTextResult } from '../web-fetch/hidden-text.ts';
-import { sliceChunk, buildOutline, type Chunk } from '../web-fetch/chunking.ts';
-import { PageCache, type CachedPage } from '../web-fetch/cache.ts';
-import { formatChunk, type SafetyStatus } from '../web-fetch/format.ts';
+import { sliceChunk, buildOutline } from '../web-fetch/chunking.ts';
+import { PageCache } from '../web-fetch/cache.ts';
+import { formatChunk } from '../web-fetch/format.ts';
+import { confirmWithUser, type ReviewFn } from '../web-fetch/review.ts';
+import { createSafetyReview } from './fetch-url-safety.ts';
+
+export {
+  CONFIRM_TIMEOUT_MS, passThroughReview,
+  type ReviewFn, type ReviewInput, type ReviewOutcome,
+} from '../web-fetch/review.ts';
 
 export const FETCH_URL_TOOL_NAME = 'fetch_url';
-/** How long a confirmation dialog waits before answering "no". */
-export const CONFIRM_TIMEOUT_MS = 10 * 60 * 1000;
-
 export const FetchUrlParams = Type.Object({
   url: Type.String({ minLength: 1, description: 'The https URL to fetch (http:// is upgraded to https://).' }),
   start: Type.Optional(Type.Integer({
@@ -51,29 +56,6 @@ export const FetchUrlParams = Type.Object({
   })),
 });
 export type FetchUrlParams = Static<typeof FetchUrlParams>;
-
-// ---------------------------------------------------------------------------
-// Review step (the safety checker's plug-in point)
-// ---------------------------------------------------------------------------
-
-export interface ReviewInput {
-  page: CachedPage;
-  chunk: Chunk;
-  ctx: ExtensionContext;
-  config: Config;
-  signal?: AbortSignal;
-}
-
-export type ReviewOutcome =
-  | { action: 'show'; safety: SafetyStatus }
-  | { action: 'withhold'; message: string; details?: Record<string, unknown> };
-
-export type ReviewFn = (input: ReviewInput) => Promise<ReviewOutcome>;
-
-/** No safety checker yet: every chunk is shown (still framed as untrusted). */
-export const passThroughReview: ReviewFn = async () => ({ action: 'show', safety: { kind: 'not-run' } });
-
-// ---------------------------------------------------------------------------
 
 export interface FetchUrlDeps {
   scrape?: typeof scrapeSingle;
@@ -98,20 +80,10 @@ function wantsOutline(raw: boolean, contentType: string, finalUrl: string): bool
   try { return /\.(?:md|markdown)$/i.test(new URL(finalUrl).pathname); } catch { return false; }
 }
 
-async function confirm(ctx: ExtensionContext, title: string, message: string, signal?: AbortSignal): Promise<boolean> {
-  if (!ctx.hasUI) return false;
-  try {
-    return await ctx.ui.confirm(title, message, { timeout: CONFIRM_TIMEOUT_MS, ...(signal ? { signal } : {}) });
-  } catch (err) {
-    logger.debug('[fetch_url] confirm dialog failed; treating as "no":', err);
-    return false;
-  }
-}
-
 export function createFetchUrlTool(iface?: ConfigInterface, deps: FetchUrlDeps = {}): ToolDefinition {
   const scrape = deps.scrape ?? scrapeSingle;
   const cache = deps.cache ?? sharedPageCache;
-  const review = deps.review ?? passThroughReview;
+  const review = deps.review ?? createSafetyReview();
   const findHidden = deps.findHidden ?? findHiddenPassages;
 
   return {
@@ -175,7 +147,7 @@ export function createFetchUrlTool(iface?: ConfigInterface, deps: FetchUrlDeps =
             const reasons = assessment.reasons.map((r) => `- ${r}`).join('\n');
             let allowed = false;
             if (config.FETCH_URL_OUTBOUND_CHECK === 'ask') {
-              allowed = await confirm(
+              allowed = await confirmWithUser(
                 ctx,
                 'fetch_url: this URL may send data out',
                 `The agent wants to fetch:\n${url.length > 500 ? `${url.slice(0, 500)}…` : url}\n\nWhy this was flagged:\n${reasons}\n\nAllow this request?`,
@@ -288,7 +260,7 @@ export function createFetchUrlTool(iface?: ConfigInterface, deps: FetchUrlDeps =
       metrics.observe('fetch_url_latency_ms', Date.now() - started, { cached: String(cached) });
       let text = formatChunk(page, chunk, outcome.safety);
       if (upgraded) text = `(Requested over http; fetched over https instead.)\n${text}`;
-      return textResult(text, { ...baseDetails, safetyCheck: outcome.safety.kind });
+      return textResult(text, { ...baseDetails, safetyCheck: outcome.safety.kind, ...(outcome.details ?? {}) });
     },
   };
 }

@@ -116,6 +116,14 @@ export const ConfigSchema = Type.Object({
    *  (long encoded values, secret-shaped tokens): 'ask' the user (default; refused when
    *  no dialog is available), 'block', or 'off'. */
   FETCH_URL_OUTBOUND_CHECK: Type.Union([Type.Literal('ask'), Type.Literal('block'), Type.Literal('off')], { default: 'ask' }),
+  /** Review every `fetch_url` chunk with the safety model before the agent sees it
+   *  (default: true). On a deny the user decides; without a dialog the chunk is withheld.
+   *  When false, content is still framed as untrusted with heuristic hints. */
+  FETCH_URL_SAFETY_CHECK: Type.Boolean({ default: true }),
+  /** What `fetch_url` does when the safety check cannot run (no model/key, provider
+   *  error, no valid verdict): 'withhold' the chunk (default) or 'warn' — show it with a
+   *  "Safety check: FAILED" line. Configured via env/config file. */
+  FETCH_URL_SAFETY_ON_ERROR: Type.Union([Type.Literal('withhold'), Type.Literal('warn')], { default: 'withhold' }),
   /** Health check timeout in milliseconds (default: 10000ms) */
   HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** Default timeout for browser page operations like search (default: 45000ms) */
@@ -180,6 +188,10 @@ export const ConfigSchema = Type.Object({
    *  for prompt-cache continuity with the conversation that triggered research.
    */
   RESEARCH_MODEL: Type.Optional(Type.String()),
+  /** Model for the fetch_url safety check (provider/model-id or model-id). Unset: the
+   *  session model — deliberately not RESEARCH_MODEL, which is often a cheaper model.
+   *  When set but not found, the session model is used, with a warning. */
+  SAFETY_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
   /** Directory for transient browser profile data. Defaults to a disk-backed
@@ -300,8 +312,11 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_FETCH_URL_MAX_CHARS',
   'PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK',
   'PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK',
+  'PI_RESEARCH_FETCH_URL_SAFETY_CHECK',
+  'PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
+  'PI_RESEARCH_SAFETY_MODEL',
   'PI_RESEARCH_KNOWLEDGE_DIR',
   'PI_RESEARCH_TMP_DIR',
   'PI_RESEARCH_REPORT_EXPORT_ENABLED',
@@ -992,6 +1007,8 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_FETCH_URL_MAX_CHARS: String(config.FETCH_URL_MAX_CHARS),
     PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK: String(config.FETCH_URL_BROWSER_FALLBACK),
     PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK: config.FETCH_URL_OUTBOUND_CHECK,
+    PI_RESEARCH_FETCH_URL_SAFETY_CHECK: String(config.FETCH_URL_SAFETY_CHECK),
+    PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR: config.FETCH_URL_SAFETY_ON_ERROR,
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
     PI_RESEARCH_LLM_THINKING_LEVEL: config.LLM_THINKING_LEVEL,
@@ -1000,6 +1017,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_MIGRATION_STRATEGY: config.MIGRATION_STRATEGY,
     PI_RESEARCH_CONSOLE_LOG: String(config.CONSOLE_LOG),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
+    ...(config.SAFETY_MODEL ? { PI_RESEARCH_SAFETY_MODEL: config.SAFETY_MODEL } : {}),
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
     ...(config.TMP_DIR ? { PI_RESEARCH_TMP_DIR: config.TMP_DIR } : {}),
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
@@ -1228,6 +1246,8 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     FETCH_URL_MAX_CHARS: parseEnvNumber(e, 'PI_RESEARCH_FETCH_URL_MAX_CHARS', DEFAULTS.FETCH_URL_MAX_CHARS, 1, undefined, true),
     FETCH_URL_BROWSER_FALLBACK: parseEnvBool(e, 'PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK', DEFAULTS.FETCH_URL_BROWSER_FALLBACK),
     FETCH_URL_OUTBOUND_CHECK: parseEnvEnum(e, 'PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK', ['ask', 'block', 'off'] as const, DEFAULTS.FETCH_URL_OUTBOUND_CHECK),
+    FETCH_URL_SAFETY_CHECK: parseEnvBool(e, 'PI_RESEARCH_FETCH_URL_SAFETY_CHECK', DEFAULTS.FETCH_URL_SAFETY_CHECK),
+    FETCH_URL_SAFETY_ON_ERROR: parseEnvEnum(e, 'PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR', ['withhold', 'warn'] as const, DEFAULTS.FETCH_URL_SAFETY_ON_ERROR),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS, 2000, 120000),
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),
@@ -1239,6 +1259,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MIGRATION_STRATEGY: parseEnvEnum(e, 'PI_RESEARCH_MIGRATION_STRATEGY', ['drop', 're-embed', 'backup'] as const, DEFAULTS.MIGRATION_STRATEGY),
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
+    SAFETY_MODEL: parseEnvString(e, 'PI_RESEARCH_SAFETY_MODEL', DEFAULTS.SAFETY_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
     TMP_DIR: parseEnvString(e, 'PI_RESEARCH_TMP_DIR', DEFAULTS.TMP_DIR),
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),

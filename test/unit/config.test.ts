@@ -377,20 +377,30 @@ describe('config (refactored)', () => {
         expect(d.FETCH_URL_MAX_CHARS).toBe(40000);
         expect(d.FETCH_URL_BROWSER_FALLBACK).toBe(true);
         expect(d.FETCH_URL_OUTBOUND_CHECK).toBe('ask');
+        expect(d.FETCH_URL_SAFETY_CHECK).toBe(true);
+        expect(d.FETCH_URL_SAFETY_ON_ERROR).toBe('withhold');
+        expect(d.SAFETY_MODEL).toBeUndefined();
 
         const c = createConfig({}, {
           PI_RESEARCH_FETCH_URL_ENABLED: 'true',
           PI_RESEARCH_FETCH_URL_MAX_CHARS: '250000',
           PI_RESEARCH_FETCH_URL_BROWSER_FALLBACK: 'false',
           PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK: 'block',
+          PI_RESEARCH_FETCH_URL_SAFETY_CHECK: 'false',
+          PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR: 'warn',
+          PI_RESEARCH_SAFETY_MODEL: 'deepseek/deepseek-flash',
         });
         expect(c.FETCH_URL_ENABLED).toBe(true);
         expect(c.FETCH_URL_MAX_CHARS).toBe(250000);
         expect(c.FETCH_URL_BROWSER_FALLBACK).toBe(false);
         expect(c.FETCH_URL_OUTBOUND_CHECK).toBe('block');
+        expect(c.FETCH_URL_SAFETY_CHECK).toBe(false);
+        expect(c.FETCH_URL_SAFETY_ON_ERROR).toBe('warn');
+        expect(c.SAFETY_MODEL).toBe('deepseek/deepseek-flash');
 
         expect(createConfig({}, { PI_RESEARCH_FETCH_URL_MAX_CHARS: '0' }).FETCH_URL_MAX_CHARS).toBe(1);
         expect(createConfig({}, { PI_RESEARCH_FETCH_URL_OUTBOUND_CHECK: 'maybe' }).FETCH_URL_OUTBOUND_CHECK).toBe('ask');
+        expect(createConfig({}, { PI_RESEARCH_FETCH_URL_SAFETY_ON_ERROR: 'show' }).FETCH_URL_SAFETY_ON_ERROR).toBe('withhold');
       });
 
       it('honors the legacy CACHE_TTL_DAYS env name when the canonical one is absent', () => {
