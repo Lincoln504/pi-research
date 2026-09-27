@@ -54,6 +54,13 @@ export const BOT_PATTERNS: ReadonlyArray<[string, string]> = [
 
 export const IMAGE_LINK_PATTERN = /\[([^\]]*)\]\((data:image\/[^)]+|[^)\s]+\.(?:svg|png|jpe?g|gif|webp|bmp|ico)(?:\?[^)]*)?)\)/gi;
 export const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\((?:data:image\/[^)]+|[^)\s]+)\)/gi;
+/**
+ * `[](#fragment)` — a link with no text to a spot on the same page (optional
+ * title). Documentation generators put one before every code line (Quarto,
+ * nbdev: `<a href="#cb2-1" aria-hidden="true"></a>`) and next to headings; the
+ * converters turn each into `[](#cb2-1)`, which carries no text.
+ */
+export const EMPTY_FRAGMENT_LINK_PATTERN = /\[\]\(#[^)\s]*(?:\s+"[^"\n]*")?\)/g;
 
 export type { ScrapeLayerResult } from './types.ts';
 

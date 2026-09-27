@@ -15,6 +15,7 @@ import {
   FILTERED_TAGS,
   IMAGE_LINK_PATTERN,
   MARKDOWN_IMAGE_PATTERN,
+  EMPTY_FRAGMENT_LINK_PATTERN,
   BOT_PATTERNS,
   INTERNAL_NETWORK_PATTERNS,
   type NativeHtmlToMarkdownModule,
@@ -486,6 +487,28 @@ function isMappedLoopback(ip: string): boolean {
 }
 
 /**
+ * Drop empty same-page links (`[](#cb2-1)`): per-line code anchors and heading
+ * anchors that documentation generators emit. They carry no text, but repeat on
+ * every code line and every heading, so they cost tokens and add noise to the
+ * knowledge store index. Links with text, and empty links to other pages, stay.
+ */
+export function stripEmptyFragmentLinks(markdown: string): string {
+  return markdown.replace(EMPTY_FRAGMENT_LINK_PATTERN, '');
+}
+
+/**
+ * Converter post-processing, shared by the native and the JS converter. Images
+ * go first: a heading anchor often wraps an icon (GitHub: `[![](link.svg)](#title)`)
+ * and only becomes an empty link once the image is gone. Removing a link that
+ * stood on its own line leaves extra blank lines, so they are collapsed again.
+ */
+export function cleanConvertedMarkdown(markdown: string): string {
+  return stripEmptyFragmentLinks(stripImageLinks(markdown))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Strip image links from markdown
  */
 export function stripImageLinks(markdown: string): string {
@@ -511,7 +534,7 @@ export function createNativeMarkdownConverter(
       codeBlockStyle: nativeModule.CodeBlockStyle.Backticks,
       wrap: false,
     });
-    return stripImageLinks(result.content ?? '');
+    return cleanConvertedMarkdown(result.content ?? '');
   };
 }
 
@@ -527,7 +550,7 @@ export function createJsMarkdownConverter(): (html: string) => Promise<string> {
 
   return async (html: string): Promise<string> => {
     const markdown = converter.translate(html);
-    return stripImageLinks(markdown);
+    return cleanConvertedMarkdown(markdown);
   };
 }
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Scraped pages no longer carry empty same-page links.** Documentation generators such as Quarto and nbdev put an empty anchor before every code line (`<a href="#cb2-1"></a>`) and next to headings; the native HTML→Markdown converter turned each into `[](#cb2-1)`, so every code block in a research scrape (and in the knowledge store) started each line with one. Both converters now drop links that have no text and point to the same page (`cleanConvertedMarkdown` in `src/web-research/scraper-utils.ts`, run after the existing image-link stripping so heading anchors that wrap an icon — GitHub's `[![](link.svg)](#title)` — go too). Links with text, and empty links to other pages, are kept. On an nbdev documentation page (fastcore.fast.ai/docments.html) this removes 583 such links, 16% of the scraped text.
+
 ## [1.7.1] - 2026-09-27
 
 ### Changed
