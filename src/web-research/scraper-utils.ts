@@ -15,6 +15,7 @@ import {
   FILTERED_TAGS,
   IMAGE_LINK_PATTERN,
   MARKDOWN_IMAGE_PATTERN,
+  EMPTY_FRAGMENT_LINK_PATTERN,
   BOT_PATTERNS,
   INTERNAL_NETWORK_PATTERNS,
   type NativeHtmlToMarkdownModule,
@@ -486,6 +487,76 @@ function isMappedLoopback(ip: string): boolean {
 }
 
 /**
+ * Drop empty same-page links (`[](#cb2-1)`): per-line code anchors and heading
+ * anchors that documentation generators emit. They carry no text, but repeat on
+ * every code line and every heading, so they cost tokens and add noise to the
+ * knowledge store index. Links with text, and empty links to other pages, stay.
+ */
+export function stripEmptyFragmentLinks(markdown: string): string {
+  return markdown.replace(EMPTY_FRAGMENT_LINK_PATTERN, '');
+}
+
+/**
+ * Front-matter keys kept by trimFrontMatter, one slot per piece of information;
+ * the first key present in a slot wins (the native converter prefixes <meta>
+ * names with `meta-`, keeping Open Graph / Dublin Core / citation prefixes).
+ */
+const FRONT_MATTER_SLOTS: ReadonlyArray<readonly string[]> = [
+  ['title', 'meta-og:title', 'meta-citation_title'],
+  ['meta-description', 'description', 'meta-og:description', 'meta-twitter:description'],
+  ['meta-author', 'meta-article:author', 'meta-citation_author', 'meta-dc.creator', 'meta-dcterms.creator'],
+  ['meta-article:published_time', 'meta-citation_publication_date', 'meta-citation_date', 'meta-dcterms.date',
+    'meta-dc.date', 'meta-date', 'meta-dcterms.created'],
+  ['meta-article:modified_time', 'meta-dcterms.modified'],
+];
+/** Front matter longer than this is not the converter's (e.g. a Markdown file's own); leave it. */
+const MAX_FRONT_MATTER_CHARS = 20_000;
+/** A front-matter entry starts with `key:`; other lines continue the previous value. */
+const FRONT_MATTER_KEY = /^([\w.:-]+):(?:\s|$)/;
+
+/**
+ * Trim the front matter the native converter builds from <meta> tags to the
+ * lines a reader can use: title, description, author, publication and
+ * modification date. The rest (analytics and error-reporting URLs, verification
+ * hashes, nonces, app ids, Open Graph / Twitter duplicates of the title and
+ * description, viewport, robots…) is noise: 54 lines on a GitHub page. Nothing
+ * in pi-research parses these lines. The block is dropped when none of the kept
+ * keys is present.
+ */
+export function trimFrontMatter(markdown: string): string {
+  if (!markdown.startsWith('---\n')) return markdown;
+  const close = markdown.indexOf('\n---\n', 3);
+  if (close === -1 || close > MAX_FRONT_MATTER_CHARS) return markdown;
+
+  const entries: Array<{ key: string; lines: string[] }> = [];
+  for (const line of markdown.slice(4, close).split('\n')) {
+    const m = FRONT_MATTER_KEY.exec(line);
+    if (m) entries.push({ key: m[1]!.toLowerCase(), lines: [line] });
+    else if (entries.length) entries[entries.length - 1]!.lines.push(line);
+  }
+  const kept: string[] = [];
+  for (const slot of FRONT_MATTER_SLOTS) {
+    const entry = slot.map((key) => entries.find((e) => e.key === key)).find((e) => e !== undefined);
+    if (entry) kept.push(...entry.lines);
+  }
+  const rest = markdown.slice(close + 5).replace(/^\n+/, '');
+  return kept.length ? `---\n${kept.join('\n')}\n---\n\n${rest}` : rest;
+}
+
+/**
+ * Converter post-processing, shared by the native and the JS converter. The
+ * front matter is trimmed first. Images go before empty links: a heading anchor
+ * often wraps an icon (GitHub: `[![](link.svg)](#title)`) and only becomes an
+ * empty link once the image is gone. Removing a link that stood on its own line
+ * leaves extra blank lines, so they are collapsed again.
+ */
+export function cleanConvertedMarkdown(markdown: string): string {
+  return stripEmptyFragmentLinks(stripImageLinks(trimFrontMatter(markdown)))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Strip image links from markdown
  */
 export function stripImageLinks(markdown: string): string {
@@ -511,7 +582,7 @@ export function createNativeMarkdownConverter(
       codeBlockStyle: nativeModule.CodeBlockStyle.Backticks,
       wrap: false,
     });
-    return stripImageLinks(result.content ?? '');
+    return cleanConvertedMarkdown(result.content ?? '');
   };
 }
 
@@ -527,7 +598,7 @@ export function createJsMarkdownConverter(): (html: string) => Promise<string> {
 
   return async (html: string): Promise<string> => {
     const markdown = converter.translate(html);
-    return stripImageLinks(markdown);
+    return cleanConvertedMarkdown(markdown);
   };
 }
 
