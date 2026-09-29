@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Research runs no longer fail on models that cannot turn thinking off.** The engine's direct LLM calls (coordinator, lead router, synthesizer, JSON repair, knowledge-search extraction and triage) all go through `buildSafeOptions` (`src/core/llm/llm-utils.ts`), which sends thinking `off` by default (`PI_RESEARCH_LLM_THINKING_LEVEL`). Some models reject that: zai/glm-5.3, whose catalog entry marks `off` as unsupported, answers every such call with 400 "This model always engages in thinking and cannot be disabled; please use low, high, or max", so a depth 1–3 run failed at the coordinator's first plan (quick mode was unaffected: it runs as a pi agent session, which already clamps the level). `off` is now raised to the nearest level the model supports (pi-ai's `clampThinkingLevel`, `low` for glm-5.3) only when the model cannot disable thinking; every other model and every explicit level is sent exactly as before. With the fix, the same depth-1 run on glm-5.3 completes.
+
 ## [1.7.2] - 2026-09-27
 
 ### Changed

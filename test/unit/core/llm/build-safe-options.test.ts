@@ -40,6 +40,32 @@ describe('buildSafeOptions', () => {
     expect(buildSafeOptions(STUB_MODEL, { maxTokens: 8192 }).maxTokens).toBe(8192);
   });
 
+  // A model that cannot disable thinking (shape of zai/glm-5.3 in pi-ai's catalog):
+  // sending no reasoning gets a 400 "cannot be disabled; please use low, high, or max".
+  const THINKING_ONLY_MODEL = {
+    ...STUB_MODEL,
+    id: 'glm-5.3',
+    provider: 'zai',
+    reasoning: true,
+    thinkingLevelMap: { off: null, minimal: null, low: 'low', medium: null, high: 'high', xhigh: null, max: 'max' },
+  } as any;
+
+  it('raises off to the lowest supported level when the model cannot disable thinking', () => {
+    expect(buildSafeOptions(THINKING_ONLY_MODEL, {}).reasoning).toBe('low');
+    expect(buildSafeOptions(THINKING_ONLY_MODEL, { reasoning: 'off' as any }).reasoning).toBe('low');
+    expect(buildSafeOptions(THINKING_ONLY_MODEL, {}, 4096, 'off').reasoning).toBe('low');
+  });
+
+  it('keeps off for reasoning models that can disable thinking', () => {
+    expect(buildSafeOptions({ ...STUB_MODEL, reasoning: true }, {}).reasoning).toBeUndefined();
+    expect(buildSafeOptions({ ...THINKING_ONLY_MODEL, thinkingLevelMap: { off: 'none' } }, {}).reasoning).toBeUndefined();
+  });
+
+  it('passes explicit non-off levels through unchanged', () => {
+    expect(buildSafeOptions(THINKING_ONLY_MODEL, { reasoning: 'high' }).reasoning).toBe('high');
+    expect(buildSafeOptions(THINKING_ONLY_MODEL, {}, 4096, 'medium').reasoning).toBe('medium');
+  });
+
   it('preserves unrelated options', () => {
     const opts = buildSafeOptions(STUB_MODEL, { sessionId: 's1', apiKey: 'k' } as any);
     expect((opts as any).sessionId).toBe('s1');
