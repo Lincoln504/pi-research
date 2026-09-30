@@ -179,20 +179,39 @@ describe('redactSecrets', () => {
     // positions (~2x), an unbounded quantifier makes it quadratic (~4x).
     // Measured: 1.87x fixed vs 4.01x unbounded on the raw pattern, 2.06x fixed
     // through redactSecrets. 3.0 sits between them with margin on both sides.
+    //
+    // Each sample is REPEATED until it has cost at least SAMPLE_MS, and the cost
+    // reported is per call. A single pass over the 8k input is only ~10ms on an
+    // idle machine and less on a fast CI runner, which puts the timer's own
+    // resolution and any per-call scheduling jitter (a GC pause, a preempted
+    // worker) in the same order of magnitude as the measurement — that is how the
+    // ratio-of-medians form of this test produced 3.47x on the ubuntu-latest node
+    // 24 leg while the same commit passed on the other three legs. At ~50ms per
+    // sample the same jitter is a couple of percent, the ratio lands on its real
+    // value (~2.0) every run, and the 3.0 threshold still separates it from the
+    // unbounded pattern's ~4.0 with margin on both sides.
+    const SAMPLE_MS = 50;
     const dense = (chars: number) => '_eyJ'.repeat(chars / 4);
     const small = dense(8_000);
     const big = dense(16_000);   // both under REDACT_SCAN_LENGTH, so neither is truncated
-    const time = (s: string) => {
-      const t0 = performance.now();
-      redactSecrets(s);
-      return performance.now() - t0;
+    const perCallMs = (s: string): number => {
+      redactSecrets(s); // warm up: JIT and regexp caches are per call site
+      const start = performance.now();
+      let reps = 0;
+      do {
+        redactSecrets(s);
+        reps++;
+      } while (performance.now() - start < SAMPLE_MS);
+      return (performance.now() - start) / reps;
     };
-    // Median of several passes: one scheduling hiccup must not decide the result.
+    // Median of several PAIRS: one hiccup cannot decide the result, and each pair
+    // is measured back to back so the small and big samples see the same machine.
     const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
-    const smallMs: number[] = [];
-    const bigMs: number[] = [];
-    for (let i = 0; i < 7; i++) { smallMs.push(time(small)); bigMs.push(time(big)); }
-    const ratio = median(bigMs) / Math.max(median(smallMs), 0.001);
+    const ratios: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      ratios.push(perCallMs(big) / Math.max(perCallMs(small), 0.001));
+    }
+    const ratio = median(ratios);
     expect(ratio, `doubling the input multiplied the cost by ${ratio.toFixed(2)}x`).toBeLessThan(3);
   });
 
