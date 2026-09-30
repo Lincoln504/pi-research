@@ -38,6 +38,7 @@ const HOST_INTERNAL_HELPERS = new Set([
   'isUnderPath',
   'loadCurrentExtensionSet',
   'loadExtensionFactories',
+  'loadExtensionPaths',
   'loadFinalExtensionSet',
   'loadProjectTrustExtensions',
   'loadThemeFromFile',

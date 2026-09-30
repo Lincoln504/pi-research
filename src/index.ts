@@ -14,6 +14,7 @@ import { logger } from './logger.ts';
 import { checkPiCompatibility } from './core/pi-version.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
+import { asToolExecContext } from './utils/tool-exec-context.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { registerBeforeExitSafetyNet } from './knowledge/embedder-utils.ts';
 import { getConfig, validateConfig } from './config.ts';
@@ -92,11 +93,12 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.87.0).
+  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.99.0).
   // The floor was raised to 0.84.0 because setRuntimeApiKey() lost its `allowNetwork` option
   // there and only 0.84.0+ hardcodes the equivalent guard internally (see pi-version.ts), then
   // to 0.85.0 to track the pi extension package line, and to 0.87.0 for the 0.86
-  // TranscriptContext / 0.87 SessionEntry-union surface (see pi-version.ts). The
+  // TranscriptContext / 0.87 SessionEntry-union surface, and to 0.99.0 for tool `exposure`
+  // and the ExtensionToolContext widening of ToolDefinition.execute() (see pi-version.ts). The
   // APIs it rests on arrived in 0.80.8, which introduced ModelRuntime and removed
   // AuthStorage/ModelRegistry.create(); buildModelRegistry (model-registry-factory.ts)
   // unconditionally calls ModelRuntime.create(), and createAgentSession() is invoked
@@ -127,6 +129,12 @@ export default async function (pi: ExtensionAPI) {
   // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY
   // This ensures we capture steering even if initialization takes time.
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
+    // A new prompt (not steering typed while the agent runs): re-align the
+    // knowledge-search tool's exposure with live config before pi builds this
+    // turn's prompt, so a /research-config Knowledge Mode change applies without
+    // a pi restart. Registration happens before this closure runs (see
+    // syncKnowledgeSearchExposure below).
+    if (!event.streamingBehavior) syncKnowledgeSearchExposure(ctx);
     // Only intercept genuine interactive keystrokes. Programmatic sends originate
     // from this extension (source 'extension') — e.g. the Alt+P pop handler forwards
     // a popped message as 'steer'. Without this guard that forward would be captured
@@ -344,13 +352,34 @@ export default async function (pi: ExtensionAPI) {
 
   // Create and register the Research Knowledge Search tool. It is native-free at
   // construction (the vector/ML stack loads lazily on first execute) and self-guards when
-  // Knowledge Mode is 'none' (its execute returns a "store disabled" miss). Registering it
-  // unconditionally lets a Knowledge Mode change via /research-config take effect without a
-  // Pi restart — availability to the agent and the /knowledge-store command below both key
-  // off live config, not this startup binding. The pi API has no unregisterTool, so a
-  // startup-gated registration could never be added back after enabling mid-session anyway.
+  // Knowledge Mode is 'none' (its execute returns a "store disabled" miss).
+  //
+  // pi 0.99 exposes tool `exposure`, which is how this tool is keyed to LIVE
+  // Knowledge Mode: while the mode is 'none' it is re-registered as `hidden`, so
+  // it is neither declared to the model nor listed in the prompt, and a mode
+  // change via /research-config takes effect on the next prompt without a pi
+  // restart (pi has no unregisterTool; re-registering with `exposure: 'hidden'`
+  // is the documented withdrawal, and a later re-register back to `direct`
+  // activates the tool like a new one). The tool object itself is kept as the
+  // base so the /knowledge-store command below can still invoke it directly.
   const researchKnowledgeSearchTool: ToolDefinition = createResearchKnowledgeSearchTool('pi');
-  pi.registerTool(researchKnowledgeSearchTool);
+  let knowledgeSearchExposure: 'direct' | 'hidden' | undefined;
+  const syncKnowledgeSearchExposure = (ctx?: ExtensionContext): void => {
+    try {
+      const mode = getConfig(ctx?.cwd ?? (pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE;
+      const want: 'direct' | 'hidden' = mode === 'none' ? 'hidden' : 'direct';
+      if (want === knowledgeSearchExposure) return;
+      pi.registerTool({ ...researchKnowledgeSearchTool, exposure: want });
+      knowledgeSearchExposure = want;
+      logger.debug(`[pi-research] research_knowledge_search exposure → ${want}`);
+    } catch (err) {
+      logger.debug('[pi-research] could not sync research_knowledge_search exposure:', err);
+    }
+  };
+  syncKnowledgeSearchExposure();
+  pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
+    syncKnowledgeSearchExposure(ctx);
+  });
 
   // Alt+P — Pop queued steering messages out of the research queue and steer pi with them.
   pi.registerShortcut(Key.alt('p'), {
@@ -435,7 +464,7 @@ export default async function (pi: ExtensionAPI) {
           { query: text, depth: config.DEFAULT_RESEARCH_DEPTH },
           ctx.signal,
           undefined,
-          ctx,
+          asToolExecContext(ctx),
         );
 
         const output = extractResultText(result);
@@ -525,7 +554,7 @@ export default async function (pi: ExtensionAPI) {
           { queries: [text] },
           ctx.signal,
           undefined,
-          ctx,
+          asToolExecContext(ctx),
         );
 
         const output = extractResultText(result);

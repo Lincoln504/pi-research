@@ -1,4 +1,12 @@
 {
   "comment": "Documented exceptions for the production npm-audit release gate (scripts/audit-gate.cjs). Runbook and reinvestigation directions: docs/AUDIT-GATE.md. Two shapes: (1) per-GHSA {id,...} allowlists ONE advisory; (2) location-scoped {package, locationContains,...} allowlists ANY advisory for `package` whose EVERY affected install path contains `locationContains` — for a transitive pinned inside an upstream npm-shrinkwrap.json (unfixable downstream), so each new disclosure for that frozen copy need not be re-listed. The 'every node in scope' rule keeps location-scoping precise: it fires only when no remediable copy is affected. Any advisory NOT matched (per-id or location) still fails the gate at moderate+. Every entry must carry reason, clearsWhen, reviewed. Re-verify at every release; the gate warns on stale entries.",
-  "exceptions": []
+  "exceptions": [
+    {
+      "package": "brace-expansion",
+      "locationContains": "@earendil-works/pi-coding-agent/node_modules",
+      "reason": "The only affected copy is the one frozen inside the pi host's npm-shrinkwrap.json (@earendil-works/pi-coding-agent -> minimatch@10.2.6 -> brace-expansion@5.0.9). A nested npm-shrinkwrap.json is authoritative, so root `overrides` cannot reach it: the same `overrides` entry that moved the hoisted copy to the fixed 5.0.12 (and every other copy in the tree) left this one at 5.0.9 - verified 2026-09-30 by `npm ls brace-expansion` after `npm install`. Reachability here is low: the DoS is in brace expansion of a glob, and pi-research reaches minimatch only through pi's own file tools, with patterns supplied by the user or the model, not by fetched page content. Not fixable downstream; the fixed release must come from the pi host. See docs/AUDIT-GATE.md for the triage that established this.",
+      "clearsWhen": "@earendil-works/pi-coding-agent ships a shrinkwrap whose minimatch resolves brace-expansion >= 5.0.12.",
+      "reviewed": "2026-09-30"
+    }
+  ]
 }

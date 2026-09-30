@@ -143,6 +143,72 @@ describe('extension entrypoint', () => {
     );
   });
 
+  describe('research_knowledge_search exposure (pi 0.99 `exposure`)', () => {
+    const KEY = 'PI_RESEARCH_KNOWLEDGE_STORE_MODE';
+    const knowledgeCalls = (pi: any) =>
+      pi.registerTool.mock.calls.map((c: any[]) => c[0]).filter((t: any) => t.name === 'research_knowledge_search');
+
+    beforeEach(async () => {
+      // Clear the cwd-keyed config cache: earlier tests in this file activated the
+      // extension with the default mode, and without this the cache would hand every
+      // test here that first config regardless of the env var it sets.
+      const { resetConfig } = await import('../../src/config.ts');
+      resetConfig();
+    });
+
+    afterEach(async () => {
+      delete process.env[KEY];
+      // The config cache is keyed by cwd and would otherwise hand every later test
+      // in this file the LAST mode set here (which made the /knowledge-store tests
+      // take the "store disabled" early-return path), so clear it.
+      const { resetConfig } = await import('../../src/config.ts');
+      resetConfig();
+    });
+
+    it('withdraws the tool while Knowledge Mode is none', async () => {
+      process.env[KEY] = 'none';
+      const { pi } = createPiMock();
+      await activate(pi as any);
+
+      expect(knowledgeCalls(pi).at(-1)).toMatchObject({ name: 'research_knowledge_search', exposure: 'hidden' });
+    });
+
+    it('keeps the tool direct when a Knowledge Mode is configured', async () => {
+      process.env[KEY] = 'project';
+      const { pi } = createPiMock();
+      await activate(pi as any);
+
+      expect(knowledgeCalls(pi).at(-1)).toMatchObject({ name: 'research_knowledge_search', exposure: 'direct' });
+    });
+
+    it('flips a live-enabled tool to hidden on the next prompt, without a restart', async () => {
+      process.env[KEY] = 'project';
+      const { pi, handlers } = createPiMock();
+      await activate(pi as any);
+      expect(knowledgeCalls(pi).at(-1)).toMatchObject({ exposure: 'direct' });
+
+      // A /research-config toggle writes env/config and resets the config cache;
+      // the next user prompt is the sync point that must pick it up.
+      process.env[KEY] = 'none';
+      const { resetConfig } = await import('../../src/config.ts');
+      resetConfig();
+      await handlers.get('input')?.({ source: 'interactive', text: 'hi', streamingBehavior: undefined }, makeCtx());
+
+      expect(knowledgeCalls(pi).at(-1)).toMatchObject({ exposure: 'hidden' });
+    });
+
+    it('does not re-register when the mode did not change', async () => {
+      process.env[KEY] = 'project';
+      const { pi, handlers } = createPiMock();
+      await activate(pi as any);
+      const before = knowledgeCalls(pi).length;
+
+      await handlers.get('input')?.({ source: 'interactive', text: 'hi' }, makeCtx());
+
+      expect(knowledgeCalls(pi).length).toBe(before);
+    });
+  });
+
   it('augments system prompt during before_agent_start when research tool available', async () => {
     const { pi, handlers } = createPiMock();
     await activate(pi as any);

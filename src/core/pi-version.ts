@@ -7,7 +7,7 @@
  *
  *   - As a pi EXTENSION, the host supplies `@earendil-works/*`. Our package.json
  *     range never constrains it, so an in-process check is the only enforcement.
- *   - As a standalone CLI/SDK, the range is `>=0.87.0 <1` and published tarballs
+ *   - As a standalone CLI/SDK, the range is `>=0.99.0 <1` and published tarballs
  *     carry no lockfile, so every fresh install resolves the newest 0.x at that
  *     instant. pi is pre-1.0: a minor bump may break anything under semver, and
  *     already has (0.83.0 extended the ResourceLoader contract).
@@ -83,8 +83,19 @@ export function compareVersions(a: SemverParts, b: SemverParts): number {
  * finishTurn boundary. The SDK paths (session service, model-registry factory)
  * are written against that surface; an older host may resolve but is not a
  * tested or supported target.
+ *
+ * 0.99.0 added tool `exposure` (including `hidden`, which is how a tool is
+ * withdrawn when tools cannot be unregistered) and widened
+ * `ToolDefinition.execute()`'s context from `ExtensionContext` to
+ * `ExtensionToolContext` (adds `tools` and `executeTool()`). pi-research uses
+ * `exposure` to keep an optional tool out of the model's tool list without a
+ * restart, and adapts plain contexts with `asToolExecContext()` at the three
+ * places it invokes its own tools directly (see utils/tool-exec-context.ts).
+ * Relying on either on an older host is a silent misbehaviour rather than a
+ * type error — a pre-0.99 host ignores `exposure: hidden` and would declare a
+ * withdrawn tool to the model — so the floor moved with the adoption.
  */
-export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 87, patch: 0 };
+export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 99, patch: 0 };
 
 /**
  * Newest host line this release was actually exercised against (CI + a real run).
@@ -92,7 +103,7 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 87, patch: 0 };
  * Compared on MAJOR.MINOR only: a patch bump within a tested line is not a new
  * surface, and warning on it would be noise.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 87, patch: 1 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 99, patch: 2 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 

@@ -20,6 +20,7 @@ import {
 } from './orchestration/service-initialization.ts';
 import { getService, resetServiceContainer, getServiceContainer, tryGetService } from './core/service-registry.ts';
 import { raceWithDeadline } from './utils/safe-unref.ts';
+import { asToolExecContext } from './utils/tool-exec-context.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from './core/interfaces/knowledge-interfaces.ts';
@@ -937,7 +938,7 @@ export async function searchKnowledge(
     { queries: queries.slice(0, 5) },
     signal,
     undefined,
-    createMockContext(`knowledge-${randomUUID()}`),
+    asToolExecContext(createMockContext(`knowledge-${randomUUID()}`)),
   );
 
   const textBlock = result.content?.find((c): c is { type: 'text'; text: string } => c.type === 'text');
