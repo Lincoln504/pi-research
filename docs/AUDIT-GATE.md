@@ -77,7 +77,16 @@ Re-examine every exception entry when any of these happens:
 ## Current exceptions and their reinvestigation checklists
 
 None. The audit gate runs with an empty allowlist: `npm audit --omit=dev` reports zero
-vulnerabilities as of 2026-09-16.
+vulnerabilities as of 2026-09-30.
+
+The shipped tree got smaller on 2026-09-30: the three `@earendil-works/pi-*` host packages moved
+from `dependencies` to `peerDependencies` (plus `devDependencies` for this repo's own build), and
+the unused `@earendil-works/pi-server` was dropped. `@earendil-works/pi-coding-agent` alone carried
+an `npm-shrinkwrap.json` with a frozen transitive tree, which is what produced the only
+location-scoped exception this file ever needed (`brace-expansion` ≤ 5.0.11 inside it, removed in
+the same change because the copy left the production tree). Anything shipped by that host package
+is no longer part of what consumers install, so it can no longer block the gate — upstream-only
+advisories now live in the dev tree and the informational full-tree summary only.
 
 ### Cleared: adm-zip GHSA-vwc7-r8mq-g2x9 (CVE-2026-76845) — fixed upstream, entry removed 2026-09-16
 

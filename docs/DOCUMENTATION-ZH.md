@@ -113,6 +113,14 @@ better-sqlite3 13 在自己的 tarball 中携带预编译绑定，隐身浏览�
 （第一次抓取需要几分钟）。整个过程无需任何审批（见
 [README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)）。
 
+全局安装也会把宿主包 `@earendil-works/pi-*` 作为 peer 依赖一并装上（npm ≥7 会自动解析）。
+如果安装时跳过了 peer 依赖（`--legacy-peer-deps`、yarn classic），引擎将无法导入其模型
+注册表，启动器会说明这一点并以退出码 78 结束。请直接安装所需的包：
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
 `skill install` 只针对 `$HOME` 下已经搭建好的智能体，绝不会覆盖插槽中的其他技能，并把
 自己创建的内容记入清单，让 `pi-research skill uninstall` 能精确移除。运行 `pi-research
 skill status` 可以查看安装到了哪里。

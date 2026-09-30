@@ -1688,12 +1688,12 @@ describe('CLI subprocess — knowledge-config (hermetic per-directory scoping)',
 // Subprocess — skill launcher (run.mjs)
 // ---------------------------------------------------------------------------
 
-function runSkill(args: string[]) {
+function runSkill(args: string[], env?: Record<string, string>) {
   // Hermetic like runCli: `status` chains through the launcher into the real
   // CLI, which reconciles skill installs against $HOME (see SUBPROCESS_HOME).
   return spawnSync(process.execPath, [SKILL_LAUNCHER, ...args], {
     encoding: 'utf-8',
-    env: hermeticEnv(),
+    env: hermeticEnv(env),
     timeout: 20_000,
   });
 }
@@ -1727,6 +1727,55 @@ describe('skill launcher subprocess', () => {
   it('bad args propagate correct exit code through launcher', () => {
     const r = runSkill(['research']);
     expect(r.status).toBe(64);
+  });
+
+  // The @earendil-works/pi-* host packages are PEER dependencies (they are what pi
+  // supplies in-process when this loads as an extension, and what npm >= 7 resolves
+  // for a standalone install). An install that skipped peers -- --legacy-peer-deps,
+  // yarn classic -- leaves the engine unable to import its model registry, which
+  // used to surface as a raw ERR_MODULE_NOT_FOUND from the spawned CLI. The
+  // launcher preflights it and exits 78 with the remedy.
+  describe('host dependency missing (peer dependency skipped)', () => {
+    let engineDir: string;
+
+    beforeAll(() => {
+      engineDir = mkdtempSync(path.join(os.tmpdir(), 'pi-launcher-nodep-'));
+      writeFileSync(
+        path.join(engineDir, 'package.json'),
+        JSON.stringify({ name: '@lincoln504/pi-research', bin: { 'pi-research': 'dist/cli.mjs' } }),
+      );
+      mkdirSync(path.join(engineDir, 'dist'), { recursive: true });
+      writeFileSync(path.join(engineDir, 'dist', 'cli.mjs'), 'console.log("engine ran");\n');
+    });
+
+    afterAll(() => {
+      rmSync(engineDir, { recursive: true, force: true });
+    });
+
+    it('exits 78 with the install remedy instead of a stack trace', () => {
+      const r = runSkill(['status'], { PI_RESEARCH_PATH: engineDir });
+
+      expect(r.status).toBe(78);
+      expect(r.stderr).toContain('@earendil-works/pi-coding-agent');
+      expect(r.stderr).toContain('npm install -g @earendil-works/pi-coding-agent');
+      expect(r.stderr).not.toContain('ERR_MODULE_NOT_FOUND');
+      // The engine must not have been spawned: the point is to fail before it does.
+      expect(r.stdout).not.toContain('engine ran');
+    });
+
+    it('spawns the engine once the dependency is present', () => {
+      const depDir = path.join(engineDir, 'node_modules', '@earendil-works', 'pi-coding-agent');
+      mkdirSync(depDir, { recursive: true });
+      writeFileSync(path.join(depDir, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', version: '0.0.0' }));
+      try {
+        const r = runSkill(['status'], { PI_RESEARCH_PATH: engineDir });
+
+        expect(r.stdout).toContain('engine ran');
+        expect(r.status).toBe(0);
+      } finally {
+        rmSync(path.join(engineDir, 'node_modules'), { recursive: true, force: true });
+      }
+    });
   });
 
   it('forwards a signal aimed at the launcher to the engine instead of orphaning it', async () => {

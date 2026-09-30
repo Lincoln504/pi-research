@@ -26,6 +26,15 @@ none are needed: better-sqlite3 13 ships prebuilt bindings in its own tarball, a
 stealth browser self-provisions on its first use (the first scrape takes a few
 minutes). No approval is required (see the [README](../README.md#install)).
 
+The global install also brings the `@earendil-works/pi-*` host packages in as peer
+dependencies (npm ≥7 resolves them). If your install skips peers
+(`--legacy-peer-deps`, yarn classic), the engine cannot import its model registry —
+the launcher says so and exits 78. Add the package it needs directly:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
 `skill install` targets only agents already set up under `$HOME`, never overwrites a
 different skill in the slot, and records what it created so `pi-research skill uninstall`
 removes exactly that. Run `pi-research skill status` to see where it is installed.

@@ -124,6 +124,16 @@ npm ≥11.19（および npm 12）では、依存パッケージのインスト�
 （初回のダウンロードには数分かかります）。承認操作は一切不要です
 （[README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install) 参照）。
 
+グローバルインストールでは、ホスト側の `@earendil-works/pi-*` パッケージも peer 依存と
+して導入されます（npm ≥7 が自動解決）。peer 依存をスキップするインストール
+（`--legacy-peer-deps`、yarn classic）ではエンジンがモデルレジストリを読み込めず、
+ランチャーがその旨を表示して終了コード 78 で停止します。必要なパッケージを直接追加して
+ください:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
 `skill install` は `$HOME` 配下に既に構成されているエージェントのみを対象とし、同じ場所に
 ある異なるスキルを決して上書きせず、作成した内容を記録します。そのため
 `pi-research skill uninstall` はその記録された内容だけを正確に削除します。どこにインストール

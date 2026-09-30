@@ -17,7 +17,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir, constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,10 +25,13 @@ import { fileURLToPath } from 'node:url';
 
 const PKG = '@lincoln504/pi-research';
 // Load-bearing runtime dependency of the engine: the standalone CLI statically
-// imports it (model registry + auth + agent dir). On an install that omitted
-// it, it would die at module-load with a raw ERR_MODULE_NOT_FOUND; we preflight
-// it here so the user gets the same clean, actionable exit-78 message as a missing
-// engine instead of a stack trace.
+// imports it (model registry + auth + agent dir). It is declared as a PEER
+// dependency of the package (the host supplies its own copy when pi loads this
+// as an extension, and npm >= 7 resolves the peer automatically for a global or
+// project install), so an install that skipped peers -- --legacy-peer-deps, what
+// `pi install` itself passes, or yarn classic -- can be missing it. In that case
+// the CLI dies at module-load with a raw ERR_MODULE_NOT_FOUND, so we preflight it
+// here and print the same clean, actionable exit-78 message as a missing engine.
 const REQUIRED_DEP = '@earendil-works/pi-coding-agent';
 const EXIT = { OK: 0, USAGE: 64, CONFIG: 78, SOFTWARE: 70, CANCELLED: 130 } as const;
 
@@ -144,9 +147,17 @@ function resolveEngine(skillDir: string): ResolvedEngine | null {
     }
   }
 
-  // 3. On PATH.
+  // 3. On PATH. A global npm install resolves the peer trio automatically, but a
+  // consumer that used --legacy-peer-deps or yarn classic has none of it. Check the
+  // dependency only when the bin clearly belongs to a node_modules install (see
+  // packageAnchorFor): a shim or a bundled binary has no package dir to check, and
+  // guessing wrongly would break working installs.
   const onPath = findOnPath('pi-research');
-  if (onPath) return { argv: [onPath], label: onPath };
+  if (onPath) {
+    const anchor = packageAnchorFor(onPath);
+    if (anchor && !depResolvableFrom(anchor)) depMissing(anchor);
+    return { argv: [onPath], label: onPath };
+  }
 
   // 4. node_modules resolution from plausible roots.
   const pkgDir = resolvePackageDir(PKG, [skillDir, process.cwd(), home, join(home, '.pi')]);
@@ -160,11 +171,44 @@ function resolveEngine(skillDir: string): ResolvedEngine | null {
     }
   }
 
-  // 5. pi's bin directory.
+  // 5. pi's bin directory. The engine here is reached through pi, but pi's own
+  // bundled copy of @earendil-works/pi-coding-agent is NOT on a resolvable path
+  // (a standalone pi binary may have none on disk at all), so the same guard
+  // applies. It only fires when the bin resolves into a node_modules package dir.
   const piBin = join(home, '.pi', 'bin', 'pi-research');
-  if (existsSync(piBin)) return { argv: [piBin], label: piBin };
+  if (existsSync(piBin)) {
+    const anchor = packageAnchorFor(piBin);
+    if (anchor && !depResolvableFrom(anchor)) depMissing(anchor);
+    return { argv: [piBin], label: piBin };
+  }
 
   return null;
+}
+
+/**
+ * The package directory a resolved bin belongs to, or null when it does not
+ * clearly belong to one.
+ *
+ * A global npm install exposes a SYMLINK in the bin directory, so the anchor has
+ * to be taken after dereferencing (realpath): dirname() of the link itself would
+ * be /usr/local/bin, whose ancestors of 4 levels and then some have no
+ * node_modules, and the guard would fail a working install. After dereferencing,
+ * the path is inside `<...>/node_modules/<pkg>/…`, which is exactly the tree Node
+ * resolves the dependency from.
+ *
+ * null means "cannot tell" (a shim script, a bundled binary, an unusual layout
+ * such as pnpm's store): the caller then skips the guard rather than risking a
+ * false exit-78 on an install that works.
+ */
+function packageAnchorFor(binPath: string): string | null {
+  let real: string;
+  try {
+    real = realpathSync(binPath);
+  } catch {
+    return null;
+  }
+  const match = /^(.*[\\/]node_modules[\\/](?:@[^\\/]+[\\/])?[^\\/]+)[\\/]/.exec(real);
+  return match?.[1] ?? null;
 }
 
 /** Given a package directory, derive how to launch its CLI (bin or dist/cli.mjs). */
@@ -228,10 +272,15 @@ function depMissing(pkgDir: string): never {
     `'${REQUIRED_DEP}' is not installed alongside it.`,
     '',
     'The standalone engine imports this package at startup, so it cannot run',
-    'without it. Reinstall so all dependencies are included:',
+    'without it. These three options all work:',
     '',
-    '    npm install -g @lincoln504/pi-research     # global — reinstalls the full dependency tree',
-    `    # or, in the package dir:  cd "${pkgDir}" && npm install ${REQUIRED_DEP}`,
+    '    npm install -g @earendil-works/pi-coding-agent   # install just the missing host package',
+    '    npm install -g @lincoln504/pi-research           # global — brings it in with the engine',
+    '                                                     # (npm >= 7 resolves peer dependencies)',
+    '    # or point the launcher at a working engine:  export PI_RESEARCH_PATH=/path/to/pi-research',
+    '',
+    'This happens when the install skipped peer dependencies (--legacy-peer-deps,',
+    'yarn classic), or when pi itself provides the host package only in-process.',
     '',
     `(engine located at: ${pkgDir})`,
     '',
@@ -253,6 +302,12 @@ function notInstalled(): never {
     '    npm install -g @lincoln504/pi-research     # global (exposes the `pi-research` bin)',
     '    # or, with pi:   pi install npm:@lincoln504/pi-research',
     '    # or point at a copy: export PI_RESEARCH_PATH=/path/to/pi-research',
+    '',
+    'A global npm install also brings the @earendil-works/pi-* host packages in as',
+    'peer dependencies. An install that skipped peers (--legacy-peer-deps, yarn',
+    'classic) needs them added by hand:',
+    '',
+    '    npm install -g @earendil-works/pi-coding-agent',
     '',
     'After installing, configure the model (PI_RESEARCH_MODEL is required) + API key.',
     'Locations:',

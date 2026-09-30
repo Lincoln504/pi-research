@@ -13,6 +13,14 @@ run the `pi` extension, which keeps its own private copy your scripts can't impo
 npm install @lincoln504/pi-research
 ```
 
+The `@earendil-works/pi-*` host packages are peer dependencies, so npm ≥7 installs them
+with the command above. If your install skips peers — `--legacy-peer-deps`, yarn
+classic — the SDK cannot import them, so add the one it loads directly:
+
+```bash
+npm install @earendil-works/pi-coding-agent
+```
+
 On npm ≥11.19 (and npm 12), dependency install scripts are skipped by default. Nothing
 here needs them: better-sqlite3 13 carries prebuilt bindings for every supported
 platform and loads them at runtime, and the stealth browser self-provisions on its

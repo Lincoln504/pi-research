@@ -127,6 +127,15 @@ tarball, y el navegador sigiloso se autoabastece en su primer uso (la primera ex
 tarda unos minutos). No se requiere ninguna aprobación (consulte el
 [README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)).
 
+La instalación global también trae los paquetes anfitriones `@earendil-works/pi-*` como
+dependencias de par (npm ≥7 las resuelve). Si su instalación omite las dependencias de par
+(`--legacy-peer-deps`, yarn classic), el motor no puede importar su registro de modelos: el
+lanzador lo indica y sale con código 78. Añada el paquete que necesita directamente:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
 `skill install` solo apunta a agentes ya configurados bajo `$HOME`, nunca sobrescribe una
 habilidad distinta en el mismo espacio, y registra lo que creó para que `pi-research skill
 uninstall` elimine exactamente eso. Ejecute `pi-research skill status` para ver dónde quedó

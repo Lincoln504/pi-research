@@ -144,10 +144,16 @@ describe('checkPiCompatibility', () => {
   it('agrees with the range declared in package.json', async () => {
     // A floor that drifts from the declared range means npm resolves a version the
     // runtime check then rejects — an install that "succeeds" and cannot run.
+    // The host packages moved from `dependencies` to `peerDependencies` (with a
+    // matching devDependency so this repo's own build resolves them), so read
+    // whichever section declares it.
     const { readFileSync } = await import('node:fs');
     const pkg = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'));
-    const range: string = pkg.dependencies['@earendil-works/pi-coding-agent'];
-    const declaredFloor = /^>=\s*(\d+\.\d+\.\d+)/.exec(range)?.[1];
+    const range: string | undefined =
+      pkg.peerDependencies?.['@earendil-works/pi-coding-agent'] ??
+      pkg.dependencies?.['@earendil-works/pi-coding-agent'];
+    expect(range).toBeDefined();
+    const declaredFloor = /^>=\s*(\d+\.\d+\.\d+)/.exec(range!)?.[1];
     expect(declaredFloor).toBeDefined();
     expect(parsePiVersion(declaredFloor!)).toEqual(PI_MIN_VERSION);
   });

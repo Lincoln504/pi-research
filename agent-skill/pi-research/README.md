@@ -47,6 +47,15 @@ npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status  # verify detection
 ```
 
+That global install also brings the `@earendil-works/pi-*` host packages in as peer
+dependencies (npm ≥7 resolves them). An install that skipped peers —
+`--legacy-peer-deps`, yarn classic — leaves the engine unable to import its model
+registry, so add it directly:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
 On npm ≥11.19 (and npm 12) dependency install scripts are skipped by default — and
 none are needed: better-sqlite3 13 ships prebuilt bindings in its own tarball, and
 the stealth browser self-provisions on its first use (the first scrape takes a few

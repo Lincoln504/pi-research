@@ -51,6 +51,14 @@ pi-research skill install
 
 No extra setup is needed. The package ships ready-made bindings for every platform and runs no install scripts. The stealth browser (1GB+ installed) downloads on first use, so the first scrape takes a few minutes. npm ≥11.19 skips install scripts by default. Leave it that way: nothing needs approving or building. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
 
+The `@earendil-works/pi-*` host packages are **peer dependencies**. pi supplies its own copies when it loads this as an extension, and npm ≥7 installs them automatically for a standalone (global or project) install. An install that skips peers does not get them: `npm install --legacy-peer-deps`, yarn classic, and `pi install` itself (it passes that flag on purpose) are all in that group. The standalone engine and the agent-skill launcher then stop with a message naming the missing package; add it with:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
+Standalone use needs that package on disk because the CLI and SDK import it directly. In pi, nothing is needed: the host's own copy is aliased in for both.
+
 In pi, the extension works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
 ### Uninstall
