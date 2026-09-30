@@ -20,7 +20,9 @@ import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
-vi.mock('@earendil-works/pi-ai', () => ({
+vi.mock('@earendil-works/pi-ai', async (importOriginal) => ({
+  // Keep the real helpers (buildSafeOptions uses clampThinkingLevel); stub only cost.
+  ...(await importOriginal<typeof import('@earendil-works/pi-ai')>()),
   calculateCost: vi.fn(() => ({ total: 0 })),
 }));
 

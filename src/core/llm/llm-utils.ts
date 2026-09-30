@@ -4,7 +4,7 @@
  * Shared logic for safe and robust LLM interactions.
  */
 
-import { type Model, type AssistantMessage, type SimpleStreamOptions, type ModelThinkingLevel, type Tool, type TSchema, type Context, type ToolCall } from '@earendil-works/pi-ai';
+import { clampThinkingLevel, type Model, type AssistantMessage, type SimpleStreamOptions, type ModelThinkingLevel, type Tool, type TSchema, type Context, type ToolCall } from '@earendil-works/pi-ai';
 import { extractText } from '../../utils/text-utils.ts';
 import { logger } from '../../logger.ts';
 import { completeSimple } from './pi-ai-completion.ts';
@@ -20,6 +20,10 @@ import { completeSimple } from './pi-ai-completion.ts';
  *   'off' is deliberate: these engine calls emit structured JSON / cited reports, so a
  *   thinking block only consumes the output-token budget (often truncating before the
  *   text block is emitted) for at most a marginal quality gain that does not justify the cost.
+ *   Some models cannot turn thinking off (their `thinkingLevelMap` marks `off` as
+ *   unsupported, e.g. zai/glm-5.3, which rejects the request with a 400); for those
+ *   'off' becomes the nearest level the model supports (pi-ai's clampThinkingLevel,
+ *   the same rule pi's own agent sessions apply). Other levels pass through unchanged.
  *
  * Callers should also pass the research `sessionId` in `options`. pi-ai forwards it as the
  * provider's prompt-cache / session-affinity key — OpenAI's `prompt_cache_key`, OpenRouter's
@@ -40,7 +44,8 @@ export function buildSafeOptions(
   defaultCap: number = 4096,
   thinkingLevel: ModelThinkingLevel = 'off'
 ): SimpleStreamOptions {
-  const effective: ModelThinkingLevel = (options.reasoning as ModelThinkingLevel | undefined) ?? thinkingLevel;
+  const requested: ModelThinkingLevel = (options.reasoning as ModelThinkingLevel | undefined) ?? thinkingLevel;
+  const effective: ModelThinkingLevel = requested === 'off' ? clampThinkingLevel(model, 'off') : requested;
   return {
     ...options,
     // Ensure maxTokens is never null/None to avoid provider-side crashes
