@@ -142,7 +142,14 @@ export class QuickResearchOrchestrator {
         }
         }
 
-        const researcherPromptTemplate = loadPrompt('researcher');
+        // Quick mode has its own, much shorter system prompt. The deep researcher
+        // prompt is written for a multi-round, sibling-coordinated, "exhaustive
+        // detail" report; reusing it here (with two placeholders blanked) fought
+        // every one of quick mode's design goals: it asked for a report where the
+        // deliverable is an answer, it advertised scrape rounds 2+ and a Session URL
+        // Pool quick runs cannot have, and "omitting information is a failure"
+        // pushed volume on a single-fact lookup.
+        const researcherPromptTemplate = loadPrompt('quick-researcher');
         // Resolve the model here (same deterministic inputs createResearcherSession
         // below will resolve again) purely to learn whether prompt caching will be
         // active, so the batch count told to the model in the prompt below matches
@@ -155,6 +162,10 @@ export class QuickResearchOrchestrator {
         const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
 
         const maxQueries = this.config.QUICK_MAX_QUERIES;
+        // The quick per-batch URL budget: the same value createResearcherSession
+        // hands the scrape tool below, so the number the model reads is the number
+        // the tool enforces.
+        const maxScrapeUrls = this.config.QUICK_MAX_SCRAPE_URLS;
         const quickEvidenceSection =
             '## Search\n' +
             `You have access to the \`search\` tool. You get EXACTLY ONE search call — make it count.\n` +
@@ -163,8 +174,8 @@ export class QuickResearchOrchestrator {
             `For roughly one in ${this.config.YOUTUBE_QUERY_EVERY_N} of your queries, append the word 'youtube' (e.g. "<topic> explained youtube") — DuckDuckGo rarely surfaces YouTube otherwise, and YouTube links let you read video transcripts.\n` +
             'Your goal is to gather a focused, high-quality pool of initial links.\n\n' +
             '## Scrape\n' +
-            `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to ${this.config.MAX_SCRAPE_URLS} URLs each).\n` +
-            'Prioritize primary sources and authoritative data.';
+            `After searching, scrape the sources that can answer the question using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to ${maxScrapeUrls} URLs each).\n` +
+            'Prioritize primary sources and authoritative data. Stop once the answer is sourced.';
         
         // Consume queued steering messages before starting
         consumeQueuedMessages(this.options.sessionId);
@@ -187,14 +198,11 @@ export class QuickResearchOrchestrator {
         // prefix providers key on, so back-to-back quick runs (and every follow-up
         // turn within this session) reuse it via prompt-cache reads.
         const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-            .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).')
+            .replace('{{extra_tool_guidelines}}', '- `search`: one web search call, executed up front.')
             // Config-driven, mirroring researcher-executor: the prompt's per-batch
-            // target can never drift from the cap the scrape tool enforces.
+            // cap can never drift from the cap the scrape tool enforces.
             // replaceAll — the template states the budget more than once.
-            .replaceAll('{{max_scrape_urls}}', String(this.config.MAX_SCRAPE_URLS))
-            // Quick research has no research lead and no next round — see
-            // RESEARCHER_DIGEST_SECTION. Its report IS the deliverable.
-            .replace('{{digest_section}}', '')
+            .replaceAll('{{max_scrape_urls}}', String(maxScrapeUrls))
             .trim();
 
         // `$`-bearing dynamic content (the user query, store descriptions, steering)
@@ -219,6 +227,7 @@ export class QuickResearchOrchestrator {
           excludeTools: resolveExcludedTools(this.options.excludeTools),
           config: this.config,
           maxSearchQueries: this.config.QUICK_MAX_QUERIES,
+          maxScrapeUrls: this.config.QUICK_MAX_SCRAPE_URLS,
           getGlobalState: (): SystemResearchState => ({
             version: 1,
             researchId: this.options.researchId,

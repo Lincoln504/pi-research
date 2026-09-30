@@ -28,7 +28,8 @@ over `config.env` for the CLI only. Precedence:
 |----------|---------|-------------|
 | `PI_RESEARCH_MODEL` | _(required)_ | The `provider/model-id` all research runs on. |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | `1` | Default depth (0–3) when `--depth` omitted. `0` is quick (single-pass, no researcher team) and requires `PI_RESEARCH_QUICK_RESEARCH` on the pi extension. The agent-facing `research` tool's depth guidance renders relative to this setting — when quick is the configured default, depth 0 is the ordinary choice and 1+ is the escalation; keeping the default (1) renders byte-identically. |
-| `PI_RESEARCH_QUICK_MAX_QUERIES` | `5` | Max queries per `search` call in quick (depth 0) research (1–10). Applies to the CLI and SDK `--depth 0` runs too. |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `3` | Max queries per `search` call in quick (depth 0) research (1–10). Applies to the CLI and SDK `--depth 0` runs too. |
+| `PI_RESEARCH_QUICK_MAX_SCRAPE_URLS` | `5` | Max URLs per scrape batch in quick (depth 0) research (1–20), separate from the deep `PI_RESEARCH_MAX_SCRAPE_URLS` (`8`). |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5). |
 | `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher timeout (180000–1800000). |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | Scrape batches per researcher (0 = unlimited). |

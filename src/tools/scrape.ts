@@ -46,6 +46,14 @@ export function createScrapeTool(options: {
   getTokensUsed?: () => number;
   /** Context window size in tokens; defaults to DEFAULT_MODEL_CONTEXT_WINDOW. */
   contextWindowSize?: number;
+  /**
+   * Overrides the per-call URL cap (default MAX_SCRAPE_URLS, 8). Quick (depth 0)
+   * researchers pass QUICK_MAX_SCRAPE_URLS: quick mode answers a single-fact
+   * question, and the deep budget pulls in pages that question does not need.
+   * The override drives the schema text, the per-call slice and the over-cap
+   * report together, so the advertised cap and the enforced one cannot drift.
+   */
+  maxScrapeUrls?: number;
   config?: Config;
 }): ToolDefinition {
   const config = options.config || getConfig(options.ctx.cwd);
@@ -60,7 +68,7 @@ export function createScrapeTool(options: {
   // One resolved value feeds the tool schema text, the batch-protocol text, the
   // per-call slice, and the over-cap report — the enforced cap and every string
   // the model sees are the same number by construction.
-  const maxScrapeUrls = getMaxScrapeUrls(config);
+  const maxScrapeUrls = options.maxScrapeUrls ?? getMaxScrapeUrls(config);
   const container = tryGetServiceContainerFromCtx(options.ctx);
 
   // Fallback global state when no orchestration context is provided

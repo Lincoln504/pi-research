@@ -602,9 +602,27 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('defaults QUICK_MAX_QUERIES to 5', () => {
+    it('defaults QUICK_MAX_QUERIES to 3', () => {
       const config = createConfig({}, {});
-      expect(config.QUICK_MAX_QUERIES).toBe(5);
+      expect(config.QUICK_MAX_QUERIES).toBe(3);
+    });
+
+    it('defaults QUICK_MAX_SCRAPE_URLS to 5, below the deep per-batch cap', () => {
+      const config = createConfig({}, {});
+      expect(config.QUICK_MAX_SCRAPE_URLS).toBe(5);
+      expect(config.QUICK_MAX_SCRAPE_URLS).toBeLessThanOrEqual(config.MAX_SCRAPE_URLS);
+    });
+
+    it('should clamp QUICK_MAX_SCRAPE_URLS to minimum (1) when below range', () => {
+      const config = createConfig({ PI_RESEARCH_QUICK_MAX_SCRAPE_URLS: '0' }, {});
+      expect(config.QUICK_MAX_SCRAPE_URLS).toBe(1);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should clamp QUICK_MAX_SCRAPE_URLS to maximum (20) when above range', () => {
+      const config = createConfig({ PI_RESEARCH_QUICK_MAX_SCRAPE_URLS: '999' }, {});
+      expect(config.QUICK_MAX_SCRAPE_URLS).toBe(20);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
     it('should clamp QUICK_MAX_QUERIES to minimum (1) when below range', () => {

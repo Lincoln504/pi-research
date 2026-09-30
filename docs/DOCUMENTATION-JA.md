@@ -832,7 +832,8 @@ TUI に露出している変数には `(TUI)` が付きます。`[project]` の�
 | `PI_RESEARCH_MAX_RESEARCHERS`（TUI） | `3` | 1–5 | 並列で動くリサーチャーの数。 |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`（TUI）`[project]` | `1` | 0–3 | `--depth` を省略したときの `/research` と CLI の深度（0=単一パスのクイック — `PI_RESEARCH_QUICK_RESEARCH` が必要 —、1=normal、2=deep、3=ultra）。 |
 | `PI_RESEARCH_QUICK_RESEARCH`（TUI）`[project]` | `false` | `true` · `false` | クイック（深度 0）リサーチのオプトイン。`false`（デフォルト）のとき、エージェント向け `research` ツールは元の `minimum: 1` スキーマを保ち — エージェントは深度 0 を見ることも送ることもできません —、`DEFAULT_RESEARCH_DEPTH` の 0 は 1 に解決されます。切り替えは次回セッションで反映されます。 |
-| `PI_RESEARCH_QUICK_MAX_QUERIES` | `5` | 1–10 | クイック（深度 0）リサーチにおける `search` 呼び出しあたりの最大クエリ数。pi 拡張機能のツール、CLI、SDK の `--depth 0` は同じリサーチャーセッションファクトリを共有しているため、すべてのクイック実行に適用されます。ディープリサーチの 30 クエリ上限より意図的に低く、上限 10 によりクイックモードが従来の 5–10 の指針を超えないようにしています。 |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `3` | 1–10 | クイック（深度 0）リサーチにおける `search` 呼び出しあたりの最大クエリ数。pi 拡張機能のツール、CLI、SDK の `--depth 0` は同じリサーチャーセッションファクトリを共有しているため、すべてのクイック実行に適用されます。ディープリサーチの 30 クエリ上限より意図的に低く、上限 10 によりクイックモードが従来の 5–10 の指針を超えないようにしています。 |
+| `PI_RESEARCH_QUICK_MAX_SCRAPE_URLS` | `5` | 1–20 | クイック（深度 0）リサーチにおける `scrape` のバッチあたり最大 URL 数。クイックモードは単一の事実を答えるためのもので、ディープ側の予算ではその質問に不要なページまで取得してしまうため、`PI_RESEARCH_MAX_SCRAPE_URLS`（ディープ、`8`）とは別です。バッチ数の上限は引き続き `PI_RESEARCH_MAX_SCRAPE_BATCHES` です。すべてのクイック実行（pi 拡張機能、CLI、SDK `--depth 0`）に適用されます。 |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES`（TUI） | `2` | 0–99 | リサーチャーごとのスクレイプバッチ数（0 = 無制限）。解決済みリサーチモデルでプロンプトキャッシュが有効だと分かっている場合（Anthropic API モデル、または Anthropic 風キャッシュ制御を明示設定した経路）は、実効上限はこの値 + 1 です — キャッシュ済みのプロンプト接頭辞によって追加バッチが安くなるためです。 |
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | リサーチャーごとの共有ウェブ収集呼び出し数（`search` + `security_search` + `stackexchange` + `youtube_transcript`）。 |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | スクレイプバッチごとに並列取得する URL 数。 |

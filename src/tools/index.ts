@@ -41,6 +41,8 @@ interface CreateToolsOptions {
   config?: Config;
   /** Overrides the search tool's query cap (default 30). Quick researchers pass QUICK_MAX_QUERIES. */
   maxSearchQueries?: number;
+  /** Overrides the scrape tool's per-call URL cap (default MAX_SCRAPE_URLS, 8). Quick researchers pass QUICK_MAX_SCRAPE_URLS. */
+  maxScrapeUrls?: number;
 }
 
 /**
@@ -83,6 +85,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       onUrlScrapeResult: options.onUrlScrapeResult,
       getTokensUsed: options.getTokensUsed,
       contextWindowSize: options.contextWindowSize,
+      maxScrapeUrls: options.maxScrapeUrls,
     }),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),

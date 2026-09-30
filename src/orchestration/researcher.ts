@@ -45,6 +45,8 @@ export interface CreateResearcherSessionOptions {
   config?: Config;
   /** Overrides the search tool's query cap (default 30). Quick research passes QUICK_MAX_QUERIES. */
   maxSearchQueries?: number;
+  /** Overrides the scrape tool's per-call URL cap (default MAX_SCRAPE_URLS). Quick research passes QUICK_MAX_SCRAPE_URLS. */
+  maxScrapeUrls?: number;
 }
 
 export interface ResolvedResearcherSession {
@@ -68,6 +70,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     excludeTools = [],
     config,
     maxSearchQueries,
+    maxScrapeUrls,
   } = options;
 
   if (!systemPrompt || typeof systemPrompt !== 'string') {
@@ -104,6 +107,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       onSearchProgress: onSearchProgress,
       onUrlScrapeResult: onUrlScrapeResult,
       maxSearchQueries,
+      maxScrapeUrls,
       getTokensUsed: () => {
         if (!sessionRef.session) return 0;
         

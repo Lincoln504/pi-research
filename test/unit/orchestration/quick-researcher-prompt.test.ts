@@ -1,18 +1,14 @@
 /**
- * The quick path renders the same researcher template as the deep path, and must
+ * The quick path renders its own template (`src/prompts/quick-researcher.md`) and must
  * substitute every placeholder in it.
  *
- * `src/prompts/researcher.md` has TWO callers — `researcher-executor` (depth 1+) and
- * `QuickResearchOrchestrator` (depth 0) — each with its own independent chain of
- * `.replace('{{...}}', ...)` calls. Nothing links the two, and `populatePrompt`-style
- * substitution fails silently: an unhandled placeholder is not an error, it is literal
- * `{{braces}}` shipped to the model as an instruction it cannot act on.
- *
- * That is not hypothetical. `{{digest_section}}` was added to the template for the
- * router protocol and had to be wired into both callers separately; the quick path
- * deliberately substitutes it with EMPTY (it has no research lead, no next round, and
- * its report goes straight to the user) — which is a substitution, not an omission, and
- * the difference is invisible without a test that reads the shipped file.
+ * It used to render `researcher.md` — the deep template — with two placeholders blanked.
+ * `populatePrompt`-style substitution fails silently: an unhandled placeholder is not an
+ * error, it is literal `{{braces}}` shipped to the model as an instruction it cannot act
+ * on, and the deep template's per-round, sibling-coordinated framing was the wrong shape
+ * for a single-fact lookup. The quick template therefore gets the same guard the deep one
+ * has: a test that reads the SHIPPED file and asserts both that placeholders are gone and
+ * that the values the quick path supplies are actually interpolated.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -56,7 +52,7 @@ import { QuickResearchOrchestrator } from '../../../src/orchestration/quick-rese
 import { getConfig } from '../../../src/config.ts';
 
 const PROMPT_PATH = path.join(
-  path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts/researcher.md',
+  path.dirname(fileURLToPath(import.meta.url)), '../../../src/prompts/quick-researcher.md',
 );
 const PLACEHOLDER = /\{\{[a-z_0-9]+\}\}/gi;
 
@@ -79,7 +75,7 @@ async function renderQuickPrompt(): Promise<string> {
   return call[0].systemPrompt;
 }
 
-describe('quick research renders the shipped researcher template', () => {
+describe('quick research renders the shipped quick-researcher template', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('leaves no placeholder behind', async () => {
@@ -108,10 +104,14 @@ describe('quick research renders the shipped researcher template', () => {
     // '' would satisfy "no placeholder left behind" while shipping an empty prompt.
     const prompt = await renderQuickPrompt();
 
-    expect(prompt).toContain('Round 1 only');                 // {{extra_tool_guidelines}}
+    expect(prompt).toContain('one web search call, executed up front'); // {{extra_tool_guidelines}}
     // The per-batch budget is interpolated from config, so the prompt's stated
-    // maximum always equals the cap the scrape tool enforces (unit-env default: 8).
-    expect(prompt).toContain(`up to ${getConfig('/test/cwd').MAX_SCRAPE_URLS} URLs per call`);
+    // cap always equals the cap the scrape tool enforces (unit-env default: 5).
+    const quickConfig = getConfig('/test/cwd');
+    expect(prompt).toContain(`at most ${quickConfig.QUICK_MAX_SCRAPE_URLS} URLs per batch`);
+    expect(quickConfig.QUICK_MAX_SCRAPE_URLS).toBeLessThan(quickConfig.MAX_SCRAPE_URLS);
+    // The deep per-round budget must NOT leak into the quick prompt.
+    expect(prompt).not.toContain(`at most ${quickConfig.MAX_SCRAPE_URLS} URLs per batch`);
     // Prompt-cache prefix invariance: the goal is per-run data and belongs in the
     // initial USER message, never the system prompt — any per-run byte here would
     // bust the cacheable system+tools prefix across back-to-back quick runs.
@@ -126,6 +126,27 @@ describe('quick research renders the shipped researcher template', () => {
 
     expect(prompt).toContain('No preamble');
     expect(prompt).toContain('no narration of what you are about to do');
+  });
+
+  it('keeps the output contract the citation parser depends on', async () => {
+    // parseCitations needs the header, one URL per entry, and Source:/Description:
+    // lines. A leaner prompt that dropped them would ship a report whose sources are
+    // silently discarded (ensureCitedLinks would rebuild the list but the inline [N]
+    // markers would point at nothing).
+    const prompt = await renderQuickPrompt();
+
+    expect(prompt).toContain('CITED LINKS');
+    expect(prompt).toContain('Description:');
+    expect(prompt).toContain('Source:');
+  });
+
+  it('keeps the researcher marker the host hook uses to skip steering injection', async () => {
+    // src/index.ts returns the system prompt untouched when it contains
+    // RESEARCHER_AGENT_MARKER; without it, every quick run would get the host's
+    // steering block injected on top of the orchestrator's own copy.
+    const prompt = await renderQuickPrompt();
+
+    expect(prompt).toContain('RESEARCHER_AGENT_MARKER');
   });
 
   it('delivers the goal and quick-mode workflow instructions in the initial USER message', async () => {
