@@ -34,24 +34,62 @@
  * the user reached for.
  */
 
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const REQUIRED_PEERS = ['@earendil-works/pi-ai', '@earendil-works/pi-coding-agent'];
 
-const missing = REQUIRED_PEERS.filter((name) => {
+/**
+ * Probe one peer dependency.
+ *
+ *   'ok'      — resolves, and the file it resolves to exists
+ *   'missing' — does not resolve at all (the --legacy-peer-deps case)
+ *   'broken'  — resolves (its package.json and exports map are readable) but the
+ *               file those point at is not on disk
+ *
+ * The 'broken' case is checked with existsSync rather than by importing the
+ * module. Resolving is not loading: an interrupted install, a pruned
+ * node_modules or a bad package-cache restore leaves a package that resolves
+ * perfectly and then fails to load, which would pass this preflight and die
+ * inside cli.mjs with the same raw ERR_MODULE_NOT_FOUND this shim exists to
+ * replace. Importing it here instead would work, but it runs the host
+ * package's module side effects before the CLI proper has decided to start, so
+ * the cheap existence check is the right trade.
+ *
+ * @returns {'ok' | 'missing' | 'broken'}
+ */
+function probePeer(name) {
+  let resolved;
   try {
-    import.meta.resolve(name);
-    return false;
+    resolved = import.meta.resolve(name);
   } catch {
-    return true;
+    return 'missing';
   }
-});
+  try {
+    return existsSync(fileURLToPath(resolved)) ? 'ok' : 'broken';
+  } catch {
+    // Resolved to something fileURLToPath cannot turn into a path (not a file:
+    // URL). It resolved, so treat it as present rather than inventing a failure.
+    return 'ok';
+  }
+}
 
-if (missing.length > 0) {
+const status = new Map(REQUIRED_PEERS.map((name) => [name, probePeer(name)]));
+const missing = REQUIRED_PEERS.filter((name) => status.get(name) === 'missing');
+const broken = REQUIRED_PEERS.filter((name) => status.get(name) === 'broken');
+
+if (missing.length > 0 || broken.length > 0) {
+  // The remedy names the packages that are ACTUALLY absent. It used to hardcode
+  // `npm install -g @earendil-works/pi-coding-agent` with the comment "add just
+  // the missing host package", which was wrong whenever pi-ai was the missing
+  // one: the instruction named a package the user already had, and following it
+  // changed nothing. Reported by review 2026-10-01.
+  const needsInstall = [...missing, ...broken];
   const lines = [
     '',
     'Error: pi-research cannot start — it is missing required runtime dependencies:',
     ...missing.map((name) => `    ${name}`),
+    ...broken.map((name) => `    ${name}  (installed, but its files are incomplete)`),
     '',
     'These are PEER dependencies. pi provides its own copies when it loads this',
     'package as an extension, and npm >= 7 installs them automatically for a',
@@ -59,10 +97,11 @@ if (missing.length > 0) {
     'what --legacy-peer-deps, yarn classic, and a pnpm config with',
     'auto-install-peers=false do.',
     '',
-    'Either of these fixes it:',
+    'Install the missing package(s), or reinstall this package, which resolves',
+    'them as peers:',
     '',
-    '    npm install -g @earendil-works/pi-coding-agent   # add just the missing host package',
-    '    npm install -g @lincoln504/pi-research           # or reinstall, resolving peers',
+    `    npm install -g ${needsInstall.join(' ')}`,
+    '    npm install -g @lincoln504/pi-research',
     '',
   ];
   process.stderr.write(lines.join('\n'));

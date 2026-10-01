@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.6] - 2026-10-01
+
+### Fixed
+
+- **The missing-peer remedy names the package that is actually missing.** The 1.7.5 shim's bullet list correctly enumerated every absent `@earendil-works/pi-*` package, but the command underneath it was hardcoded to `npm install -g @earendil-works/pi-coding-agent` with the comment "add just the missing host package". When `pi-ai` (and not `pi-coding-agent`) was the absent one, the instruction named a package the user already had and following it changed nothing. The remedy is now built from the detected set, so both peers are named when both are missing and only the absent one is named otherwise. Caught in review; pinned by a test that asserts the present package is never the one the remedy suggests installing.
+- **The bin preflight detects an install whose files are incomplete, not just an absent package.** It resolved each peer and treated a successful resolve as healthy. Resolving is not loading: an interrupted install, a pruned `node_modules` or a bad package-cache restore leaves `package.json` and its `exports` map intact with the file they point at gone, so the preflight passed it through and the bundle died on that import with the raw `ERR_MODULE_NOT_FOUND` the shim exists to replace. The preflight now also checks that the resolved file exists and reports `installed, but its files are incomplete` with the same exit 78. Checked with `existsSync` rather than by importing the module, which would run the host packages' side effects before the CLI has decided to start. Verified by reverting each half in isolation: without the `argv[1]` rewrite the stub engine exits 97, with a resolve-only preflight a deliberately truncated peer produces `ERR_MODULE_NOT_FOUND`, and the fixed shim produces exit 78.
+- **`dist/cli-bin.mjs` ships executable.** It was published at mode 644 against 755 for `dist/cli.mjs`, because the build copies it with `copyFileSync`, which preserves the committed source mode. Every package manager chmods the declared `bin` target itself, so no install was broken, but the shipped artifact should not depend on that. The build now chmods 755 and the source is committed executable.
+
 ## [1.7.5] - 2026-10-01
 
 ### Added

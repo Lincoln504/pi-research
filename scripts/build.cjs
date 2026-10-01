@@ -57,6 +57,14 @@ function copyWebGpuProbe() {
 function copyCliBin() {
   fs.mkdirSync(p('dist'), { recursive: true });
   fs.copyFileSync(p('src', 'cli-bin.mjs'), p('dist', 'cli-bin.mjs'));
+  // copyFileSync preserves the SOURCE mode. The source is committed executable
+  // (100755) so this is belt-and-braces, but nothing about the shipped bin should
+  // depend on the source file's mode or on the umask of whatever builds it. The
+  // bin is what the OS executes, so ship it executable like dist/cli.mjs: every
+  // package manager does its own chmod on the declared bin target, but nothing
+  // should depend on that. (Flagged in review 2026-10-01: the packed 1.7.5 tarball
+  // had dist/cli.mjs at 755 and dist/cli-bin.mjs at 644.)
+  fs.chmodSync(p('dist', 'cli-bin.mjs'), 0o755);
 }
 
 // Build the browser worker bundle. Factored out so the cli target can guarantee

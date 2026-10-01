@@ -88,7 +88,12 @@ describe('pi-research bin shim', () => {
     expect(r.status).toBe(78);
     expect(r.stderr).toContain('@earendil-works/pi-ai');
     expect(r.stderr).toContain('@earendil-works/pi-coding-agent');
-    expect(r.stderr).toContain('npm install -g @earendil-works/pi-coding-agent');
+    // The remedy must name BOTH when both are missing. It used to hardcode a
+    // single package name, so the "add just the missing host package" line
+    // installed one of the two and left the install still broken.
+    expect(r.stderr).toContain(
+      'npm install -g @earendil-works/pi-ai @earendil-works/pi-coding-agent',
+    );
     expect(r.stderr).not.toContain('ERR_MODULE_NOT_FOUND');
     expect(r.stdout).not.toContain('engine ran');
   });
@@ -101,6 +106,38 @@ describe('pi-research bin shim', () => {
     expect(r.status).toBe(78);
     expect(r.stderr).toContain('@earendil-works/pi-coding-agent');
     expect(r.stderr).not.toContain('    @earendil-works/pi-ai');
+  });
+
+  it('the remedy names the package that is missing, not the one that is present', () => {
+    // The precise case that was broken: pi-ai absent, pi-coding-agent present.
+    // The remedy used to read `npm install -g @earendil-works/pi-coding-agent`,
+    // i.e. install the package the user already had, which fixes nothing.
+    rmSync(path.join(workDir, 'node_modules'), { recursive: true, force: true });
+    hostPackage(workDir, '@earendil-works/pi-coding-agent');
+    const r = runShim();
+
+    expect(r.status).toBe(78);
+    expect(r.stderr).toMatch(/npm install -g @earendil-works\/pi-ai(\s|$)/);
+    expect(r.stderr).not.toContain('npm install -g @earendil-works/pi-coding-agent');
+  });
+
+  it('reports a package whose files are incomplete, instead of passing it and crashing later', () => {
+    // Resolving is not loading. An interrupted install or a pruned node_modules
+    // leaves package.json and its exports map intact while the file they point
+    // at is gone: the old preflight saw a successful resolve, waved it through,
+    // and cli.mjs then died with the raw ERR_MODULE_NOT_FOUND this shim exists
+    // to replace.
+    rmSync(path.join(workDir, 'node_modules'), { recursive: true, force: true });
+    hostPackage(workDir, '@earendil-works/pi-coding-agent');
+    hostPackage(workDir, '@earendil-works/pi-ai');
+    rmSync(path.join(workDir, 'node_modules', '@earendil-works', 'pi-ai', 'index.js'));
+    const r = runShim();
+
+    expect(r.status).toBe(78);
+    expect(r.stderr).toContain('@earendil-works/pi-ai  (installed, but its files are incomplete)');
+    expect(r.stderr).toContain('npm install -g @earendil-works/pi-ai');
+    expect(r.stderr).not.toContain('ERROR');
+    expect(r.stdout).not.toContain('engine ran');
   });
 
   it('loads the bundle when both peers are present, and rewrites argv[1] so main() runs', () => {
