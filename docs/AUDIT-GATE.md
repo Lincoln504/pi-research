@@ -77,7 +77,11 @@ Re-examine every exception entry when any of these happens:
 ## Current exceptions and their reinvestigation checklists
 
 None. The audit gate runs with an empty allowlist: `npm audit --omit=dev` reports zero
-vulnerabilities as of 2026-09-30.
+vulnerabilities in this repository's tree as of 2026-10-01. Scope, stated plainly because the
+section at the bottom of this file depends on it: the gate audits the tree rooted HERE, where the
+`overrides` in `package.json` apply. It says nothing about the tree a consumer resolves. When
+triaging a consumer-reported advisory, do not treat a green gate as evidence that consumers are
+clean — measure their shape directly: pack, install into a scratch project, `npm audit --omit=dev`.
 
 The shipped tree got smaller on 2026-09-30: the three `@earendil-works/pi-*` host packages moved
 from `dependencies` to `peerDependencies` (plus `devDependencies` for this repo's own build), and
@@ -103,6 +107,12 @@ floor explicitly. Consumers clear the advisory as soon as their lockfiles re-res
 (a fresh `npm install` suffices — no override needed on their side, and any consumer-side
 allowlist or suppression for this GHSA can be removed).
 
+Correction (2026-10-01): "each requiring `^0.6.0`" was true of `camoufox-js` and of the
+`onnxruntime-node` this repository resolved, but NOT of the `onnxruntime-node` a consumer got.
+`transformers` 4.2.0 pinned `onnxruntime-node` 1.24.3, which requires `adm-zip ^0.5.16`, and the
+repository-wide override is what hid that here. It took the `transformers` 4.3.0 bump
+(`onnxruntime-node` 1.30.0, `adm-zip ^0.6.0`) to make the parents' ranges true for consumers too.
+
 ### adm-zip: GHSA-vwc7-r8mq-g2x9 (CVE-2026-76845, moderate, allowlisted 2026-09-09 — CLEARED, see above)
 
 Symlink following at the extraction destination (CWE-59) in adm-zip 0.5.9 through 0.6.0. Reaches
@@ -123,12 +133,70 @@ the shipped tree as one deduped copy required by `onnxruntime-node` (via
    override), delete this entry, re-run the gate and its unit tests, and re-run
    `npm audit --omit=dev` to confirm zero blocking advisories.
 
-## What consumers of the published package see (verified empirically, npm 11.19.0, 2026-09-16)
+## What consumers of the published package see (re-measured, npm 11.19.0, 2026-10-01)
 
-Clean since adm-zip 0.6.1 reached the tree (2026-09-16): `npm audit --omit=dev` reports zero
-vulnerabilities and this package contributes none. The historical findings below are kept because
-they document how the advisory behaved while the vulnerable tree was present (before consumer
-lockfiles re-resolve adm-zip):
+**Not clean. The gate audits the tree rooted in this repository, and that tree is not the tree a
+consumer gets.** `npm overrides` are honored only from the root project of an install, so the
+`sharp` and `adm-zip` overrides in `package.json` (and the `brace-expansion` one) reach the
+in-repo tree and nothing else. Measured on 2026-10-01 against the published tarball, a consumer
+resolving the same declared ranges sees 4-7 HIGH severity advisories depending on install shape:
+
+| Install shape | HIGH | Leaf advisory groups |
+| --- | --- | --- |
+| `npm install` (peers auto-installed) | 7 | adm-zip 0.5.18, sharp 0.34.5 + 0.33.5, brace-expansion 5.0.9 |
+| `npm install --legacy-peer-deps` (the `pi install` shape) | 4 | sharp 0.33.5 |
+| `npm install` (peers auto-installed), plus a consumer `overrides: {"sharp": "^0.35.4"}` | 1 | brace-expansion 5.0.9 (unfixable downstream) |
+| `npm install --legacy-peer-deps`, plus that same `sharp` override | 0 | none — the peer that carries brace-expansion is never installed under this flag |
+
+Adding `brace-expansion: ^5.0.12` to a consumer root changes none of these rows: on the
+peer-skipping shape there is no such copy to fix, and on the plain shape the copy lives inside
+the host's shrinkwrap and stays at 5.0.9 (verified). The count of 7 is npm's chain-inclusive node
+count — the leaf advisory groups are the ones listed in the third column, and `@lincoln504/pi-research`
+itself appears in npm's report only as a chain effect.
+
+The `adm-zip 0.5.18` group left the consumer tree on 2026-10-01 with the
+`@huggingface/transformers` 4.2.0 → 4.3.0 bump (`onnxruntime-node` 1.24.3 → 1.30.0, whose
+`adm-zip ^0.6.0` dedupes to the patched 0.6.1 everywhere in the graph). Two groups remain and
+neither is fixable from here:
+
+- **`sharp` via `@lancedb/lancedb` 0.39.0.** LanceDB's `optionalDependencies` pins
+  `@huggingface/transformers` at exactly `3.0.2`, whose `sharp ^0.33.5` resolves to the vulnerable
+  `0.33.5`; 0.39.0 is the newest stable LanceDB (the 0.40.0 betas still pin `3.0.2`), so no bump
+  moves it. pi-research uses transformers only
+  for text `feature-extraction`, so the vulnerable libvips/libheif decoders are never invoked —
+  the exposure is a scanner finding, not a reachable path. A consumer `sharp` override clears it
+  (verified: `0.35.5` forced at every copy, `npm audit --omit=dev` drops to 0 on the
+  `--legacy-peer-deps` shape). Consuming LanceDB's own embedding function is the only reason to
+  keep `sharp` unoverridden.
+- **`brace-expansion 5.0.9` inside `@earendil-works/pi-coding-agent`'s `npm-shrinkwrap.json`.**
+  Upstream-frozen, and it is exactly what the location-scoped exception shape was built for. It
+  appears only when npm auto-installs the peer (`--legacy-peer-deps` skips that, which is what
+  `pi install` uses), and it survives a consumer `overrides` entry — verified: `brace-expansion:
+  ^5.0.12` in a consumer root left the shrinkwrapped copy at 5.0.9.
+
+What has NOT changed, and what any future exception entry here must not overstate: `npm install`
+and `pi install` both **succeed with exit 0** (npm prints the advisory count as a warning), the
+tarball and registry download are unaffected (the findings are metadata-level, enforced by
+nothing at install time; onnxruntime-node ships its native binaries in its own tarball, so npm
+12's install-script policy does not turn this into a missing-binary failure), and `npm audit` in
+a consumer project **exits 1**, which fails a consumer CI that runs it. Dependabot will raise
+alerts on consumer repositories — point reporters at this document.
+
+Correction to the earlier version of this section: it claimed consumers saw zero vulnerabilities
+since 2026-09-16, on the strength of an empirical run. The claim is withdrawn, and the decisive
+reason is scope, not timing: whatever that run installed, it was measured from this repository's
+root, where `overrides` apply, not from an external consumer's install. The date argument only
+reinforces it — the `sharp` copy a consumer resolved then was already inside its `<0.35.0`
+advisory range (GHSA-f88m-g3jw-g9cj, live since 2026-07-21), and the 2026-09-18 and 2026-09-29
+adm-zip disclosures landed after the run. Separately, an install that did pull the optional
+subtree could not have shown zero either.
+
+It also said both adm-zip pinning parents "each require `^0.6.0`"; `onnxruntime-node 1.24.3`
+(the copy `transformers` 4.2.0 actually pinned) required `adm-zip ^0.5.16`, which is why a
+vulnerable `0.5.18` was present in consumers at all.
+
+The historical findings below are kept because they document how the adm-zip advisory behaved
+while the vulnerable tree was present (before consumer lockfiles re-resolve adm-zip):
 
 - `npm install` (project or global) with this package in the tree **succeeds, exit 0**. npm prints
   "1 moderate severity vulnerability" as a warning; nothing blocks or fails.

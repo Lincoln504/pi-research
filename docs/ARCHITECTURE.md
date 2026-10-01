@@ -384,16 +384,35 @@ validates with. Bump it in lockstep with the pi host, not independently. (`undic
 contrast, tracks the host's major — the host is on undici 8, and pi-research only uses the
 stable `Agent` connector API, so it follows `^8`.)
 
-Pinned embedding runtime — `@huggingface/transformers` is exact at `4.2.0`. Tried `4.3.0`
-on 2026-10-01 and did not take it: it moves the native stack with it (onnxruntime-node
-`1.24.3` → `1.30.0`, onnxruntime-web `1.26.0-dev.20260416` → `1.31.0-dev.20260914`) and
-reshapes the tree (`roarr`, `boolean` and `detect-node` leave `global-agent`'s subtree). The
-knowledge-store unit suite (26 files, 322 tests) and the integration suites
-(`knowledge-stack`, `knowledge-models`, `research-knowledge-search`; 33 tests, 25 run, 8
-skipped) pass on both versions, so those suites do not decide it — they mock the backend or
-run against an already-cached model, and neither exercises a real model download and backend
-selection. Bump it only with a live embedding check (model load, CPU and WebGPU backends) on
-the new ONNX Runtime.
+Pinned embedding runtime — `@huggingface/transformers` is exact at `4.3.0`. The hold at `4.2.0`
+was lifted on 2026-10-01 for a security reason, not a feature one: `4.2.0` declares
+`sharp ^0.34.5` and pins `onnxruntime-node 1.24.3`, whose `adm-zip ^0.5.16` resolves to the
+advisory-ridden `0.5.18`, and neither range can be lifted downstream (npm ignores a published
+dependency's `overrides`, so the repository's own `sharp`/`adm-zip` overrides reach only the
+tree rooted here). `4.3.0` ships `sharp ^0.35.4` and `onnxruntime-node 1.30.0`
+(`adm-zip ^0.6.0`), which clears both advisory groups for consumers as well. It also moves the
+native stack with it (onnxruntime-web `1.26.0-dev.20260416` → `1.31.0-dev.20260914`, left
+overridden at the stable `1.24.3` as before) and reshapes the tree (`global-agent` 3.0.0 →
+4.1.3, dropping seven packages from its old subtree: `roarr`, `boolean`, `detect-node`, `es6-error`,
+`json-stringify-safe`, `semver-compare`, `sprintf-js`).
+
+The unit suite (26 knowledge files, 322 tests) and the integration suites (`knowledge-stack`,
+`knowledge-models`, `knowledge-migrations`, `research-knowledge-search`; 44 tests, 36 run, 8
+skipped) pass on both versions, so those suites do NOT decide a bump — they mock the backend or
+run against an already-cached model, and neither exercises real model load and backend
+selection. What decided this one was a live embedding check against the real backend, run on
+both release candidates with `onnx-community/granite-embedding-small-english-r2-ONNX`:
+
+dimension 384 on both backends; CPU `initialize` 536 ms (4.2.0) vs 524 ms (4.3.0) and
+`embedMany` of 3 texts 48 ms vs 39 ms; WebGPU (Dawn/Vulkan) `initialize` 1003 ms vs 1409 ms and
+`embedMany` 110 ms vs 71 ms; cosine between the two related sentences 0.90431857 (4.2.0 CPU) vs
+0.90431858 (4.3.0 CPU) against 0.70265303 vs 0.70265297 for the unrelated one; embedding the
+same text twice returns cosine 1.0; and a full store round-trip (two documents written through
+the real embedder, then a hybrid vector + FTS + RRF `search` on both devices) returns the
+expected top hit. The shipped `dist/webgpu-probe.mjs` answers `PROBE_OK 384` on the new runtime.
+The remaining hold condition is unchanged: bump this package only with a live embedding check
+(model load, CPU and WebGPU backends, and a store round-trip) on the new ONNX Runtime, because
+nothing in the test suite fails when the backend is broken.
 
 Transient-failure resilience — every LLM call is a potential single point of failure on a
 streaming endpoint that can drop mid-response (undici surfaces this as `terminated`). The
