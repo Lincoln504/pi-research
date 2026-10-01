@@ -7,10 +7,13 @@
  *
  *   - As a pi EXTENSION, the host supplies `@earendil-works/*`. Our package.json
  *     range never constrains it, so an in-process check is the only enforcement.
- *   - As a standalone CLI/SDK, the range is `>=0.99.0 <1` and published tarballs
- *     carry no lockfile, so every fresh install resolves the newest 0.x at that
- *     instant. pi is pre-1.0: a minor bump may break anything under semver, and
- *     already has (0.83.0 extended the ResourceLoader contract).
+ *   - As a standalone CLI/SDK, the range is `>=0.99.0 <2` and published tarballs
+ *     carry no lockfile, so every fresh install resolves the newest release in
+ *     that window at that instant. The host is young: a minor bump may break
+ *     anything under semver, and already has (0.83.0 extended the ResourceLoader
+ *     contract). The upper bound is `<2` rather than `<1` because 1.0.0 changed
+ *     no API this package uses — see the 1.0.0 note on the tested ceiling — and
+ *     `<1` would exclude the current release from a fresh install.
  *
  * Hence two thresholds, not one. Below the FLOOR we throw — those APIs are gone
  * and nothing will work. Above the TESTED ceiling we warn once and continue: a
@@ -102,8 +105,25 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 99, patch: 0 };
  * Bump this — deliberately — when a new pi is verified, not automatically.
  * Compared on MAJOR.MINOR only: a patch bump within a tested line is not a new
  * surface, and warning on it would be noise.
+ *
+ * 1.0.0 is a major version number, not a breaking change for this package. The
+ * full public surface was diffed against 0.99.2 (2026-10-01): `@earendil-works/pi-ai`
+ * is byte-identical in its declarations, and the extension API
+ * (`core/extensions/index.d.ts`, the file every tool, event and context type
+ * comes from) is unchanged, as is `docs/extensions.md`. `pi-coding-agent` adds
+ * one method (`ModelRegistry.generateImages()`), widens `quietStartup` to
+ * `boolean | "header"`, and adds internal fields; `pi-tui` adds
+ * `isAppleTerminalSession`, `flattenLines()` and `TUI.getScreenLines()`.
+ * Nothing was removed or re-signed, so the 0.99.0 floor still describes the
+ * oldest host these APIs exist on.
+ *
+ * The behavioural changes in 1.0.0 that a user can notice are the fullscreen TUI
+ * default (this extension renders through `ctx.ui.*` widgets, which work in both
+ * modes), the `builtin:<name>` naming for built-in extensions and tools, and
+ * `--no-extensions` now also disabling the built-in extensions. None of them
+ * change what this package does.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 0, minor: 99, patch: 2 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 0, patch: 0 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 

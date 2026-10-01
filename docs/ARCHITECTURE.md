@@ -372,7 +372,8 @@ changes which pairing needs re-validating.
 
 Pinned validation library — `typebox` (TypeBox 1.x, unscoped package name) is pinned to the
 exact version the pi host packages depend on (`@earendil-works/pi-ai` /
-`@earendil-works/pi-coding-agent` 0.99.2 both pin `1.3.27` — verified 2026-10-01, after an
+`@earendil-works/pi-coding-agent` 1.0.0 both pin `1.3.27` — verified 2026-10-01 against 1.0.0 
+(and against 0.99.2 before it), after an
 undocumented drift was caught in the 0.84/0.85 era and realigned; that drift was to `1.3.26`,
 and the version now pinned is `1.3.27`, both re-checked directly in the installed host
 packages' `package.json`). Every

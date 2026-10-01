@@ -1499,8 +1499,8 @@ UnionVariant { variant: "Type::FixedSizeList" }` で失敗します — 実テ�
 組み合わせが変わるだけです。
 
 固定されたバリデーションライブラリ — `typebox` は pi ホストパッケージが依存する正確なバージョンに
-ピン留めされています（`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` は 0.99.x 系列で
-`1.3.27` にピン留め）。各ツールのパラメータスキーマはここで TypeBox で構築され、pi のツールシステムへ
+ピン留めされています（`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` は `1.3.27` に
+ピン留め。2026-10-01 に 1.0.0 で、その前は 0.99.2 で確認済み）。各ツールのパラメータスキーマはここで TypeBox で構築され、pi のツールシステムへ
 渡されるため、両者は `Value.Check`/`Convert` のセマンティクスで一致していなければなりません。浮動範囲
 `^1.1.38` は、新しい消費者インストールが pi よりも新しい TypeBox へ pi-research を解決してしまい、
 テストされていないクロスバージョンの組み合わせを配布しました。正確なピン留めにより、pi-research は

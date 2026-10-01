@@ -38,6 +38,11 @@ vi.mock('../../src/tools/research-knowledge-search.ts', () => ({
     name: 'research_knowledge_search',
     execute: mockKnowledgeExecute,
     description: 'Search the research knowledge store',
+    // Present so the exposure re-registration test can prove the spread carries
+    // metadata through. The REAL definitions' metadata is pinned by
+    // test/unit/tools/tool-metadata.test.ts, which imports the factories directly.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    namespace: { name: 'pi-research', description: 'Web research, knowledge-store search, and system health checks.' },
   })),
 }));
 
@@ -179,6 +184,25 @@ describe('extension entrypoint', () => {
       await activate(pi as any);
 
       expect(knowledgeCalls(pi).at(-1)).toMatchObject({ name: 'research_knowledge_search', exposure: 'direct' });
+    });
+
+    it('carries the tool metadata through the exposure re-registration', async () => {
+      // The withdrawal is a re-registration with a spread definition, so the
+      // annotations and namespace travel with it. Losing them here would be
+      // silent: the tool would still be hidden, but pi and permission extensions
+      // would see an unannotated tool for the rest of the session.
+      process.env[KEY] = 'none';
+      const { pi } = createPiMock();
+      await activate(pi as any);
+
+      const registered = knowledgeCalls(pi).at(-1);
+      expect(registered.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      });
+      expect(registered.namespace).toMatchObject({ name: 'pi-research' });
     });
 
     it('flips a live-enabled tool to hidden on the next prompt, without a restart', async () => {

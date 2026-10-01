@@ -37,6 +37,7 @@ import { recordLlmUsage } from '../utils/llm-usage.ts';
 import { buildSafeOptions, validateAndExtractText, buildConstrainedSubmitTool, completeSimpleStructured } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { withTimeout } from '../core/llm/llm-timeout.ts';
+import { KNOWLEDGE_SEARCH_TOOL_ANNOTATIONS, PI_RESEARCH_TOOL_NAMESPACE } from './tool-metadata.ts';
 import { abortableDelay } from '../web-research/retry-utils.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
@@ -894,6 +895,8 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
       'Do not call knowledge search and research for the same query in the same turn — wait for the result.',
     ],
     parameters: ResearchKnowledgeSearchParams,
+    annotations: KNOWLEDGE_SEARCH_TOOL_ANNOTATIONS,
+    namespace: PI_RESEARCH_TOOL_NAMESPACE,
     executionMode: 'parallel',
     async execute(
       _toolCallId: string,

@@ -1564,7 +1564,7 @@ emparejamiento necesita revalidarse.
 
 Biblioteca de validación fijada — `typebox` está fijado a la versión exacta de la que
 dependen los paquetes del host pi (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent`
-fijan `1.3.27` a lo largo de la línea 0.99.x). El esquema de parámetros de cada herramienta se
+fijan `1.3.27`; verificado contra 1.0.0 el 2026-10-01, y antes contra 0.99.2). El esquema de parámetros de cada herramienta se
 construye aquí con TypeBox y se entrega al sistema de herramientas de pi, así que ambos deben
 coincidir en la semántica de `Value.Check`/`Convert`. Un rango flotante `^1.1.38` dejó que una
 instalación de consumo nueva resolviera pi-research a un TypeBox más nuevo que el de pi,

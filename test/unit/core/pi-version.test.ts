@@ -4,9 +4,9 @@
  * The declared dependency range cannot enforce this: as a pi extension the HOST
  * supplies `@earendil-works/*`, so our package.json never constrains it; and
  * standalone, published tarballs carry no lockfile, so a fresh install resolves
- * the newest 0.x at that instant. pi is pre-1.0, where a minor bump may break
- * anything under semver — and 0.83.0 already did extend the ResourceLoader
- * contract. So: hard floor, soft tested-ceiling.
+ * the newest release in the declared range at that instant. The host is young,
+ * where a minor bump may break anything under semver — and 0.83.0 already did
+ * extend the ResourceLoader contract. So: hard floor, soft tested-ceiling.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -125,6 +125,29 @@ describe('checkPiCompatibility', () => {
 
   it('warns on a newer MAJOR too', () => {
     const r = checkPiCompatibility(`${PI_TESTED_MAX_VERSION.major + 1}.0.0`);
+    expect(r.level).toBe('untested');
+    expect(r.fatal).toBe(false);
+  });
+
+  it('accepts pi 1.0.0 silently, the release the peer range now admits', () => {
+    // 1.0.0 is a major number but not a break for this package: the extension API
+    // is unchanged and pi-ai's declarations are identical to 0.99.2. If a future
+    // bump of the tested ceiling is forgotten, this is the test that says so.
+    const r = checkPiCompatibility('1.0.0');
+    expect(r.level).toBe('ok');
+    expect(r.message).toBeNull();
+  });
+
+  it('accepts a patch above 1.0.0 silently and warns on the next minor', () => {
+    expect(checkPiCompatibility('1.0.7').level).toBe('ok');
+    expect(checkPiCompatibility('1.1.0').level).toBe('untested');
+  });
+
+  it('does not refuse a host above the declared peer range, only warns', () => {
+    // The peer range caps at <2, so npm would not resolve a 2.x host for a
+    // standalone install. An extension host is supplied by pi itself and never
+    // constrained by that range, so the runtime must warn rather than throw.
+    const r = checkPiCompatibility('2.0.0');
     expect(r.level).toBe('untested');
     expect(r.fatal).toBe(false);
   });

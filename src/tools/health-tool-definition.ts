@@ -13,6 +13,7 @@ import type {
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { healthRegistry } from '../healthcheck/index.ts';
+import { HEALTH_TOOL_ANNOTATIONS, PI_RESEARCH_TOOL_NAMESPACE } from './tool-metadata.ts';
 
 /**
  * Create the health check tool definition
@@ -37,6 +38,8 @@ export function createHealthTool(): ToolDefinition {
     description: 'Verify system status (browser pool, knowledge store, GPU lock).',
     promptSnippet: 'Run system health checks',
     parameters,
+    annotations: HEALTH_TOOL_ANNOTATIONS,
+    namespace: PI_RESEARCH_TOOL_NAMESPACE,
     renderShell: 'self',
     executionMode: 'parallel',
     async execute(

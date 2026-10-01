@@ -1336,7 +1336,7 @@ footer: RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` �
 因此升级 LanceDB 并不能消除 override；只会改变需要重新验证的组合。
 
 固定校验库 —— `typebox` 固定到 pi 宿主包依赖的精确版本（`@earendil-works/pi-ai`/
-`@earendil-works/pi-coding-agent` 在 0.99.x 线上固定 `1.3.27`）。每个工具的参数 schema
+`@earendil-works/pi-coding-agent` 固定 `1.3.27`；2026-10-01 对 1.0.0 复核，此前对 0.99.2 复核）。每个工具的参数 schema
 都在这里用 TypeBox 构建，跨边界交给 pi 的工具系统，因此两者必须在
 `Value.Check`/`Convert` 语义上一致。浮动范围 `^1.1.38` 曾让全新消费者安装把 pi-research
 解析到比 pi 更新的 TypeBox，发布了一个未经测试的跨版本组合；精确固定让 pi-research

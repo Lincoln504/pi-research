@@ -19,6 +19,7 @@ import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { validateConfig, getConfig, type ConfigInterface } from '../config.ts';
+import { RESEARCH_TOOL_ANNOTATIONS, PI_RESEARCH_TOOL_NAMESPACE } from './tool-metadata.ts';
 import { tryGetServiceContainerFromCtx, getService } from '../core/service-registry.ts';
 
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -159,6 +160,8 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
       'Perform multi-source web research using search, scraping, and specialized databases.',
     promptSnippet: 'Execute comprehensive web research',
     parameters,
+    annotations: RESEARCH_TOOL_ANNOTATIONS,
+    namespace: PI_RESEARCH_TOOL_NAMESPACE,
     renderShell: 'self',
     executionMode: 'parallel',
     prepareArguments: (args: unknown) => {

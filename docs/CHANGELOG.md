@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.7] - 2026-10-01
+
+### Changed
+
+- **pi 1.0.0 support.** The peer ranges said `>=0.99.0 <1`, which excluded the current pi release: a standalone install resolved 0.99.x while the user's pi was 1.0.0, and the extension printed an untested-host notice on every session. The ranges are now `>=0.99.0 <2` and the tested ceiling is 1.0.0. The whole public surface was diffed 0.99.2 -> 1.0.0: `@earendil-works/pi-ai` is identical in its declarations, the extension API (`core/extensions/index.d.ts`, the file every tool, event and context type comes from) is unchanged, and `docs/extensions.md` is unchanged. `pi-coding-agent` adds `ModelRegistry.generateImages()` and widens `quietStartup` to `boolean | "header"`; `pi-tui` adds `isAppleTerminalSession`, `flattenLines()` and `TUI.getScreenLines()`. Nothing was removed or re-signed, so the 0.99.0 floor still describes the oldest host those APIs exist on, and the version number is a milestone rather than a break for this package. Verified by installing 1.0.0 into this repo, type-checking both projects against it, running the unit and integration suites (254 files / 3207 tests, 57 + 103 integration), and calling the `health` tool through a real pi 1.0.0 session. Two 1.0.0 behaviour changes are worth knowing and change nothing here: the TUI now defaults to fullscreen (this extension renders through `ctx.ui.*` widgets, which work in both modes) and built-in extensions and tools are named `builtin:<name>` in errors and diagnostics.
+- **The three tools declare MCP-style `annotations` and one shared `namespace`.** Both fields arrived in pi 0.99 and are surfaced by 1.0.0: `pi.getAllTools()` reports them, the documented permission pattern reads the annotations to decide which calls to confirm, and codemode lists the tools of one namespace under a single heading. `research` and `research_knowledge_search` are declared `openWorldHint: true` because they reach the network and spend provider tokens, `health` is `idempotentHint: true` and closed-world, and all three are `readOnlyHint: false` with `destructiveHint: false`: they append to the knowledge store, and `health` with `probe: true` starts the browser pool. The hints are author-declared and unverified, so they under-claim deliberately, because `readOnlyHint` is the one hint that can suppress a confirmation a user should have been asked for.
+
+### Fixed
+
+- Host-version references in `docs/ARCHITECTURE.md` and the ES/JA/ZH docs said the typebox pin was verified against 0.99.2. It is still `1.3.27` in both host packages, re-verified against 1.0.0, and the docs now say so. The README requirements state the supported host range and that a host newer than the tested ceiling still runs, with a one-line notice.
+
 ## [1.7.6] - 2026-10-01
 
 ### Fixed
