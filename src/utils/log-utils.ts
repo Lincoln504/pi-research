@@ -148,7 +148,10 @@ const KNOWN_TOKEN_PATTERN = new RegExp(
 // input to 41ms (~10x) with no loss of coverage. The bounds are far above any
 // real token: a 1024-char header covers even an x5c certificate chain, and 8192
 // covers payloads no bearer credential approaches.
-const JWT_PATTERN = new RegExp(
+// `export`ed so the bounds themselves can be asserted: a wall-clock scaling test
+// for this pattern measured call overhead, not regex work (see the bounds test in
+// test/unit/utils/log-redaction.test.ts).
+export const JWT_PATTERN = new RegExp(
   `${B_LEFT}eyJ[A-Za-z0-9_-]{1,1024}\\.[A-Za-z0-9_-]{1,8192}\\.[A-Za-z0-9_-]{1,4096}`,
   'g',
 );

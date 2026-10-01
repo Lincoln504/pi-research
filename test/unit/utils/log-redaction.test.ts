@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, stripTerminalEscapes } from '../../../src/utils/log-utils.ts';
+import { redactSecrets, stripTerminalEscapes, JWT_PATTERN } from '../../../src/utils/log-utils.ts';
 
 describe('redactSecrets', () => {
   it('masks credentials embedded in URL userinfo', () => {
@@ -161,58 +161,23 @@ describe('redactSecrets', () => {
     expect(performance.now() - start).toBeLessThan(500);
   });
 
-  it('scales LINEARLY, not quadratically, on a dense run of JWT prefixes', () => {
-    // Same quadratic shape as the URL case above, on the sibling pattern the
-    // original fix did not reach. JWT segments exclude `.`, so an unbounded
-    // `[A-Za-z0-9_-]+` consumes to the end of a dotless base64url run and then
-    // backtracks one character at a time — and because `_` counts as a non-
-    // alphanumeric left boundary, the same run offers a fresh start position
-    // every few characters. Measured 393ms per log message pre-fix, 41ms after.
+  it('keeps every JWT segment bounded, which is what removes the backtracking bomb', () => {
+    // This replaces a wall-clock scaling assertion that flaked on CI: 3.12x
+    // against a 3.0 threshold on ubuntu/node 22, 3.47x on node 24 before that.
+    // The timing cannot be trusted here. On this input the per-call cost of the
+    // bounded pattern measures ~0.004ms, so a doubling ratio was reading call
+    // overhead, regexp-cache warm-up and cache effects rather than regex work, and
+    // V8's literal prefilter hides the pathology either way: an unbounded variant
+    // of the same pattern also scales linearly on `_eyJ` runs.
     //
-    // Asserted as a SCALING RATIO rather than a wall-clock budget, deliberately.
-    // An absolute threshold cannot separate the two here: this suite runs 193
-    // files in parallel, which inflated a 41ms pass to 288ms, while the pre-fix
-    // cost on an idle machine is ~393ms — the ranges overlap, so any fixed
-    // number either flakes under load or stops catching the regression. Doubling
-    // the input is immune to that: both measurements inflate together, so the
-    // ratio holds. Bounded segments make the work linear in the number of start
-    // positions (~2x), an unbounded quantifier makes it quadratic (~4x).
-    // Measured: 1.87x fixed vs 4.01x unbounded on the raw pattern, 2.06x fixed
-    // through redactSecrets. 3.0 sits between them with margin on both sides.
-    //
-    // Each sample is REPEATED until it has cost at least SAMPLE_MS, and the cost
-    // reported is per call. A single pass over the 8k input is only ~10ms on an
-    // idle machine and less on a fast CI runner, which puts the timer's own
-    // resolution and any per-call scheduling jitter (a GC pause, a preempted
-    // worker) in the same order of magnitude as the measurement — that is how the
-    // ratio-of-medians form of this test produced 3.47x on the ubuntu-latest node
-    // 24 leg while the same commit passed on the other three legs. At ~50ms per
-    // sample the same jitter is a couple of percent, the ratio lands on its real
-    // value (~2.0) every run, and the 3.0 threshold still separates it from the
-    // unbounded pattern's ~4.0 with margin on both sides.
-    const SAMPLE_MS = 50;
-    const dense = (chars: number) => '_eyJ'.repeat(chars / 4);
-    const small = dense(8_000);
-    const big = dense(16_000);   // both under REDACT_SCAN_LENGTH, so neither is truncated
-    const perCallMs = (s: string): number => {
-      redactSecrets(s); // warm up: JIT and regexp caches are per call site
-      const start = performance.now();
-      let reps = 0;
-      do {
-        redactSecrets(s);
-        reps++;
-      } while (performance.now() - start < SAMPLE_MS);
-      return (performance.now() - start) / reps;
-    };
-    // Median of several PAIRS: one hiccup cannot decide the result, and each pair
-    // is measured back to back so the small and big samples see the same machine.
-    const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
-    const ratios: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      ratios.push(perCallMs(big) / Math.max(perCallMs(small), 0.001));
-    }
-    const ratio = median(ratios);
-    expect(ratio, `doubling the input multiplied the cost by ${ratio.toFixed(2)}x`).toBeLessThan(3);
+    // What the fix actually encodes is that no segment quantifier is unbounded, so
+    // that is asserted directly and deterministically. The shape being guarded:
+    // `.` is not in the segment class, so `[A-Za-z0-9_-]+` consumes to the end of a
+    // dotless base64url run and backtracks one character at a time looking for one,
+    // while `_`/`-` count as non-alphanumeric, so B_LEFT admits a fresh start
+    // position every few characters inside that same run.
+    const quantifiers = [...JWT_PATTERN.source.matchAll(/\[[^\]]+\](\{[^}]*\}|[*+?])/g)].map((m) => m[1]);
+    expect(quantifiers).toEqual(['{1,1024}', '{1,8192}', '{1,4096}']);
   });
 
   it('still masks JWTs of every realistic segment size after the bound', () => {
