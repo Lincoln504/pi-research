@@ -1490,13 +1490,13 @@ Arrow 21.2 が書くスキーマを解析できず、すべてのテーブルオ
 `Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer: RangeOutOfBounds …
 UnionVariant { variant: "Type::FixedSizeList" }` で失敗します — 実テーブルに触れる 56 個のユニット
 テストと 36 個の統合テストがすべて落ちました。この範囲を caret セーフとして扱わないでください。また、
-`@lancedb/lancedb` の 0.37 までのすべてのリリースが同じ `<=18.1.0` の Arrow 上限を宣言していることに
+`@lancedb/lancedb` の 0.39.0 までのすべてのリリースが同じ `<=18.1.0` の Arrow 上限を宣言していることに
 も注意してください。したがって LanceDB をアップグレードしても override は消えず、再検証が必要な
 組み合わせが変わるだけです。
 
 固定されたバリデーションライブラリ — `typebox` は pi ホストパッケージが依存する正確なバージョンに
-ピン留めされています（`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` は 0.84.x 系列で
-`1.3.7` にピン留め）。各ツールのパラメータスキーマはここで TypeBox で構築され、pi のツールシステムへ
+ピン留めされています（`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` は 0.99.x 系列で
+`1.3.27` にピン留め）。各ツールのパラメータスキーマはここで TypeBox で構築され、pi のツールシステムへ
 渡されるため、両者は `Value.Check`/`Convert` のセマンティクスで一致していなければなりません。浮動範囲
 `^1.1.38` は、新しい消費者インストールが pi よりも新しい TypeBox へ pi-research を解決してしまい、
 テストされていないクロスバージョンの組み合わせを配布しました。正確なピン留めにより、pi-research は

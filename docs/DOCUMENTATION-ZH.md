@@ -1319,7 +1319,7 @@ camoufox-js 版本无关 —— npm 固定不冻结它，未来某个 camoufox r
 
 固定数据技术栈 —— `apache-arrow` 是 `21.1.0` 的直接依赖，`overrides` 把整棵树强制到
 这一个版本，让 LanceDB 和 Arrow 共享同一个 Arrow 实例（版本不匹配的 Arrow 副本无法
-互操作 —— 一方构建的数组会被另一方拒绝）。这位于 `@lancedb/lancedb` 0.37 声明的 Arrow
+互操作 —— 一方构建的数组会被另一方拒绝）。这位于 `@lancedb/lancedb` 0.39.0 声明的 Arrow
 peer 上限（`>=15.0.0 <=18.1.0`）之上 —— 没有 override，npm 根本不会解析这个组合 ——
 并且已验证可用，但每次升级 `@lancedb/lancedb` 都应重新验证。
 
@@ -1328,11 +1328,11 @@ peer 上限（`>=15.0.0 <=18.1.0`）之上 —— 没有 override，npm 根本�
 表都失败，报 `Failed to read IPC file: Arrow error: Parser error: Unable to get root as
 footer: RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` —— 56 个单元
 测试和 36 个集成测试，凡是碰真实表的都挂。不要把这个范围当 caret 安全。另请注意，
-`@lancedb/lancedb` 到 0.37 为止的每个 release 都声明同样的 `<=18.1.0` Arrow 上限，
+`@lancedb/lancedb` 到 0.39.0 为止的每个 release 都声明同样的 `<=18.1.0` Arrow 上限，
 因此升级 LanceDB 并不能消除 override；只会改变需要重新验证的组合。
 
 固定校验库 —— `typebox` 固定到 pi 宿主包依赖的精确版本（`@earendil-works/pi-ai`/
-`@earendil-works/pi-coding-agent` 在 0.84.x 线上固定 `1.3.7`）。每个工具的参数 schema
+`@earendil-works/pi-coding-agent` 在 0.99.x 线上固定 `1.3.27`）。每个工具的参数 schema
 都在这里用 TypeBox 构建，跨边界交给 pi 的工具系统，因此两者必须在
 `Value.Check`/`Convert` 语义上一致。浮动范围 `^1.1.38` 曾让全新消费者安装把 pi-research
 解析到比 pi 更新的 TypeBox，发布了一个未经测试的跨版本组合；精确固定让 pi-research

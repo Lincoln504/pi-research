@@ -349,7 +349,7 @@ mismatch.
 Pinned data stack — `apache-arrow` is a direct dependency at `21.1.0`, and `overrides`
 forces the whole tree to that single version so LanceDB and Arrow share one Arrow instance
 (mismatched Arrow copies do not interoperate — arrays built by one are rejected by the
-other). This sits above `@lancedb/lancedb` 0.38's declared Arrow peer ceiling
+other). This sits above `@lancedb/lancedb` 0.39.0's declared Arrow peer ceiling
 (`>=15.0.0 <=18.1.0`) — npm will not even resolve the pairing without the override — and
 it is verified working, but it should be re-validated whenever `@lancedb/lancedb` is
 upgraded.
@@ -360,17 +360,22 @@ schema that Arrow 21.2 writes, failing every table open with
 `Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer:
 RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` — 56 unit and 36
 integration tests, every one that touches a real table. Do not treat this range as
-caret-safe. Re-verified on 2026-09-09 against `@lancedb/lancedb` 0.38.0 (the knowledge-store
-unit suite fails identically on 21.2.0 there). Note also that every `@lancedb/lancedb` release
-through 0.38 declares the same
+caret-safe. Re-verified on 2026-09-09 against `@lancedb/lancedb` 0.38.0 and again on
+2026-10-01 against 0.39.0 (the installed version), where the knowledge-store unit suite
+fails identically on 21.2.0: the same
+`Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer:
+RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }`. Note also that every
+`@lancedb/lancedb` release
+through 0.39 declares the same
 `<=18.1.0` Arrow ceiling, so upgrading LanceDB does not resolve the override; it only
 changes which pairing needs re-validating.
 
-Pinned validation library — `typebox` is pinned to the exact version the pi host packages
-depend on (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent` pin `1.3.7` across
-the 0.84.x AND 0.85.x lines — verified against both 0.85.0 and 0.85.1 on 2026-09-09, after
-an undocumented 1.3.26 drift was caught and realigned; 3,064 unit tests and all four
-type-checks pass against 1.3.7). Every
+Pinned validation library — `typebox` (TypeBox 1.x, unscoped package name) is pinned to the
+exact version the pi host packages depend on (`@earendil-works/pi-ai` /
+`@earendil-works/pi-coding-agent` 0.99.2 both pin `1.3.27` — verified 2026-10-01, after an
+undocumented drift was caught in the 0.84/0.85 era and realigned; that drift was to `1.3.26`,
+and the version now pinned is `1.3.27`, both re-checked directly in the installed host
+packages' `package.json`). Every
 tool's parameter schema is built with TypeBox here and handed across the boundary to pi's
 tool system, so the two must agree on `Value.Check`/`Convert` semantics. A floating `^1.1.38`
 range let a fresh consumer install resolve pi-research to a newer TypeBox than pi's, shipping
@@ -378,6 +383,17 @@ an untested cross-version pairing; the exact pin keeps pi-research on the same v
 validates with. Bump it in lockstep with the pi host, not independently. (`undici`, by
 contrast, tracks the host's major — the host is on undici 8, and pi-research only uses the
 stable `Agent` connector API, so it follows `^8`.)
+
+Pinned embedding runtime — `@huggingface/transformers` is exact at `4.2.0`. Tried `4.3.0`
+on 2026-10-01 and did not take it: it moves the native stack with it (onnxruntime-node
+`1.24.3` → `1.30.0`, onnxruntime-web `1.26.0-dev.20260416` → `1.31.0-dev.20260914`) and
+reshapes the tree (`roarr`, `boolean` and `detect-node` leave `global-agent`'s subtree). The
+knowledge-store unit suite (26 files, 322 tests) and the integration suites
+(`knowledge-stack`, `knowledge-models`, `research-knowledge-search`; 33 tests, 25 run, 8
+skipped) pass on both versions, so those suites do not decide it — they mock the backend or
+run against an already-cached model, and neither exercises a real model download and backend
+selection. Bump it only with a live embedding check (model load, CPU and WebGPU backends) on
+the new ONNX Runtime.
 
 Transient-failure resilience — every LLM call is a potential single point of failure on a
 streaming endpoint that can drop mid-response (undici surfaces this as `terminated`). The

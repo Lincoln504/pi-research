@@ -1550,13 +1550,13 @@ puede analizar el esquema que Arrow 21.2 escribe, fallando cada apertura de tabl
 `Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer:
 RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` — 56 pruebas unitarias y
 36 de integración, todas las que tocan una tabla real. No trate este rango como seguro para
-caret. Nótese también que todo release de `@lancedb/lancedb` hasta 0.37 declara el mismo
+caret. Nótese también que todo release de `@lancedb/lancedb` hasta 0.39.0 declara el mismo
 techo Arrow `<=18.1.0`, así que actualizar LanceDB no resuelve el override; solo cambia qué
 emparejamiento necesita revalidarse.
 
 Biblioteca de validación fijada — `typebox` está fijado a la versión exacta de la que
 dependen los paquetes del host pi (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent`
-fijan `1.3.7` a lo largo de la línea 0.84.x). El esquema de parámetros de cada herramienta se
+fijan `1.3.27` a lo largo de la línea 0.99.x). El esquema de parámetros de cada herramienta se
 construye aquí con TypeBox y se entrega al sistema de herramientas de pi, así que ambos deben
 coincidir en la semántica de `Value.Check`/`Convert`. Un rango flotante `^1.1.38` dejó que una
 instalación de consumo nueva resolviera pi-research a un TypeBox más nuevo que el de pi,
