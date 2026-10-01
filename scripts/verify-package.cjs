@@ -49,6 +49,11 @@ const REQUIRED = [
   'dist/pdf-extract-worker.mjs',
   // CLI binary (the `pi-research` bin in package.json)
   'dist/cli.mjs',
+  // The bin shim package.json actually points at. It must ship UNBUNDLED and
+  // NEXT TO dist/cli.mjs: it preflights the peer dependencies the bundle imports
+  // statically, and only then loads the bundle. A missing shim means `bin`
+  // resolves to nothing, so npm installs a command that does not exist.
+  'dist/cli-bin.mjs',
   // Out-of-process WebGPU viability probe (cli.mjs spawns it; shipped via files[])
   'dist/webgpu-probe.mjs',
   // Agent skill — the launcher + definition that coding agents load
@@ -135,6 +140,20 @@ function exportsTargets() {
     if (typeof target === 'string') out.push(target.replace(/^\.\//, ''));
   }
   return out;
+}
+
+// The `bin` map's targets. Checked the same way as `exports` targets because the
+// failure mode is worse: a bin that is not in the tarball still installs, and npm
+// happily writes a shim that resolves to a file that does not exist — so every
+// user's `pi-research` command is broken, including on platforms where the shim
+// is the only entry point (Windows .cmd/.ps1).
+function binTargets() {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const bin = pkg.bin;
+  const values = typeof bin === 'string' ? [bin] : Object.values(bin || {});
+  return values
+    .filter((v) => typeof v === 'string')
+    .map((v) => v.replace(/^\.\//, ''));
 }
 
 // The package version is duplicated in two hand-maintained places. The `npm
@@ -228,6 +247,10 @@ function verifyManifest() {
     if (t !== 'package.json' && !set.has(t)) fail(`exports target not shipped: ${t}`);
   }
 
+  for (const t of binTargets()) {
+    if (!set.has(t)) fail(`bin target not shipped: ${t} (the installed 'pi-research' command would not exist)`);
+  }
+
   for (const { dir, min } of PROMPT_DIRS) {
     const n = files.filter((p) => p.startsWith(`${dir}/`) && p.endsWith('.md')).length;
     if (n < min) fail(`${dir}: expected >=${min} .md prompt files, found ${n}`);
@@ -271,13 +294,17 @@ function verifyInstalled(pkgDir) {
     if (!fs.existsSync(path.join(pkgDir, t))) fail(`Installed exports target missing: ${t}`);
   }
 
+  for (const t of binTargets()) {
+    if (!fs.existsSync(path.join(pkgDir, t))) fail(`Installed bin target missing: ${t}`);
+  }
+
   // Executable scripts MUST start with a shebang. npm relies on it (not the exec
   // bit) to run a `bin` on Linux/macOS; an esbuild bundle has none unless the
   // build adds a --banner. Without it `pi-research` fails with an exec-format
   // error on Unix, while Windows' generated shims hide the breakage — so assert
   // it here where the file content is on disk.
   const SHEBANG = '#!/usr/bin/env node';
-  for (const rel of ['dist/cli.mjs', 'agent-skill/pi-research/scripts/run.mjs']) {
+  for (const rel of ['dist/cli.mjs', 'dist/cli-bin.mjs', 'agent-skill/pi-research/scripts/run.mjs']) {
     const full = path.join(pkgDir, rel);
     if (!fs.existsSync(full)) continue; // already reported missing above
     // Strip a trailing \r: a CRLF checkout (or a Windows-side pack) would otherwise fail

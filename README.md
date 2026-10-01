@@ -19,11 +19,11 @@
   ·
   <a href="docs/ARCHITECTURE.md">Architecture</a>
   ·
-  <a href="docs/DOCUMENTATION-ES.md">ES</a>
+  <a href="https://github.com/Lincoln504/pi-research/blob/main/docs/DOCUMENTATION-ES.md">ES</a>
   ·
-  <a href="docs/DOCUMENTATION-ZH.md">中文研究</a>
+  <a href="https://github.com/Lincoln504/pi-research/blob/main/docs/DOCUMENTATION-ZH.md">中文研究</a>
   ·
-  <a href="docs/DOCUMENTATION-JA.md">日本語研究</a>
+  <a href="https://github.com/Lincoln504/pi-research/blob/main/docs/DOCUMENTATION-JA.md">日本語研究</a>
 </p>
 
 ---
@@ -49,7 +49,7 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-No extra setup is needed. The package ships ready-made bindings for every platform and runs no install scripts. The stealth browser (1GB+ installed) downloads on first use, so the first scrape takes a few minutes. npm ≥11.19 skips install scripts by default. Leave it that way: nothing needs approving or building. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
+No extra setup is needed. The package ships ready-made bindings for every platform and declares no build step, so there is nothing to approve or compile. The stealth browser (1GB+ installed) is fetched by the `postinstall` script when npm runs install scripts, which it does by default up to npm 11.18 — that is the bundled npm on the Node 22.22.2 floor this package requires, so expect the fetch during install. Newer npm (11.19+) skips install scripts by default, and the browser is then fetched lazily on the first scrape instead. Either way the first scrape takes a few minutes until it is in place. Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to defer the fetch deliberately. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
 
 The `@earendil-works/pi-*` host packages are **peer dependencies**. pi supplies its own copies when it loads this as an extension, and npm ≥7 installs them automatically for a standalone (global or project) install. An install that skips peers does not get them: `npm install --legacy-peer-deps`, yarn classic, and `pi install` itself (it passes that flag on purpose) are all in that group. The standalone engine and the agent-skill launcher then stop with a message naming the missing package; add it with:
 
@@ -63,7 +63,7 @@ In pi, the extension works out of the box on the session's model and pi's config
 
 ### Uninstall
 
-`pi remove npm:@lincoln504/pi-research` removes the extension. `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. npm 7+ no longer runs `preuninstall`, so nothing else is removed on its own: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents). The shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
+`pi remove npm:@lincoln504/pi-research` removes the extension. `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. npm 7+ no longer runs `preuninstall`, so nothing else is removed on its own: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents), then remove the rest with `pi-research cleanup`: The shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
 
 ### How it works
 

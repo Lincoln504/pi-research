@@ -3,7 +3,13 @@
 /**
  * pi-research postinstall setup.
  * Installs Camoufox browser binaries.
- * Never exits with code 1 — that would break npm install.
+ *
+ * Exits 0 on EVERY failure path, because a non-zero exit from postinstall makes
+ * `npm install` fail and leaves the user without the package at all — the
+ * browser is re-fetchable on first use, a failed install is not. The single
+ * exception is PI_RESEARCH_STRICT_SETUP (set by this repo's CI), which restates
+ * the failure as exit 1 so an install regression fails the build loudly instead
+ * of hiding behind the graceful path.
  *
  * Environment:
  *   PLAYWRIGHT_BROWSERS_PATH            - override browser install location
@@ -82,6 +88,10 @@ function camoufoxCachePath() {
 }
 
 let browsersInstalled = false;
+// Set when a fetch cannot possibly succeed (an unusable configured install dir),
+// so the download is skipped rather than run to completion and then fail. Kept
+// separate from browsersInstalled so the summary below still tells the truth.
+let fetchSkipped = false;
 
 if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
   console.log('pi-research: skipping browser download (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
@@ -98,7 +108,15 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
   const installDeps = process.argv.includes('--system-deps') || process.env.PLAYWRIGHT_INSTALL_DEPS === 'true';
   if (installDeps && isLinux) {
     try {
-      execSync('npx playwright install-deps', { stdio: 'inherit', env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' } });
+      // Use the installed playwright-core CLI, NOT `npx playwright`: `playwright`
+      // is not a dependency of this package (only `playwright-core` is), so
+      // `npx playwright` resolved a DIFFERENT, unpinned package from the registry
+      // at install time — an extra network fetch, an extra supply-chain surface,
+      // and a version that can disagree with the browser we drive. playwright-core
+      // ships the same `install-deps` subcommand (verified: its CLI lists it).
+      const playwrightCoreBin = path.join(projectRoot, 'node_modules', '.bin', isWindows ? 'playwright-core.cmd' : 'playwright-core');
+      const cli = existsSync(playwrightCoreBin) ? playwrightCoreBin : 'playwright-core';
+      execSync(`"${cli}" install-deps`, { stdio: 'inherit', env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' } });
     } catch (e) {
       console.warn(`WARNING: could not install system dependencies. Run: sudo apt-get install -y libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1\nReason: ${e instanceof Error ? e.message : String(e)}\n(These are the libraries headless camoufox needs. Xvfb is NOT required for the default headless mode — only add it if you opt into virtual-display mode with PI_RESEARCH_USE_XVFB=true.)`);
     }
@@ -114,11 +132,23 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
         console.log(`pi-research: Camoufox already installed at ${cachePath}. Skipping fetch.`);
       }
     } catch (e) {
-      console.warn(`pi-research: error checking camoufox path ${cachePath}: ${e instanceof Error ? e.message : String(e)}`);
+      // A configured install dir that exists but cannot be READ as a directory
+      // (a plain file, a broken symlink mount, no permission) makes the fetch
+      // below impossible: camoufox downloads the whole ~663MB archive and then
+      // fails to place it. Report and skip instead, which is what the user's
+      // install needs either way (the catch further down exits 0, and the
+      // browser is re-fetchable once the path is usable).
+      console.warn(`pi-research: cannot use the browser install directory ${cachePath}: ${e instanceof Error ? e.message : String(e)}`);
+      if (customCamoufoxDir()) {
+        console.warn('pi-research: skipping the browser fetch because CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH points at a path that is not a usable directory. Fix or unset it, then run: npx camoufox-js fetch');
+        fetchSkipped = true;
+      }
     }
   }
 
-  if (!alreadyInstalled) {
+  if (fetchSkipped) {
+    // Reported above; the fetch cannot work until the configured path is fixed.
+  } else if (!alreadyInstalled) {
     try {
       const bin = resolveCamoufoxBin();
       // spawnSync with an ARGV ARRAY, never a shell string. `bin` is a filesystem
@@ -169,7 +199,11 @@ if (existsSync(cachePath)) {
     const versions = readdirSync(cachePath).filter(f => statSync(path.join(cachePath, f)).isDirectory());
     console.log(`pi-research: camoufox ready (${versions.join(', ') || 'installed'})`);
   } catch (e) {
-    console.log(`pi-research: camoufox ready (path check error: ${e instanceof Error ? e.message : String(e)})`);
+    // Not "ready": the path exists but cannot be read as an install dir (a plain
+    // file, no permission, a broken mount). Claiming readiness here is how a
+    // broken CAMOUFOX_INSTALL_DIR turned into a mysterious "browser missing at
+    // runtime" much later. The fetch path above already printed the remedy.
+    console.warn(`pi-research: camoufox install path ${cachePath} could not be verified: ${e instanceof Error ? e.message : String(e)}`);
   }
 } else if (browsersInstalled) {
   console.warn(`pi-research: camoufox binary not found at expected path ${cachePath}`);

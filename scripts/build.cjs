@@ -49,6 +49,16 @@ function copyWebGpuProbe() {
   );
 }
 
+// The `pi-research` bin shim (src/cli-bin.mjs), copied unbundled next to the
+// bundle it loads. It MUST NOT be bundled into dist/cli.mjs: its whole job is to
+// run BEFORE that bundle's external peer-dependency imports are evaluated, and
+// esbuild hoists those to the top of the emitted file. See the shim's own header
+// for the full story and for why `bin` points here instead of at dist/cli.mjs.
+function copyCliBin() {
+  fs.mkdirSync(p('dist'), { recursive: true });
+  fs.copyFileSync(p('src', 'cli-bin.mjs'), p('dist', 'cli-bin.mjs'));
+}
+
 // Build the browser worker bundle. Factored out so the cli target can guarantee
 // it exists when built in isolation (`build:cli`), not only via `build all`.
 function buildWorker() {
@@ -146,6 +156,7 @@ const TARGETS = {
     copyThreadWorker();
     copyPdfWorker();
     copyWebGpuProbe();
+    copyCliBin();
     copyPrompts();
   },
   skill: () => {

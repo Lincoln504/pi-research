@@ -121,10 +121,14 @@ npm install -g @lincoln504/pi-research   # el motor (deja `pi-research` en el PA
 pi-research skill install                # enlaza la habilidad en cada agente detectado
 ```
 
-En npm ≥11.19 (y npm 12) los scripts de instalación de dependencias se omiten por defecto —
-y no se necesitan: better-sqlite3 13 trae binarios precompilados dentro de su propio
-tarball, y el navegador sigiloso se autoabastece en su primer uso (la primera extracción
-tarda unos minutos). No se requiere ninguna aprobación (consulte el
+El paquete no requiere ninguna compilación ni aprobación: better-sqlite3 13 trae binarios
+precompilados dentro de su propio tarball. El navegador sigiloso (más de 1GB instalado) lo
+descarga el script `postinstall` cuando npm ejecuta los scripts de instalación, que es lo
+predeterminado hasta npm 11.18 — el npm incluido en Node 22.22.2, el mínimo que este paquete
+exige, así que espere la descarga durante la instalación. En npm ≥11.19 los scripts se omiten
+por defecto y el navegador se descarga de forma perezosa en la primera extracción; en ambos
+casos la primera extracción tarda unos minutos. Use `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` para
+posponerla deliberadamente (consulte el
 [README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)).
 
 La instalación global también trae los paquetes anfitriones `@earendil-works/pi-*` como
@@ -214,7 +218,10 @@ Agentes Externos. El instalador:
 > @lincoln504/pi-research` deja en su lugar los enlaces de la habilidad, el directorio de
 > estado (`~/.pi/research/state`) y el directorio de caché (`~/.cache/pi-research`,
 > incluidos los modelos de incrustación descargados). Ejecute `pi-research skill uninstall`
-> **antes** de retirar el paquete para llevarse los enlaces con usted.
+> **antes** de retirar el paquete para llevarse los enlaces con usted, y después
+> `pi-research cleanup` para eliminar el estado y la caché (conserva `config.env` y la base de
+> conocimiento). Añada `--purge-browsers` para borrar también `~/.cache/camoufox`, compartida con
+> otras herramientas.
 
 Independiente (sin extensión de pi). `pi-research skill install` y `pi-research skill
 uninstall` hacen exactamente lo mismo desde la CLI — misma detección de agentes, mismo
@@ -270,10 +277,11 @@ pueden importar:
 npm install @lincoln504/pi-research
 ```
 
-En npm ≥11.19 (y npm 12), los scripts de instalación de dependencias se omiten por defecto.
-Aquí no se necesita ninguno: better-sqlite3 13 trae binarios precompilados para todas las
-plataformas compatibles y los carga en tiempo de ejecución, y el navegador sigiloso se
-autoabastece en su primer uso. (El par `npm approve-scripts better-sqlite3` + `npm rebuild`
+El paquete no necesita compilar nada: better-sqlite3 13 trae binarios precompilados para todas
+las plataformas compatibles y los carga en tiempo de ejecución. El navegador sigiloso lo
+descarga el script `postinstall` cuando npm ejecuta los scripts de instalación (predeterminado
+hasta npm 11.18, el npm incluido en Node 22.22.2), y en npm ≥11.19 se descarga de forma
+perezosa en la primera extracción. (El par `npm approve-scripts better-sqlite3` + `npm rebuild`
 documentado por versiones anteriores reparaba better-sqlite3 12, que descargaba su binario
 desde un script de instalación — 13 incluye el binario en el paquete, y en npm 12.0.2 una
 aprobación no logra ejecutar un script omitido de todos modos.)

@@ -118,11 +118,13 @@ npm install -g @lincoln504/pi-research   # エンジン（`pi-research` が PATH
 pi-research skill install                # 検出された各エージェントにスキルをリンク
 ```
 
-npm ≥11.19（および npm 12）では、依存パッケージのインストールスクリプトはデフォルトで
-スキップされます — が、ここでは不要です。better-sqlite3 13 はプリビルド済みバイナリを
-自身の tarball に同梱しており、ステルスブラウザも初回使用時にセルフプロビジョニングします
-（初回のダウンロードには数分かかります）。承認操作は一切不要です
-（[README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install) 参照）。
+ビルドも承認も不要です。better-sqlite3 13 はプリビルド済みバイナリを自身の tarball に
+同梱しています。ステルスブラウザ（インストール後 1GB 超）は、npm がインストールスクリプトを
+実行する場合に `postinstall` が取得します（npm 11.18 までは既定で実行。Node 22.22.2 に同梱の
+npm もこれに該当し、本パッケージの最低要件です）。npm ≥11.19 ではスクリプトは既定で
+スキップされ、ブラウザは初回のスクレイプ時に遅延取得されます。いずれの場合も初回の
+スクレイプには数分かかります。`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` で明示的に後回しに
+できます（[README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install) 参照）。
 
 グローバルインストールでは、ホスト側の `@earendil-works/pi-*` パッケージも peer 依存と
 して導入されます（npm ≥7 が自動解決）。peer 依存をスキップするインストール
@@ -211,7 +213,9 @@ pi-research エンジン  —  CLI（dist/cli.mjs）
 > `npm uninstall @lincoln504/pi-research` を実行しても、スキルのリンク、状態ディレクトリ
 > （`~/.pi/research/state`）、キャッシュディレクトリ（`~/.cache/pi-research`。ダウンロード済みの
 > 埋め込みモデルを含みます）はその場に残ります。パッケージを削除する**前に**
-> `pi-research skill uninstall` を実行して、リンクを自分で片付けてください。
+> `pi-research skill uninstall` を実行してリンクを片付け、続けて `pi-research cleanup` で
+> 状態とキャッシュを削除してください（`config.env` とナレッジストアのデータベースは残ります）。
+> `--purge-browsers` を付けると、他のツールと共有している `~/.cache/camoufox` も削除されます。
 
 スタンドアロン（pi 拡張機能なし）。`pi-research skill install` と
 `pi-research skill uninstall` は CLI からまったく同じことを行います — 同じエージェント検出、
@@ -267,10 +271,10 @@ import が解決するように、プロジェクトの依存としてインス�
 npm install @lincoln504/pi-research
 ```
 
-npm ≥11.19（および npm 12）では、依存パッケージのインストールスクリプトはデフォルトで
-スキップされます。ここで必要なものはありません。better-sqlite3 13 はサポート対象のすべての
-プラットフォーム向けにプリビルド済みバイナリを同梱しており、実行時に読み込みます。
-ステルスブラウザも初回使用時にセルフプロビジョニングします。（旧バージョンのドキュメントに
+ビルドは不要です。better-sqlite3 13 はサポート対象のすべてのプラットフォーム向けに
+プリビルド済みバイナリを同梱しており、実行時に読み込みます。ステルスブラウザは、npm が
+インストールスクリプトを実行する場合は `postinstall` が取得し（npm 11.18 までは既定。
+Node 22.22.2 同梱の npm がこれに該当）、npm ≥11.19 では初回のスクレイプ時に遅延取得されます。（旧バージョンのドキュメントに
 あった `npm approve-scripts better-sqlite3` + `npm rebuild` の組み合わせは
 better-sqlite3 12 を修復するためのものです。12 はインストールスクリプトでバイナリを
 ダウンロードしていました。13 はバイナリをパッケージに同梱しており、しかも npm 12.0.2 では

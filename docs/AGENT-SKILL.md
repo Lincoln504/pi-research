@@ -110,7 +110,10 @@ Install in External Agents. The installer:
 > @lincoln504/pi-research` leaves the skill links, the state directory
 > (`~/.pi/research/state`) and the cache directory (`~/.cache/pi-research`,
 > including downloaded embedding models) in place. Run `pi-research skill uninstall`
-> **before** removing the package to take the links with you.
+> **before** removing the package to take the links with you. Then run
+> `pi-research cleanup` to remove the state tree and the cache (it keeps `config.env`
+> and the knowledge store database); add `--purge-browsers` to delete the shared
+> `~/.cache/camoufox` cache as well.
 
 Standalone (no pi extension). `pi-research skill install` and `pi-research skill uninstall`
 do exactly the same from the CLI — same agent detection, same manifest, same

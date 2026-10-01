@@ -312,6 +312,31 @@ describe('parseArgs — skill', () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseArgs — cleanup
+// ---------------------------------------------------------------------------
+
+describe('parseArgs — cleanup', () => {
+  it('bare `cleanup` parses with browsers preserved', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'cleanup']);
+    expect(r.command).toBe('cleanup');
+    expect(r.cleanup).toEqual({ purgeBrowsers: false });
+  });
+
+  it('--purge-browsers opts into deleting the shared browser cache', () => {
+    const r = parseArgs(['node', 'cli.mjs', 'cleanup', '--purge-browsers']);
+    expect(r.cleanup).toEqual({ purgeBrowsers: true });
+  });
+
+  it('unknown flag → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'cleanup', '--dry-run'])).toThrow(UsageError);
+  });
+
+  it('positional argument → UsageError', () => {
+    expect(() => parseArgs(['node', 'cli.mjs', 'cleanup', 'everything'])).toThrow(UsageError);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // parseArgs — research
 // ---------------------------------------------------------------------------
 
@@ -1837,3 +1862,69 @@ describe('skill launcher subprocess', () => {
   }, 30_000);
 });
 
+
+// ---------------------------------------------------------------------------
+// cleanup — subprocess end to end
+// ---------------------------------------------------------------------------
+//
+// `pi-research cleanup` is the documented way to remove what `npm uninstall`
+// leaves behind (npm 7+ never runs `preuninstall`). It delegates to the shipped
+// scripts/cleanup.cjs, so this exercises the real deletion path: the ownership
+// guards, the "keep config.env and knowledge_db" promise, and the exit code.
+//
+// XDG_CACHE_HOME is set explicitly here rather than relying on hermeticEnv: that
+// helper scrubs PI_RESEARCH_* and pins HOME, but XDG_CACHE_HOME takes PRECEDENCE
+// over HOME in the cache resolution and is not PI_RESEARCH_-prefixed, so on a host
+// that exports it (as the author's shell does) an unset value would point this
+// test at the developer's real cache directory and delete it.
+describe('cleanup — subprocess end to end', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), 'pi-cli-cleanup-'));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('removes the state tree and the cache, and keeps config.env and the knowledge store', () => {
+    const configDir = path.join(home, '.pi', 'research');
+    mkdirSync(path.join(configDir, 'state'), { recursive: true });
+    mkdirSync(path.join(configDir, 'knowledge_db'), { recursive: true });
+    mkdirSync(path.join(home, '.cache', 'pi-research', 'models'), { recursive: true });
+    writeFileSync(path.join(configDir, 'config.env'), 'PI_RESEARCH_MODEL=provider/model\n');
+    writeFileSync(path.join(configDir, 'state', 'session.json'), '{}\n');
+    writeFileSync(path.join(home, '.cache', 'pi-research', 'models', 'model.onnx'), 'x');
+
+    const r = spawnSync(process.execPath, [CLI, 'cleanup'], {
+      encoding: 'utf-8',
+      env: hermeticEnv({
+        HOME: home,
+        USERPROFILE: home,
+        XDG_CACHE_HOME: path.join(home, '.cache'),
+      }),
+      timeout: 20_000,
+    });
+
+    expect(r.status).toBe(0);
+    expect(existsSync(path.join(configDir, 'state'))).toBe(false);
+    expect(existsSync(path.join(home, '.cache', 'pi-research'))).toBe(false);
+    // Configuration and collected knowledge are deliberately preserved: they cost
+    // the user effort, and re-installing the package must not mean losing them.
+    expect(existsSync(path.join(configDir, 'config.env'))).toBe(true);
+    expect(existsSync(path.join(configDir, 'knowledge_db'))).toBe(true);
+  });
+
+  it('is idempotent — a second run on a cleaned tree still exits 0', () => {
+    const configDir = path.join(home, '.pi', 'research');
+    mkdirSync(path.join(configDir, 'state'), { recursive: true });
+    const env = hermeticEnv({ HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, '.cache') });
+
+    const first = spawnSync(process.execPath, [CLI, 'cleanup'], { encoding: 'utf-8', env, timeout: 20_000 });
+    const second = spawnSync(process.execPath, [CLI, 'cleanup'], { encoding: 'utf-8', env, timeout: 20_000 });
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+  });
+});

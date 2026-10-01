@@ -428,7 +428,7 @@ to support testing (mock replacement) and enforce init → use → dispose lifec
 Pure ESM — the codebase is ES Modules (`"type": "module"`). Worker bundles are built with
 esbuild (`npm run build:worker`) before integration tests or publishing.
 
-Enforced boundaries — `docs/deps.svg` is regenerated on every push (madge), and
+Enforced boundaries — [`docs/deps.svg`](https://github.com/Lincoln504/pi-research/blob/main/docs/deps.svg) is regenerated on every push (madge), and
 architectural rules are enforced by dependency-cruiser
 (`config/tooling/dependency-cruiser.cjs`).
 

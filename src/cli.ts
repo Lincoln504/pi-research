@@ -25,6 +25,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // pi-research internals (bundled; native/npm deps stay external).
@@ -989,6 +990,55 @@ export async function cmdKnowledgeConfig(kc: NonNullable<ParsedArgs['knowledgeCo
  * clobbered, and every link/copy is manifest-tracked so uninstall removes exactly
  * what was created.
  */
+/**
+ * `pi-research cleanup` — the supported way to remove what `npm uninstall`
+ * leaves behind.
+ *
+ * npm removed `preuninstall` in npm 7, so an uninstall removes the package
+ * directory and nothing else: skill links in other agents, the state tree and
+ * the cache (downloaded embedding models included) all stay on disk. The
+ * deletion logic already exists in `scripts/cleanup.cjs`, which ships in the
+ * tarball and is wired to the `preuninstall` and `cleanup` npm scripts — but
+ * reaching it means knowing where your package manager put the package.
+ *
+ * Delegates to that script rather than reimplementing it, deliberately: one
+ * deletion implementation, one set of ownership guards (it removes only what it
+ * can prove it created, and refuses to touch the shared camoufox cache unless
+ * asked). spawnSync with an argv array and process.execPath, never a shell
+ * string, so a package installed under a path containing shell metacharacters
+ * cannot execute anything.
+ *
+ * Resolves the script relative to THIS module: `src/cli.ts` and the bundled
+ * `dist/cli.mjs` are each one level below the package root, so `../scripts/`
+ * is correct for a source checkout, a local install and a global install alike.
+ */
+function cmdCleanup(c: NonNullable<ParsedArgs['cleanup']>): number {
+  const script = fileURLToPath(new URL('../scripts/cleanup.cjs', import.meta.url));
+  if (!fs.existsSync(script)) {
+    toStderr(
+      `\nError: cleanup script not found at ${script}.\n` +
+        'Run it from the installed package instead: node <package-dir>/scripts/cleanup.cjs\n',
+    );
+    return EXIT.CONFIG;
+  }
+
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (c.purgeBrowsers) {
+    // Shared with every other camoufox user on the box, which is why it is not
+    // the default. The script prints what it is about to delete.
+    env['PI_RESEARCH_PURGE_BROWSERS'] = '1';
+  }
+
+  // stdio: 'inherit' — the script narrates each removal, and that narration is
+  // the user's only confirmation of what was deleted.
+  const res = spawnSync(process.execPath, [script], { stdio: 'inherit', env });
+  if (res.error) {
+    toStderr(`\nError: could not run ${script}: ${res.error.message}\n`);
+    return EXIT.SOFTWARE;
+  }
+  return res.status ?? EXIT.SOFTWARE;
+}
+
 async function cmdSkill(s: NonNullable<ParsedArgs['skill']>): Promise<number> {
   const {
     installSkill, uninstallSkill, skillInstallCandidates, skillUninstallCandidates,
@@ -1268,6 +1318,7 @@ interface ParsedArgs {
   knowledgeConfig?: { action: 'show' | 'set' | 'set-retrieval'; mode?: 'none' | 'project' | 'global'; retrieval?: 'vector' | 'bm25'; json?: boolean };
   status?: { json?: boolean };
   skill?: { action: 'install' | 'uninstall' | 'status'; json?: boolean; dryRun?: boolean; copy?: boolean };
+  cleanup?: { purgeBrowsers?: boolean };
   configPath?: string;
   json?: boolean;
 }
@@ -1315,6 +1366,12 @@ COMMANDS
     --copy | --dry-run | --json  Copy instead of symlink; plan only; JSON output.
   skill uninstall                Remove the skill from agents where pi-research installed it.
     --dry-run | --json           Plan only; JSON output.
+
+  cleanup                        Remove what npm uninstall leaves behind: the skill links, the
+                                 state tree (<config dir>/research/state) and the cache, including
+                                 downloaded embedding models. Keeps config.env and the knowledge
+                                 store database. --purge-browsers also deletes the shared
+                                 stealth-browser cache (~/.cache/camoufox) other tools use.
 
   help, --help, -h               Show this help.
   --version, -v                  Print the pi-research version.
@@ -1490,6 +1547,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
       return out;
     }
     throw new UsageError(`unknown knowledge-config action "${action}". Use: show | set <none|project|global> | set retrieval <vector|bm25>.`);
+  }
+
+  if (cmd === 'cleanup') {
+    // Wrapper for the shipped scripts/cleanup.cjs. npm 7+ never runs
+    // `preuninstall`, so an uninstall leaves the state tree, the cache and any
+    // skill links in other agents behind; this is the documented way to remove
+    // them without locating the script inside node_modules or a global prefix.
+    let purgeBrowsers = false;
+    for (const a of rest) {
+      if (a === '--purge-browsers') purgeBrowsers = true;
+      else if (a?.startsWith('--')) throw new UsageError(`unknown option for cleanup: ${a}`);
+      else throw new UsageError(`unexpected argument "${a}" after "cleanup".`);
+    }
+    out.command = 'cleanup';
+    out.cleanup = { purgeBrowsers };
+    return out;
   }
 
   if (cmd === 'skill') {
@@ -1847,6 +1920,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdKnowledgeConfig(parsed.knowledgeConfig!);
     case 'skill':
       return cmdSkill(parsed.skill!);
+    case 'cleanup':
+      return cmdCleanup(parsed.cleanup!);
     case 'research':
       return cmdResearch(parsed.research!);
     default:

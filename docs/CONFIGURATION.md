@@ -363,7 +363,20 @@ All pi-research state lives under its own namespace, `~/.pi/research/`:
 | `~/.pi/research/state/` | Active sessions, browser status, locks. |
 | `~/.pi/research/knowledge_db/` | The knowledge store (LanceDB), unless `PI_RESEARCH_KNOWLEDGE_DIR` is set. |
 | `~/.cache/pi-research/profiles/` | Transient browser profiles, unless `PI_RESEARCH_TMP_DIR` is set. Rooted at `$XDG_CACHE_HOME` when that is set. |
+| `~/.cache/pi-research/models/` | Downloaded embedding models (the `@huggingface/transformers` backend). Re-downloaded on demand if removed. Rooted at `$XDG_CACHE_HOME` when that is set. |
 | `~/.cache/pi-research/webgpu-viability.json` | Cached WebGPU-viability verdict (see the knowledge store doc). Rooted at `$XDG_CACHE_HOME` when that is set. |
+| `~/.cache/camoufox/` | The stealth browser itself (1GB+). Shared with any other camoufox user on the machine, so it is never removed by default. |
+| `~/.pi/research/installed-skills.json` | Manifest of the skill links/copies `pi-research skill install` created, so `skill uninstall` removes exactly those. |
+| `$TMPDIR/pi-research.log` | Debug log, kept while `PI_RESEARCH_DEBUG=true`. Rotates at 10MB and keeps 10 archives. `PI_RESEARCH_LOG_PATH` relocates it. |
 
 Paths can be relocated with `PI_RESEARCH_STATE_DIR`, `PI_RESEARCH_KNOWLEDGE_DIR`,
 and `PI_RESEARCH_TMP_DIR`.
+
+### What uninstalling leaves behind
+
+`npm uninstall` removes the package directory and nothing else: npm 7 removed the
+`preuninstall` lifecycle, so the script declared in `package.json` never runs.
+`pi-research skill uninstall` removes the skill links, and `pi-research cleanup`
+removes the state tree and the cache (embedding models included) while keeping
+`config.env` and `knowledge_db/`. Add `--purge-browsers` to also delete the shared
+`~/.cache/camoufox` cache. The debug log is not removed by either.

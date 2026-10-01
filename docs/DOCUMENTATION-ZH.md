@@ -108,9 +108,11 @@ npm install -g @lincoln504/pi-research   # 引擎（把 `pi-research` 加入 PAT
 pi-research skill install                # 把技能链接到每个已检测到的智能体
 ```
 
-在 npm ≥11.19（以及 npm 12）上，依赖安装脚本默认被跳过 —— 本包也不需要它们：
-better-sqlite3 13 在自己的 tarball 中携带预编译绑定，隐身浏览器则在首次使用时自行准备
-（第一次抓取需要几分钟）。整个过程无需任何审批（见
+本包无需编译，也无需任何审批：better-sqlite3 13 在自己的 tarball 中携带预编译绑定。隐身浏览器
+（安装后 1GB 以上）由 `postinstall` 脚本在 npm 执行安装脚本时下载，这在 npm 11.18 及更早版本
+是默认行为 —— 本包要求的 Node 22.22.2 自带的正是该版本，因此安装过程就会下载。在 npm ≥11.19
+上安装脚本默认被跳过，浏览器改为首次抓取时按需下载。两种情况第一次抓取都需要几分钟。可用
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 主动推迟（见
 [README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)）。
 
 全局安装也会把宿主包 `@earendil-works/pi-*` 作为 peer 依赖一并装上（npm ≥7 会自动解析）。
@@ -188,7 +190,9 @@ pi-research 引擎  ——  CLI（dist/cli.mjs）
 > 不会运行 `preuninstall`** —— 已在 npm 11 上验证：`postinstall` 会触发，`preuninstall`
 > 不会。因此 `npm uninstall @lincoln504/pi-research` 会留下技能链接、状态目录
 > （`~/.pi/research/state`）和缓存目录（`~/.cache/pi-research`，包括已下载的嵌入模型）。
-> 请在移除包**之前**运行 `pi-research skill uninstall`，把链接一起带走。
+> 请在移除包**之前**运行 `pi-research skill uninstall` 带走链接，随后运行
+> `pi-research cleanup` 删除状态与缓存（保留 `config.env` 和知识库数据库）。加上
+> `--purge-browsers` 则同时删除与其他工具共享的 `~/.cache/camoufox`。
 
 独立使用（不装 pi 扩展）。`pi-research skill install` 和 `pi-research skill uninstall`
 从 CLI 做完全相同的事 —— 相同的智能体检测、相同的清单、相同的"绝不覆盖外来技能"保证
@@ -238,9 +242,9 @@ node "<skill_dir>/scripts/run.mjs" status   # 验证引擎能否被检测到
 npm install @lincoln504/pi-research
 ```
 
-在 npm ≥11.19（以及 npm 12）上，依赖安装脚本默认被跳过。本包不需要任何安装脚本：
-better-sqlite3 13 为所有受支持平台携带预编译绑定，运行时直接加载；隐身浏览器在首次
-使用时自行准备。（早期版本文档中的 `npm approve-scripts better-sqlite3` + `npm rebuild`
+本包不需要编译：better-sqlite3 13 为所有受支持平台携带预编译绑定，运行时直接加载。隐身浏览器
+由 `postinstall` 脚本在 npm 执行安装脚本时下载（npm 11.18 及更早为默认，Node 22.22.2 自带的
+npm 即属此类），在 npm ≥11.19 上改为首次抓取时按需下载。（早期版本文档中的 `npm approve-scripts better-sqlite3` + `npm rebuild`
 组合，是用来修复 better-sqlite3 12 的 —— 它通过安装脚本下载绑定；13 直接把绑定打包
 进 tarball，而且在 npm 12.0.2 上，approve 也没办法让被跳过的脚本跑起来。）
 
