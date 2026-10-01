@@ -194,6 +194,12 @@ jobs:
           key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
+      # npm/cli#4828 does not only drop a platform binding: it can drop the whole
+      # optional @huggingface/transformers subtree silently, and this job's
+      # type-check needs that package's declarations (`src/` imports them
+      # unconditionally), so the drop fails the job with TS2307 for a reason that
+      # has nothing to do with the code. Idempotent on a healthy tree.
+      - run: node scripts/ensure-native-deps.cjs
       - run: npm run type-check
       - run: npm run type-check:tests
       # TypeScript 7 (native compiler) typecheck. The repo is deliberately kept

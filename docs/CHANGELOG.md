@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A silently dropped optional `@huggingface/transformers` subtree no longer fails the type-check gate, and both the release and CI type-check jobs now repair it.** `npm ci` (npm/cli#4828, the same bug the lancedb binding self-heal exists for) can drop the ENTIRE optional embedding tree without printing any `npm warn optional` line: the v1.7.4 release run installed 592 packages from the same lockfile that had installed 606 minutes earlier in CI, and its `npm run type-check` then failed with six `TS2307: Cannot find module '@huggingface/transformers'` errors, because `src/` imports that package's declarations unconditionally. Re-running the identical job installed 606 and passed, then published. The runtime tolerates the absence by design (the knowledge store disables cleanly, which is why the package is optional), but the type-check gate does not, so the failure was a delivery flake rather than a code defect. `scripts/ensure-native-deps.cjs` now reads the pin from `optionalDependencies` (one source of truth), verifies it resolves, and when it does not installs that exact version by name, which is not subject to the optional-dependency resolution bug. The repair uses `--no-save --no-package-lock` so package.json and the tracked lockfile stay untouched, emits a GitHub warning annotation so it is visible in the run summary, and exits non-zero if the repair does not take. Verified against a scratch tree with the subtree deleted: the package is restored at the pinned version, both manifest hashes are unchanged, and `npm run type-check` then passes. The CI type-check job now runs the self-heal too (it was exposed to the same flake and had no repair step), the lancedb install in the same script gained `--no-package-lock` for the same reason, and `test/unit/scripts/ensure-native-deps.test.ts` covers the pin lookup, the resolve check and the platform-package selection.
+
 ## [1.7.4] - 2026-09-30
 
 ### Changed

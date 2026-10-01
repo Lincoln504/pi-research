@@ -18,6 +18,19 @@
  * then re-verifies. It exits non-zero only if a binding still cannot be loaded,
  * so a genuine problem fails the job loudly instead of silently.
  *
+ * A second, worse instance of the same bug is repaired here: `npm ci` can drop
+ * the ENTIRE optional `@huggingface/transformers` subtree (14 packages in
+ * 2026-10-01's tree — transformers, its onnxruntime/global-agent/sharp chain and
+ * the tokenizers/jinja packages), silently and with no `npm warn optional` line.
+ * Runtime tolerates it (the knowledge store disables cleanly, which is the whole
+ * point of the package being optional), but `npm run type-check` does not: `src/`
+ * imports its type declarations unconditionally. The release workflow's
+ * test-install job runs type-check, so a dropped subtree failed the v1.7.4
+ * release run with six `TS2307: Cannot find module '@huggingface/transformers'`
+ * errors while the same lockfile installed all 606 packages on a re-run. Hence
+ * the repair below: a NAMED install of the pinned version, which is not subject
+ * to the optional-dependency resolution bug.
+ *
  * Idempotent and fast: on a healthy tree the first require() succeeds and it
  * exits 0 immediately (the common case on macOS/Windows and on a good install).
  */
@@ -102,7 +115,84 @@ function lancedbVersion() {
   return JSON.parse(fs.readFileSync(pkgJson, 'utf8')).version;
 }
 
+/**
+ * The optional embedding runtime this repository requires, as {name, version},
+ * read from package.json so the pin lives in exactly one place. Returns null if
+ * package.json no longer declares it (in which case the type-check that needs it
+ * is gone too, and there is nothing to repair).
+ *
+ * `webgpu`, the other optionalDependencies entry, is deliberately NOT covered:
+ * its absence is a supported state on every platform (it is a browser shim) and
+ * nothing in the build or type-check path resolves it.
+ */
+function optionalEmbeddingPin(manifestPath = path.join(process.cwd(), 'package.json')) {
+  let deps;
+  try {
+    deps = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).optionalDependencies || {};
+  } catch {
+    return null;
+  }
+  const NAME = '@huggingface/transformers';
+  return Object.prototype.hasOwnProperty.call(deps, NAME) ? { name: NAME, version: deps[NAME] } : null;
+}
+
+/**
+ * True if `name` resolves from this tree. Fresh child process for the same
+ * resolver-state reason as lancedbLoads().
+ */
+function resolvable(name) {
+  const r = spawnSync(process.execPath, ['-e', `require.resolve(${JSON.stringify(name)})`], {
+    stdio: 'ignore',
+  });
+  return r.status === 0;
+}
+
+/**
+ * Repair a dropped optional embedding subtree. Never throws for a reason that is
+ * the app's problem: a genuinely absent optional package is a supported runtime
+ * state, but it is NOT a supported type-check state, so a repair that does not
+ * take fails the job loudly.
+ */
+function ensureOptionalEmbedding() {
+  const pin = optionalEmbeddingPin();
+  if (!pin) return;
+  if (resolvable(pin.name)) {
+    log(`${pin.name} present — nothing to do.`);
+    return;
+  }
+
+  const spec = `${pin.name}@${pin.version}`;
+  log(
+    `${pin.name} is missing after npm ci (npm/cli#4828 drops the optional ` +
+      `subtree silently). Type-check cannot run without its declarations, so ` +
+      `installing ${spec} directly (a named leaf install is not subject to the ` +
+      'optional-dep resolution bug)…',
+  );
+  process.stdout.write(
+    `::warning title=Optional embedding runtime repaired::${pin.name} was missing after npm ci; installed ${spec} directly (npm/cli#4828)\n`,
+  );
+
+  // --no-save + --no-package-lock keep this repair out of package.json and the
+  // tracked lockfile: the tree is repaired, the repository is not modified.
+  execSync(
+    `npm install --no-save --no-package-lock --no-audit --no-fund --legacy-peer-deps ${spec}`,
+    { stdio: 'inherit' },
+  );
+
+  if (!resolvable(pin.name)) {
+    process.stderr.write(
+      `[ensure-native-deps] ERROR: ${spec} was installed but ${pin.name} still ` +
+        'does not resolve. Type-check and the knowledge store cannot run on ' +
+        'this tree \u2014 run a clean `npm ci` and re-run.\n',
+    );
+    process.exit(1);
+  }
+  log(`repair succeeded — ${pin.name} now resolves.`);
+}
+
 function main() {
+  ensureOptionalEmbedding();
+
   if (lancedbLoads()) {
     log('lancedb native binding present — nothing to do.');
     return;
@@ -141,9 +231,10 @@ function main() {
   // --legacy-peer-deps mirrors how the project installs everywhere (a peer
   // conflict in the tree makes strict resolution ERESOLVE); --no-save keeps
   // package.json / lockfile untouched.
-  execSync(`npm install --no-save --no-audit --no-fund --legacy-peer-deps ${spec}`, {
-    stdio: 'inherit',
-  });
+  execSync(
+    `npm install --no-save --no-package-lock --no-audit --no-fund --legacy-peer-deps ${spec}`,
+    { stdio: 'inherit' },
+  );
 
   if (!lancedbLoads()) {
     process.stderr.write(
@@ -155,4 +246,10 @@ function main() {
   log('repair succeeded — lancedb native binding now loads.');
 }
 
-main();
+// Same shape as scripts/audit-gate.cjs: pure logic exported for the unit test,
+// side effects only when run as a CLI.
+module.exports = { optionalEmbeddingPin, resolvable, lancedbPlatformPackage, linuxLibc };
+
+if (require.main === module) {
+  main();
+}
