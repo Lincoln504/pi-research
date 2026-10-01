@@ -80,6 +80,7 @@ import {
   cmdKnowledge,
   cmdKnowledgeConfig,
   makeProgressObserver,
+  resolveCliDepth,
 } from '../../src/cli.ts';
 import { createResearchStopError } from '../../src/orchestration/session-state.ts';
 import { ResearchRunCapacityError } from '../../src/infrastructure/research-run-semaphore.ts';
@@ -1926,5 +1927,16 @@ describe('cleanup — subprocess end to end', () => {
 
     expect(first.status).toBe(0);
     expect(second.status).toBe(0);
+  });
+});
+
+describe('resolveCliDepth', () => {
+  it('an explicit --depth 0 is honoured even when QUICK_RESEARCH is off', () => {
+    expect(resolveCliDepth(0, { QUICK_RESEARCH: false, DEFAULT_RESEARCH_DEPTH: 2 })).toBe(0);
+  });
+  it('a config-derived default of 0 resolves to 1 unless QUICK_RESEARCH is on', () => {
+    expect(resolveCliDepth(undefined, { QUICK_RESEARCH: false, DEFAULT_RESEARCH_DEPTH: 0 })).toBe(1);
+    expect(resolveCliDepth(undefined, { QUICK_RESEARCH: true, DEFAULT_RESEARCH_DEPTH: 0 })).toBe(0);
+    expect(resolveCliDepth(undefined, { QUICK_RESEARCH: false, DEFAULT_RESEARCH_DEPTH: 3 })).toBe(3);
   });
 });

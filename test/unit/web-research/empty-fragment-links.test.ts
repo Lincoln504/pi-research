@@ -13,6 +13,7 @@ import {
   cleanConvertedMarkdown,
   createJsMarkdownConverter,
   createNativeMarkdownConverter,
+  collapseBlankLines,
 } from '../../../src/web-research/scraper-utils.ts';
 
 // Shape of a Quarto code block (llmstxt.org), plus a heading anchor.
@@ -67,5 +68,26 @@ describe('converters drop empty same-page links', () => {
     expect(md).not.toMatch(/\[\]\(#/);
     expect(md).toContain('# Title');
     expect(md).toContain('[example](#example)');
+  });
+});
+
+describe('collapseBlankLines', () => {
+  it('collapses blank-line runs in prose to one blank line', () => {
+    expect(collapseBlankLines('a\n\n\n\nb\n\n\nc')).toBe('a\n\nb\n\nc');
+  });
+
+  it('keeps blank lines inside fenced code (backtick and tilde), collapses around them', () => {
+    const md = 'x\n\n\n```python\ndef a():\n    pass\n\n\ndef b():\n    pass\n```\n\n\ny\n\n\n~~~\nm\n\n\nn\n~~~\n\n\nz';
+    expect(collapseBlankLines(md)).toBe('x\n\n```python\ndef a():\n    pass\n\n\ndef b():\n    pass\n```\n\ny\n\n~~~\nm\n\n\nn\n~~~\n\nz');
+  });
+
+  it('a shorter or different fence marker does not close a block; an unclosed fence runs to the end', () => {
+    expect(collapseBlankLines('````\na\n\n\n```\n\n\nb\n````\n\n\nc')).toBe('````\na\n\n\n```\n\n\nb\n````\n\nc');
+    expect(collapseBlankLines('```\na\n\n\nb')).toBe('```\na\n\n\nb');
+  });
+
+  it('cleanConvertedMarkdown preserves blank lines in code while dropping empty anchors', () => {
+    const md = '```\n[](#cb1-1)a\n\n\n[](#cb1-4)b\n```';
+    expect(cleanConvertedMarkdown(md)).toBe('```\na\n\n\nb\n```');
   });
 });

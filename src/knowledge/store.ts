@@ -279,7 +279,7 @@ export class KnowledgeStore implements IKnowledgeStore {
 
     try {
       if (!fs.existsSync(this.options.dbDir)) {
-        fs.mkdirSync(this.options.dbDir, { recursive: true });
+        fs.mkdirSync(this.options.dbDir, { recursive: true, mode: 0o700 });
       }
       this.db = await (await getLancedb()).connect(this.options.dbDir);
 

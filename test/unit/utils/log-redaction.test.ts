@@ -23,6 +23,30 @@ describe('redactSecrets', () => {
     expect(redactSecrets('Cookie: sessionid=deadbeefdeadbeef')).not.toContain('deadbeefdeadbeef');
   });
 
+  it('masks a bare token key, in env, query and JSON shapes', () => {
+    for (const input of ['token=abc123secret', 'GITHUB_TOKEN=ghp_x', 'https://h/?token=zzz', '{"token":"zzz"}']) {
+      const out = redactSecrets(input);
+      expect(out, input).toContain('[REDACTED]');
+      expect(out, input).not.toMatch(/abc123secret|ghp_x|zzz/);
+    }
+    // Plural token COUNTS are not credentials.
+    expect(redactSecrets('max_tokens=4096 tokens=12')).toBe('max_tokens=4096 tokens=12');
+  });
+
+  it('masks a quoted value whole, including spaces and commas', () => {
+    expect(redactSecrets('password="abc def ghi"')).toBe('password="[REDACTED]"');
+    expect(redactSecrets('{"apiKey":"abc,def"}')).toBe('{"apiKey":"[REDACTED]"}');
+    expect(redactSecrets("secret='a b' next")).toBe("secret='[REDACTED]' next");
+    // Unterminated quote: still masked up to the old delimiter, nothing leaks.
+    expect(redactSecrets('password="abc def')).not.toContain('abc');
+  });
+
+  it('masks the credential after an unrecognised Authorization scheme', () => {
+    const out = redactSecrets('Authorization: Token abc123abc123');
+    expect(out).not.toContain('abc123abc123');
+    expect(redactSecrets('Authorization: Digest username=x')).not.toContain('username=x');
+  });
+
   it('masks the ENTIRE Cookie header value, not just the first pair', () => {
     // The KV value class stops at whitespace, so pre-fix only `lang=en;` was
     // masked and every later pair — including the actual credential — survived.

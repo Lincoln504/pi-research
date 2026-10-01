@@ -121,6 +121,17 @@ describe('pi-research bin shim', () => {
     expect(r.stderr).not.toContain('npm install -g @earendil-works/pi-coding-agent');
   });
 
+  it('also guards pi-tui, which dist/cli.mjs imports directly', () => {
+    rmSync(path.join(workDir, 'node_modules'), { recursive: true, force: true });
+    hostPackage(workDir, '@earendil-works/pi-ai');
+    hostPackage(workDir, '@earendil-works/pi-coding-agent');
+    const r = runShim();
+
+    expect(r.status).toBe(78);
+    expect(r.stderr).toMatch(/npm install -g @earendil-works\/pi-tui(\s|$)/);
+    expect(r.stdout).not.toContain('engine ran');
+  });
+
   it('reports a package whose files are incomplete, instead of passing it and crashing later', () => {
     // Resolving is not loading. An interrupted install or a pruned node_modules
     // leaves package.json and its exports map intact while the file they point
@@ -130,6 +141,7 @@ describe('pi-research bin shim', () => {
     rmSync(path.join(workDir, 'node_modules'), { recursive: true, force: true });
     hostPackage(workDir, '@earendil-works/pi-coding-agent');
     hostPackage(workDir, '@earendil-works/pi-ai');
+    hostPackage(workDir, '@earendil-works/pi-tui');
     rmSync(path.join(workDir, 'node_modules', '@earendil-works', 'pi-ai', 'index.js'));
     const r = runShim();
 
@@ -143,6 +155,7 @@ describe('pi-research bin shim', () => {
   it('loads the bundle when both peers are present, and rewrites argv[1] so main() runs', () => {
     hostPackage(workDir, '@earendil-works/pi-ai');
     hostPackage(workDir, '@earendil-works/pi-coding-agent');
+    hostPackage(workDir, '@earendil-works/pi-tui');
     const r = runShim(['--version']);
 
     expect(r.stderr).toBe('');
@@ -157,6 +170,7 @@ describe('pi-research bin shim', () => {
     // CJS resolver throw ERR_PACKAGE_PATH_NOT_EXPORTED for an installed package.
     hostPackage(workDir, '@earendil-works/pi-ai');
     hostPackage(workDir, '@earendil-works/pi-coding-agent');
+    hostPackage(workDir, '@earendil-works/pi-tui');
     const r = runShim();
     expect(r.stdout).toContain('engine ran');
   });

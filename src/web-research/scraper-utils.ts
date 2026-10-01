@@ -551,20 +551,43 @@ export function trimFrontMatter(markdown: string): string {
  * leaves extra blank lines, so they are collapsed again.
  */
 export function cleanConvertedMarkdown(markdown: string): string {
-  return stripEmptyFragmentLinks(stripImageLinks(trimFrontMatter(markdown)))
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return collapseBlankLines(stripEmptyFragmentLinks(stripImageLinks(trimFrontMatter(markdown)))).trim();
+}
+
+/** Opening/closing fence of a fenced code block (CommonMark: up to 3 spaces, 3+ backticks or tildes). */
+const CODE_FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * Collapse runs of blank lines to one, EXCEPT inside fenced code blocks, where
+ * blank lines are content (PEP 8 spacing, Makefiles, ASCII art). An unclosed
+ * fence runs to the end of the document, as in CommonMark.
+ */
+export function collapseBlankLines(markdown: string): string {
+  if (!markdown.includes('\n\n\n')) return markdown;
+  const out: string[] = [];
+  let fence: string | null = null;
+  for (const line of markdown.split('\n')) {
+    const m = CODE_FENCE.exec(line);
+    if (fence === null) {
+      if (m) fence = m[1]!;
+    } else if (m && m[1]![0] === fence[0] && m[1]!.length >= fence.length && line.slice(m[0].length).trim() === '') {
+      fence = null;
+    }
+    if (fence === null && line === '' && out.length > 0 && out[out.length - 1] === '') continue;
+    out.push(line);
+  }
+  return out.join('\n');
 }
 
 /**
  * Strip image links from markdown
  */
 export function stripImageLinks(markdown: string): string {
-  return markdown
-    .replace(MARKDOWN_IMAGE_PATTERN, '')
-    .replace(IMAGE_LINK_PATTERN, '$1')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return collapseBlankLines(
+    markdown
+      .replace(MARKDOWN_IMAGE_PATTERN, '')
+      .replace(IMAGE_LINK_PATTERN, '$1'),
+  ).trim();
 }
 
 /**

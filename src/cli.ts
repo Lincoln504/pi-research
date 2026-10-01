@@ -580,6 +580,20 @@ interface ResearchArgs {
   json?: boolean;
 }
 
+
+/**
+ * Depth for a CLI research run. An explicit --depth 0 always runs quick mode (the
+ * documented CLI/skill entry). A CONFIG-derived default of 0 only does when
+ * QUICK_RESEARCH is on; otherwise it resolves to 1, as on the pi tool path.
+ */
+export function resolveCliDepth(
+  explicit: number | undefined,
+  cfg: { QUICK_RESEARCH: boolean; DEFAULT_RESEARCH_DEPTH: number },
+): 0 | 1 | 2 | 3 {
+  const d = explicit ?? (cfg.QUICK_RESEARCH ? cfg.DEFAULT_RESEARCH_DEPTH : Math.max(1, cfg.DEFAULT_RESEARCH_DEPTH));
+  return d as 0 | 1 | 2 | 3;
+}
+
 /**
  * Research subcommand. Initializes the SDK, runs deep/quick research, prints the
  * markdown report to stdout, and always shuts down (even on failure).
@@ -607,8 +621,7 @@ export async function cmdResearch(args: ResearchArgs): Promise<number> {
     return EXIT.USAGE;
   }
 
-  const depth: 0 | 1 | 2 | 3 =
-    (args.depth ?? getConfig(process.cwd(), 'cli').DEFAULT_RESEARCH_DEPTH) as 0 | 1 | 2 | 3;
+  const depth = resolveCliDepth(args.depth, getConfig(process.cwd(), 'cli'));
   // det.model already reflects --model-first precedence (detectCredentials above).
   const runModel = det.model;
   toStderr(`[pi-research] starting research (depth ${depth})${runModel ? ` with ${runModel}` : ''}…\n`);

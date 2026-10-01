@@ -188,7 +188,7 @@ export async function exportResearchReport(
     const filepath = join(targetDir, filename);
 
     try {
-      await fs.writeFile(filepath, result, { flag: 'wx' });
+      await fs.writeFile(filepath, result, { flag: 'wx', mode: 0o600 });
       logger.log(`[export] Research report saved to: ${filepath}`);
       return filepath;
     } catch (error) {

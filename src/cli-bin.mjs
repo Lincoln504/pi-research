@@ -37,7 +37,13 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const REQUIRED_PEERS = ['@earendil-works/pi-ai', '@earendil-works/pi-coding-agent'];
+const REQUIRED_PEERS = [
+  '@earendil-works/pi-ai',
+  '@earendil-works/pi-coding-agent',
+  // dist/cli.mjs imports it directly (TUI width helpers), so an install that skips
+  // peers can lack it even though pi-coding-agent normally brings it in.
+  '@earendil-works/pi-tui',
+];
 
 /**
  * Probe one peer dependency.

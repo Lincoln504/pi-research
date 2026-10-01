@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.8] - 2026-10-01
+
+### Fixed
+
+- **Scraped code blocks keep their blank lines.** `cleanConvertedMarkdown` and `stripImageLinks` collapsed every run of blank lines across the whole document, fenced code included, so a PEP 8 two-blank-line gap, a Makefile or preformatted ASCII was altered in what was stored and cited. The collapse now skips fenced blocks (backtick or tilde, closing fence at least as long as the opening one, an unclosed fence running to the end as in CommonMark) and still tidies prose. Empty-anchor removal still applies inside code on purpose: that is where Quarto/nbdev emit them.
+- **`pi-research research` honours the quick-mode gate for a config-derived depth.** `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH=0` with `QUICK_RESEARCH` off ran quick mode from the CLI, while the documented rule, and the pi tool path, resolve it to 1. An explicit `--depth 0` still runs quick mode, as the skill documents. The rule now lives in one tested function, `resolveCliDepth`.
+- **Log redaction covers more credential shapes.** A bare `token` key (`token=…`, `GITHUB_TOKEN=…`, `?token=…`) was not masked, a quoted value was cut at its first space, comma or ampersand (`password="a b"` left ` b"` in the log), and `Authorization: Token <credential>` (any scheme other than Bearer/Basic) masked only the scheme word. Quoted values are now consumed whole under a 1024-character bound, so the scan stays linear (measured on adversarial 40k inputs: single-digit milliseconds). Plural counters such as `max_tokens=4096` are deliberately not matched.
+- **The `pi-research` bin shim also checks `@earendil-works/pi-tui`.** `dist/cli.mjs` imports it directly, but the preflight only listed `pi-ai` and `pi-coding-agent`, so a peer-skipping install lacking only `pi-tui` still died with a raw `ERR_MODULE_NOT_FOUND`.
+- **Local files that hold research content are no longer group/world readable by default.** The knowledge store directory is created `0700` and exported research reports are written `0600` (previously the process umask decided, typically `0775`/`0644`, and exports can fall back to the shared temp directory). An existing directory is not re-chmodded.
+
 ## [1.7.7] - 2026-10-01
 
 ### Changed

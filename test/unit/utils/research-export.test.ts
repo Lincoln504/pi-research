@@ -36,7 +36,7 @@ describe('exportResearchReport', () => {
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringContaining('pi-research-test-query-with-spaces-'),
       'result',
-      { flag: 'wx' }
+      { flag: 'wx', mode: 0o600 }
     );
   });
 
@@ -57,7 +57,7 @@ describe('exportResearchReport', () => {
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringContaining(join('pinned-reports', 'pi-research-q-')),
       'result',
-      { flag: 'wx' },
+      { flag: 'wx', mode: 0o600 },
     );
   });
 
@@ -71,7 +71,7 @@ describe('exportResearchReport', () => {
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringMatching(/pi-research-[^\/]+-[a-f0-9]{6}\.md/),
       'result',
-      { flag: 'wx' }
+      { flag: 'wx', mode: 0o600 }
     );
   });
 
@@ -84,7 +84,7 @@ describe('exportResearchReport', () => {
     expect(mockWriteFile).toHaveBeenCalledWith(
       expect.stringContaining('pi-research-test-query-'),
       'result',
-      { flag: 'wx' }
+      { flag: 'wx', mode: 0o600 }
     );
   });
 

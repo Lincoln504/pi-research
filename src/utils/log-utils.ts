@@ -126,8 +126,18 @@ const COOKIE_HEADER_PATTERN = new RegExp(
 // sort key, a map key) is the accepted trade-off — same one already made for
 // the equally generic bare `session`/`cookie` entries below.
 const SENSITIVE_KV_PATTERN = new RegExp(
-  `${B_LEFT}(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key|key)${B_RIGHT}` +
-    `(["']?\\s*[:=]\\s*["']?)([^\\s"',&)]+)`,
+  `${B_LEFT}(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key|token|key)${B_RIGHT}` +
+    // A quoted value is consumed whole (bounded, so no backtracking blow-up): the
+    // old unquoted class stopped at the first space/comma/&, so `password="a b"`
+    // left ` b"` in the clear. An unterminated quote falls through to that class.
+    `(["']?\\s*[:=]\\s*)("[^"\\r\\n]{0,1024}"|'[^'\\r\\n]{0,1024}'|["']?[^\\s"',&)]+)`,
+  'gi',
+);
+// `Authorization: <scheme> <credential>` for schemes the Bearer/Basic patterns do
+// not know (Token, Digest, ApiKey, ...). The KV pass alone would mask only the
+// scheme word and leave the credential after the space.
+const AUTH_SCHEME_PATTERN = new RegExp(
+  `${B_LEFT}(authorization)${B_RIGHT}(["']?\\s*[:=]\\s*["']?)([A-Za-z][A-Za-z0-9_-]{0,31})[ \\t]+[^\\s"',&)]+`,
   'gi',
 );
 // Well-known opaque credential formats (OpenAI, GitHub, AWS, Slack, Anthropic).
@@ -237,7 +247,12 @@ export function redactSecrets(message: string): string {
   // Whole-header cookie masking before the KV pass, which would otherwise stop
   // at the first whitespace and leave every subsequent pair in the clear.
   out = out.replace(COOKIE_HEADER_PATTERN, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
-  out = out.replace(SENSITIVE_KV_PATTERN, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
+  out = out.replace(AUTH_SCHEME_PATTERN, (_m, key: string, sep: string, scheme: string) => `${key}${sep}${scheme} [REDACTED]`);
+  out = out.replace(SENSITIVE_KV_PATTERN, (_m, key: string, sep: string, val: string) => {
+    const q = val[0] === '"' || val[0] === "'" ? val[0] : '';
+    const closed = q !== '' && val.length > 1 && val.endsWith(q);
+    return `${key}${sep}${q}[REDACTED]${closed ? q : ''}`;
+  });
   out = out.replace(KNOWN_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(PROVIDER_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(LONG_HEX_SECRET_PATTERN, '[REDACTED]');
