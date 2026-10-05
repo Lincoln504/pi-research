@@ -121,8 +121,8 @@ npm install -g @lincoln504/pi-research   # el motor (deja `pi-research` en el PA
 pi-research skill install                # enlaza la habilidad en cada agente detectado
 ```
 
-El paquete no requiere ninguna compilación ni aprobación: better-sqlite3 13 trae binarios
-precompilados dentro de su propio tarball. El navegador sigiloso (más de 1GB instalado) lo
+El paquete no requiere ninguna compilación ni aprobación: la única pieza nativa en la ruta de
+lanzamiento es `impit`, que trae binarios precompilados. El navegador sigiloso (más de 1GB instalado) lo
 descarga el script `postinstall` cuando npm ejecuta los scripts de instalación, que es lo
 predeterminado hasta npm 11.18 — el npm incluido en Node 22.22.2, el mínimo que este paquete
 exige, así que espere la descarga durante la instalación. En npm ≥11.19 los scripts se omiten
@@ -277,14 +277,15 @@ pueden importar:
 npm install @lincoln504/pi-research
 ```
 
-El paquete no necesita compilar nada: better-sqlite3 13 trae binarios precompilados para todas
-las plataformas compatibles y los carga en tiempo de ejecución. El navegador sigiloso lo
+El paquete no necesita compilar nada: la única pieza nativa en la ruta de lanzamiento es
+`impit`, que trae binarios precompilados. El navegador sigiloso lo
 descarga el script `postinstall` cuando npm ejecuta los scripts de instalación (predeterminado
 hasta npm 11.18, el npm incluido en Node 22.22.2), y en npm ≥11.19 se descarga de forma
 perezosa en la primera extracción. (El par `npm approve-scripts better-sqlite3` + `npm rebuild`
-documentado por versiones anteriores reparaba better-sqlite3 12, que descargaba su binario
-desde un script de instalación — 13 incluye el binario en el paquete, y en npm 12.0.2 una
-aprobación no logra ejecutar un script omitido de todos modos.)
+documentado por versiones anteriores reparaba el antiguo lanzador `camoufox-js`, cuyo binario
+`better-sqlite3` venía de un script de instalación — el cambio a `@camoufox/camoufox` del
+2026-10-05 eliminó esa dependencia, y en npm 12.0.2 una aprobación no logra ejecutar un script
+omitido de todos modos.)
 
 Después elija el modelo: pase `model` a `initResearchSDK`, o defina `PI_RESEARCH_MODEL`
 (env o `~/.pi/research/config.env`). El SDK nunca sigue el modelo seleccionado dentro de la

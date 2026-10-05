@@ -22,9 +22,9 @@ pi-research skill install                # link the skill into every detected ag
 ```
 
 On npm ≥11.19 (and npm 12) dependency install scripts are skipped by default — and
-none are needed: better-sqlite3 13 ships prebuilt bindings in its own tarball, and the
-stealth browser self-provisions on its first use (the first scrape takes a few
-minutes). No approval is required (see the [README](../README.md#install)).
+none are needed: the only native piece on the launch path is `impit`, which ships
+prebuilt binaries, and the stealth browser self-provisions on its first use (the first
+scrape takes a few minutes). No approval is required (see the [README](../README.md#install)).
 
 The global install also brings the `@earendil-works/pi-*` host packages in as peer
 dependencies (npm ≥7 resolves them). If your install skips peers

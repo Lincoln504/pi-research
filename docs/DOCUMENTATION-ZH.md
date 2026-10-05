@@ -108,7 +108,7 @@ npm install -g @lincoln504/pi-research   # 引擎（把 `pi-research` 加入 PAT
 pi-research skill install                # 把技能链接到每个已检测到的智能体
 ```
 
-本包无需编译，也无需任何审批：better-sqlite3 13 在自己的 tarball 中携带预编译绑定。隐身浏览器
+本包无需编译，也无需任何审批：启动路径上唯一的原生部分是 `impit`，它自带预编译二进制。隐身浏览器
 （安装后 1GB 以上）由 `postinstall` 脚本在 npm 执行安装脚本时下载，这在 npm 11.18 及更早版本
 是默认行为 —— 本包要求的 Node 22.22.2 自带的正是该版本，因此安装过程就会下载。在 npm ≥11.19
 上安装脚本默认被跳过，浏览器改为首次抓取时按需下载。两种情况第一次抓取都需要几分钟。可用
@@ -242,11 +242,12 @@ node "<skill_dir>/scripts/run.mjs" status   # 验证引擎能否被检测到
 npm install @lincoln504/pi-research
 ```
 
-本包不需要编译：better-sqlite3 13 为所有受支持平台携带预编译绑定，运行时直接加载。隐身浏览器
+本包不需要编译：启动路径上唯一的原生部分是 `impit`，它自带预编译二进制。隐身浏览器
 由 `postinstall` 脚本在 npm 执行安装脚本时下载（npm 11.18 及更早为默认，Node 22.22.2 自带的
 npm 即属此类），在 npm ≥11.19 上改为首次抓取时按需下载。（早期版本文档中的 `npm approve-scripts better-sqlite3` + `npm rebuild`
-组合，是用来修复 better-sqlite3 12 的 —— 它通过安装脚本下载绑定；13 直接把绑定打包
-进 tarball，而且在 npm 12.0.2 上，approve 也没办法让被跳过的脚本跑起来。）
+组合，是用来修复旧 `camoufox-js` 启动器的 —— 它的 `better-sqlite3` 绑定由安装脚本下载；
+2026-10-05 改用 `@camoufox/camoufox` 后该依赖已完全移除，而且在 npm 12.0.2 上，
+approve 也没办法让被跳过的脚本跑起来。）
 
 然后选择模型：向 `initResearchSDK` 传入 `model`，或设置 `PI_RESEARCH_MODEL`（环境变量
 或 `~/.pi/research/config.env`）。SDK 绝不跟随 pi 扩展内选中的模型；只有当两者都未设置

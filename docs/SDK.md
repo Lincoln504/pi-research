@@ -22,12 +22,13 @@ npm install @earendil-works/pi-coding-agent
 ```
 
 On npm ≥11.19 (and npm 12), dependency install scripts are skipped by default. Nothing
-here needs them: better-sqlite3 13 carries prebuilt bindings for every supported
-platform and loads them at runtime, and the stealth browser self-provisions on its
-first use. (The `npm approve-scripts better-sqlite3` + `npm rebuild` pair documented by
-earlier releases repaired better-sqlite3 12, which downloaded its binding from an
-install script — 13 ships the binding instead, and on npm 12.0.2 an approval does not
-make a skipped script run anyway.)
+here needs them: the only native piece on the launch path is `impit`, which ships
+prebuilt binaries, and the stealth browser self-provisions on its first use. (The
+`npm approve-scripts better-sqlite3` + `npm rebuild` pair documented by earlier
+releases repaired the old `camoufox-js` launcher, whose `better-sqlite3` binding came
+from an install script — the 2026-10-05 move to `@camoufox/camoufox` removed that
+dependency entirely, and on npm 12.0.2 an approval does not make a skipped script run
+anyway.)
 
 Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
 (env or `~/.pi/research/config.env`). The SDK never follows the model selected
