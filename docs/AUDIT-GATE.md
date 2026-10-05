@@ -161,12 +161,20 @@ is not fixable from here:
 
 - **`sharp` via `@lancedb/lancedb` 0.39.0.** LanceDB's `optionalDependencies` pins
   `@huggingface/transformers` at exactly `3.0.2`, whose `sharp ^0.33.5` resolves to the vulnerable
-  `0.33.5`; 0.39.0 is the newest stable LanceDB (the 0.40.0 betas still pin `3.0.2`), so no bump
-  moves it. pi-research uses transformers only
+  `0.33.5`. Every published LanceDB version was checked on 2026-10-05 — 0.39.0 is the newest
+  stable and the 0.40.0 betas (through `0.40.0-beta.12`, the `preview` dist-tag) all pin the same
+  exact `3.0.2` — so no bump moves it. Upstream is the only fix: `transformers` 4.3.0 is the first
+  release whose `sharp ^0.35.4` is clear, and `transformers` 3.0.3 dropped the `sharp` dependency
+  entirely (the 3.1.x/3.2.x line kept `^0.33.5`). pi-research uses transformers only
   for text `feature-extraction`, so the vulnerable libvips/libheif decoders are never invoked —
-  the exposure is a scanner finding, not a reachable path. A consumer `sharp` override clears it
-  (verified: 0 on both install shapes). Consuming LanceDB's own embedding function is the only reason to
-  keep `sharp` unoverridden.
+  the exposure is a scanner finding, not a reachable path.
+  - Consumer-side remedies, both re-verified against the 1.7.8 tarball on 2026-10-05:
+    - a root `overrides: {"sharp": "^0.35.4"}` gives `npm audit` 0 and dedupes a single
+      `sharp@0.35.5` into LanceDB's `transformers@3.0.2`, so the store keeps working;
+    - `npm install --omit=optional` plus `npm audit --omit=optional` reports 0 as well, but it
+      also drops LanceDB's own native binding, so the knowledge store disables (`DISABLED('native')`)
+      rather than degrading to BM25. Not a substitute for the override when the store is wanted.
+  - Consuming LanceDB's own embedding function is the only reason to keep `sharp` unoverridden.
 
 **Cleared 2026-10-05: `brace-expansion 5.0.9` inside the pi host's `npm-shrinkwrap.json`.** pi 1.0.1
 (changelog: "Fixed installations resolving vulnerable `brace-expansion` 5.0.9 by pinning
