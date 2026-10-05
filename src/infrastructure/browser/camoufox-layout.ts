@@ -429,9 +429,17 @@ export async function provisionBrowser(
   } catch (e) {
     reason = e instanceof Error ? e.message : String(e);
   }
-  if (ok && isUsable(dir, pin)) {
+  // A non-zero exit is NOT proof the browser is unusable. The launcher extracts the
+  // browser and writes the compat flag BEFORE it fetches its companion geoip database
+  // from a separate GitHub release, so a failure there (observed: `UND_ERR_SOCKET other
+  // side closed` on ubuntu-latest, three runs in a row on 2026-10-05) exits non-zero with
+  // a fully launchable paired build already in place. Verified: a real headless launch
+  // succeeds with the mmdb removed. Keep the install and drop the legacy stash rather
+  // than reporting a failure and restoring an older browser on top of a working one.
+  if (isUsable(dir, pin)) {
     discardLegacy(stash);
     if (stash) log('pi-research: removed the legacy Camoufox install (replaced by the new build)');
+    if (!ok) log(`pi-research: camoufox fetch reported a failure after the browser was installed (${reason}); keeping it. Run "npx camoufox fetch" to retry the companion download (e.g. the geoip database).`);
     sweepStaleStashes(dir, log);
     return { status: 'installed', pruned: pruneSuperseded(dir, log, pin) };
   }

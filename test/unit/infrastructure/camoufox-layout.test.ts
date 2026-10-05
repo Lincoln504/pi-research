@@ -241,6 +241,22 @@ describe('provisionBrowser — never leaves the user with less than they had', (
     }
   });
 
+  it('a fetch that fails AFTER installing the paired build keeps it (companion download failed)', async () => {
+    for (const impl of ['ts', 'cjs'] as const) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      legacy();
+      // The launcher extracts the browser (and writes .0.5_FLAG) before it fetches its
+      // companion geoip database from a separate release; a failure there exits non-zero
+      // over a launchable build. Keep it instead of restoring the legacy one.
+      const r = await provision(impl, () => { fixture()(); return false; });
+      expect(r.res.status).toBe('installed');
+      expect(fs.existsSync(path.join(dir, 'camoufox-bin'))).toBe(false); // legacy discarded, not restored
+      expect(fs.readdirSync(root)).toEqual(['camoufox']);                // no stash left behind
+      expect(ts.listInstalls(dir)).toHaveLength(1);
+      expect(r.msgs.join('\n')).toContain('keeping it');
+    }
+  });
+
   it('recovers a stash left by a crashed upgrade (dir missing) before doing anything else', async () => {
     for (const impl of ['ts', 'cjs'] as const) {
       fs.rmSync(root, { recursive: true, force: true });

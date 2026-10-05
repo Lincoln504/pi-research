@@ -47,6 +47,10 @@ if (cmd === 'fetch') {
   fs.writeFileSync(path.join(b, 'camoufox-bin'), 'new');
   fs.writeFileSync(path.join(dir, '.0.5_FLAG'), '');
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ active_version: 'browsers/official/' + folder }));
+  // The real launcher writes the flag and the pinned build BEFORE it fetches its
+  // companion geoip database from a separate GitHub release; a failure there exits 1
+  // over a fully launchable browser (verified: a headless launch works without the mmdb).
+  if (process.env.FAKE_GEOIP_FAIL === '1') { log('geoip-failed'); process.exit(1); }
 } else if (cmd === 'remove') {
   log('remove ' + process.argv.slice(3).join(' '));
   fs.rmSync(dir, { recursive: true, force: true });
@@ -155,6 +159,22 @@ describe('setup.cjs — install, migrate, upgrade', () => {
     const strict = run('setup.cjs', { FAKE_FAIL: '1', PI_RESEARCH_STRICT_SETUP: '1' });
     expect(strict.status).toBe(1);
     expect(fs.readFileSync(path.join(dir, 'camoufox-bin'), 'utf8')).toBe('old');
+  });
+
+  it('a fetch that fails after the browser is installed keeps it (a companion download failed)', () => {
+    plantLegacy();
+    const r = run('setup.cjs', { FAKE_GEOIP_FAIL: '1' });
+    expect(r.status).toBe(0);
+    expect(builds()).toEqual(['156.0.1-beta.34-deadbeef']);
+    expect(fs.existsSync(path.join(dir, 'camoufox-bin'))).toBe(false); // legacy gone; the new build kept
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith(path.basename(dir)))).toEqual([path.basename(dir)]);
+    expect(r.stdout).toContain('keeping it');
+
+    // Strict mode (what CI runs) must accept it too — the browser is launchable.
+    fs.rmSync(dir, { recursive: true, force: true });
+    plantLegacy();
+    const strict = run('setup.cjs', { FAKE_GEOIP_FAIL: '1', PI_RESEARCH_STRICT_SETUP: '1' });
+    expect(strict.status).toBe(0);
   });
 
   it('upgrade: a superseded build is pruned once the newly paired one is installed', () => {
