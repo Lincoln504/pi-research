@@ -9,7 +9,10 @@
  *     (so a legacy flat camoufox-js install is destroyed even when the download then fails);
  *   - `remove -y` deletes the whole install dir.
  * Every spawn uses a fully pinned env built from scratch with HOME and XDG_CACHE_HOME inside
- * the tmpdir, so nothing can reach the developer's real ~/.cache/camoufox.
+ * the tmpdir, so nothing can reach the developer's real ~/.cache/camoufox. The install dir
+ * itself is resolved through the shipped camoufox-layout.cjs for the RUNNING platform, so the
+ * fixtures follow macOS (HOME/Library/Caches, a custom dir is ignored there) and Windows
+ * (LOCALAPPDATA) as well as Linux.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -17,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -25,7 +29,8 @@ const SHIPPED = ['setup.cjs', 'cleanup.cjs', 'camoufox-layout.cjs'];
 const FAKE_CLI = `
 const fs = require('fs'), path = require('path');
 const base = process.env.XDG_CACHE_HOME;
-const dir = path.join(base, 'camoufox');
+const dir = process.env.PIR_FAKE_DIR;
+if (!dir) throw new Error('fake camoufox: PIR_FAKE_DIR is not set');
 const log = (m) => fs.appendFileSync(path.join(base, 'fake-cli.log'), m + '\\n');
 const cmd = process.argv[2];
 if (cmd === 'fetch') {
@@ -48,20 +53,40 @@ if (cmd === 'fetch') {
 }
 `;
 
+interface LayoutModule {
+  resolveInstall(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home: string): { dir: string; overrides: Record<string, string>; custom: string | null; ignoredCustom: boolean };
+}
+
 let proj: string;
 let home: string;
-let cache: string; // XDG_CACHE_HOME
-let dir: string;   // <cache>/camoufox
+let cache: string; // XDG_CACHE_HOME (the fake CLI's log lives here on every platform)
+let dir: string;   // the install dir the shipped layout resolves for THIS platform
+let layout: LayoutModule;
+
+/** The pinned environment every spawn starts from, before per-case overrides. */
+function pinnedEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env['PATH'] ?? '',
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CACHE_HOME: cache,
+    ...extra,
+  };
+}
 
 beforeEach(() => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pir-lifecycle-'));
   proj = path.join(base, 'proj');
   home = path.join(base, 'home');
   cache = path.join(home, '.cache');
-  dir = path.join(cache, 'camoufox');
   fs.mkdirSync(path.join(proj, 'scripts'), { recursive: true });
   fs.mkdirSync(cache, { recursive: true });
   for (const f of SHIPPED) fs.copyFileSync(path.join(REPO, 'scripts', f), path.join(proj, 'scripts', f));
+  // Resolve the install dir through the shipped twin, for the running platform: Linux and
+  // Windows follow XDG_CACHE_HOME / LOCALAPPDATA, macOS uses HOME/Library/Caches and
+  // deliberately ignores a custom dir. Fixtures and the fake CLI share this one value.
+  layout = createRequire(path.join(proj, 'scripts', 'cleanup.cjs'))('./camoufox-layout.cjs') as LayoutModule;
+  dir = layout.resolveInstall(pinnedEnv(), process.platform, home).dir;
   const pkg = path.join(proj, 'node_modules', '@camoufox', 'camoufox');
   fs.mkdirSync(path.join(pkg, 'dist', 'data-files'), { recursive: true });
   fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@camoufox/camoufox', version: '0.0.0-fake', bin: { camoufox: 'dist/__main__.js' } }));
@@ -71,13 +96,7 @@ beforeEach(() => {
 afterEach(() => { fs.rmSync(path.dirname(proj), { recursive: true, force: true }); });
 
 function run(script: 'setup.cjs' | 'cleanup.cjs', extra: Record<string, string> = {}) {
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env['PATH'] ?? '',
-    HOME: home,
-    USERPROFILE: home,
-    XDG_CACHE_HOME: cache,
-    ...extra,
-  };
+  const env = pinnedEnv({ PIR_FAKE_DIR: dir, ...extra });
   return spawnSync(process.execPath, [path.join(proj, 'scripts', script)], { encoding: 'utf-8', env, cwd: home, timeout: 60_000 });
 }
 
@@ -120,7 +139,7 @@ describe('setup.cjs — install, migrate, upgrade', () => {
     expect(fetchLog()).toEqual(['fetch dir-entries=0']);
     expect(builds()).toEqual(['156.0.1-beta.34-deadbeef']);
     expect(fs.existsSync(path.join(dir, 'camoufox-bin'))).toBe(false);
-    expect(fs.readdirSync(cache).filter((e) => e.startsWith('camoufox'))).toEqual(['camoufox']);
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith('camoufox'))).toEqual([path.basename(dir)]);
     expect(r.stdout).toContain('removed the legacy Camoufox install');
   });
 
@@ -130,7 +149,7 @@ describe('setup.cjs — install, migrate, upgrade', () => {
     expect(soft.status).toBe(0);
     expect(fs.readFileSync(path.join(dir, 'camoufox-bin'), 'utf8')).toBe('old');
     expect(fs.existsSync(path.join(dir, 'partial'))).toBe(false);
-    expect(fs.readdirSync(cache).filter((e) => e.startsWith('camoufox'))).toEqual(['camoufox']);
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith('camoufox'))).toEqual([path.basename(dir)]);
     expect(soft.stderr).toContain('Camoufox browser install failed');
 
     const strict = run('setup.cjs', { FAKE_FAIL: '1', PI_RESEARCH_STRICT_SETUP: '1' });
@@ -159,12 +178,16 @@ describe('setup.cjs — install, migrate, upgrade', () => {
     expect(builds()).toEqual(['150.0.2-beta.25-oldoldol']);
   });
 
-  it('a custom CAMOUFOX_INSTALL_DIR is translated into the cache root the launcher reads', () => {
+  // macOS deliberately ignores a custom dir (the launcher derives the cache from HOME and
+  // cannot be relocated). That behaviour is asserted in camoufox-layout.test.ts, so the
+  // honored-custom path here is Linux/Windows only.
+  it.skipIf(process.platform === 'darwin')('a custom CAMOUFOX_INSTALL_DIR is translated into the cache root the launcher reads', () => {
     const custom = path.join(home, 'elsewhere');
     fs.mkdirSync(custom, { recursive: true });
-    const r = run('setup.cjs', { CAMOUFOX_INSTALL_DIR: custom });
+    const expected = layout.resolveInstall(pinnedEnv({ CAMOUFOX_INSTALL_DIR: custom }), process.platform, home).dir;
+    const r = run('setup.cjs', { CAMOUFOX_INSTALL_DIR: custom, PIR_FAKE_DIR: expected });
     expect(r.status).toBe(0);
-    expect(builds(path.join(custom, 'camoufox'))).toEqual(['156.0.1-beta.34-deadbeef']);
+    expect(builds(expected)).toEqual(['156.0.1-beta.34-deadbeef']);
     expect(fs.existsSync(dir)).toBe(false);
   });
 
@@ -198,7 +221,7 @@ describe('cleanup.cjs — uninstall', () => {
     plantLegacy(`${dir}.legacy-9-9`);
     const r = run('cleanup.cjs', { PI_RESEARCH_PURGE_BROWSERS: '1' });
     expect(r.status).toBe(0);
-    expect(fs.readdirSync(cache).filter((e) => e.startsWith('camoufox'))).toEqual([]);
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith('camoufox'))).toEqual([]);
   });
 
   it('purge is idempotent', () => {
@@ -218,14 +241,12 @@ describe('cleanup.cjs — uninstall', () => {
   });
 
   it('REFUSES to delete a directory that is not provably a Camoufox install', () => {
-    const custom = path.join(home, 'mine');
-    const target = path.join(custom, 'camoufox');
-    fs.mkdirSync(target, { recursive: true });
-    fs.writeFileSync(path.join(target, 'precious.txt'), 'user data');
-    const r = run('cleanup.cjs', { PI_RESEARCH_PURGE_BROWSERS: '1', CAMOUFOX_INSTALL_DIR: custom });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'precious.txt'), 'user data');
+    const r = run('cleanup.cjs', { PI_RESEARCH_PURGE_BROWSERS: '1' });
     expect(r.status).toBe(0);
     expect(r.stderr + r.stdout).toContain('refusing to delete');
-    expect(fs.readFileSync(path.join(target, 'precious.txt'), 'utf8')).toBe('user data');
+    expect(fs.readFileSync(path.join(dir, 'precious.txt'), 'utf8')).toBe('user data');
   });
 });
 
