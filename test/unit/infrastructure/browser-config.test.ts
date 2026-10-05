@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 
@@ -39,12 +39,16 @@ describe('browser-config', () => {
     describe('getBrowserCacheDir', () => {
         it('PLAYWRIGHT_BROWSERS_PATH relocates the Linux cache HOME (the launcher reads XDG_CACHE_HOME)', () => {
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/my/browser/path';
-            expect(getBrowserCacheDir()).toBe(join('/my/browser/path', 'camoufox'));
+            // A custom dir is resolved with the HOST path flavor: the layout module takes an
+            // explicit platform only so its branches can be pushed from any host, while the
+            // custom-dir resolution it mirrors is inherently host-bound (production always
+            // passes process.platform). resolve() keeps this assertion portable to Windows.
+            expect(getBrowserCacheDir()).toBe(join(resolve('/my/browser/path'), 'camoufox'));
         });
 
         it('a custom dir that already ends in "camoufox" is used as the install dir itself', () => {
             process.env['CAMOUFOX_INSTALL_DIR'] = '/opt/camoufox';
-            expect(getBrowserCacheDir()).toBe('/opt/camoufox');
+            expect(getBrowserCacheDir()).toBe(resolve('/opt/camoufox'));
         });
 
         it('macOS: a custom dir is ignored (the launcher derives the cache from HOME only)', () => {
@@ -100,18 +104,18 @@ describe('browser-config', () => {
             // reinterprets them.
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/custom/browser-cache';
             const env = getBrowserEnv();
-            expect(env['XDG_CACHE_HOME']).toBe('/custom/browser-cache');
+            expect(env['XDG_CACHE_HOME']).toBe(resolve('/custom/browser-cache'));
             expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBeUndefined();
             expect(env['CAMOUFOX_INSTALL_DIR']).toBeUndefined();
-            expect(getBrowserCacheDir()).toBe(join('/custom/browser-cache', 'camoufox'));
+            expect(getBrowserCacheDir()).toBe(join(resolve('/custom/browser-cache'), 'camoufox'));
         });
 
         it('CAMOUFOX_INSTALL_DIR alone drives the override and the resolved paths', () => {
             process.env['CAMOUFOX_INSTALL_DIR'] = '/opt/cfx';
             const env = getBrowserEnv();
-            expect(env['XDG_CACHE_HOME']).toBe('/opt/cfx');
-            expect(getBrowserCacheDir()).toBe(join('/opt/cfx', 'camoufox'));
-            expect(getCamoufoxBinaryPath()).toBe(join('/opt/cfx', 'camoufox'));
+            expect(env['XDG_CACHE_HOME']).toBe(resolve('/opt/cfx'));
+            expect(getBrowserCacheDir()).toBe(join(resolve('/opt/cfx'), 'camoufox'));
+            expect(getCamoufoxBinaryPath()).toBe(join(resolve('/opt/cfx'), 'camoufox'));
         });
 
         it('Windows: a custom dir becomes LOCALAPPDATA for the worker', () => {
@@ -250,7 +254,7 @@ describe('browser-config', () => {
     describe('getCamoufoxBinaryPath', () => {
         it('PLAYWRIGHT_BROWSERS_PATH relocates the cache HOME on Linux (same answer as getBrowserCacheDir)', () => {
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/override/path';
-            expect(getCamoufoxBinaryPath()).toBe(join('/override/path', 'camoufox'));
+            expect(getCamoufoxBinaryPath()).toBe(join(resolve('/override/path'), 'camoufox'));
             expect(getCamoufoxBinaryPath()).toBe(getBrowserCacheDir());
         });
 

@@ -139,7 +139,7 @@ describe('setup.cjs — install, migrate, upgrade', () => {
     expect(fetchLog()).toEqual(['fetch dir-entries=0']);
     expect(builds()).toEqual(['156.0.1-beta.34-deadbeef']);
     expect(fs.existsSync(path.join(dir, 'camoufox-bin'))).toBe(false);
-    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith('camoufox'))).toEqual([path.basename(dir)]);
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith(path.basename(dir)))).toEqual([path.basename(dir)]);
     expect(r.stdout).toContain('removed the legacy Camoufox install');
   });
 
@@ -149,7 +149,7 @@ describe('setup.cjs — install, migrate, upgrade', () => {
     expect(soft.status).toBe(0);
     expect(fs.readFileSync(path.join(dir, 'camoufox-bin'), 'utf8')).toBe('old');
     expect(fs.existsSync(path.join(dir, 'partial'))).toBe(false);
-    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith('camoufox'))).toEqual([path.basename(dir)]);
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith(path.basename(dir)))).toEqual([path.basename(dir)]);
     expect(soft.stderr).toContain('Camoufox browser install failed');
 
     const strict = run('setup.cjs', { FAKE_FAIL: '1', PI_RESEARCH_STRICT_SETUP: '1' });
@@ -221,7 +221,7 @@ describe('cleanup.cjs — uninstall', () => {
     plantLegacy(`${dir}.legacy-9-9`);
     const r = run('cleanup.cjs', { PI_RESEARCH_PURGE_BROWSERS: '1' });
     expect(r.status).toBe(0);
-    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith('camoufox'))).toEqual([]);
+    expect(fs.readdirSync(path.dirname(dir)).filter((e) => e.startsWith(path.basename(dir)))).toEqual([]);
   });
 
   it('purge is idempotent', () => {

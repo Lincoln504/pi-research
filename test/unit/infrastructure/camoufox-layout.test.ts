@@ -86,7 +86,10 @@ describe('resolveInstall — placement of the cache', () => {
   });
 
   it('translates a custom dir into the variable the launcher actually reads', () => {
-    expect(ts.resolveInstall({ CAMOUFOX_INSTALL_DIR: '/opt/cfx' }, 'linux', '/h').overrides).toEqual({ XDG_CACHE_HOME: '/opt/cfx' });
+    // Custom dirs are resolved with the HOST path flavor (the explicit platform argument
+    // exists so the branches can be pushed from any host; production passes process.platform),
+    // hence resolve() rather than a POSIX literal, which keeps this portable to Windows.
+    expect(ts.resolveInstall({ CAMOUFOX_INSTALL_DIR: '/opt/cfx' }, 'linux', '/h').overrides).toEqual({ XDG_CACHE_HOME: path.resolve('/opt/cfx') });
     expect(ts.resolveInstall({ CAMOUFOX_INSTALL_DIR: 'E:\\cfx' }, 'win32', 'C:\\h').overrides).toEqual({ LOCALAPPDATA: 'E:\\cfx' });
   });
 });
