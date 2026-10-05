@@ -66,6 +66,10 @@ describe('redactSecrets', () => {
     expect(redactSecrets('token sk-ABCDEFGHIJKLMNOPQRSTUV')).toContain('[REDACTED]');
     expect(redactSecrets('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123')).toContain('[REDACTED]');
     expect(redactSecrets('AKIAIOSFODNN7EXAMPLE')).toContain('[REDACTED]');
+    // Bare Google API key, npm automation token and Hugging Face token (no key= context).
+    expect(redactSecrets('key AIzaSyA-ABCDEFGHIJKLMNOPQRSTUVWXYZ01234 end')).toBe('key [REDACTED] end');
+    expect(redactSecrets('npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789')).toBe('[REDACTED]');
+    expect(redactSecrets('hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789')).toBe('[REDACTED]');
   });
 
   it('masks JWTs', () => {

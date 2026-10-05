@@ -158,55 +158,51 @@ export async function initBrowser(): Promise<void> {
         logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
 
         // ---------------------------------------------------------------------
-        // Pinned browser stack — DO NOT caret-bump these three in isolation.
-        // They are one coupled set (see package.json + docs/ARCHITECTURE.md).
-        // Each was a real fresh-install/runtime break that our lockfile masked
-        // (consumers install without our lockfile, so a floating range resolves
-        // to a newer, broken version):
+        // Pinned browser stack — DO NOT caret-bump these in isolation. They are one
+        // coupled set (see package.json + docs/ARCHITECTURE.md). Each was a real
+        // fresh-install/runtime break that our lockfile masked (consumers install
+        // without our lockfile, so a floating range resolves to a newer, broken
+        // version):
         //
-        //   • camoufox-js  ^0.12.0 (2026-08-30 refresh) → the 0.10.x pin survived
-        //     two refresh cycles on three since-lapsed blockers (Windows assets
-        //     returned in v152.0.4-beta.26, 2026-07-16; impit's `only-allow pnpm`
-        //     guard existed only in 0.13.1/0.14.0; and better-sqlite3 13's changed
-        //     install model). The refresh accepted better-sqlite3 13. MEASURED on
-        //     13.0.3: `prebuilds/` for all eight platform/arch pairs ship INSIDE
-        //     the tarball and load at runtime via node-gyp-build — no install
-        //     script, no toolchain needed on modern npm (≥11.19 skips the
-        //     injected `node-gyp rebuild` that a binding.gyp without an install
-        //     script triggers; it was that needless rebuild, not a missing
-        //     binary, that broke toolchain-less Windows installs). A future bump
-        //     must still check better-sqlite3 first, not camoufox.
-        //   • playwright-core  1.60.0 (exact) → playwright-core and the camoufox
-        //     binary are one matched Juggler-protocol pair. 1.61 added a
-        //     viewport.isMobile field the build REJECTS ("property
-        //     viewport.isMobile not described in this scheme"), failing every
-        //     launch below. Corroborated upstream: camoufox-js 0.12.0 declares
-        //     `peerDependencies: playwright-core "<1.61.0"`, the same bound this
-        //     pin has held by hand.
-        //   • impit  0.14.4 (exact, a direct dep though only camoufox-js uses it;
-        //     2026-08-30 refresh from 0.13.0) → kept EXACT because it is the only
-        //     way to force a version for consumers: npm `overrides` don't
-        //     propagate to installers of a published package, and impit's
-        //     mid-stream `only-allow pnpm` guard incident (0.13.1/0.14.0) showed
-        //     floating ranges breaking fresh global installs our lockfile masks.
+        //   • @camoufox/camoufox  ^0.5.7 (replaced camoufox-js 0.12.0, 2026-10-05).
+        //     The launcher ships `dist/data-files/browser-pin.json` naming the ONE
+        //     browser build it was released and tested with (v156.0.1-beta.34 at
+        //     0.5.7), and by default fetches and launches exactly that build. The
+        //     old camoufox-js had no such pairing: it took "the newest non-prerelease
+        //     GitHub release", so when upstream flagged v156.0.1-beta.34
+        //     non-prerelease on 2026-10-03 every fresh install got a browser whose
+        //     schema dropped `navigator.product` and every launch threw
+        //     `UnknownProperty` (CI went red on all three OSes; machines with an
+        //     older cached browser never noticed). A new pi-research release that
+        //     bumps this dependency therefore moves the browser deliberately, with
+        //     the launcher it was verified against, and no longer on upstream's
+        //     release timing.
+        //   • playwright-core  1.62.1 (exact) → playwright-core and the Camoufox
+        //     build are one matched Juggler-protocol pair. @camoufox/camoufox
+        //     declares `peerDependencies: playwright-core "<1.63"` and mirrors it
+        //     from its Python twin ("every Playwright minor is free to change
+        //     Juggler, so the ceiling is bumped deliberately"). 1.61 added a
+        //     viewport.isMobile field the OLD build rejected; the paired v156 build
+        //     was verified under 1.62.x. Re-verify a REAL launch before raising it.
+        //   • impit  0.14.5 (exact, a direct dep though only the launcher uses it):
+        //     kept EXACT because it is the only way to force a version for
+        //     consumers — npm `overrides` don't propagate to installers of a
+        //     published package, and impit's mid-stream `only-allow pnpm` guard
+        //     incident (0.13.1/0.14.0) showed floating ranges breaking fresh global
+        //     installs our lockfile masks.
         //
-        // What is NOT pinned: the browser BINARY. `camoufox-js fetch` takes no
-        // version argument — it walks the GitHub releases newest-first and takes
-        // the first non-prerelease one with an asset for this OS/arch. A consumer
-        // therefore gets whatever camoufox published most recently, whichever
-        // camoufox-js they have, and a future release could break launches with no
-        // change on our side. Both the current newest (v152.0.4-beta.28, Firefox
-        // 152) and the older v135.0.1-beta.24 an existing cache may hold were
-        // verified launching and driving under playwright-core 1.60.0.
+        // better-sqlite3 is gone: it was camoufox-js's dependency, not ours, and
+        // @camoufox/camoufox has none. The one native module left on the launch
+        // path is impit, probed by probeBrowserNativeDeps().
         //
         // Always re-verify a REAL headless run after touching any of this: the
         // unit and integration suites mock the browser, so a Juggler mismatch
         // reaches production with a fully green suite.
         let CamoufoxModule: any;
         try {
-          CamoufoxModule = await import('camoufox-js');
+          CamoufoxModule = await import('@camoufox/camoufox');
         } catch (e: unknown) {
-          throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+          throw new Error(`[Worker] @camoufox/camoufox not found in node_modules. Please run 'npm install'. Original error: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
         }
 
         const { Camoufox } = CamoufoxModule;
@@ -344,7 +340,7 @@ export async function initBrowser(): Promise<void> {
     } catch (e: unknown) {
       // Close any partially-launched browser to avoid orphaning the process.
       // Promise.resolve() wraps the call safely: in headless:'virtual' mode,
-      // camoufox-js browser.close() is synchronous (returns void), not a Promise.
+      // camoufox browser.close() is synchronous (returns void), not a Promise.
       if (browser && typeof browser.close === 'function') {
         Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during failed init: ${err.message}`));
       }
@@ -352,7 +348,7 @@ export async function initBrowser(): Promise<void> {
       const msg = e instanceof Error ? e.message : String(e);
 
       if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
-        throw new Error(`[Worker] Browser binaries not found. Please run 'npx camoufox-js fetch' to install them.`, { cause: e });
+        throw new Error(`[Worker] Browser binaries not found. Please run 'npx camoufox fetch' to install them.`, { cause: e });
       }
 
       // camoufox headless: "virtual" spawns Xvfb on Linux when no DISPLAY is set.

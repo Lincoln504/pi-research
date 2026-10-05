@@ -9,6 +9,7 @@ import * as crypto from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { platform, homedir } from 'node:os';
+import { resolveInstall, isUsable, loadPin, findPackageRoot } from './camoufox-layout.ts';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
 import { getLogger } from '../../logger.ts';
@@ -19,63 +20,26 @@ import { createRequire } from 'node:module';
 // ============================================================================
 
 /**
- * The directory where camoufox-js installs the browser on Windows.
+ * Where the Camoufox browser lives, and which environment overrides make the
+ * browser launcher agree with that.
  *
- * camoufox-js's userCacheDir("camoufox") resolves to
- *   os.homedir()/AppData/Local/camoufox/camoufox/Cache
- * — note the DOUBLED "camoufox" segment, and that it uses os.homedir() rather
- * than %LOCALAPPDATA%. We must mirror it exactly, otherwise isBrowserAvailable()
- * looks in the wrong place and every browser test silently skips on Windows
- * even though the binary downloaded and launches fine.
+ * `@camoufox/camoufox` derives its install directory ONLY from the platform cache
+ * location (XDG_CACHE_HOME on Linux, LOCALAPPDATA on Windows, $HOME/Library/Caches on
+ * macOS). Unlike the camoufox-js it replaced, it does NOT read CAMOUFOX_INSTALL_DIR
+ * or PLAYWRIGHT_BROWSERS_PATH. Both variables are still honoured here as the
+ * documented way to relocate the browser, by translating them into the platform
+ * override the launcher does read (see resolveInstall in camoufox-layout.ts). The
+ * lookup (getCamoufoxBinaryPath), the install (scripts/setup.cjs,
+ * ensure-browser.ts) and the worker launch (getBrowserEnv) all go through that one
+ * function, so they cannot disagree.
  */
-function getWindowsCamoufoxDir(): string {
-    return join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
-}
 
 /**
- * The custom camoufox location, if the user set one.
- *
- * CAMOUFOX_INSTALL_DIR takes precedence because it is camoufox-js's OWN
- * variable and the only one that can ever move the install: camoufox-js ≥0.12.0
- * resolves INSTALL_DIR from it. PLAYWRIGHT_BROWSERS_PATH is kept as a documented
- * alias, but on its own it only ever moved where we LOOK — camoufox went on
- * installing to the default cache, so setting it made the browser permanently
- * "not found" right after a successful download. Both are exported onward to
- * camoufox-js (getBrowserEnv, scripts/setup.cjs) so that install and lookup
- * cannot disagree.
- *
- * HISTORY: camoufox-js <0.12.0 hardcoded `userCacheDir("camoufox")` and
- * honoured NEITHER variable, which made this plumbing deliberately inert for
- * two pin cycles. The 0.12.0 refresh (2026-08-30) honours CAMOUFOX_INSTALL_DIR
- * again, so a custom location now relocates the install itself, not just our
- * lookup — the two can no longer disagree via version skew, but keep the dual
- * export (install + lookup) so they can never drift apart in future.
- */
-function getCustomCamoufoxDir(): string | undefined {
-    return process.env['CAMOUFOX_INSTALL_DIR'] || process.env['PLAYWRIGHT_BROWSERS_PATH'] || undefined;
-}
-
-/**
- * Get the camoufox binary cache directory.
- * Uses the custom location above if set, otherwise the standard user cache location
- * that camoufox uses by default (~/.cache/camoufox on Linux).
+ * Get the camoufox install directory (the directory that holds `browsers/`).
  * We do NOT override HOME — that trick was unreliable and caused install/runtime mismatches.
  */
 export function getBrowserCacheDir(): string {
-    const custom = getCustomCamoufoxDir();
-    if (custom) {
-        return custom;
-    }
-    // Mirror getCamoufoxBinaryPath() so both functions agree on the cache location
-    const osPlatform = platform();
-    if (osPlatform === 'win32') {
-        return getWindowsCamoufoxDir();
-    } else if (osPlatform === 'darwin') {
-        return join(homedir(), 'Library', 'Caches', 'camoufox');
-    } else {
-        const cacheHome = process.env['XDG_CACHE_HOME'] || join(homedir(), '.cache');
-        return join(cacheHome, 'camoufox');
-    }
+    return resolveInstall(process.env, platform(), homedir()).dir;
 }
 
 /**
@@ -134,18 +98,16 @@ export function getBrowserProfileDir(config?: Config): string {
  */
 export function getBrowserEnv(config?: Config): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
-    const customPath = getCustomCamoufoxDir();
-    if (customPath) {
-        env['PLAYWRIGHT_BROWSERS_PATH'] = customPath;
-        // The one that camoufox-js actually reads. Without it the worker's
-        // camoufox launches from the DEFAULT cache while everything on this side
-        // resolves the custom path — the install/runtime mismatch this file's
-        // header warns about, just arriving through a different door.
-        env['CAMOUFOX_INSTALL_DIR'] = customPath;
-    } else {
-        delete env['PLAYWRIGHT_BROWSERS_PATH'];
-        delete env['CAMOUFOX_INSTALL_DIR'];
-    }
+    // Hand the worker the placement overrides the browser launcher actually reads
+    // (XDG_CACHE_HOME / LOCALAPPDATA), derived from the user's custom dir. Without
+    // them the worker launches from the DEFAULT cache while everything on this side
+    // resolves the custom one: the install/runtime mismatch this file's header warns
+    // about. The two user-facing variables are removed so a nested tool cannot
+    // reinterpret them.
+    const install = resolveInstall(process.env, platform(), homedir());
+    Object.assign(env, install.overrides);
+    delete env['PLAYWRIGHT_BROWSERS_PATH'];
+    delete env['CAMOUFOX_INSTALL_DIR'];
     // Tell thread-workers where to write their lifecycle/error log. Precedence:
     //   1. A user-set PI_RESEARCH_LOG_FILE (already copied from process.env above) wins —
     //      never clobber an explicit override.
@@ -194,26 +156,12 @@ export function ensureBrowserCacheDir(): string {
 }
 
 /**
- * Get the expected path where camoufox installs its binaries.
- * Matches camoufox-js's own resolution logic.
+ * Get the path where camoufox installs its browsers (the directory holding `browsers/`).
+ * Same answer as getBrowserCacheDir(); kept as a separate name for the callers that
+ * think of it as "the binary location".
  */
 export function getCamoufoxBinaryPath(): string {
-    const customPath = getCustomCamoufoxDir();
-    if (customPath) {
-        return customPath;
-    }
-
-    const osPlatform = platform();
-
-    if (osPlatform === 'win32') {
-        return getWindowsCamoufoxDir();
-    } else if (osPlatform === 'darwin') {
-        return join(homedir(), 'Library', 'Caches', 'camoufox');
-    } else {
-        // Linux and others
-        const cacheHome = process.env['XDG_CACHE_HOME'] || join(homedir(), '.cache');
-        return join(cacheHome, 'camoufox');
-    }
+    return getBrowserCacheDir();
 }
 
 // ============================================================================
@@ -255,7 +203,7 @@ export function getSchedulerVersion(config?: Config): string {
  *
  * Returns true (true headless — no visible window) on Windows and macOS.
  * Historically Windows used headless:false because headless:true crashed Firefox
- * (exit 0x80000003, camoufox-js issue #614); that is fixed in camoufox-js >=0.10
+ * (exit 0x80000003, camoufox issue #614); that is fixed in camoufox-js >=0.10
  * (verified on Windows 11 x64 with 0.10.2: headless:true launches and navigates
  * reliably and, crucially, NO browser window pops up on the desktop). Using
  * headless:false on a real Windows desktop flashed visible, sometimes fullscreen,
@@ -302,8 +250,8 @@ export function resolveHeadlessMode(): boolean | 'virtual' {
  * Check if the browser is available for meaningful browser pool testing.
  * 
  * Returns false if:
- * - camoufox-js package is not installed
- * - camoufox binary is not present at expected path
+ * - @camoufox/camoufox package is not installed
+ * - no browser build is installed under the cache dir (new `browsers/<repo>/<version>` layout)
  * - FULL_MOCK_MODE is active (both search and scrape mocked)
  * 
  * In FULL_MOCK_MODE, browser pool tests are not meaningful because:
@@ -317,22 +265,16 @@ export function resolveHeadlessMode(): boolean | 'virtual' {
  * Whether the browser stack's NATIVE dependencies can actually load.
  *
  * `isBrowserAvailable()` answers a different question — is the camoufox binary on
- * disk — and a browser can be fully downloaded and still unable to launch. camoufox-js
- * requires `better-sqlite3`, whose binding is produced by a dependency INSTALL SCRIPT,
- * and npm 12 turns those off by default. The module then imports fine and throws only
- * when first used, so nothing notices until every browser worker dies mid-run with
- * "Could not locate the bindings file" and the run reports a network problem it does
- * not have.
+ * disk — and a browser can be fully downloaded and still unable to launch.
  *
- * Measured, not assumed: of this package's native dependencies, only better-sqlite3
- * fails a scripts-blocked install. onnxruntime-node ships its binding inside its own
- * tarball, and lancedb, impit and html-to-markdown all resolve prebuilt platform
- * packages, so the knowledge store keeps working while search is dead — exactly the
- * split seen in the field.
- *
- * Opening an in-memory database is the only check that settles it: resolving the
- * module or stat-ing a path does not, because the failure is in the binding lookup at
- * first use. It costs a few milliseconds and is confined to diagnostics.
+ * History: camoufox-js required `better-sqlite3`, whose binding came from a dependency
+ * INSTALL SCRIPT that npm 12 turns off, so the module imported fine and every browser
+ * worker died at first use. `@camoufox/camoufox` has no better-sqlite3; the one native
+ * module left in the launcher's path is `impit` (its IP/geo lookups), which resolves a
+ * prebuilt platform package. That package can still be dropped by npm's optional-
+ * dependency bug (npm/cli#4828), and the failure is again at first use, so the probe
+ * loads it: resolving the module name or stat-ing a path does not settle it. It costs a
+ * few milliseconds and is confined to diagnostics.
  */
 export function probeBrowserNativeDeps(
     /** Injected for tests. Production callers pass nothing. */
@@ -350,16 +292,17 @@ export function probeBrowserNativeDeps(
 
 function defaultNativeDepLoad(): void {
     const require = createRequire(import.meta.url);
-    const Database = require('better-sqlite3') as new (p: string) => { close(): void };
-    const db = new Database(':memory:');
-    db.close();
+    // Requiring `impit` loads its native binding eagerly and throws if the platform
+    // package is missing.
+    require('impit');
 }
 
 export function isBrowserAvailable(): boolean {
     if (isFullMockMode()) return false;
     try {
-        import.meta.resolve('camoufox-js');
-        return existsSync(getCamoufoxBinaryPath());
+        import.meta.resolve('@camoufox/camoufox');
+        const root = findPackageRoot(import.meta.url);
+        return isUsable(getCamoufoxBinaryPath(), root ? loadPin(root) : null);
     } catch {
         return false;
     }

@@ -37,9 +37,20 @@ describe('browser-config', () => {
     });
 
     describe('getBrowserCacheDir', () => {
-        it('PLAYWRIGHT_BROWSERS_PATH overrides every platform default', () => {
+        it('PLAYWRIGHT_BROWSERS_PATH relocates the Linux cache HOME (the launcher reads XDG_CACHE_HOME)', () => {
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/my/browser/path';
-            expect(getBrowserCacheDir()).toBe('/my/browser/path');
+            expect(getBrowserCacheDir()).toBe(join('/my/browser/path', 'camoufox'));
+        });
+
+        it('a custom dir that already ends in "camoufox" is used as the install dir itself', () => {
+            process.env['CAMOUFOX_INSTALL_DIR'] = '/opt/camoufox';
+            expect(getBrowserCacheDir()).toBe('/opt/camoufox');
+        });
+
+        it('macOS: a custom dir is ignored (the launcher derives the cache from HOME only)', () => {
+            osMock.current = 'darwin';
+            process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/my/browser/path';
+            expect(getBrowserCacheDir()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
         it('Linux: defaults to ~/.cache/camoufox', () => {
@@ -58,20 +69,19 @@ describe('browser-config', () => {
             expect(getBrowserCacheDir()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
-        it('Windows: mirrors camoufox-js userCacheDir (doubled camoufox segment, homedir-based)', () => {
+        it('Windows: mirrors @camoufox/camoufox userCacheDir (doubled camoufox segment, homedir fallback)', () => {
             osMock.current = 'win32';
-            // camoufox-js installs to homedir()/AppData/Local/camoufox/camoufox/Cache
-            // and ignores %LOCALAPPDATA%, so detection must do the same.
+            delete process.env['LOCALAPPDATA'];
             expect(getBrowserCacheDir()).toBe(
                 join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
             );
         });
 
-        it('Windows: ignores LOCALAPPDATA (camoufox-js uses homedir, not %LOCALAPPDATA%)', () => {
+        it('Windows: honours an absolute LOCALAPPDATA (the new launcher reads it; camoufox-js did not)', () => {
             osMock.current = 'win32';
             process.env['LOCALAPPDATA'] = join('D:', 'Other', 'AppData', 'Local');
             expect(getBrowserCacheDir()).toBe(
-                join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+                join('D:', 'Other', 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
             );
         });
     });
@@ -82,35 +92,38 @@ describe('browser-config', () => {
             expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBeUndefined();
         });
 
-        it('passes through PLAYWRIGHT_BROWSERS_PATH when explicitly set', () => {
+        it('translates a custom PLAYWRIGHT_BROWSERS_PATH into the XDG_CACHE_HOME the launcher reads', () => {
+            // @camoufox/camoufox ignores PLAYWRIGHT_BROWSERS_PATH and CAMOUFOX_INSTALL_DIR
+            // and derives its install dir from the platform cache root only. The worker
+            // must be told in THAT variable or install and launch resolve to different
+            // directories; the two user-facing variables are removed so nothing nested
+            // reinterprets them.
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/custom/browser-cache';
             const env = getBrowserEnv();
-            expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBe('/custom/browser-cache');
+            expect(env['XDG_CACHE_HOME']).toBe('/custom/browser-cache');
+            expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBeUndefined();
+            expect(env['CAMOUFOX_INSTALL_DIR']).toBeUndefined();
+            expect(getBrowserCacheDir()).toBe(join('/custom/browser-cache', 'camoufox'));
         });
 
-        it('exports CAMOUFOX_INSTALL_DIR alongside it — the variable camoufox-js actually reads', () => {
-            // PLAYWRIGHT_BROWSERS_PATH moved only where WE look. camoufox-js
-            // <0.12.0 hardcoded userCacheDir("camoufox") and honoured nothing, so
-            // setting it downloaded to the default cache and then reported the
-            // browser missing from the custom path forever. 0.12.0 added
-            // CAMOUFOX_INSTALL_DIR, so the worker must be told in the variable it
-            // obeys or install and launch resolve to different directories.
-            process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/custom/browser-cache';
-            const env = getBrowserEnv();
-            expect(env['CAMOUFOX_INSTALL_DIR']).toBe('/custom/browser-cache');
-        });
-
-        it('CAMOUFOX_INSTALL_DIR alone drives both variables and the resolved paths', () => {
+        it('CAMOUFOX_INSTALL_DIR alone drives the override and the resolved paths', () => {
             process.env['CAMOUFOX_INSTALL_DIR'] = '/opt/cfx';
             const env = getBrowserEnv();
-            expect(env['CAMOUFOX_INSTALL_DIR']).toBe('/opt/cfx');
-            expect(env['PLAYWRIGHT_BROWSERS_PATH']).toBe('/opt/cfx');
-            expect(getBrowserCacheDir()).toBe('/opt/cfx');
-            expect(getCamoufoxBinaryPath()).toBe('/opt/cfx');
+            expect(env['XDG_CACHE_HOME']).toBe('/opt/cfx');
+            expect(getBrowserCacheDir()).toBe(join('/opt/cfx', 'camoufox'));
+            expect(getCamoufoxBinaryPath()).toBe(join('/opt/cfx', 'camoufox'));
         });
 
-        it('omits CAMOUFOX_INSTALL_DIR when no custom location is set', () => {
+        it('Windows: a custom dir becomes LOCALAPPDATA for the worker', () => {
+            osMock.current = 'win32';
+            process.env['CAMOUFOX_INSTALL_DIR'] = join('D:', 'cfx');
             const env = getBrowserEnv();
+            expect(env['LOCALAPPDATA']).toBe('D:\\cfx');
+        });
+
+        it('adds no placement override when no custom location is set', () => {
+            const env = getBrowserEnv();
+            expect(env['XDG_CACHE_HOME']).toBe(process.env['XDG_CACHE_HOME']);
             expect(env['CAMOUFOX_INSTALL_DIR']).toBeUndefined();
         });
 
@@ -190,7 +203,7 @@ describe('browser-config', () => {
             expect(resolveHeadlessMode()).toBe(true);
         });
 
-        it('returns true on Windows — true headless, no visible window (camoufox-js >=0.10 fixed the old crash)', () => {
+        it('returns true on Windows — true headless, no visible window (camoufox >=0.10 fixed the old crash)', () => {
             osMock.current = 'win32';
             delete process.env['DISPLAY'];
             expect(resolveHeadlessMode()).toBe(true);
@@ -235,9 +248,10 @@ describe('browser-config', () => {
     });
 
     describe('getCamoufoxBinaryPath', () => {
-        it('PLAYWRIGHT_BROWSERS_PATH override wins on every platform', () => {
+        it('PLAYWRIGHT_BROWSERS_PATH relocates the cache HOME on Linux (same answer as getBrowserCacheDir)', () => {
             process.env['PLAYWRIGHT_BROWSERS_PATH'] = '/override/path';
-            expect(getCamoufoxBinaryPath()).toBe('/override/path');
+            expect(getCamoufoxBinaryPath()).toBe(join('/override/path', 'camoufox'));
+            expect(getCamoufoxBinaryPath()).toBe(getBrowserCacheDir());
         });
 
         it('Linux: defaults to ~/.cache/camoufox', () => {
@@ -256,18 +270,19 @@ describe('browser-config', () => {
             expect(getCamoufoxBinaryPath()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
-        it('Windows: mirrors camoufox-js userCacheDir (doubled camoufox segment, homedir-based)', () => {
+        it('Windows: mirrors @camoufox/camoufox userCacheDir (doubled camoufox segment, homedir fallback)', () => {
             osMock.current = 'win32';
+            delete process.env['LOCALAPPDATA'];
             expect(getCamoufoxBinaryPath()).toBe(
                 join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
             );
         });
 
-        it('Windows: ignores LOCALAPPDATA (camoufox-js uses homedir, not %LOCALAPPDATA%)', () => {
+        it('Windows: honours an absolute LOCALAPPDATA', () => {
             osMock.current = 'win32';
             process.env['LOCALAPPDATA'] = join('D:', 'Other', 'AppData', 'Local');
             expect(getCamoufoxBinaryPath()).toBe(
-                join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+                join('D:', 'Other', 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
             );
         });
 

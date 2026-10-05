@@ -38,6 +38,15 @@ process.env['PI_RESEARCH_FORCE_READY'] = 'true';
 const unitHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-unit-home-'));
 process.env['HOME'] = unitHome;
 process.env['USERPROFILE'] = unitHome;
+// The platform cache roots too. @camoufox/camoufox computes its install dir at IMPORT
+// time from XDG_CACHE_HOME / LOCALAPPDATA (HOME only when those are unset), and its
+// launcher DELETES a non-empty install dir that lacks the compat flag ("Cleaning old
+// data...") before downloading ~1.3GB. A unit test that reaches the real launcher (for
+// example a mock whose module name drifted from the import) would otherwise wipe the
+// developer's real ~/.cache/camoufox. With these redirected the worst case is a
+// throwaway directory.
+process.env['XDG_CACHE_HOME'] = path.join(unitHome, '.cache');
+process.env['LOCALAPPDATA'] = path.join(unitHome, 'AppData', 'Local');
 
 // The throwaway HOME is per worker process and used to outlive it forever:
 // nothing removed it, so every `npm run test:unit` leaked one tmpdir (4,990
@@ -63,7 +72,7 @@ try {
 // browser layer (so getCamoufoxBinaryPath() points at a non-existent temp dir),
 // which would otherwise make the runtime browser-provisioning step in
 // initializePool() think the binary is missing and trigger a real ~100MB
-// `camoufox-js fetch`. This mirrors the unit-test job's CI env and is honoured
+// `camoufox fetch`. This mirrors the unit-test job's CI env and is honoured
 // by ensureBrowserInstalled(). A dedicated ensure-browser unit test overrides
 // this per-case to exercise the fetch path.
 process.env['PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD'] = '1';

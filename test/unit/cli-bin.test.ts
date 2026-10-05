@@ -132,6 +132,18 @@ describe('pi-research bin shim', () => {
     expect(r.stdout).not.toContain('engine ran');
   });
 
+  it('also guards typebox, a peer dependency that dist/cli.mjs imports directly', () => {
+    rmSync(path.join(workDir, 'node_modules'), { recursive: true, force: true });
+    hostPackage(workDir, '@earendil-works/pi-ai');
+    hostPackage(workDir, '@earendil-works/pi-coding-agent');
+    hostPackage(workDir, '@earendil-works/pi-tui');
+    const r = runShim();
+
+    expect(r.status).toBe(78);
+    expect(r.stderr).toMatch(/npm install -g typebox(\s|$)/);
+    expect(r.stdout).not.toContain('engine ran');
+  });
+
   it('reports a package whose files are incomplete, instead of passing it and crashing later', () => {
     // Resolving is not loading. An interrupted install or a pruned node_modules
     // leaves package.json and its exports map intact while the file they point
@@ -142,6 +154,7 @@ describe('pi-research bin shim', () => {
     hostPackage(workDir, '@earendil-works/pi-coding-agent');
     hostPackage(workDir, '@earendil-works/pi-ai');
     hostPackage(workDir, '@earendil-works/pi-tui');
+    hostPackage(workDir, 'typebox');
     rmSync(path.join(workDir, 'node_modules', '@earendil-works', 'pi-ai', 'index.js'));
     const r = runShim();
 
@@ -156,6 +169,7 @@ describe('pi-research bin shim', () => {
     hostPackage(workDir, '@earendil-works/pi-ai');
     hostPackage(workDir, '@earendil-works/pi-coding-agent');
     hostPackage(workDir, '@earendil-works/pi-tui');
+    hostPackage(workDir, 'typebox');
     const r = runShim(['--version']);
 
     expect(r.stderr).toBe('');
@@ -171,6 +185,7 @@ describe('pi-research bin shim', () => {
     hostPackage(workDir, '@earendil-works/pi-ai');
     hostPackage(workDir, '@earendil-works/pi-coding-agent');
     hostPackage(workDir, '@earendil-works/pi-tui');
+    hostPackage(workDir, 'typebox');
     const r = runShim();
     expect(r.stdout).toContain('engine ran');
   });

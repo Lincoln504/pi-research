@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mockCamoufox = vi.fn();
-vi.mock('camoufox-js', () => ({
+vi.mock('@camoufox/camoufox', () => ({
   Camoufox: mockCamoufox,
 }));
 

@@ -46,15 +46,15 @@ export async function setupLifecycle(): Promise<TestContext> {
   
   if (!isBrowserAvailable()) {
     // In CI the browser IS installed, so "not available" there means our mirrored
-    // cache path has drifted from camoufox-js's — and the whole browser integration
+    // cache path has drifted from the launcher's — and the whole browser integration
     // leg would then report green while running nothing. The workflow's separate
-    // launch check cannot catch that: it goes through camoufox-js's OWN resolution,
+    // launch check cannot catch that: it goes through the launcher's OWN resolution,
     // so it passes on exactly the paths this one gets wrong. Fail loudly instead.
     if (process.env['PI_RESEARCH_REQUIRE_BROWSER'] === '1') {
       throw new Error(
         '[test] PI_RESEARCH_REQUIRE_BROWSER=1 but isBrowserAvailable() is false. ' +
         `Expected the camoufox binary at ${getCamoufoxBinaryPath()} on ${process.platform}. ` +
-        'Either the download failed or getBrowserCacheDir() no longer mirrors camoufox-js — ' +
+        'Either the download failed or getBrowserCacheDir() no longer mirrors @camoufox/camoufox — ' +
         'the latter silently empties this entire suite.',
       );
     }

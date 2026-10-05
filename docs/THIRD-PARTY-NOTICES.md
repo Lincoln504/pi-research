@@ -12,12 +12,12 @@ first-party sources, so no third-party code is inlined).
 
 ### Notable dependency licensing
 
-camoufox-js / Camoufox browser
+@camoufox/camoufox / Camoufox browser
 
-The `camoufox-js` npm package itself is licensed under **MPL-2.0** (file-level
-copyleft). It is resolved at install time and **not bundled** into this package's
-artifacts (the bundled entry points are built `--packages=external`), so no MPL-covered source is
-combined into or redistributed by this MIT package. It is used in-process only to
+The `@camoufox/camoufox` npm package itself is licensed under **MIT**. It is the
+launcher that replaced `camoufox-js` 0.12.0 (MPL-2.0) in the current development line.
+It is resolved at install time and **not bundled** into this package's artifacts (the
+bundled entry points are built `--packages=external`). It is used in-process only to
 configure and launch the Camoufox (Firefox-fork) browser **binary as a separate
 operating-system process**, which this package then drives over the Playwright/Juggler
 protocol. The Camoufox binary is downloaded and run separately and is subject to its
@@ -29,8 +29,12 @@ ua-parser-js
 package free of AGPL-licensed code in its dependency tree, `package.json`
 `overrides` pins `ua-parser-js` to the `1.x` line, which is MIT-licensed. The
 1.x and 2.x APIs are compatible for the only surface our direct dependency
-(`camoufox-js`) uses, and the pin is behavior-neutral for this package's usage
-(no custom `navigator.userAgent`/`fingerprint` is passed to Camoufox).
+(`@camoufox/camoufox`, which declares `^2.0.2`) uses — it calls just
+`new UAParser(ua).getBrowser().name` and `.getOS().name`, both present in 1.x and
+verified against the pinned `1.0.41` — and the pin is behavior-neutral for this
+package's usage (no custom `navigator.userAgent`/`fingerprint` is passed to Camoufox).
+Re-check that surface on every `@camoufox/camoufox` bump: a 2.x-only call would make
+this override a runtime break, not just a licensing choice.
 
 youtubei.js / bgutils-js / jsdom (YouTube transcripts)
 

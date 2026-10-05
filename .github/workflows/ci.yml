@@ -365,8 +365,8 @@ jobs:
           key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
-        # camoufox-js's postinstall fetch queries the GitHub releases API; the
-        # token lifts the 60/hr unauthenticated limit that rate-limits shared
+        # @camoufox/camoufox's postinstall fetch queries the GitHub releases API;
+        # the token lifts the 60/hr unauthenticated limit that rate-limits shared
         # macOS/Windows runner IPs.
         #
         # PI_RESEARCH_STRICT_SETUP makes setup.cjs exit non-zero on a failed browser
@@ -382,7 +382,7 @@ jobs:
       # above NO LONGER RUNS on modern npm. Provision the browser explicitly —
       # this is the one job whose suite launches real browsers on all three
       # OSes, and a silently-missing binary would skip them all green. Running
-      # scripts/setup.cjs (not a bare `camoufox-js fetch`) keeps the strict-mode
+      # scripts/setup.cjs (not a bare `camoufox fetch`) keeps the strict-mode
       # enforcement and the install-dir resolution consumers actually get.
       - name: Provision the Camoufox browser (explicit — npm ≥11.19 skips postinstall)
         run: node scripts/setup.cjs
@@ -431,8 +431,11 @@ jobs:
         # Always fetch on macOS/Windows (not Linux-cached); on Linux only on a
         # cache miss. Idempotent — skips if the binary is already present.
         if: runner.os != 'Linux' || steps.cache-camoufox.outputs.cache-hit != 'true'
-        timeout-minutes: 5
-        run: npx camoufox-js fetch
+        # 15 min: the pinned archive is ~1.3GB. Normally a no-op (the explicit
+        # provision step above already fetched it on every OS), but a Linux
+        # cache miss with a slow runner would blow a 5-minute bound.
+        timeout-minutes: 15
+        run: npx @camoufox/camoufox fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # headless:'virtual' (opt-in Xvfb path) requires an X11 display.
@@ -454,7 +457,7 @@ jobs:
         shell: bash
         run: |
           node --input-type=module <<'NODE_EOF'
-          import { Camoufox } from 'camoufox-js';
+          import { Camoufox } from '@camoufox/camoufox';
           const b = await Camoufox({ headless: true });
           await b.close();
           console.log('camoufox headless:true OK');
@@ -465,16 +468,17 @@ jobs:
         # Exercises the headless:'virtual' code path that the regular integration
         # tests always bypass because DISPLAY=:99 is set earlier in this job.
         # Here we explicitly unset DISPLAY before launching so camoufox spawns
-        # its own Xvfb. If camoufox-js or Xvfb regressions break this path,
-        # this step catches it before the integration suite even runs.
+        # its own Xvfb. If @camoufox/camoufox or Xvfb regressions break this
+        # path, this step catches it before the integration suite even runs.
         shell: bash
         run: |
           node --input-type=module <<'NODE_EOF'
-          import { Camoufox } from 'camoufox-js';
+          import { Camoufox } from '@camoufox/camoufox';
           delete process.env['DISPLAY'];
           const b = await Camoufox({ headless: 'virtual' });
-          // headless:'virtual' browser.close() is synchronous (returns void).
-          b.close();
+          // browser.close() is Playwright's async close; awaiting it also lets
+          // the library tear down the Xvfb display it spawned for 'virtual'.
+          await b.close();
           console.log('camoufox headless:virtual OK');
           NODE_EOF
       - name: Build worker bundle
@@ -513,10 +517,11 @@ jobs:
           #
           # And enforce that: the browser IS installed on this job, so if
           # isBrowserAvailable() is false here it means our mirrored camoufox cache
-          # path has drifted from camoufox-js's own — which would empty this entire
-          # suite while still reporting green. The "Verify camoufox launches" step
-          # cannot catch that, because it resolves the binary through camoufox-js
-          # rather than through our path. NOT set on the parallel group above, where
+          # path has drifted from @camoufox/camoufox's own — which would empty this
+          # entire suite while still reporting green. The "Verify camoufox launches"
+          # step cannot catch that, because it resolves the binary through
+          # @camoufox/camoufox rather than through our path. NOT set on the parallel
+          # group above, where
           # full-mock mode makes an unavailable browser the intended state.
           PI_RESEARCH_REQUIRE_BROWSER: "1"
           PI_RESEARCH_WORKER_THREADS: "2"

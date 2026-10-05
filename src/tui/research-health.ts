@@ -69,7 +69,7 @@ export function formatHealthError(raw: string): string {
   if (raw.includes('Xvfb') || raw.includes('xvfb') || raw.includes('virtual display') || raw.includes('display server') || raw.includes('DISPLAY not set')) {
     return 'No display server found on Linux. Install Xvfb for TTY/Wayland use: sudo apt install xvfb';
   } else if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
-    return 'Browser engine not installed. Run `npx camoufox-js fetch` to install it.';
+    return 'Browser engine not installed. Run `npx camoufox fetch` to install it.';
   } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
     // The readiness probes check browser/state/knowledge availability — they do NOT perform a
     // web search, so a timeout here is NOT the search engine blocking us. It is almost always

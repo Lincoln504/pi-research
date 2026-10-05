@@ -101,8 +101,9 @@ inside the target", plus hardening: setuid/setgid/sticky bits stripped from extr
 addLocalFolder no longer follows symlinks out of the archived folder). The GitHub advisory page
 currently still reads "patched versions: None" (last reviewed 2026-09-08, three days before the
 release), but the affected range `>=0.5.9 <=0.6.0` excludes 0.6.1, so `npm audit` is clean. Both
-pinning parents (`onnxruntime-node` and `camoufox-js`, each requiring `^0.6.0`) resolve 0.6.1
-without any override; the `adm-zip` override in `package.json` was moved to `^0.6.1` to pin the
+pinning parents (`onnxruntime-node` and the browser launcher — `camoufox-js` requiring `^0.6.0`
+at the time, `@camoufox/camoufox` requiring `^0.6.1` since the 2026-10-05 launcher replacement)
+resolve 0.6.1 without any override; the `adm-zip` override in `package.json` was moved to `^0.6.1` to pin the
 floor explicitly. Consumers clear the advisory as soon as their lockfiles re-resolve adm-zip
 (a fresh `npm install` suffices — no override needed on their side, and any consumer-side
 allowlist or suppression for this GHSA can be removed).
@@ -117,14 +118,15 @@ repository-wide override is what hid that here. It took the `transformers` 4.3.0
 
 Symlink following at the extraction destination (CWE-59) in adm-zip 0.5.9 through 0.6.0. Reaches
 the shipped tree as one deduped copy required by `onnxruntime-node` (via
-`@huggingface/transformers`) and `camoufox-js`. Re-check on every release:
+`@huggingface/transformers`) and `@camoufox/camoufox` (the browser launcher; `camoufox-js`
+before the 2026-10-05 replacement). Re-check on every release:
 
 1. Has a patched adm-zip shipped? `npm view adm-zip time --json` (0.6.0, published 2026-07-10, is
    the newest release; the advisory's `first_patched_version` was null as of 2026-09-09). Watch
    the in-progress upstream fix: cthackers/adm-zip PR #575 ("Update fix issue snyk symlink", open
    since 2026-09-01, rewrites `util/utils.js` with symlink regression tests).
 2. Have the parents moved? `npm view onnxruntime-node version dependencies.adm-zip` and
-   `npm view camoufox-js version dependencies.adm-zip`. Even the latest onnxruntime-node (1.29.0
+   `npm view @camoufox/camoufox version dependencies.adm-zip`. Even the latest onnxruntime-node (1.29.0
    as of 2026-09-09) still requires `^0.6.0`.
 3. Do NOT "fix" it by downgrading below 0.5.9: 0.5.8 and everything below 0.6.0 is covered by
    GHSA-xcpc-8h2w-3j85 (CVE-2026-39244, HIGH, patched exactly in 0.6.0). Both parents' declared
@@ -133,31 +135,29 @@ the shipped tree as one deduped copy required by `onnxruntime-node` (via
    override), delete this entry, re-run the gate and its unit tests, and re-run
    `npm audit --omit=dev` to confirm zero blocking advisories.
 
-## What consumers of the published package see (re-measured, npm 11.19.0, 2026-10-01)
+## What consumers of the published package see (re-measured, npm 11.19.0, 2026-10-05)
 
 **Not clean. The gate audits the tree rooted in this repository, and that tree is not the tree a
 consumer gets.** `npm overrides` are honored only from the root project of an install, so the
 `sharp` and `adm-zip` overrides in `package.json` (and the `brace-expansion` one) reach the
-in-repo tree and nothing else. Measured on 2026-10-01 against the published tarball, a consumer
-resolving the same declared ranges sees 4-7 HIGH severity advisories depending on install shape:
+in-repo tree and nothing else. Measured on 2026-10-05 against the published tarball, a consumer
+resolving the same declared ranges sees 4 HIGH severity advisories (all one sharp chain) on either install shape:
 
 | Install shape | HIGH | Leaf advisory groups |
 | --- | --- | --- |
-| `npm install` (peers auto-installed) | 7 | adm-zip 0.5.18, sharp 0.34.5 + 0.33.5, brace-expansion 5.0.9 |
-| `npm install --legacy-peer-deps` (the `pi install` shape) | 4 | sharp 0.33.5 |
-| `npm install` (peers auto-installed), plus a consumer `overrides: {"sharp": "^0.35.4"}` | 1 | brace-expansion 5.0.9 (unfixable downstream) |
-| `npm install --legacy-peer-deps`, plus that same `sharp` override | 0 | none — the peer that carries brace-expansion is never installed under this flag |
+| `npm install` (peers auto-installed, pi 1.0.3 host packages) | 4 | sharp 0.33.5 (npm counts the chain: `sharp`, `@huggingface/transformers`, `@lancedb/lancedb`, `@lincoln504/pi-research`) |
+| `npm install --legacy-peer-deps` (the `pi install` shape) | 4 | the same sharp 0.33.5 chain |
+| either shape, plus a consumer `overrides: {"sharp": "^0.35.4"}` | 0 | none (measured 2026-10-05 on the plain shape) |
 
-Adding `brace-expansion: ^5.0.12` to a consumer root changes none of these rows: on the
-peer-skipping shape there is no such copy to fix, and on the plain shape the copy lives inside
-the host's shrinkwrap and stays at 5.0.9 (verified). The count of 7 is npm's chain-inclusive node
-count — the leaf advisory groups are the ones listed in the third column, and `@lincoln504/pi-research`
-itself appears in npm's report only as a chain effect.
+Measured 2026-10-05 by `npm pack`, then `npm install --ignore-scripts` of the tarball into a scratch
+project, then `npm audit --omit=dev --json`. This replaces the 2026-10-01 table (7 / 4 / 1 / 0), whose
+extra rows were `adm-zip 0.5.18` (cleared 2026-10-01 by the `@huggingface/transformers` 4.3.0 bump)
+and `brace-expansion 5.0.9` inside the host's `npm-shrinkwrap.json` (see below: gone with pi 1.0.1).
 
 The `adm-zip 0.5.18` group left the consumer tree on 2026-10-01 with the
 `@huggingface/transformers` 4.2.0 → 4.3.0 bump (`onnxruntime-node` 1.24.3 → 1.30.0, whose
-`adm-zip ^0.6.0` dedupes to the patched 0.6.1 everywhere in the graph). Two groups remain and
-neither is fixable from here:
+`adm-zip ^0.6.0` dedupes to the patched 0.6.1 everywhere in the graph). One group remains and
+is not fixable from here:
 
 - **`sharp` via `@lancedb/lancedb` 0.39.0.** LanceDB's `optionalDependencies` pins
   `@huggingface/transformers` at exactly `3.0.2`, whose `sharp ^0.33.5` resolves to the vulnerable
@@ -165,14 +165,17 @@ neither is fixable from here:
   moves it. pi-research uses transformers only
   for text `feature-extraction`, so the vulnerable libvips/libheif decoders are never invoked —
   the exposure is a scanner finding, not a reachable path. A consumer `sharp` override clears it
-  (verified: `0.35.5` forced at every copy, `npm audit --omit=dev` drops to 0 on the
-  `--legacy-peer-deps` shape). Consuming LanceDB's own embedding function is the only reason to
+  (verified: 0 on both install shapes). Consuming LanceDB's own embedding function is the only reason to
   keep `sharp` unoverridden.
-- **`brace-expansion 5.0.9` inside `@earendil-works/pi-coding-agent`'s `npm-shrinkwrap.json`.**
-  Upstream-frozen, and it is exactly what the location-scoped exception shape was built for. It
-  appears only when npm auto-installs the peer (`--legacy-peer-deps` skips that, which is what
-  `pi install` uses), and it survives a consumer `overrides` entry — verified: `brace-expansion:
-  ^5.0.12` in a consumer root left the shrinkwrapped copy at 5.0.9.
+
+**Cleared 2026-10-05: `brace-expansion 5.0.9` inside the pi host's `npm-shrinkwrap.json`.** pi 1.0.1
+(changelog: "Fixed installations resolving vulnerable `brace-expansion` 5.0.9 by pinning
+`brace-expansion` 5.0.12 as a direct dependency", and "Removed `npm-shrinkwrap.json` from the published
+package") fixed it at the source. This repository's own tree had still carried the frozen copy at
+`node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion` (a dev-tree HIGH that
+`npm audit --omit=dev`, and so this gate, cannot see) until the dev dependency moved from 1.0.0 to
+1.0.3 on 2026-10-05. A consumer whose pi host is older than 1.0.1 still has it; nothing here can
+change that.
 
 What has NOT changed, and what any future exception entry here must not overstate: `npm install`
 and `pi install` both **succeed with exit 0** (npm prints the advisory count as a warning), the

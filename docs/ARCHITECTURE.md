@@ -308,43 +308,53 @@ directory".
 Worker pool over direct browser — browser processes are isolated in workers so a crash
 in one cannot affect the orchestrator or other sessions.
 
-Pinned browser stack — `playwright-core` and `impit` are pinned to exact versions and
-`camoufox-js` is pinned to its `0.12.0` line; the three are coupled and upgraded together,
+Pinned browser stack — the three browser packages are coupled and upgraded together,
 because each floating range broke fresh consumer installs that our lockfile masked.
-playwright-core stays at `1.60.0` (1.61+ rejects camoufox's Juggler and fails every
-launch — corroborated upstream: camoufox-js `0.12.0` declares
-`peerDependencies: { "playwright-core": "<1.61.0" }`, the same bound this pin holds by
-hand). `impit` is exact at `0.14.4` (refreshed from `0.13.0` on 2026-08-30 together with
-the camoufox bump) — exact because npm `overrides` do not propagate to consumers, so an
-exact pin is the only way to force a version downstream; impit's `only-allow pnpm`
-preinstall-guard incident (0.13.1/0.14.0, dropped in 0.14.1) is why floating ranges are
-not trusted here. Rationale in full: `src/infrastructure/browser/thread-worker-browser.ts`.
+`@camoufox/camoufox` is pinned to its `0.5` line (`^0.5.7`), `playwright-core` is exact at
+`1.62.1` and `impit` exact at `0.14.5`. The playwright pin follows the launcher's declared
+peer: `@camoufox/camoufox` declares
+`peerDependencies: { "playwright-core": "<1.63" }` (`1.60.0` was the old `camoufox-js`
+bound, which capped `<1.61.0`). `impit` stays exact because npm `overrides` do not
+propagate to consumers, so an exact pin is the only way to force a version downstream;
+impit's `only-allow pnpm` preinstall-guard incident (0.13.1/0.14.0, dropped in 0.14.1) is
+why floating ranges are not trusted here. Rationale in full:
+`src/infrastructure/browser/thread-worker-browser.ts`.
 
-The 0.10.x→0.12.0 camoufox bump had been held back through two refresh cycles by three
-blockers, all since resolved: camoufox restored Windows binaries in `v152.0.4-beta.26`
-(2026-07-16); impit's pnpm guard existed only in 0.13.1/0.14.0; and camoufox-js 0.12's
-better-sqlite3 13 upgrade, which initially looked like it demanded a C++ toolchain on
-every install. Measured on 13.0.3: `prebuilds/` for all eight platform/arch pairs ship
-INSIDE its tarball and load at runtime via node-gyp-build — no install script, nothing
-for a consumer to approve. What actually broke was tooling, not the binding: npm ≤11's
-injected `node-gyp rebuild` needlessly recompiles a binding.gyp with no install script
-(and its node-gyp 11.2 cannot detect the VS2026 CI runner image), which is why CI runs
-npm 12. Any future bump checks better-sqlite3 first, not camoufox.
+The launcher replacement (2026-10-05). `camoufox-js` `0.12.0` was replaced by
+`@camoufox/camoufox` `0.5.7` after the former broke every fresh install. On 2026-10-03
+`v156.0.1-beta.34` was published to the `daijro/camoufox` releases WITHOUT the prerelease
+flag, and the 156-series browser schema had dropped `navigator.product` (with
+`appName`/`appCodeName`). `camoufox-js` `0.12.0` still sent those properties, and its
+`fetch` takes no version argument — it walks the releases newest-first and takes the first
+NON-PRERELEASE asset for this OS/arch. Every install after 2026-10-03 therefore fetched
+the 156 build and died on launch with `UnknownProperty: Unknown property
+navigator.product in config`, while machines holding an older cached browser kept working:
+which is why CI (a fresh cache) went red while local runs stayed green. There was no pin to
+turn — the library had no version argument and no environment variable for the browser.
 
-The browser BINARY, by contrast, is not pinned and cannot be. `camoufox-js fetch` takes
-no version argument: it walks the `daijro/camoufox` GitHub releases newest-first and takes
-the first non-prerelease release carrying an asset for this OS/arch. So the binary a
-consumer gets is whatever camoufox published most recently at install time, regardless of
-which camoufox-js version is installed — the npm pins do not freeze it, and a future
-camoufox release could break launches for fresh installs with no change on our side.
-Windows assets were in fact missing from `v146-hardware` through `v152.0.2-alpha` and
-returned in `v152.0.4-beta.26` (2026-07-16). Current newest is `v152.0.4-beta.28`
-(Firefox 152); it launches and drives cleanly under playwright-core `1.60.0`, verified
-directly, as does the older `v135.0.1-beta.24` an existing cache may still hold. The
-practical consequence is that browser freshness is independent of the npm pin: a stale
-`camoufox-js` does not mean a stale Firefox. Re-verify a real launch when bumping this
-stack — the unit and integration suites mock the browser and cannot catch a Juggler
-mismatch.
+`@camoufox/camoufox` fixes that structurally: every published copy is stamped with the one
+browser build compiled from the same sources (`browser-pin.json`; 0.5.7 pins
+`v156.0.1-beta.34`), and it fetches and launches exactly that build by default. The two
+halves of the stack are released together, so a schema change cannot reach a launcher that
+does not understand it. The browser BINARY is PINNED now, where the old stack left it
+floating, and the practical consequence runs the other way: a stale `@camoufox/camoufox`
+means a stale Firefox, and the browser only moves when this dependency does.
+
+The extra install layer this adds: `@camoufox/camoufox` installs under
+`<INSTALL_DIR>/browsers/<repo>/<version>/` (multi-version, with `config.json`,
+`repo_cache.json` and a `.0.5_FLAG` above it) where `camoufox-js` laid the browser flat
+with a root `version.json`, and it derives `INSTALL_DIR` only from the platform cache
+directory — it reads neither `CAMOUFOX_INSTALL_DIR` nor `PLAYWRIGHT_BROWSERS_PATH`.
+`src/infrastructure/browser/camoufox-layout.ts` (install/uninstall twin:
+`scripts/camoufox-layout.cjs`, both driven by the same fixtures in
+`test/unit/infrastructure/camoufox-layout.test.ts`) is the single resolver for that
+location and for the override the launcher does read (`XDG_CACHE_HOME` on Linux,
+`LOCALAPPDATA` on Windows); it also recognises a legacy flat install, which matters
+because `camoufox fetch` runs `rm -rf INSTALL_DIR` over a directory it does not recognise.
+`@camoufox/camoufox` has no `better-sqlite3` dependency (the native surface on the launch
+path is now only `impit`), so the old npm-install-script blocker on this stack is gone.
+Re-verify a real launch when bumping it — the unit and integration suites mock the browser
+and cannot catch a Juggler mismatch.
 
 Pinned data stack — `apache-arrow` is a direct dependency at `21.1.0`, and `overrides`
 forces the whole tree to that single version so LanceDB and Arrow share one Arrow instance
@@ -370,20 +380,24 @@ through 0.39 declares the same
 `<=18.1.0` Arrow ceiling, so upgrading LanceDB does not resolve the override; it only
 changes which pairing needs re-validating.
 
-Pinned validation library — `typebox` (TypeBox 1.x, unscoped package name) is pinned to the
-exact version the pi host packages depend on (`@earendil-works/pi-ai` /
-`@earendil-works/pi-coding-agent` 1.0.0 both pin `1.3.27` — verified 2026-10-01 against 1.0.0 
-(and against 0.99.2 before it), after an
-undocumented drift was caught in the 0.84/0.85 era and realigned; that drift was to `1.3.26`,
-and the version now pinned is `1.3.27`, both re-checked directly in the installed host
-packages' `package.json`). Every
-tool's parameter schema is built with TypeBox here and handed across the boundary to pi's
-tool system, so the two must agree on `Value.Check`/`Convert` semantics. A floating `^1.1.38`
-range let a fresh consumer install resolve pi-research to a newer TypeBox than pi's, shipping
-an untested cross-version pairing; the exact pin keeps pi-research on the same version pi
-validates with. Bump it in lockstep with the pi host, not independently. (`undici`, by
-contrast, tracks the host's major — the host is on undici 8, and pi-research only uses the
-stable `Agent` connector API, so it follows `^8`.)
+Validation library — `typebox` (TypeBox 1.x, unscoped package name) is a PEER dependency
+(`>=1.3.27 <2`) and an exact `1.3.27` devDependency. It is host-provided: pi's extension loader
+warns on every startup when a host-provided package (`typebox`, `@sinclair/typebox`, the
+`@earendil-works/pi-*` packages) sits in `dependencies`, because an installed copy can bypass the
+loader and create a second live module instance (`resource-loader.js`,
+`collectExtensionPackageWarnings`; pi `docs/packages.md`). Under pi the host's own copy is used,
+so the two agree on `Value.Check`/`Convert` by construction. `@earendil-works/pi-ai` and
+`@earendil-works/pi-coding-agent` 1.0.0 through 1.0.3 all pin `1.3.27` (re-checked 2026-10-05 in
+the installed packages' `package.json`), which is why the devDependency, and so every test run and
+the type-check, stays on exactly that version: bump it in lockstep with the pi host, not
+independently. A standalone CLI/SDK install resolves the peer automatically on npm >= 7; the
+`pi-research` bin preflights it with the pi packages and exits 78 with the remedy when a
+peer-skipping install lacks it. The range is bounded below 2 on purpose (the pi packages use
+`>=0.99.0 <2` for the same reason) rather than pi's suggested `"*"`, so a standalone install cannot
+silently pick up a future major. Known trade-off: on a standalone install the peer resolves to the newest 1.x (1.3.35 on 2026-10-05, measured by installing the packed tarball) while the pi packages nest their own exact `1.3.27`, so two TypeBox copies coexist there; under pi only the host's copy exists. Every tool's parameter schema is built with TypeBox here and
+handed across the boundary to pi's tool system. (`undici`, by contrast, tracks the host's major —
+the host is on undici 8, and pi-research only uses the stable `Agent` connector API, so it follows
+`^8`.)
 
 Pinned embedding runtime — `@huggingface/transformers` is exact at `4.3.0`. The hold at `4.2.0`
 was lifted on 2026-10-01 for a security reason, not a feature one: `4.2.0` declares

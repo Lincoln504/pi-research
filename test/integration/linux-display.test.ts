@@ -20,7 +20,7 @@
  *        (B) TTY + Xvfb absent  → healthy:false with actionable install hint (mocked)
  *        (C) DISPLAY set        → which Xvfb is NOT called at all
  *        (C2) pure Wayland      → which Xvfb is NOT called (headless:true used instead)
- *        (D) binary absent      → healthy:false with `npx camoufox-js fetch` hint
+ *        (D) binary absent      → healthy:false with `npx camoufox fetch` hint
  *
  * Skip semantics: every test uses ctx.skip() — never a silent pass-green.
  * Platform guard:  Linux-only tests are skipped via ctx.skip() on non-Linux,
@@ -189,7 +189,7 @@ describe('Linux display-mode integration tests', () => {
   // =========================================================================
   // Group 2: camoufox virtual-mode launch
   //
-  // These tests directly call camoufox-js (bypassing the browser pool) with
+  // These tests directly call @camoufox/camoufox (bypassing the browser pool) with
   // headless:'virtual' and no DISPLAY set. They prove the full Xvfb spawn-
   // and-kill lifecycle works correctly on this machine.
   //
@@ -217,7 +217,7 @@ describe('Linux display-mode integration tests', () => {
       // Confirm the resolved mode — this is what the browser worker would pass.
       expect(resolveHeadlessMode()).toBe('virtual');
 
-      const { Camoufox } = await import('camoufox-js');
+      const { Camoufox } = await import('@camoufox/camoufox');
 
       let browser: any;
       try {
@@ -235,7 +235,7 @@ describe('Linux display-mode integration tests', () => {
         expect(context).toBeDefined();
         await context.close();
       } finally {
-        // camoufox-js virtual mode: close() is synchronous (returns undefined),
+        // @camoufox/camoufox virtual mode: close() is synchronous (returns undefined),
         // unlike the Promise-returning close() in headless:true mode.
         if (browser) try { await browser.close(); } catch {}
       }
@@ -260,7 +260,7 @@ describe('Linux display-mode integration tests', () => {
       process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       expect(resolveHeadlessMode()).toBe('virtual');
 
-      const { Camoufox } = await import('camoufox-js');
+      const { Camoufox } = await import('@camoufox/camoufox');
 
       let browser: any;
       let pageTitle: string | undefined;
@@ -455,7 +455,7 @@ describe('Linux display-mode integration tests', () => {
       const result = await checkBrowserCapability();
 
       expect(result.healthy).toBe(false);
-      expect(result.error).toContain('npx camoufox-js fetch');
+      expect(result.error).toContain('npx camoufox fetch');
     });
   });
 

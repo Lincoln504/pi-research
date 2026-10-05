@@ -74,7 +74,7 @@ describe('ensureFunctionalHealth', () => {
       success: false,
       status: 'unhealthy',
       components: [{ component: 'BrowserCapability', healthy: false, error: 'Camoufox (browser) not found.' }],
-      error: 'Camoufox (browser) not found. Run "npx camoufox-js fetch" to install the browser.',
+      error: 'Camoufox (browser) not found. Run "npx camoufox fetch" to install the browser.',
     });
 
     await expect(ensureFunctionalHealth(ctx)).rejects.toThrow(/Browser engine not installed/);

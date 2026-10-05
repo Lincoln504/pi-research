@@ -323,20 +323,18 @@ export async function performSearch(
 
         // A missing native addon is a BROKEN INSTALL, and the generic advice below
         // actively misleads: it sends the reader to check their network and their
-        // machine load when neither is involved and neither can be acted on. npm 12
-        // defaults `allowScripts` to off, so a plain install no longer builds
-        // camoufox-js's better-sqlite3 dependency and every browser worker dies
-        // identically. Say that instead, and say what fixes it.
+        // machine load when neither is involved and neither can be acted on. A
+        // dropped platform package (npm/cli#4828) or an install that skipped a native
+        // dependency's binding makes every browser worker die identically. Say that
+        // instead, and say what fixes it.
         if (isNativeBindingError(sampleWorkerError)) {
             metrics.increment('browser_search_total_failures_total', 1, { cause: 'native_binding' });
             throw new Error(
                 `Search completely failed: ${reason}, all with a missing native module. ` +
-                `This is an incomplete install, not a network problem: better-sqlite3 13 ` +
-                `ships prebuilt bindings for every supported platform and loads them at ` +
-                `runtime, so a missing binding means an old or broken npm install. ` +
-                `Upgrade npm to ≥12 (npm install -g npm@12) and reinstall this package — ` +
-                `modern npm skips the needless recompile that fails on toolchain-less ` +
-                `machines, and the prebuilt binding then loads as-is.` +
+                `This is an incomplete install, not a network problem: the browser launcher's ` +
+                `native dependency (impit) ships a prebuilt binding per platform as a separate ` +
+                `package, and npm sometimes drops it (npm/cli#4828). ` +
+                `Reinstall this package (npm install, or pi install again) to restore it.` +
                 (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
             );
         }

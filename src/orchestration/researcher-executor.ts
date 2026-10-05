@@ -61,6 +61,36 @@ export function isUnretriableResearcherError(error: unknown): boolean {
 }
 
 /**
+ * OpenRouter's *in-flight budget* 402 — a different condition from a spent balance, and a
+ * transient one: the request is refused because too many of THIS account's requests are
+ * still open, and the provider states how long the window needs in `Retry-After`. It must
+ * stay retriable (the condition clears by itself), but the ordinary 1-2s exponential
+ * backoff cannot outlast a 120s settle window: the run burns its three attempts, fails,
+ * and the round then degrades to a raw-compilation synthesis. Matched on the provider's
+ * wording rather than a bare `402`, for the same reason as the unretriable gate above.
+ */
+export function isInFlightBudgetError(error: unknown): boolean {
+  const lower = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return lower.includes('in_flight_budget_exhausted')
+    || lower.includes('would exceed your available credits given your current in-flight requests');
+}
+
+/**
+ * The `Retry-After` a provider error asked for, in ms, clamped to [5s, 60s], or null when
+ * the error carries none. Read out of the message because the researcher retry loop sees a
+ * serialized provider error, not the raw Response headers: pi's `after_provider_response`
+ * hook (src/index.ts) is the only place with headers, and it does not feed this loop.
+ */
+export function parseRetryAfterMs(error: unknown): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const m = /["']?retry-after["']?\s*[:=]\s*["']?(\d{1,4})/i.exec(message);
+  if (!m) return null;
+  const seconds = Number(m[1]);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return Math.min(Math.max(seconds, 5), 60) * 1000;
+}
+
+/**
  * Run a single researcher with retries
  */
 export async function runResearcher(options: RunResearcherOptions): Promise<void> {
@@ -214,6 +244,10 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     .replace('{{digest_section}}', () => RESEARCHER_DIGEST_SECTION)
     .trim();
 
+  // Set when the previous attempt failed on the provider's in-flight budget: the next
+  // backoff uses the provider's Retry-After instead of the small exponential step.
+  let inFlightBackoffMs: number | null = null;
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Launch boundary: never build a session for a run that is already cancelled
     // or fast-stopped. The abort sentinel keeps the wrapper's clean-cancel
@@ -225,7 +259,11 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       return;
     }
     if (attempt > 1) {
-      const delay = Math.min(1000 * Math.pow(2, attempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
+      // A provider-declared in-flight window overrides the exponential step for exactly
+      // one attempt: the condition cannot clear in 1-2s, and the provider already said
+      // how long it needs (isInFlightBudgetError / parseRetryAfterMs).
+      const delay = inFlightBackoffMs ?? Math.min(1000 * Math.pow(2, attempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
+      inFlightBackoffMs = null;
       logger.warn(`[ResearcherExecutor] Researcher ${id} retry ${attempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
       observer?.onResearcherProgress?.(id, 'retry');
       // Abortable: a cancel during this backoff must wake the sleep immediately —
@@ -592,6 +630,14 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         logger.error(`[ResearcherExecutor] Researcher ${id} failed with an unretriable provider error, not retrying: ${errMsg}`);
         metrics.increment('researcher_unretriable_total', 1, { mode: 'deep', complexity: String(complexity) });
         break;
+      }
+
+      // Transient provider condition that needs a real wait, not a retry loop: honor the
+      // Retry-After it returned (clamped) for the next attempt instead of 1-2s.
+      if (isInFlightBudgetError(err) && attempt < maxAttempts) {
+        inFlightBackoffMs = parseRetryAfterMs(err) ?? 15000;
+        metrics.increment('researcher_inflight_budget_backoff_total', 1, { mode: 'deep', complexity: String(complexity) });
+        logger.warn(`[ResearcherExecutor] Researcher ${id} hit the provider's in-flight budget; backing off ${inFlightBackoffMs}ms (provider Retry-After, else 15s) before attempt ${attempt + 1}`);
       }
 
       if (attempt < maxAttempts) {

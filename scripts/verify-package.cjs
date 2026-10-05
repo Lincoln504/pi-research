@@ -64,6 +64,9 @@ const REQUIRED = [
   // Install/uninstall lifecycle scripts
   'scripts/setup.cjs',
   'scripts/cleanup.cjs',
+  // Required by BOTH of the above (`require('./camoufox-layout.cjs')`): without it the
+  // shipped postinstall and cleanup die with MODULE_NOT_FOUND on every install.
+  'scripts/camoufox-layout.cjs',
   // Build scripts the git-install path depends on: `prepare` runs on install and
   // invokes build.cjs to produce dist/ + the skill launcher from source. Dropping
   // either from files[] would silently break `pi install git:` / directory installs.
@@ -257,6 +260,7 @@ function verifyManifest() {
   }
 
   verifyPromptsInSync();
+  verifyLocalRequiresShipped(files);
 
   for (const f of files) {
     for (const { re, what } of FORBIDDEN) {
@@ -268,6 +272,32 @@ function verifyManifest() {
     console.error(`\nManifest verification FAILED (${files.length} files inspected).`);
   } else {
     console.log(`OK: Tarball manifest verified: ${files.length} files, all required present, no junk.`);
+  }
+}
+
+/**
+ * A shipped script must not require a LOCAL file the tarball omits.
+ *
+ * `scripts/setup.cjs` and `scripts/cleanup.cjs` are shipped through files[] one by one,
+ * so a helper they gain (camoufox-layout.cjs) is silently absent from the published
+ * package unless files[] is updated too, and the failure only appears on a user's machine
+ * as MODULE_NOT_FOUND at postinstall. Scan every shipped scripts/*.cjs for relative
+ * `require('./x')` and assert each target is in the tarball.
+ */
+function verifyLocalRequiresShipped(shipped) {
+  const set = new Set(shipped);
+  for (const f of shipped) {
+    if (!/^scripts\/[^/]+\.cjs$/.test(f)) continue;
+    const abs = path.join(ROOT, f);
+    if (!fs.existsSync(abs)) continue;
+    const src = fs.readFileSync(abs, 'utf8');
+    for (const m of src.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(f), m[1]));
+      const candidates = [target, `${target}.js`, `${target}.cjs`, `${target}.json`];
+      if (!candidates.some((c) => set.has(c))) {
+        fail(`${f} requires ${m[1]} but ${target} is not in the published tarball — add it to package.json files[].`);
+      }
+    }
   }
 }
 

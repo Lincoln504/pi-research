@@ -24,7 +24,7 @@ const { mockRunBrowserTask } = vi.hoisted(() => ({ mockRunBrowserTask: vi.fn() }
 
 vi.mock('../../../src/web-research/utils.ts', () => ({
   checkModule: vi.fn().mockImplementation((name) => {
-    if (name === 'playwright-core' || name === 'camoufox-js') return true;
+    if (name === 'playwright-core' || name === '@camoufox/camoufox') return true;
     return false;
   }),
 }));

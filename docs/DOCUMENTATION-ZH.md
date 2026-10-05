@@ -845,8 +845,8 @@ API 密钥
 | `PI_RESEARCH_SKILL_DIR` | _（自动）_ | 覆盖技能安装器使用的随包研究技能源码目录。 |
 | `PI_RESEARCH_PURGE_BROWSERS` | _（未设置）_ | 由随包 `scripts/cleanup.cjs` 读取：设为 `1` 同时删除共享的 camoufox 浏览器缓存（默认保留，因为其他安装可能使用）。注意 npm ≥7 不运行 `preuninstall`，因此该脚本在 `npm uninstall` 时不会触发 —— 见[智能体技能](#agent-skill)。 |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _（未设置）_ | 在 `npm install` 期间设为 `1` 以跳过 camoufox 浏览器下载（改为首次使用时惰性获取；Playwright 标准约定）。 |
-| `CAMOUFOX_INSTALL_DIR` | _（用户缓存）_ | camoufox-js 自己的变量，也是唯一能重定位浏览器的变量。它决定 pi-research 查找二进制的位置，并导出给 postinstall 抓取和浏览器 worker。在固定的 camoufox-js 0.12.0+ 上生效，它重新认可该变量；旧固定版本（<0.12，缓存目录硬编码在代码里）只重定位查找 —— 见[架构](#architecture)。 |
-| `PLAYWRIGHT_BROWSERS_PATH` | _（用户缓存）_ | 上述变量的别名，为兼容而接受，并作为 `CAMOUFOX_INSTALL_DIR` 继续导出 —— 在 camoufox-js 0.12.0+ 上它重定位下载本身，与 `CAMOUFOX_INSTALL_DIR` 完全相同。 |
+| `CAMOUFOX_INSTALL_DIR` | _（用户缓存）_ | 重定位浏览器下载。pi-research 认可它，启动器不认可：`@camoufox/camoufox` 只读平台的缓存变量，因此 pi-research 把该值映射过去（Linux 上是 `XDG_CACHE_HOME`，Windows 上是 `LOCALAPPDATA`），并导出给 postinstall 抓取和浏览器 worker，使安装与查找不会漂移。macOS 上忽略（启动器只从 `$HOME` 推导缓存）—— 见[架构](#architecture)。 |
+| `PLAYWRIGHT_BROWSERS_PATH` | _（用户缓存）_ | `CAMOUFOX_INSTALL_DIR` 的别名，为兼容而接受。 |
 | `XDG_CACHE_HOME` | `~/.cache` | 标准 XDG 变量。设置后，下面所有 `~/.cache/pi-research/...` 路径改为扎根于 `$XDG_CACHE_HOME/pi-research/...`。 |
 | `PI_RESEARCH_BIN`（别名 `PI_RESEARCH_PATH`） | _（自动）_ | 仅智能体技能启动器：需要绕过自动解析（PATH → 本地安装 → npx）时，指向 pi-research 引擎二进制的显式路径。见 [agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md)。 |
 | `PLAYWRIGHT_INSTALL_DEPS` | _（未设置）_ | 仅 Linux。在 `npm install` 期间设为 `true`，也会通过 `npx playwright install-deps` 安装系统库（等同于 `npm run install:system-deps`）。 |
@@ -1291,35 +1291,43 @@ src/
 worker 进程池优先于直接浏览器 —— 浏览器进程隔离在 worker 中，一个崩溃不会影响编排器
 或其他会话。
 
-固定浏览器技术栈 —— `playwright-core` 和 `impit` 固定到精确版本，`camoufox-js` 固定到
-其 `0.12.0` 线；三者耦合，一起升级，因为每个浮动范围都曾破坏全新消费者安装，而我们的
-lockfile 掩盖了问题。playwright-core 保持在 `1.60.0`（1.61+ 拒绝 camoufox 的 Juggler，
-导致每次启动都失败 —— 上游可佐证：camoufox-js `0.12.0` 声明
-`peerDependencies: { "playwright-core": "<1.61.0" }`，与这个手工持有的边界一致）。`impit`
-精确在 `0.14.4`（2026-08-30 随 camoufox 升级从 `0.13.0` 刷新）—— 之所以精确，是因为
-npm 的 `overrides` 不会传播给消费者，精确固定是在下游强制版本的唯一方式；impit 的
+固定浏览器技术栈 —— 三个浏览器包相互耦合、一起升级，因为每个浮动范围都曾破坏全新消费者
+安装，而我们的 lockfile 掩盖了问题。`@camoufox/camoufox` 固定到其 `0.5` 线（`^0.5.7`），
+`playwright-core` 精确在 `1.62.1`，`impit` 精确在 `0.14.5`。playwright 的固定跟随启动器
+声明的 peer：`@camoufox/camoufox` 声明 `peerDependencies: { "playwright-core": "<1.63" }`
+（`1.60.0` 是旧 `camoufox-js` 的边界，上限为 `<1.61.0`）。`impit` 之所以精确，是因为 npm
+的 `overrides` 不会传播给消费者，精确固定是在下游强制版本的唯一方式；impit 的
 `only-allow pnpm` 预安装守卫事故（0.13.1/0.14.0，0.14.1 移除）就是这里不信任浮动范围的
 原因。完整理由：`src/infrastructure/browser/thread-worker-browser.ts`。
 
-0.10.x→0.12.0 的 camoufox 升级曾因三个阻塞项被推迟了两个刷新周期，现已全部解决：
-camoufox 在 `v152.0.4-beta.26`（2026-07-16）恢复了 Windows 二进制；impit 的 pnpm 守卫
-只存在于 0.13.1/0.14.0；camoufox-js 0.12 升级到 better-sqlite3 13，起初看起来要求每次
-安装都带 C++ 工具链。在 13.0.3 上实测：全部八对平台/架构的 `prebuilds/` 都打包在
-tarball *内部*，经 node-gyp-build 在运行时加载 —— 没有安装脚本，消费者无需审批任何
-东西。真正坏的是工具链而不是绑定：npm ≤11 注入的 `node-gyp rebuild` 不必要地重编译
-一个没有安装脚本的 binding.gyp（而它的 node-gyp 11.2 检测不到 VS2026 CI runner 镜像），
-这正是 CI 跑 npm 12 的原因。今后任何升级都先查 better-sqlite3，而不是 camoufox。
+启动器替换（2026-10-05）。`camoufox-js` `0.12.0` 因破坏所有全新安装而被
+`@camoufox/camoufox` `0.5.7` 取代。2026-10-03，`v156.0.1-beta.34` 在没有预发行标记的
+情况下发布到 `daijro/camoufox`，而 156 系列的浏览器 schema 删除了 `navigator.product`
+（以及 `appName`/`appCodeName`）。`camoufox-js` `0.12.0` 仍然发送这些属性，而它的
+`fetch` 不接受版本参数 —— 它从新到旧遍历 releases，取第一个带本 OS/架构资产的
+非预发行 release。因此 2026-10-03 之后的每次安装都会抓到 156 构建，并在启动时以
+`UnknownProperty: Unknown property navigator.product in config` 失败；而持有较旧缓存的
+机器仍然正常：这正是 CI（全新缓存）变红、本地保持绿色的原因。当时没有可调的固定 ——
+该库既没有版本参数，也没有针对浏览器的环境变量。
 
-相反，浏览器**二进制**不固定，也无法固定。`camoufox-js fetch` 不接受版本参数：它从新到
-旧遍历 `daijro/camoufox` 的 GitHub releases，取第一个带本 OS/架构资产的非预发行 release。
-因此消费者拿到什么二进制，取决于安装时 camoufox 最新发布了什么，与安装了哪个
-camoufox-js 版本无关 —— npm 固定不冻结它，未来某个 camoufox release 可能在我们没有任何
-改动的情况下破坏全新安装的启动。事实上 Windows 资产从 `v146-hardware` 到
-`v152.0.2-alpha` 一直缺失，在 `v152.0.4-beta.26`（2026-07-16）回归。当前最新是
-`v152.0.4-beta.28`（Firefox 152）；它在 playwright-core `1.60.0` 下启动顺畅、驱动
-正常，已直接验证，现存缓存中可能仍持有的较老 `v135.0.1-beta.24` 也一样。实际含义是：
-浏览器新鲜度独立于 npm 固定 —— 过时的 `camoufox-js` 不代表过时的 Firefox。升级这套
-技术栈时务必重新验证真实启动 —— 单元和集成测试都 mock 浏览器，抓不到 Juggler 不匹配。
+`@camoufox/camoufox` 从结构上解决了这一点：每个已发布的副本都印有由同一份源码构建的
+唯一浏览器构建（`browser-pin.json`；0.5.7 固定 `v156.0.1-beta.34`），并默认只抓取和启动
+该构建。技术栈的两半一起发布，因此 schema 变更不可能到达不理解它的启动器。浏览器
+**二进制**如今被固定，而旧技术栈让它浮动，实际含义随之反转：过时的
+`@camoufox/camoufox` 意味着过时的 Firefox，浏览器只会随这个依赖一起移动。
+
+这新增的安装层：`@camoufox/camoufox` 安装到 `<INSTALL_DIR>/browsers/<repo>/<version>/`
+之下（多版本，上方还有 `config.json`、`repo_cache.json` 和 `.0.5_FLAG`），而
+`camoufox-js` 把浏览器平铺存放并在根目录放 `version.json`。它只从平台缓存目录推导
+`INSTALL_DIR` —— 既不读 `CAMOUFOX_INSTALL_DIR` 也不读 `PLAYWRIGHT_BROWSERS_PATH`。
+`src/infrastructure/browser/camoufox-layout.ts`（安装/卸载侧的孪生：
+`scripts/camoufox-layout.cjs`，二者由 `test/unit/infrastructure/camoufox-layout.test.ts`
+中的同一套夹具驱动）是该位置以及启动器真正读取的覆盖变量（Linux 上是
+`XDG_CACHE_HOME`，Windows 上是 `LOCALAPPDATA`）的唯一解析器；它还能识别遗留的平铺
+安装 —— 这很重要，因为 `camoufox fetch` 会对它不认识的目录执行 `rm -rf INSTALL_DIR`。
+`@camoufox/camoufox` 已无 `better-sqlite3` 依赖（启动路径上的原生面只剩 `impit`），
+因此该技术栈上旧的 npm 安装脚本阻塞项消失了。升级它时务必重新验证真实启动 —— 单元
+和集成测试都 mock 浏览器，抓不到 Juggler 不匹配。
 
 固定数据技术栈 —— `apache-arrow` 是 `21.1.0` 的直接依赖，`overrides` 把整棵树强制到
 这一个版本，让 LanceDB 和 Arrow 共享同一个 Arrow 实例（版本不匹配的 Arrow 副本无法

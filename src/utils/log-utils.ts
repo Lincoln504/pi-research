@@ -142,7 +142,7 @@ const AUTH_SCHEME_PATTERN = new RegExp(
 );
 // Well-known opaque credential formats (OpenAI, GitHub, AWS, Slack, Anthropic).
 const KNOWN_TOKEN_PATTERN = new RegExp(
-  `${B_LEFT}(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})${B_RIGHT}`,
+  `${B_LEFT}(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,})${B_RIGHT}`,
   'g',
 );
 // JSON Web Tokens — header.payload.signature, each a base64url segment.

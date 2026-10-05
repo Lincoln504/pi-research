@@ -818,10 +818,11 @@ async function cmdStatus(json?: boolean): Promise<number> {
   // anything.
   //
   // The browser's NATIVE DEPENDENCIES are a separate and harsher question, and were
-  // previously assumed away here with "nothing else fails". Measured: better-sqlite3,
-  // which camoufox-js needs to launch at all, is built by a dependency install script
-  // and does NOT survive a scripts-blocked install. When it is missing every browser
-  // worker dies and SEARCH IS DEAD — not degraded — while the knowledge store keeps
+  // previously assumed away here with "nothing else fails". The launcher's native
+  // module (`impit`) resolves a prebuilt platform package; if npm drops it (npm/cli#4828)
+  // the module fails at first use. (Historically this was better-sqlite3, a dependency
+  // of the camoufox-js launcher this package replaced with @camoufox/camoufox.)
+  // When it is missing every browser worker dies and SEARCH IS DEAD — not degraded — while the knowledge store keeps
   // working because onnxruntime and lancedb both ship their binaries. That is not a
   // capability note, so it gates `ready`: a build that cannot search cannot research.
   const browserInstalled = isBrowserAvailable();
@@ -843,17 +844,14 @@ async function cmdStatus(json?: boolean): Promise<number> {
       installed: browserInstalled,
       nativeDepsOk: nativeDeps.ok,
       nativeDepsError: nativeDeps.ok ? null : nativeDeps.error,
-      // better-sqlite3 13 ships prebuilds/ for all eight platform/arch pairs and
-      // loads them at runtime via node-gyp-build — no install script involved.
-      // On modern npm (≥11.19) the injected `node-gyp rebuild` that a
-      // binding.gyp-without-install-script triggers is skipped, so a missing
-      // binding here means an old/broken install, not an approval problem:
-      // point at the upgrade that fixes it.
+      // impit ships its binding as a per-platform optional package, no install script
+      // involved: a missing binding means npm dropped that package, and a reinstall
+      // restores it.
       nativeDepsFix: nativeDeps.ok
         ? null
-        : 'Upgrade npm and reinstall: npm install -g npm@12, then reinstall @lincoln504/pi-research. better-sqlite3 13 ships prebuilt bindings (no script needed); older npm needlessly recompiles it and fails on machines without a C++ toolchain.',
+        : 'Reinstall @lincoln504/pi-research (npm install). The browser launcher\'s native module (impit) ships as a separate platform package that npm sometimes drops (npm/cli#4828); a fresh install restores it.',
       // Same remedy the health check prints, so both surfaces name one command.
-      fix: browserInstalled ? null : 'npx camoufox-js fetch',
+      fix: browserInstalled ? null : 'npx camoufox fetch',
       note: browserInstalled
         ? null
         : 'Stealth browser not installed — scraping falls back to plain fetch, which some sites block. npm 12 blocks install scripts by default, which skips this package\'s postinstall; the engine is fetched on first use instead.',
@@ -1384,7 +1382,8 @@ COMMANDS
                                  state tree (<config dir>/research/state) and the cache, including
                                  downloaded embedding models. Keeps config.env and the knowledge
                                  store database. --purge-browsers also deletes the shared
-                                 stealth-browser cache (~/.cache/camoufox) other tools use.
+                                 stealth-browser cache (~/.cache/camoufox, every installed
+                                 browser build) other tools use.
 
   help, --help, -h               Show this help.
   --version, -v                  Print the pi-research version.

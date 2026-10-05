@@ -43,6 +43,9 @@ const REQUIRED_PEERS = [
   // dist/cli.mjs imports it directly (TUI width helpers), so an install that skips
   // peers can lack it even though pi-coding-agent normally brings it in.
   '@earendil-works/pi-tui',
+  // Host-provided too (peerDependency since 1.7.9): dist/cli.mjs imports it for
+  // every tool schema, and pi supplies its own copy when it loads the extension.
+  'typebox',
 ];
 
 /**

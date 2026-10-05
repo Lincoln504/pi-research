@@ -12,7 +12,8 @@
  * of hiding behind the graceful path.
  *
  * Environment:
- *   PLAYWRIGHT_BROWSERS_PATH            - override browser install location
+ *   CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH - relocate the browser cache (Linux: XDG_CACHE_HOME,
+ *                                         Windows: LOCALAPPDATA; ignored on macOS)
  *   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1  - skip download entirely
  *   PLAYWRIGHT_INSTALL_DEPS=true        - also install Linux system deps (or pass --system-deps)
  */
@@ -26,7 +27,6 @@ const path = require('path');
 const projectRoot = path.join(__dirname, '..');
 
 const isLinux = process.platform === 'linux';
-const isDarwin = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
 const [nodeMajor, nodeMinor, nodePatch] = process.version.replace('v', '').split('.').map((n) => parseInt(n, 10));
@@ -37,54 +37,27 @@ if (belowMinimum) {
   console.warn(`WARNING: Node.js ${process.version} is below the minimum (>=22.22.2). Upgrade to 22.22.2+.`);
 }
 
+const layout = require('./camoufox-layout.cjs');
+
 /**
- * Resolve the camoufox-js binary path.
+ * Resolve the `camoufox` CLI entry of @camoufox/camoufox.
  *
- * In a typical npm install, dependencies are hoisted to the root node_modules,
- * so the package's own node_modules/ may be empty. We use require.resolve to
- * find the real location of camoufox-js and derive the bin from there.
+ * Dependencies are hoisted, so the package's own node_modules may be empty:
+ * require.resolve finds the real location. We run the CLI's JS entry with
+ * process.execPath instead of the .bin shim: no .cmd quoting on Windows, no
+ * shell, and an argv array that cannot be reinterpreted.
  */
-function resolveCamoufoxBin() {
+function resolveCamoufoxCli() {
   try {
-    const pkgDir = path.dirname(require.resolve('camoufox-js/package.json', { paths: [projectRoot] }));
-    const binDir = path.join(pkgDir, '..', '.bin');
-    // On Windows the executable is the .cmd shim; the extensionless file is a sh
-    // script that only runs via PATHEXT luck. Mirror src ensure-browser.ts.
-    const bin = path.join(binDir, isWindows ? 'camoufox-js.cmd' : 'camoufox-js');
-    if (existsSync(bin)) return bin;
+    const pkgJson = require.resolve('@camoufox/camoufox/package.json', { paths: [projectRoot] });
+    const pkg = require(pkgJson);
+    const rel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin && pkg.bin.camoufox;
+    if (rel) {
+      const entry = path.join(path.dirname(pkgJson), rel);
+      if (existsSync(entry)) return entry;
+    }
   } catch (_) { /* fall through */ }
   return null;
-}
-
-/**
- * The custom camoufox location, if the user set one. Mirrors
- * getCustomCamoufoxDir() in src/infrastructure/browser/config.ts — the two must
- * agree or install and lookup land in different directories.
- *
- * CAMOUFOX_INSTALL_DIR first: it is camoufox-js's own variable and the only one
- * that can relocate the install (camoufox-js <0.12.0 hardcoded
- * userCacheDir("camoufox") and honoured nothing — inert there; effective on the
- * 0.12.0+ refresh). PLAYWRIGHT_BROWSERS_PATH is kept as the documented alias
- * and is exported BELOW as CAMOUFOX_INSTALL_DIR. See
- * src/infrastructure/browser/config.ts and thread-worker-browser.ts.
- */
-function customCamoufoxDir() {
-  return process.env.CAMOUFOX_INSTALL_DIR || process.env.PLAYWRIGHT_BROWSERS_PATH || null;
-}
-
-function camoufoxCachePath() {
-  const customPath = customCamoufoxDir();
-  if (customPath) return customPath;
-
-  if (isWindows) {
-    // Mirror camoufox-js userCacheDir("camoufox") exactly: homedir-based with a
-    // DOUBLED "camoufox" segment. Must match src getWindowsCamoufoxDir().
-    return path.join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
-  }
-  if (isDarwin) return path.join(homedir(), 'Library', 'Caches', 'camoufox');
-  
-  const cacheHome = process.env.XDG_CACHE_HOME || path.join(homedir(), '.cache');
-  return path.join(cacheHome, 'camoufox');
 }
 
 let browsersInstalled = false;
@@ -93,17 +66,26 @@ let browsersInstalled = false;
 // separate from browsersInstalled so the summary below still tells the truth.
 let fetchSkipped = false;
 
+// @camoufox/camoufox derives its install dir ONLY from the platform cache location
+// and ignores CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH. The layout module turns
+// a user's custom dir into the variable it does read (XDG_CACHE_HOME / LOCALAPPDATA).
+// The same function runs at runtime (src/infrastructure/browser/config.ts), so the
+// install and the lookup cannot disagree.
+const install = layout.resolveInstall(process.env, process.platform, homedir());
+const cachePath = install.dir;
+if (install.ignoredCustom) {
+  console.warn(
+    `pi-research: CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH (${install.custom}) is ignored on macOS: ` +
+    `the Camoufox launcher always uses ${cachePath} and cannot be relocated without moving HOME.`,
+  );
+}
+
 if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
   console.log('pi-research: skipping browser download (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
 } else {
-  const env = { ...process.env };
-  // Make the fetch honour the custom location. Without this the download always
-  // went to camoufox's default cache while camoufoxCachePath() reported the
-  // custom one: the "already installed" probe never matched, every install
-  // re-fetched, and at runtime the browser was reported missing despite having
-  // downloaded successfully.
-  const customDir = customCamoufoxDir();
-  if (customDir) env.CAMOUFOX_INSTALL_DIR = customDir;
+  const env = { ...process.env, ...install.overrides };
+  delete env.CAMOUFOX_INSTALL_DIR;
+  delete env.PLAYWRIGHT_BROWSERS_PATH;
 
   const installDeps = process.argv.includes('--system-deps') || process.env.PLAYWRIGHT_INSTALL_DEPS === 'true';
   if (installDeps && isLinux) {
@@ -122,62 +104,43 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
     }
   }
 
-  const cachePath = camoufoxCachePath();
-  let alreadyInstalled = false;
-  if (existsSync(cachePath)) {
+  // A configured install dir whose parent exists but cannot be used as a directory (a
+  // plain file, a broken mount) makes the fetch impossible: it would download the whole
+  // ~1.3GB archive and then fail to place it. Report and skip instead.
+  if (install.custom && existsSync(install.custom)) {
     try {
-      const versions = readdirSync(cachePath).filter(f => statSync(path.join(cachePath, f)).isDirectory());
-      if (versions.length > 0) {
-        alreadyInstalled = true;
-        console.log(`pi-research: Camoufox already installed at ${cachePath}. Skipping fetch.`);
-      }
+      if (!statSync(install.custom).isDirectory()) throw new Error('not a directory');
+      readdirSync(install.custom);
     } catch (e) {
-      // A configured install dir that exists but cannot be READ as a directory
-      // (a plain file, a broken symlink mount, no permission) makes the fetch
-      // below impossible: camoufox downloads the whole ~663MB archive and then
-      // fails to place it. Report and skip instead, which is what the user's
-      // install needs either way (the catch further down exits 0, and the
-      // browser is re-fetchable once the path is usable).
-      console.warn(`pi-research: cannot use the browser install directory ${cachePath}: ${e instanceof Error ? e.message : String(e)}`);
-      if (customCamoufoxDir()) {
-        console.warn('pi-research: skipping the browser fetch because CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH points at a path that is not a usable directory. Fix or unset it, then run: npx camoufox-js fetch');
-        fetchSkipped = true;
-      }
+      console.warn(`pi-research: cannot use the browser install directory ${install.custom}: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn('pi-research: skipping the browser fetch because CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH points at a path that is not a usable directory. Fix or unset it, then run: npx camoufox fetch');
+      fetchSkipped = true;
     }
   }
 
-  if (fetchSkipped) {
-    // Reported above; the fetch cannot work until the configured path is fixed.
-  } else if (!alreadyInstalled) {
-    try {
-      const bin = resolveCamoufoxBin();
-      // spawnSync with an ARGV ARRAY, never a shell string. `bin` is a filesystem
-      // path derived from the install directory, and execSync runs through
-      // `/bin/sh -c` where `$(…)`, backticks and quotes stay live INSIDE double
-      // quotes — so a package installed under a directory whose name contains
-      // shell metacharacters would execute them at install time. Windows still
-      // needs a shell to run the `.cmd` shim, and there the path is quoted; the
-      // runtime twin in ensure-browser.ts uses the same shape.
-      // Bound the ~500MB camoufox-js 0.12 browser download (was ~100MB on the
-      // 0.10 pin — the old 15-minute bound could kill a download that would
-      // have succeeded on a slow link) so a stalled/interrupted network fails
-      // eventually instead of hanging `npm install` forever (the catch below
-      // exits 0, and the browser is re-fetchable manually). 45 min covers a
-      // working link down to ~180 KB/s; a dead link aborts on its own sooner.
-      const spawnOpts = { stdio: 'inherit', env, timeout: 45 * 60 * 1000 };
-      const res = bin
-        ? (isWindows
-            ? spawnSync(`"${bin}"`, ['fetch'], { ...spawnOpts, shell: true })
-            : spawnSync(bin, ['fetch'], spawnOpts))
-        : spawnSync('npx', ['camoufox-js', 'fetch'], { ...spawnOpts, shell: isWindows });
+  if (!fetchSkipped) {
+    const cli = resolveCamoufoxCli();
+    // The fetch runs through process.execPath with an ARGV ARRAY, never a shell string:
+    // `cli` is a filesystem path derived from the install directory, and a shell string
+    // would let a directory name containing `$(…)` execute at install time. The runtime
+    // twin in ensure-browser.ts uses the same shape.
+    // Bound the ~1.3GB browser download so a stalled network fails eventually instead of
+    // hanging `npm install` forever (the failure path below exits 0 and the browser is
+    // re-fetchable). 45 min covers a working link down to ~500 KB/s.
+    const runFetch = () => {
+      if (!cli) throw new Error('@camoufox/camoufox is not installed (cannot find its CLI)');
+      const res = spawnSync(process.execPath, [cli, 'fetch'], { stdio: 'inherit', env, timeout: 45 * 60 * 1000 });
       if (res.error) throw res.error;
       if (res.status !== 0) throw new Error(`camoufox fetch exited with code ${res.status}`);
-      browsersInstalled = true;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      return true;
+    };
+
+    const pkgRoot = layout.findPackageRoot(projectRoot);
+    const result = layout.provisionBrowser(cachePath, runFetch, (m) => console.log(m), pkgRoot ? layout.loadPin(pkgRoot) : null);
+    if (result.status === 'failed') {
       console.error('ERROR: Camoufox browser install failed — pi-research will not work.');
-      console.error('Run manually to fix: npx camoufox-js fetch');
-      console.error(`Reason: ${msg}`);
+      console.error('Run manually to fix: npx camoufox fetch');
+      console.error(`Reason: ${result.reason}`);
       // Exit 0 by default: the browser is fetched lazily on first use, so a restrictive
       // network must not fail a user's install. But that also meant nothing here could
       // ever turn CI red — a broken Windows launcher yielded a green `npm ci`. CI sets
@@ -187,23 +150,21 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
                      process.env.PI_RESEARCH_STRICT_SETUP === 'true';
       process.exit(strict ? 1 : 0);
     }
-  } else {
     browsersInstalled = true;
+    if (result.status === 'present') {
+      console.log(`pi-research: Camoufox already installed at ${cachePath}. Skipping fetch.`);
+    }
   }
 }
 
 // Verify
-const cachePath = camoufoxCachePath();
 if (existsSync(cachePath)) {
-  try {
-    const versions = readdirSync(cachePath).filter(f => statSync(path.join(cachePath, f)).isDirectory());
-    console.log(`pi-research: camoufox ready (${versions.join(', ') || 'installed'})`);
-  } catch (e) {
-    // Not "ready": the path exists but cannot be read as an install dir (a plain
-    // file, no permission, a broken mount). Claiming readiness here is how a
-    // broken CAMOUFOX_INSTALL_DIR turned into a mysterious "browser missing at
-    // runtime" much later. The fetch path above already printed the remedy.
-    console.warn(`pi-research: camoufox install path ${cachePath} could not be verified: ${e instanceof Error ? e.message : String(e)}`);
+  const builds = layout.listInstalls(cachePath).map((b) => b.name);
+  const pkgRootForVerify = layout.findPackageRoot(projectRoot);
+  if (builds.length > 0 && layout.isUsable(cachePath, pkgRootForVerify ? layout.loadPin(pkgRootForVerify) : null)) {
+    console.log(`pi-research: camoufox ready (${builds.join(', ')})`);
+  } else if (browsersInstalled) {
+    console.warn(`pi-research: camoufox install at ${cachePath} could not be verified (no usable browser build found)`);
   }
 } else if (browsersInstalled) {
   console.warn(`pi-research: camoufox binary not found at expected path ${cachePath}`);

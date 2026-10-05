@@ -129,10 +129,11 @@ export function isPoolShutdownError(error: unknown): boolean {
  * anything about the page, the network or the load on the machine.
  *
  * The case that produced this: npm 12 turns `allowScripts` OFF by default, so a
- * plain `npm install` no longer runs dependency lifecycle scripts — including the
- * one that fetches/builds `better-sqlite3`, which `camoufox-js` needs to launch a
- * browser at all. Every browser worker then dies with "Could not locate the
- * bindings file", every query fails, and the run reported that DuckDuckGo might be
+ * plain `npm install` no longer runs dependency lifecycle scripts, and npm can drop a
+ * native dependency's platform package (npm/cli#4828). Historically this was
+ * `better-sqlite3` (a dependency of the old `camoufox-js` launcher; the launcher is now
+ * `@camoufox/camoufox`, whose native module is `impit`). Every browser worker then dies
+ * with "Could not locate the bindings file", every query fails, and the run reported that DuckDuckGo might be
  * unreachable or the machine under extreme load. Neither was true, and the advice
  * that follows from each is useless. An install fault has to say so.
  */

@@ -1,16 +1,17 @@
 /**
  * `pi-research status` must not report a build that cannot search as ready.
  *
- * npm 12 turns dependency install scripts off by default. camoufox-js needs
- * better-sqlite3 to launch a browser at all, and better-sqlite3's binding comes from
- * such a script — so on a scripts-blocked install the module imports fine and throws
- * only at FIRST USE, with "Could not locate the bindings file". Nothing noticed:
+ * npm 12 turns dependency install scripts off by default, and npm can drop a native
+ * dependency's platform package (npm/cli#4828). The old launcher (camoufox-js) needed
+ * better-sqlite3, whose binding came from such a script; the current one
+ * (@camoufox/camoufox) has no better-sqlite3 and its one native module is `impit`.
+ * Either way the module imports fine and throws only at FIRST USE, with "Could not locate the bindings file". Nothing noticed:
  * `status` derived `ready` from credentials alone and said yes, `isBrowserAvailable()`
  * only stats the camoufox binary, and the first real symptom was every browser worker
  * dying mid-run behind an error blaming the network.
  *
- * Measured across this package's native dependencies: better-sqlite3 is the only one
- * that fails that way. onnxruntime-node ships its binding inside its own tarball, and
+ * Measured on the camoufox-js stack: better-sqlite3 was the only one that failed that
+ * way. onnxruntime-node ships its binding inside its own tarball, and
  * lancedb, impit and html-to-markdown resolve prebuilt platform packages — which is why
  * the knowledge store kept answering while search was dead.
  */
@@ -20,7 +21,7 @@ import { probeBrowserNativeDeps } from '../../../src/infrastructure/browser/conf
 
 describe('probeBrowserNativeDeps', () => {
   it('reports ok on a correctly built install', () => {
-    // No injection: this exercises the REAL better-sqlite3 load in this repo, which is
+    // No injection: this exercises the REAL impit load in this repo, which is
     // correctly built. If this ever fails here, the repo's own install is broken.
     expect(probeBrowserNativeDeps()).toEqual({ ok: true });
   });

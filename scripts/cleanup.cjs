@@ -16,6 +16,7 @@
  */
 
 const { spawnSync } = require('child_process');
+const fs = require('fs');
 const { rmSync, existsSync, lstatSync, readdirSync, readlinkSync, readFileSync, writeFileSync, unlinkSync } = require('fs');
 const os = require('os');
 const path = require('path');
@@ -90,45 +91,87 @@ function removeInstalledSkills() {
 
 removeInstalledSkills();
 
+const layout = require('./camoufox-layout.cjs');
+
 /**
- * Resolve the camoufox-js binary path.
- *
- * See setup.cjs for rationale — dependencies are hoisted to root node_modules.
+ * Resolve the `camoufox` CLI entry of @camoufox/camoufox (see setup.cjs: run through
+ * process.execPath with an argv array, never a shell string).
  */
-function resolveCamoufoxBin() {
+function resolveCamoufoxCli() {
   try {
-    const pkgDir = path.dirname(require.resolve('camoufox-js/package.json', { paths: [projectRoot] }));
-    const binDir = path.join(pkgDir, '..', '.bin');
-    // On Windows the executable is the .cmd shim; see setup.cjs.
-    const bin = path.join(binDir, process.platform === 'win32' ? 'camoufox-js.cmd' : 'camoufox-js');
-    if (existsSync(bin)) return bin;
+    const pkgJson = require.resolve('@camoufox/camoufox/package.json', { paths: [projectRoot] });
+    const pkg = require(pkgJson);
+    const rel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin && pkg.bin.camoufox;
+    if (rel) {
+      const entry = path.join(path.dirname(pkgJson), rel);
+      if (existsSync(entry)) return entry;
+    }
   } catch (_) { /* fall through */ }
   return null;
 }
 
-// Remove camoufox browser binaries — only when explicitly requested.
-// The shared cache (~/.cache/camoufox) may be used by other tools, so we do NOT
-// purge it by default. Set PI_RESEARCH_PURGE_BROWSERS=1 to opt in.
-if (process.env.PI_RESEARCH_PURGE_BROWSERS === '1') {
-  if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD !== '1') {
-    try {
-      const bin = resolveCamoufoxBin();
-      // Argv array, not a shell string — see the matching note in setup.cjs: `bin`
-      // is derived from the install directory, and a shell string would let a
-      // directory name containing `$(…)` execute at uninstall time.
-      const isWin = process.platform === 'win32';
-      const res = bin
-        ? (isWin
-            ? spawnSync(`"${bin}"`, ['remove'], { stdio: 'inherit', shell: true })
-            : spawnSync(bin, ['remove'], { stdio: 'inherit' }))
-        : spawnSync('npx', ['camoufox-js', 'remove'], { stdio: 'inherit', shell: isWin });
-      if (res.error) throw res.error;
-      if (res.status !== 0) throw new Error(`camoufox remove exited with code ${res.status}`);
-      console.log('pi-research: camoufox browser binaries removed.');
-    } catch (error) {
-      console.warn(`pi-research: could not remove camoufox binaries: ${error instanceof Error ? error.message : String(error)}`);
-      console.warn('pi-research: to remove manually, run: npx camoufox-js remove');
+/**
+ * Remove EVERY Camoufox browser this package could have installed: all
+ * `browsers/<repo>/<version>/` builds, the config/geoip/addon data beside them, a legacy
+ * flat camoufox-js install, and any legacy stash a crashed upgrade left behind.
+ *
+ * Only when explicitly requested: the cache (~/.cache/camoufox) is shared with every
+ * other Camoufox user on the box, so the default leaves it alone. The directory is
+ * removed only when it is provably a Camoufox install (layout.isCamoufoxDir): a
+ * CAMOUFOX_INSTALL_DIR pointed at something else is refused, never deleted.
+ */
+function purgeBrowsers(env = process.env, platform = process.platform) {
+  const install = layout.resolveInstall(env, platform, os.homedir());
+  const dir = install.dir;
+  const spawnEnv = { ...env, ...install.overrides };
+  delete spawnEnv.CAMOUFOX_INSTALL_DIR;
+  delete spawnEnv.PLAYWRIGHT_BROWSERS_PATH;
+  let removedAnything = false;
+
+  if (pathExists(dir)) {
+    if (!layout.isCamoufoxDir(dir)) {
+      console.warn(`pi-research: ${dir} does not look like a Camoufox install; refusing to delete it.`);
+    } else {
+      const cli = resolveCamoufoxCli();
+      if (cli) {
+        // The upstream CLI removes the whole data dir; -y skips its interactive prompt.
+        const res = spawnSync(process.execPath, [cli, 'remove', '-y'], { stdio: 'inherit', env: spawnEnv });
+        if (res.error || res.status !== 0) {
+          console.warn(`pi-research: camoufox remove did not succeed (${res.error ? res.error.message : `exit ${res.status}`}); removing the directory directly.`);
+        }
+      }
+      // Either the CLI is unavailable (package already uninstalled) or it did not finish:
+      // finish the job ourselves, under the same ownership guard.
+      if (pathExists(dir)) layout.removeInstallDir(dir);
+      removedAnything = !pathExists(dir);
+      if (removedAnything) console.log(`pi-research: removed Camoufox browser data at ${dir}.`);
+      else console.warn(`pi-research: could not fully remove ${dir}; remove it manually.`);
     }
+  }
+  // Stashes from a crashed upgrade are legacy browsers too (proven by listStashes).
+  for (const stash of layout.listStashes(dir)) {
+    try {
+      fs.rmSync(stash, { recursive: true, force: true });
+      console.log(`pi-research: removed leftover legacy Camoufox stash ${stash}`);
+      removedAnything = true;
+    } catch (error) {
+      console.warn(`pi-research: could not remove ${stash}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (!removedAnything && !pathExists(dir)) console.log('pi-research: no Camoufox browser data to remove.');
+  return removedAnything;
+}
+
+function pathExists(p) {
+  try { return existsSync(p); } catch (_) { return false; }
+}
+
+if (process.env.PI_RESEARCH_PURGE_BROWSERS === '1') {
+  try {
+    purgeBrowsers();
+  } catch (error) {
+    console.warn(`pi-research: could not remove camoufox binaries: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn('pi-research: to remove manually, run: npx camoufox remove -y');
   }
 } else {
   console.log('pi-research: leaving shared camoufox binaries in place (set PI_RESEARCH_PURGE_BROWSERS=1 to remove).');

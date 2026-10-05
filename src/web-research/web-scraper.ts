@@ -41,7 +41,7 @@ let playwrightAvailable: boolean = false;
 let markdownConverterPromise: Promise<(html: string) => Promise<string>> | null = null;
 
 export function initScraperDependencies(): void {
-  playwrightAvailable = checkModule('playwright-core') && checkModule('camoufox-js');
+  playwrightAvailable = checkModule('playwright-core') && checkModule('@camoufox/camoufox');
 }
 initScraperDependencies();
 

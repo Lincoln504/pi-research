@@ -968,8 +968,8 @@ Diagnósticos y plataforma
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Sobrescribe el directorio de código fuente de la habilidad de investigación incluida, usado por el instalador de habilidades. |
 | `PI_RESEARCH_PURGE_BROWSERS` | _(sin definir)_ | Lo lee el `scripts/cleanup.cjs` incluido: defina `1` para borrar también la caché compartida del navegador camoufox (conservada por defecto porque otras instalaciones pueden usarla). Nota: npm ≥7 no ejecuta `preuninstall`, así que ese script no se dispara en `npm uninstall` — consulte [Habilidad de agente](#agent-skill). |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _(sin definir)_ | Defina `1` durante `npm install` para omitir la descarga del navegador camoufox (se obtiene perezosamente en el primer uso; convención estándar de Playwright). |
-| `CAMOUFOX_INSTALL_DIR` | _(caché de usuario)_ | La propia variable de camoufox-js, y la única que puede reubicar el navegador. Define dónde busca el binario pi-research, y se exporta a la descarga posterior a la instalación y a los workers del navegador. Efectiva en camoufox-js fijado a 0.12.0+, que la vuelve a honrar; en fijaciones antiguas (<0.12, que fijaban su directorio de caché en el código) solo reubicaba la búsqueda — consulte [Arquitectura](#architecture). |
-| `PLAYWRIGHT_BROWSERS_PATH` | _(caché de usuario)_ | Alias de la anterior, aceptado por compatibilidad y exportado hacia adelante como `CAMOUFOX_INSTALL_DIR` — en camoufox-js 0.12.0+ reubica la propia descarga, exactamente como `CAMOUFOX_INSTALL_DIR`. |
+| `CAMOUFOX_INSTALL_DIR` | _(caché de usuario)_ | Reubica la descarga del navegador. Lo honra pi-research, no el lanzador: `@camoufox/camoufox` lee solo la variable de caché de la plataforma, así que pi-research mapea este valor a ella — `XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows — y la exporta a la descarga posterior a la instalación y a los workers del navegador, de modo que instalación y búsqueda no pueden desviarse. Se ignora en macOS, donde el lanzador deriva su caché solo de `$HOME`. Consulte [Arquitectura](#architecture). |
+| `PLAYWRIGHT_BROWSERS_PATH` | _(caché de usuario)_ | Alias de `CAMOUFOX_INSTALL_DIR`, aceptado por compatibilidad. |
 | `XDG_CACHE_HOME` | `~/.cache` | Variable XDG estándar. Cuando está definida, toda ruta `~/.cache/pi-research/...` de abajo se ancla en `$XDG_CACHE_HOME/pi-research/...` en su lugar. |
 | `PI_RESEARCH_BIN` (alias `PI_RESEARCH_PATH`) | _(auto)_ | Solo lanzador de la habilidad de agente: ruta explícita al binario del motor pi-research cuando debe omitirse la auto-resolución (PATH → instalación local → npx). Consulte [agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md). |
 | `PLAYWRIGHT_INSTALL_DEPS` | _(sin definir)_ | Solo Linux. Defina `true` durante `npm install` para instalar también las bibliotecas del sistema vía `npx playwright install-deps` (igual que `npm run install:system-deps`). |
@@ -1503,46 +1503,54 @@ así que la frontera es "sin mutación", no "solo este directorio".
 Grupo de workers sobre navegador directo — los procesos de navegador se aíslan en workers
 para que un bloqueo en uno no afecte al orquestador ni a otras sesiones.
 
-Pila de navegador fijada — `playwright-core` e `impit` están fijados a versiones exactas y
-`camoufox-js` está fijado a su línea `0.12.0`; los tres están acoplados y se actualizan
+Pila de navegador fijada — los tres paquetes del navegador están acoplados y se actualizan
 juntos, porque cada rango flotante rompió instalaciones de consumo nuevas que nuestro
-lockfile enmascaraba. playwright-core se mantiene en `1.60.0` (1.61+ rechaza el Juggler de
-camoufox y falla todo lanzamiento — corroborado arriba: camoufox-js `0.12.0` declara
-`peerDependencies: { "playwright-core": "<1.61.0" }`, el mismo límite que esta fijación
-sostiene a mano). `impit` está exacto en `0.14.4` (refrescado desde `0.13.0` el 2026-08-30
-junto con el aumento de camoufox) — exacto porque los `overrides` de npm no se propagan a los
-consumidores, así que una fijación exacta es la única forma de forzar una versión aguas
-abajo; el incidente del guardia `only-allow pnpm` de preinstalación de impit (0.13.1/0.14.0,
-retirado en 0.14.1) es por qué aquí no se confía en rangos flotantes. Razonamiento completo:
-`src/infrastructure/browser/thread-worker-browser.ts`.
+lockfile enmascaraba. `@camoufox/camoufox` está fijado a su línea `0.5` (`^0.5.7`),
+`playwright-core` exacto en `1.62.1` e `impit` exacto en `0.14.5`. La fijación de playwright
+sigue al peer declarado por el lanzador: `@camoufox/camoufox` declara
+`peerDependencies: { "playwright-core": "<1.63" }` (`1.60.0` era el límite del viejo
+`camoufox-js`, que topaba en `<1.61.0`). `impit` sigue exacto porque los `overrides` de npm
+no se propagan a los consumidores, así que una fijación exacta es la única forma de forzar
+una versión aguas abajo; el incidente del guardia `only-allow pnpm` de preinstalación de
+impit (0.13.1/0.14.0, retirado en 0.14.1) es por qué aquí no se confía en rangos flotantes.
+Razonamiento completo: `src/infrastructure/browser/thread-worker-browser.ts`.
 
-El aumento 0.10.x→0.12.0 de camoufox se había retenido durante dos ciclos de refresco por
-tres bloqueadores, todos ya resueltos: camoufox restauró los binarios de Windows en
-`v152.0.4-beta.26` (2026-07-16); el guardia pnpm de impit existió solo en 0.13.1/0.14.0; y la
-actualización a better-sqlite3 13 de camoufox-js 0.12, que inicialmente pareció exigir una
-cadena de herramientas C++ en cada instalación. Medido en 13.0.3: los `prebuilds/` de los
-ocho pares plataforma/arquitectura viajan DENTRO de su tarball y se cargan en tiempo de
-ejecución vía node-gyp-build — sin script de instalación, nada que un consumidor deba
-aprobar. Lo que realmente se rompió fue la herramienta, no el binario: el `node-gyp rebuild`
-inyectado por npm ≤11 recompila innecesariamente un binding.gyp sin script de instalación (y
-su node-gyp 11.2 no puede detectar la imagen del runner VS2026 de CI), por lo que CI ejecuta
-npm 12. Cualquier aumento futuro verifica better-sqlite3 primero, no camoufox.
+La sustitución del lanzador (2026-10-05). `camoufox-js` `0.12.0` fue reemplazado por
+`@camoufox/camoufox` `0.5.7` después de que el primero rompiera todas las instalaciones
+nuevas. El 2026-10-03 se publicó `v156.0.1-beta.34` en los releases de `daijro/camoufox`
+SIN la marca de prerelease, y el esquema del navegador de la serie 156 había eliminado
+`navigator.product` (junto con `appName`/`appCodeName`). `camoufox-js` `0.12.0` seguía
+enviando esas propiedades, y su `fetch` no toma argumento de versión — recorre los releases
+del más nuevo al más viejo y toma el primer asset NO-PRERELEASE para este SO/arquitectura.
+Toda instalación posterior al 2026-10-03 obtenía así el build 156 y moría al lanzar con
+`UnknownProperty: Unknown property navigator.product in config`, mientras las máquinas con
+una caché vieja seguían funcionando: por eso CI (caché nueva) se puso rojo y las ejecuciones
+locales siguieron verdes. No había pin que girar — la librería no tenía argumento de versión
+ni variable de entorno para el navegador.
 
-El BINARIO del navegador, por el contrario, no está fijado y no puede estarlo. `camoufox-js
-fetch` no toma argumento de versión: recorre los releases de GitHub de `daijro/camoufox`
-del más nuevo al más viejo y toma el primer release no-prerelease que lleve un asset para
-este SO/arquitectura. Así que el binario que recibe un consumidor es el que camoufox
-publicó más recientemente en el momento de la instalación, sin importar qué versión de
-camoufox-js esté instalada — los pines de npm no lo congelan, y un futuro release de
-camoufox podría romper lanzamientos de instalaciones nuevas sin cambio de nuestro lado. Los
-assets de Windows estuvieron de hecho ausentes de `v146-hardware` a `v152.0.2-alpha` y
-volvieron en `v152.0.4-beta.26` (2026-07-16). El más nuevo actual es `v152.0.4-beta.28`
-(Firefox 152); lanza y se maneja limpiamente bajo playwright-core `1.60.0`, verificado
-directamente, igual que el más viejo `v135.0.1-beta.24` que una caché existente puede
-conservar aún. La consecuencia práctica es que la frescura del navegador es independiente
-del pin npm: un `camoufox-js` obsoleto no significa un Firefox obsoleto. Re-verifique un
-lanzamiento real al aumentar esta pila — las suites unitarias y de integración simulan el
-navegador y no pueden detectar un desajuste de Juggler.
+`@camoufox/camoufox` lo arregla estructuralmente: cada copia publicada lleva estampado el
+único build del navegador compilado desde las mismas fuentes (`browser-pin.json`; 0.5.7 fija
+`v156.0.1-beta.34`), y por defecto descarga y lanza exactamente ese build. Las dos mitades de
+la pila se publican juntas, así que un cambio de esquema no puede alcanzar a un lanzador que
+no lo entiende. El BINARIO del navegador ahora SÍ está fijado, donde la pila vieja lo dejaba
+flotando, y la consecuencia práctica se invierte: un `@camoufox/camoufox` obsoleto significa
+un Firefox obsoleto, y el navegador solo se mueve cuando se mueve esta dependencia.
+
+La capa extra de instalación que esto añade: `@camoufox/camoufox` instala bajo
+`<INSTALL_DIR>/browsers/<repo>/<version>/` (multiversión, con `config.json`,
+`repo_cache.json` y un `.0.5_FLAG` encima) donde `camoufox-js` dejaba el navegador plano con
+un `version.json` en la raíz, y deriva `INSTALL_DIR` solo del directorio de caché de la
+plataforma — no lee ni `CAMOUFOX_INSTALL_DIR` ni `PLAYWRIGHT_BROWSERS_PATH`.
+`src/infrastructure/browser/camoufox-layout.ts` (gemelo de instalación/desinstalación:
+`scripts/camoufox-layout.cjs`, ambos conducidos por los mismos fixtures en
+`test/unit/infrastructure/camoufox-layout.test.ts`) es el único resolutor de esa ubicación y
+del override que el lanzador sí lee (`XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows);
+también reconoce una instalación plana heredada, lo que importa porque `camoufox fetch`
+ejecuta `rm -rf INSTALL_DIR` sobre un directorio que no reconoce. `@camoufox/camoufox` no
+tiene dependencia de `better-sqlite3` (la superficie nativa en la ruta de lanzamiento es ya
+solo `impit`), así que el viejo bloqueador de scripts de instalación de npm en esta pila
+desapareció. Re-verifique un lanzamiento real al aumentarla — las suites unitarias y de
+integración simulan el navegador y no pueden detectar un desajuste de Juggler.
 
 Pila de datos fijada — `apache-arrow` es una dependencia directa en `21.1.0`, y los
 `overrides` fuerzan todo el árbol a esa única versión para que LanceDB y Arrow compartan una

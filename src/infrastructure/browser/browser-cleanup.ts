@@ -42,7 +42,7 @@ export async function cleanupOrphanedCamoufoxProcesses(): Promise<void> {
  * Marker that identifies a browser process as one WE launched (Camoufox via
  * Playwright), never the user's own system Firefox. We match on the launched
  * EXECUTABLE — `camoufox-bin` (Linux), `camoufox.exe` (Windows) or
- * `…/MacOS/camoufox` (macOS), per camoufox-js's LAUNCH_FILE — plus our
+ * `…/MacOS/camoufox` (macOS), per @camoufox/camoufox's LAUNCH_FILE — plus our
  * `…/pi-research/profiles/…` profile path (the fallback when PI_RESEARCH_TMP_DIR
  * relocates profiles). Anchoring on the executable name (rather than a bare
  * `camoufox` substring) keeps an incidental `tail camoufox.log`, `grep camoufox`,

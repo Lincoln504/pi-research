@@ -382,18 +382,27 @@ export function formatErrorWithCause(err: unknown): string {
 function isPrivateIp(ip: string): boolean {
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some(p => isNaN(p))) return false;
-  const [a, b] = parts;
+  const [a, b, c] = parts;
   if (a === undefined || b === undefined) return false;
   // 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10 (RFC 6598 CGNAT / shared address space,
   // routinely routed to internal infra by cloud/hosting providers), 127.0.0.0/8,
   // 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4 (multicast),
-  // 240.0.0.0/4 (reserved)
+  // 240.0.0.0/4 (reserved).
+  // Also blocked: 198.18.0.0/15 (RFC 2544 benchmarking, sometimes routed by
+  // broken tooling), 192.0.0.0/24 (RFC 6890 IETF protocol assignments) and the
+  // three documentation ranges 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+  // (TEST-NET-1/2/3, RFC 5737). None is a legitimate scrape target, and a
+  // mis-issued NAT or a hostile page's SSRF probe can name them.
   return (
     a === 0 || a === 10 || a === 127 ||
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113) ||
     a >= 224
   );
 }

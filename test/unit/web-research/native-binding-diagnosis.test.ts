@@ -2,7 +2,7 @@
  * A broken install must not be reported as a network or load problem.
  *
  * Observed in the wild: a scripts-blocked install (npm 12 defaults `allowScripts`
- * to off) leaves camoufox-js's `better-sqlite3` dependency without its native
+ * to off) leaves the old camoufox-js launcher's `better-sqlite3` dependency without its native
  * binding, so every browser worker dies with "Could not locate the bindings file".
  * The run then reported "Browser workers may be unavailable, DuckDuckGo is
  * unreachable, or the system is under extreme load" — three things that were all
