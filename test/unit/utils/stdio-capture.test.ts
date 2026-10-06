@@ -10,15 +10,25 @@
  * the log file. These tests pin the lazy-LIFO unwind that prevents that.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { captureStdio } from '../../../src/utils/stdio-capture.ts';
 
+// Every tmpLogFile() call makes a throwaway dir; collect them so this file's own teardown
+// removes them (before this, each run leaked one `stdio-cap-test-*` forever).
+const tmpDirs: string[] = [];
+
 function tmpLogFile(): string {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'stdio-cap-test-')), 'log.jsonl');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stdio-cap-test-'));
+  tmpDirs.push(dir);
+  return path.join(dir, 'log.jsonl');
 }
+
+afterAll(() => {
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 describe('captureStdio — LIFO restore under out-of-order completion', () => {
   it('restores the true originals only after the LAST nested capture finishes', async () => {

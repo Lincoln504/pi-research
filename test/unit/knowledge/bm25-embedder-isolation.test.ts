@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
@@ -64,6 +64,13 @@ describe('bm25 retrieval mode — embedding isolation', () => {
   beforeEach(() => {
     storeCtorArgs.length = 0;
     testDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-bm25-iso-'));
+  });
+
+  // The throwaway DB dir is per test; remove it here. Before this, every run leaked one
+  // empty `pi-research-bm25-iso-*` into the OS tmpdir forever (308 had accumulated on
+  // this dev box by 2026-10-05).
+  afterEach(() => {
+    fs.rmSync(testDbDir, { recursive: true, force: true });
   });
 
   it('never invokes the embedder factory — the transformers boundary is hard', async () => {

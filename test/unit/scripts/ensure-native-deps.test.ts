@@ -6,7 +6,7 @@
  * Only the decision logic is tested here — the repairs themselves shell out to
  * `npm install` and are exercised by the CI jobs that run the script.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -21,12 +21,21 @@ const { optionalEmbeddingPin, resolvable, lancedbPlatformPackage } = require(
   lancedbPlatformPackage: () => string | null;
 };
 
+// Each writeManifest() call makes a throwaway dir; collect them so this file's own teardown
+// removes them (before this, each run leaked one `ensure-native-deps-*` forever).
+const manifestDirs: string[] = [];
+
 function writeManifest(body: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ensure-native-deps-'));
+  manifestDirs.push(dir);
   const file = path.join(dir, 'package.json');
   fs.writeFileSync(file, typeof body === 'string' ? body : JSON.stringify(body));
   return file;
 }
+
+afterAll(() => {
+  for (const dir of manifestDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 describe('ensure-native-deps — optional embedding pin', () => {
   it('reads the pinned version from optionalDependencies', () => {

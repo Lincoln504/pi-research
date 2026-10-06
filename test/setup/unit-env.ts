@@ -19,6 +19,9 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+// Safe to import: vitest does not transitively load src/logger.ts, so the env assignments
+// below still run before anything in src/ is evaluated.
+import { afterAll } from 'vitest';
 
 process.env['NODE_ENV'] = 'test';
 process.env['PI_RESEARCH_DEBUG'] = 'false';
@@ -54,6 +57,14 @@ process.env['LOCALAPPDATA'] = path.join(unitHome, 'AppData', 'Local');
 // opportunistically reclaim leaks older than 24h — no test run keeps a worker
 // alive that long — while never touching dirs owned by concurrent runs.
 try {
+  // `process.on('exit')` alone does not fire here: the forks pool ends a worker with a
+  // signal (SIGTERM) rather than a clean exit, so the handler never ran and each unit run
+  // leaked one tmpdir per test file (243 left behind by a single 258-file run, 2026-10-05).
+  // A vite hook runs on the normal teardown path, which fires whether the worker exits or
+  // is killed. `process.on('exit')` stays as a backstop.
+  afterAll(() => {
+    try { fs.rmSync(unitHome, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
   process.on('exit', () => {
     try { fs.rmSync(unitHome, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
