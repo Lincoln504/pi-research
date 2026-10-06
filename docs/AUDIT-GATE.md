@@ -175,6 +175,12 @@ is not fixable from here:
       also drops LanceDB's own native binding, so the knowledge store disables (`DISABLED('native')`)
       rather than degrading to BM25. Not a substitute for the override when the store is wanted.
   - Consuming LanceDB's own embedding function is the only reason to keep `sharp` unoverridden.
+  - Shipping an `npm-shrinkwrap.json` does NOT propagate it either. Tested 2026-10-05: the file was
+    added to `files[]`, `npm pack` included it in the tarball (`package/npm-shrinkwrap.json`
+    confirmed in the archive), and a scratch consumer resolving that tarball still nested
+    `sharp 0.33.5` under `@lancedb/lancedb`. npm rebuilds the nested placement from the parent's
+    declared range, so a packed tree pins nothing below the top level. Only a root `overrides`
+    entry in the consumer's own project reaches it. Do not re-open this as an in-repo fix.
 
 **Cleared 2026-10-05: `brace-expansion 5.0.9` inside the pi host's `npm-shrinkwrap.json`.** pi 1.0.1
 (changelog: "Fixed installations resolving vulnerable `brace-expansion` 5.0.9 by pinning
