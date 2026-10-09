@@ -21,7 +21,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { existsSync, fstatSync, openSync, closeSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, fstatSync, openSync, closeSync, rmSync, readFileSync, createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, platform, homedir } from 'node:os';
 import { logger } from '../../logger.ts';
@@ -89,6 +89,14 @@ const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * spawn error / timeout. Runs the CLI's JS entry with process.execPath and an argv array:
  * no shell, so neither a spaced Windows path nor a metacharacter in an install directory
  * can be reinterpreted.
+ *
+ * The child's stdout is captured in a temp file, not inherited: a child with an
+ * inherited fd 1 writes raw to the terminal, which inside a pi session bypasses the
+ * host's JS-level stdout redirection (pi redirects `process.stdout.write` for its TUI)
+ * and interleaves the download's progress with the host's output stream — in
+ * print/JSON/RPC modes stdout is the protocol itself, so raw child output corrupts it.
+ * The launcher's progress is noise either way; its errors go to stderr, which stays
+ * inherited and is therefore still visible.
  */
 function runFetch(): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
@@ -106,19 +114,35 @@ function runFetch(): Promise<boolean> {
     delete env['PLAYWRIGHT_BROWSERS_PATH'];
     logger.info(`[ensure-browser] Camoufox not found; fetching the browser (this runs once, ~1.3GB): ${process.execPath} ${cli} fetch`);
 
-    const child = spawn(process.execPath, [cli, 'fetch'], { stdio: 'inherit', env });
+    const outLogPath = join(tmpdir(), `pi-research-camoufox-fetch-${process.pid}-${Date.now()}.log`);
+    const outStream = createWriteStream(outLogPath, { mode: 0o600 });
+    const child = spawn(process.execPath, [cli, 'fetch'], { stdio: ['ignore', 'pipe', 'inherit'], env });
+    if (child.stdout) {
+      child.stdout.pipe(outStream);
+    }
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`camoufox fetch timed out after ${FETCH_TIMEOUT_MS}ms`));
     }, FETCH_TIMEOUT_MS);
 
-    child.on('error', (err) => {
+    const finish = (err: Error | null, ok: boolean): void => {
       clearTimeout(timer);
-      reject(err);
+      void outStream.close();
+      if (err) reject(err);
+      else resolve(ok);
+    };
+
+    child.on('error', (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      finish(new Error(`${message} (fetch output logged at ${outLogPath})`), false);
     });
     child.on('exit', (code) => {
-      clearTimeout(timer);
-      resolve(code === 0);
+      if (code === 0) {
+        try { rmSync(outLogPath, { force: true }); } catch { /* best-effort */ }
+        finish(null, true);
+      } else {
+        finish(new Error(`camoufox fetch exited with code ${code} (fetch output logged at ${outLogPath})`), false);
+      }
     });
   });
 }

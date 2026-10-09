@@ -65,7 +65,8 @@ function spawnWith(onFetch: () => void, code = 0): void {
       try { onFetch(); } catch { /* the test asserts on the outcome */ }
       handlers['exit']?.(code);
     });
-    return { on: (ev: string, cb: (arg?: unknown) => void) => { handlers[ev] = cb; }, kill: vi.fn() };
+    // The fetch child's stdout is piped to a temp log file in the real module.
+    return { on: (ev: string, cb: (arg?: unknown) => void) => { handlers[ev] = cb; }, kill: vi.fn(), stdout: { pipe: vi.fn() } };
   });
 }
 
@@ -110,11 +111,14 @@ describe('ensureBrowserInstalled', () => {
     const { ensureBrowserInstalled, isBrowserBinaryPresent } = await freshModule();
     await ensureBrowserInstalled();
     expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [cmd, args, opts] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }];
+    const [cmd, args, opts] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean; stdio?: unknown }];
     expect(cmd).toBe(process.execPath);
     expect(args[0]).toMatch(/camoufox[\\/]dist[\\/]__main__\.js$/);
     expect(args[1]).toBe('fetch');
     expect(opts.shell).toBeUndefined();
+    // stdout is captured (not inherited): an inherited fd 1 would write raw to the
+    // terminal and, inside a pi session, corrupt the host's output stream.
+    expect(opts.stdio).toEqual(['ignore', 'pipe', 'inherit']);
     expect(isBrowserBinaryPresent()).toBe(true);
   });
 
