@@ -135,6 +135,7 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
       return true;
     };
 
+    console.log('pi-research: downloading the ~1.3 GB Camoufox browser — this can take several minutes on a slow link…');
     const pkgRoot = layout.findPackageRoot(projectRoot);
     const result = layout.provisionBrowser(cachePath, runFetch, (m) => console.log(m), pkgRoot ? layout.loadPin(pkgRoot) : null);
     if (result.status === 'failed') {

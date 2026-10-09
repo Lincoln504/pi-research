@@ -83,6 +83,10 @@ coding agents detected on this machine so they can run web research through the
 CLI, and remove it again — with exact, manifest-tracked cleanup. See
 [AGENT-SKILL.md](AGENT-SKILL.md) for the full installation flow.
 
+### Update
+
+`pi update --extensions` moves every installed extension to its newest published version; `pi update npm:@lincoln504/pi-research` targets only this one. A versioned source (`npm:@lincoln504/pi-research@1.7.9`) is pinned and never updates — remove and reinstall it to move versions.
+
 ### Lifecycle
 
 - `activate` — registers commands, tools, the TUI controller, and initializes services.

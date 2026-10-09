@@ -109,9 +109,9 @@ pi-research skill install                # 把技能链接到每个已检测到�
 ```
 
 本包无需编译，也无需任何审批：启动路径上唯一的原生部分是 `impit`，它自带预编译二进制。隐身浏览器
-（安装后 1GB 以上）由 `postinstall` 脚本在 npm 执行安装脚本时下载，这在 npm 11.18 及更早版本
-是默认行为 —— 本包要求的 Node 22.22.2 自带的正是该版本，因此安装过程就会下载。在 npm ≥11.19
-上安装脚本默认被跳过，浏览器改为首次抓取时按需下载。两种情况第一次抓取都需要几分钟。可用
+（安装后 1GB 以上）由 `postinstall` 脚本在 npm 执行依赖安装脚本时下载 —— npm 10 至 11.19 会执行
+（11.16–11.19 附带警告），本包要求的 Node 22.22.2 自带的 npm 即在其中，因此安装过程就会下载。
+npm 12（当前 npm）默认阻止依赖安装脚本（Node 24/25 自带的 npm 是 11.19.0，仍会执行），浏览器改为首次抓取时按需下载。两种情况第一次抓取都需要几分钟。可用
 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 主动推迟（见
 [README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)）。
 
@@ -243,8 +243,8 @@ npm install @lincoln504/pi-research
 ```
 
 本包不需要编译：启动路径上唯一的原生部分是 `impit`，它自带预编译二进制。隐身浏览器
-由 `postinstall` 脚本在 npm 执行安装脚本时下载（npm 11.18 及更早为默认，Node 22.22.2 自带的
-npm 即属此类），在 npm ≥11.19 上改为首次抓取时按需下载。（早期版本文档中的 `npm approve-scripts better-sqlite3` + `npm rebuild`
+由 `postinstall` 脚本在 npm 执行依赖安装脚本时下载（npm 10 至 11.19 会执行，11.16–11.19 附带警告，
+Node 22.22.2 自带的 npm（10.9.7）即属此类），在 npm 12（当前 npm；Node 24/25 自带的 11.19.0 仍会执行）上改为首次抓取时按需下载。（早期版本文档中的 `npm approve-scripts better-sqlite3` + `npm rebuild`
 组合，是用来修复旧 `camoufox-js` 启动器的 —— 它的 `better-sqlite3` 绑定由安装脚本下载；
 2026-10-05 改用 `@camoufox/camoufox` 后该依赖已完全移除，而且在 npm 12.0.2 上，
 approve 也没办法让被跳过的脚本跑起来。）
@@ -1345,7 +1345,7 @@ footer: RangeOutOfBounds … UnionVariant { variant: "Type::FixedSizeList" }` �
 因此升级 LanceDB 并不能消除 override；只会改变需要重新验证的组合。
 
 固定校验库 —— `typebox` 固定到 pi 宿主包依赖的精确版本（`@earendil-works/pi-ai`/
-`@earendil-works/pi-coding-agent` 固定 `1.3.27`；2026-10-01 对 1.0.0 复核，此前对 0.99.2 复核）。每个工具的参数 schema
+`@earendil-works/pi-coding-agent` 固定 `1.3.27`；2026-10-08 对 1.1.0 复核，此前 2026-10-01 对 1.0.0、更早对 0.99.2 复核）。每个工具的参数 schema
 都在这里用 TypeBox 构建，跨边界交给 pi 的工具系统，因此两者必须在
 `Value.Check`/`Convert` 语义上一致。浮动范围 `^1.1.38` 曾让全新消费者安装把 pi-research
 解析到比 pi 更新的 TypeBox，发布了一个未经测试的跨版本组合；精确固定让 pi-research

@@ -21,9 +21,11 @@ classic — the SDK cannot import them, so add the one it loads directly:
 npm install @earendil-works/pi-coding-agent
 ```
 
-On npm ≥11.19 (and npm 12), dependency install scripts are skipped by default. Nothing
+npm 12, the current npm, blocks dependency install scripts by default. Nothing
 here needs them: the only native piece on the launch path is `impit`, which ships
-prebuilt binaries, and the stealth browser self-provisions on its first use. (The
+prebuilt binaries, and the stealth browser self-provisions on its first use. On npm 10
+through 11.19 the `postinstall` fetch runs during install instead; that is the npm
+bundled with Node 24/25 (11.19.0) and with the Node 22.22.2 floor (10.9.7). (The
 `npm approve-scripts better-sqlite3` + `npm rebuild` pair documented by earlier
 releases repaired the old `camoufox-js` launcher, whose `better-sqlite3` binding came
 from an install script — the 2026-10-05 move to `@camoufox/camoufox` removed that

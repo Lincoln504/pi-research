@@ -225,9 +225,9 @@ jobs:
         include:
           # npm 12 on the windows leg, same reason as the integration/validate
           # jobs: npm ≤11's node-gyp 11.2 cannot detect the runner image's
-          # Visual Studio 2026, and better-sqlite3 13's dependency rebuild then
-          # fails `npm ci` outright. Unit tests never build it themselves, but
-          # `npm ci` installs it, so the leg needs a node-gyp that works.
+          # Visual Studio 2026, so any native dependency rebuild on that leg
+          # would fail. npm 12 is the current npm (12.2.0), which users reach by
+          # npm self-upgrade.
           # package.json declares `engines.node: ">=22.22.2"`, but every job pinned
           # .nvmrc (22.22.2) — so the ONLY Node version ever tested was the floor,
           # while consumers on a newer major were unverified. One extra leg on the
@@ -340,9 +340,9 @@ jobs:
       # find-VS recognizes the Visual Studio 2026 ("version 18") that the
       # windows-latest image migrated to in August 2026 (actions/runner-images
       # #13272). npm ≤11's node-gyp 11.2 crashes detecting it (maxbuffer RangeError
-      # in its PowerShell probe, then `unknown version "undefined"`), which made
-      # better-sqlite3 13's dependency rebuild unbuildable on the Windows leg.
-      # npm 12 is also what consumers on supported Node versions actually run.
+      # in its PowerShell probe, then `unknown version "undefined"`), which would
+      # leave any native dependency rebuild unbuildable on the Windows leg.
+      # npm 12 is the current npm (12.2.0), which users reach by npm self-upgrade.
       # (GYP_MSVS_VERSION=2026 was tried first and does NOT help: the 11.2 crash
       # is in version DETECTION, before that variable is consulted.)
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
@@ -377,14 +377,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PI_RESEARCH_STRICT_SETUP: '1'
-      # npm ≥11.19 blocks dependency install scripts by default (warn-and-skip;
-      # npm 12 hardens the machinery further), so the postinstall browser fetch
-      # above NO LONGER RUNS on modern npm. Provision the browser explicitly —
-      # this is the one job whose suite launches real browsers on all three
-      # OSes, and a silently-missing binary would skip them all green. Running
-      # scripts/setup.cjs (not a bare `camoufox fetch`) keeps the strict-mode
-      # enforcement and the install-dir resolution consumers actually get.
-      - name: Provision the Camoufox browser (explicit — npm ≥11.19 skips postinstall)
+      # npm 12 (what every leg here runs) blocks dependency install scripts by
+      # default — npm 10 through 11.19 still runs them, 11.16–11.19 with a
+      # warning — so the postinstall browser fetch above does not run on this
+      # job. Provision the browser explicitly — this is the one job whose suite
+      # launches real browsers on all three OSes, and a silently-missing binary
+      # would skip them all green. Running scripts/setup.cjs (not a bare
+      # `camoufox fetch`) keeps the strict-mode enforcement and the install-dir
+      # resolution consumers actually get.
+      - name: Provision the Camoufox browser (explicit — npm 12 skips postinstall)
         run: node scripts/setup.cjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -635,8 +636,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: '.nvmrc'
-      # npm 12, mirroring the integration job: its node-gyp 13 builds
-      # better-sqlite3 13 on the VS2026 windows-latest image, and its
+      # npm 12, mirroring the integration job: its node-gyp 13 recognizes the
+      # VS2026 windows-latest image (npm ≤11's node-gyp 11.2 cannot), and its
       # script-skip semantics are what this job's clean-project install step
       # must model for real consumers.
       - name: Use npm 12 (node-gyp 13 recognizes the VS2026 runner image)
@@ -684,8 +685,8 @@ jobs:
         # Mirrors how a real consumer / `pi install` resolves the package:
         #  - NO --legacy-peer-deps, so a peer/ERESOLVE conflict (the class that
         #    broke the fresh install) fails CI instead of shipping.
-        #  - npm ≥11.19 skips install scripts by default, so the postinstall is
-        #    NOT exercised by the install itself any more (measured on npm
+        #  - npm 12 (what this job runs) skips install scripts by default, so the
+        #    postinstall is NOT exercised by the install itself (measured on npm
         #    12.0.2: approve-scripts registers the approval but the script still
         #    never runs for a file:/ tarball). Run scripts/setup.cjs explicitly
         #    — it must execute and exit 0; browser download skipped to keep it

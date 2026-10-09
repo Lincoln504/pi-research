@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.10] - 2026-10-08
+
+### Changed
+
+- **The pi host dev dependencies move 1.0.4 → 1.1.0** (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`; the peer range stays `>=0.99.0 <2`). The 1.0.4 → 1.1.0 diff is additive for this package (declaration diff of the installed packages, 2026-10-08): `pi-coding-agent` adds `durationMs` on the tool render context and `tool_execution_end`, `aborted` on `agent_settled` events, and the `+name`/`-name` tool modifiers; `pi-ai` adds the Decisions-API classifier surface and an optional `AuthProvider.agentName`; `pi-tui` adds the OSC 7501 program-status helpers and `Text.setPaddingX`. `docs/extensions.md` is unchanged and nothing was removed or re-signed, so the 0.99.0 floor is unchanged too. `PI_TESTED_MAX_VERSION` moves to 1.1.0 (`src/core/pi-version.ts`), so a pi 1.1.x host runs without the "newer than the tested ceiling" notice; `npm audit` stays at 0 and type-check (TypeScript 6 and 7), lint and the full unit suite (3305) pass against 1.1.0.
+- **The npm install-script boundary is corrected across every user-facing surface and CI comment.** npm 10 through 11.19 run dependency install scripts (11.16–11.19 print a warning); npm 12, the current npm, blocks them by default — the npm bundled with Node 24/25 is 11.19.0, which still runs them, so a stock Node install fetches the browser during install. The old "11.19+ skips install scripts" wording in `README.md`, `docs/AGENT-SKILL.md`, `docs/SDK.md`, the ES/JA/ZH docs and the `ci.yml` comments was wrong — verified against the npm 11.19.0 source (arborist skips a script only when it is explicitly denied; `strict-allow-scripts` is opt-in) and consistent with this repo's own earlier measurement that 11.16–11.19 "warn but still run". The stale "compile from source on Windows" / `better-sqlite3` 13 references that survived the 1.7.9 launcher swap are gone with it.
+- **Update guidance is documented** (README and `docs/PI-EXTENSION.md`): `pi update --extensions` moves every installed extension to its newest published version, `pi update npm:@lincoln504/pi-research` targets only this one, and a versioned source (`npm:@lincoln504/pi-research@1.7.9`) is pinned and never updates — remove and reinstall it to move versions.
+- **`setup.cjs` announces the ~1.3 GB fetch before it starts**, so the postinstall fetch that runs inside `pi install` / `pi update --extensions` on script-running npm (10–11.19) no longer looks like a hang.
+- In-range dev refresh: `vite` 8.3.2 → 8.3.4.
+
+### Fixed
+
+- **The in-host lazy browser fetch no longer writes raw to the terminal.** `ensureBrowserInstalled()` spawned its `camoufox fetch` child with `stdio: 'inherit'`; a child with an inherited fd 1 bypasses pi's JS-level stdout redirection (pi's `takeOverStdout` rewrites `process.stdout.write` for the TUI) and interleaves the download's progress with the host's output stream — in print/JSON/RPC modes stdout is the protocol itself, so raw child output could corrupt it. The child's stdout is now captured in a temp file (its path is logged on failure, the file is removed on success) and stderr stays inherited, so real errors remain visible. Pinned by a test asserting `stdio: ['ignore', 'pipe', 'inherit']` on the fetch child.
+
+### Also shipped since 1.7.9
+
+- **`source-map-js` 1.2.2** in the production tree clears GHSA-68fv-2mgg-jv7q from the audit gate (`npm audit`: 0).
+- **The unit suite stops leaking throwaway tmpdirs.**
+- **`docs/AUDIT-GATE.md` records** that a shipped host `npm-shrinkwrap.json` does not propagate a consumer-side `sharp` override (consumer advisory note).
+
 ## [1.7.9] - 2026-10-05
 
 ### Changed

@@ -49,7 +49,7 @@ npm install -g @lincoln504/pi-research
 pi-research skill install
 ```
 
-No extra setup is needed. The package ships ready-made bindings for every platform and declares no build step, so there is nothing to approve or compile. The stealth browser (1GB+ installed) is fetched by the `postinstall` script when npm runs install scripts, which it does by default up to npm 11.18 — that is the bundled npm on the Node 22.22.2 floor this package requires, so expect the fetch during install. Newer npm (11.19+) skips install scripts by default, and the browser is then fetched lazily on the first scrape instead. Either way the first scrape takes a few minutes until it is in place. Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to defer the fetch deliberately. Only Windows with npm older than 11.19 can fail when the install tries to compile from source. Upgrading npm fixes it.
+No extra setup is needed. The package ships ready-made bindings for every platform and declares no build step, so there is nothing to approve or compile. The stealth browser (1GB+ installed) is fetched by the `postinstall` script whenever npm runs dependency install scripts — which is npm 10 through 11.19 (11.16–11.19 print a warning) — and that includes the npm bundled with the Node 22.22.2 floor this package requires (10.9.7) and the npm bundled with Node 24/25 (11.19.0), so expect the fetch during install. npm 12, the current npm, blocks dependency install scripts by default, and the browser is then fetched lazily on the first scrape instead. Either way the first scrape takes a few minutes until it is in place. Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to defer the fetch deliberately.
 
 The `@earendil-works/pi-*` host packages are **peer dependencies**. pi supplies its own copies when it loads this as an extension, and npm ≥7 installs them automatically for a standalone (global or project) install. An install that skips peers does not get them: `npm install --legacy-peer-deps`, yarn classic, and `pi install` itself (it passes that flag on purpose) are all in that group. The standalone engine and the agent-skill launcher then stop with a message naming the missing package; add it with:
 
@@ -60,6 +60,10 @@ npm install -g @earendil-works/pi-coding-agent
 Standalone use needs that package on disk because the CLI and SDK import it directly. In pi, nothing is needed: the host's own copy is aliased in for both.
 
 In pi, the extension works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
+
+### Update
+
+`pi update --extensions` moves every installed extension to its newest published version; `pi update npm:@lincoln504/pi-research` targets only this one. A versioned source (`npm:@lincoln504/pi-research@1.7.9`) is pinned and never updates — remove and reinstall it to move versions.
 
 ### Uninstall
 

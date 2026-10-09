@@ -21,10 +21,12 @@ npm install -g @lincoln504/pi-research   # the engine (puts `pi-research` on PAT
 pi-research skill install                # link the skill into every detected agent
 ```
 
-On npm ≥11.19 (and npm 12) dependency install scripts are skipped by default — and
+npm 12, the current npm, blocks dependency install scripts by default — and
 none are needed: the only native piece on the launch path is `impit`, which ships
 prebuilt binaries, and the stealth browser self-provisions on its first use (the first
-scrape takes a few minutes). No approval is required (see the [README](../README.md#install)).
+scrape takes a few minutes). On npm 10 through 11.19 the `postinstall` fetch runs
+during install instead; that is the npm bundled with Node 24/25 (11.19.0) and with
+the Node 22.22.2 floor (10.9.7). No approval is required (see the [README](../README.md#install)).
 
 The global install also brings the `@earendil-works/pi-*` host packages in as peer
 dependencies (npm ≥7 resolves them). If your install skips peers

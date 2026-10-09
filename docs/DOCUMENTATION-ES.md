@@ -123,12 +123,13 @@ pi-research skill install                # enlaza la habilidad en cada agente de
 
 El paquete no requiere ninguna compilación ni aprobación: la única pieza nativa en la ruta de
 lanzamiento es `impit`, que trae binarios precompilados. El navegador sigiloso (más de 1GB instalado) lo
-descarga el script `postinstall` cuando npm ejecuta los scripts de instalación, que es lo
-predeterminado hasta npm 11.18 — el npm incluido en Node 22.22.2, el mínimo que este paquete
-exige, así que espere la descarga durante la instalación. En npm ≥11.19 los scripts se omiten
-por defecto y el navegador se descarga de forma perezosa en la primera extracción; en ambos
-casos la primera extracción tarda unos minutos. Use `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` para
-posponerla deliberadamente (consulte el
+descarga el script `postinstall` cuando npm ejecuta los scripts de instalación de dependencias, lo
+que hacen npm 10 a 11.19 (11.16–11.19 con una advertencia) — incluido el npm incluido en
+Node 22.22.2, el mínimo que este paquete exige (10.9.7), y el npm incluido en Node 24/25
+(11.19.0) —, así que espere la descarga durante la instalación. En npm 12, el npm actual, los
+scripts se bloquean por defecto y el navegador se descarga de forma perezosa en la primera
+extracción; en ambos casos la primera extracción tarda unos minutos. Use
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` para posponerla deliberadamente (consulte el
 [README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)).
 
 La instalación global también trae los paquetes anfitriones `@earendil-works/pi-*` como
@@ -279,9 +280,10 @@ npm install @lincoln504/pi-research
 
 El paquete no necesita compilar nada: la única pieza nativa en la ruta de lanzamiento es
 `impit`, que trae binarios precompilados. El navegador sigiloso lo
-descarga el script `postinstall` cuando npm ejecuta los scripts de instalación (predeterminado
-hasta npm 11.18, el npm incluido en Node 22.22.2), y en npm ≥11.19 se descarga de forma
-perezosa en la primera extracción. (El par `npm approve-scripts better-sqlite3` + `npm rebuild`
+descarga el script `postinstall` cuando npm ejecuta los scripts de instalación de dependencias
+(npm 10 a 11.19 los ejecutan, 11.16–11.19 con una advertencia; el npm incluido en Node 22.22.2
+(10.9.7) y el incluido en Node 24/25 (11.19.0) están en ese grupo), y en npm 12, el npm
+actual, se descarga de forma perezosa en la primera extracción. (El par `npm approve-scripts better-sqlite3` + `npm rebuild`
 documentado por versiones anteriores reparaba el antiguo lanzador `camoufox-js`, cuyo binario
 `better-sqlite3` venía de un script de instalación — el cambio a `@camoufox/camoufox` del
 2026-10-05 eliminó esa dependencia, y en npm 12.0.2 una aprobación no logra ejecutar un script
@@ -1573,7 +1575,7 @@ emparejamiento necesita revalidarse.
 
 Biblioteca de validación fijada — `typebox` está fijado a la versión exacta de la que
 dependen los paquetes del host pi (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent`
-fijan `1.3.27`; verificado contra 1.0.0 el 2026-10-01, y antes contra 0.99.2). El esquema de parámetros de cada herramienta se
+fijan `1.3.27`; verificado contra 1.1.0 el 2026-10-08, y antes contra 1.0.0 (2026-10-01) y 0.99.2). El esquema de parámetros de cada herramienta se
 construye aquí con TypeBox y se entrega al sistema de herramientas de pi, así que ambos deben
 coincidir en la semántica de `Value.Check`/`Convert`. Un rango flotante `^1.1.38` dejó que una
 instalación de consumo nueva resolviera pi-research a un TypeBox más nuevo que el de pi,
