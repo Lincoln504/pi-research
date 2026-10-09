@@ -138,9 +138,10 @@ describe('checkPiCompatibility', () => {
     expect(r.message).toBeNull();
   });
 
-  it('accepts a patch above 1.0.0 silently and warns on the next minor', () => {
-    expect(checkPiCompatibility('1.0.7').level).toBe('ok');
-    expect(checkPiCompatibility('1.1.0').level).toBe('untested');
+  it('accepts a patch above the tested ceiling silently and warns on the next minor', () => {
+    const { major, minor } = PI_TESTED_MAX_VERSION;
+    expect(checkPiCompatibility(`${major}.${minor}.7`).level).toBe('ok');
+    expect(checkPiCompatibility(`${major}.${minor + 1}.0`).level).toBe('untested');
   });
 
   it('does not refuse a host above the declared peer range, only warns', () => {

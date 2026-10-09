@@ -122,8 +122,16 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 99, patch: 0 };
  * modes), the `builtin:<name>` naming for built-in extensions and tools, and
  * `--no-extensions` now also disabling the built-in extensions. None of them
  * change what this package does.
+ *
+ * 1.1.0 (2026-10-07) is additive for this package. Diffed against 1.0.4 on 2026-10-08:
+ * `@earendil-works/pi-coding-agent` adds `durationMs` on the tool render context and
+ * `tool_execution_end`, `aborted` on `agent_settled` events, and the `+name`/`-name`
+ * tool modifiers; `@earendil-works/pi-ai` adds the Decisions-API classifier surface
+ * and an optional `AuthProvider.agentName`; `@earendil-works/pi-tui` adds the OSC 7501
+ * program-status helpers and `Text.setPaddingX`. `docs/extensions.md` is unchanged,
+ * and nothing was removed or re-signed, so the 0.99.0 floor is unchanged too.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 0, patch: 0 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 1, patch: 0 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 
