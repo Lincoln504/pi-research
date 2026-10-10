@@ -19,6 +19,7 @@ import {
   setupOrphanProtection,
   createKillHandler,
   setBrowserCleanup,
+  markWorkerBootstrap,
 } from './thread-worker-lifecycle.ts';
 import {
   setWorkerId,
@@ -59,6 +60,11 @@ setBrowserCleanup(cleanupBrowser);
 if (process.env['GITHUB_ACTIONS'] !== 'true') {
   setupOrphanProtection();
 }
+
+// Startup marker (always recorded). A non-zero exit with no marker in the log
+// means the worker died during top-level module evaluation, before the handlers
+// above were installed — the silent churn signature of the 2026-10-08 crash chain.
+markWorkerBootstrap(workerId);
 
 // When both search and scrape are mocked, skip Firefox entirely in task handlers
 // and in the eager warm-up below. Firefox startup in cluster workers takes 60-90s

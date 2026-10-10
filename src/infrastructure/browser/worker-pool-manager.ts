@@ -7,6 +7,7 @@
 
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 import { logger } from '../../logger.ts';
@@ -110,6 +111,35 @@ export class WorkerPoolManager implements IService {
     // Handle for the schedulePoolReset() destroy timer, so shutdown() can cancel a pending
     // reset instead of letting it fire after teardown and clobber a freshly-rebuilt pool.
     private _resetTimer: ReturnType<typeof setTimeout> | null = null;
+    // One in-flight destroy promise per pool instance. Both the auto-recovery timer
+    // and shutdown() can try to destroy the same pool (observed 2026-10-08 during a
+    // leader-handover storm: "Cannot destroy an already destroying pool"). A second
+    // destroy() racing the first wipes worker listeners (terminate →
+    // removeAllListeners) while the first is still sending kill messages — the fatal
+    // IPC re-emit window. Sharing one promise per pool makes that race impossible.
+    private _destroyInFlight: Map<object, Promise<void>> = new Map();
+
+    /**
+     * Serialize pool destruction: the first caller wins; later callers await the
+     * same promise instead of racing a second destroy(). Rejections that merely
+     * report a concurrent/finished destroy are treated as success — the pool is
+     * gone either way, and re-throwing them would turn a benign race into a
+     * logged (and potentially escalated) failure.
+     */
+    private destroyPoolOnce(deadPool: object): Promise<void> {
+        let p = this._destroyInFlight.get(deadPool);
+        if (!p) {
+            p = (deadPool as { destroy: () => Promise<void> }).destroy().catch((e: unknown) => {
+                if (e instanceof Error && /already (destroying|destroyed|starting)/i.test(e.message)) {
+                    return;
+                }
+                throw new Error(`Worker pool destroy failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+            });
+            void p.then(() => this._destroyInFlight.delete(deadPool));
+            this._destroyInFlight.set(deadPool, p);
+        }
+        return p;
+    }
 
     constructor(
         private readonly onPoolError?: (error: Error, consecutiveErrors: number) => void
@@ -169,7 +199,7 @@ export class WorkerPoolManager implements IService {
                 if (this.pool && (this.currentWorkerCount !== maxWorkers || this.currentWorkerConcurrency !== workerConcurrency)) {
                     logger.log(`[WorkerPoolManager] Pool shape changed (workers ${this.currentWorkerCount} -> ${maxWorkers}, concurrency ${this.currentWorkerConcurrency} -> ${workerConcurrency}), recreating pool...`);
                     this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
-                    await this.pool.destroy();
+                    await this.destroyPoolOnce(this.pool);
                     this.pool = null;
                 }
 
@@ -234,6 +264,23 @@ export class WorkerPoolManager implements IService {
                         `Browser worker bundle is missing at ${workerPath}. ` +
                         `It is produced by the build step; reinstall the extension (e.g. \`pi update --extensions\`) ` +
                         `or run \`npm install\` in the extension directory so the prepare/build script regenerates it.`,
+                    );
+                }
+
+                // A bundle that EXISTS but is corrupted (truncated or partially overwritten
+                // file — observed 2026-10-08: a git checkout missing files) fails with a bare
+                // SyntaxError in every forked worker — code-1 exits with no worker-side log,
+                // the same silent churn signature as a missing bundle. Parse (not execute)
+                // the source here so a corrupted bundle fails loudly at pool init instead of
+                // masking as worker churn. `node --check` parses .mjs as ESM (~40 ms).
+                try {
+                    execFileSync(process.execPath, ['--check', workerPath], { stdio: 'pipe' });
+                } catch (e) {
+                    throw new Error(
+                        `Browser worker bundle at ${workerPath} does not parse ` +
+                        `(${e instanceof Error ? e.message : String(e)}). ` +
+                        `Reinstall the extension (e.g. \`pi update --extensions\`) so the build step regenerates it.`,
+                        { cause: e },
                     );
                 }
 
@@ -472,7 +519,7 @@ export class WorkerPoolManager implements IService {
                 // and nulling shared state would clobber a pool rebuilt after the shutdown.
                 if (this.isShuttingDown || this.generation !== myGen) return;
                 this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
-                if (deadPool) await deadPool.destroy();
+                if (deadPool) await this.destroyPoolOnce(deadPool);
                 logger.info('[WorkerPoolManager] Auto-recovery: old pool destroyed.');
             } catch (err) {
                 logger.warn('[WorkerPoolManager] Auto-recovery: error destroying old pool:', err);
@@ -535,7 +582,10 @@ export class WorkerPoolManager implements IService {
                 // in their killHandler (context.close / browser.close via Playwright), so
                 // allow enough time for those to complete before the IPC channel closes.
                 this.poolEpoch++; // intentional destroy: silence the dying pool's exit events
-                const destroyPromise = this.pool.destroy();
+                // Shared promise: if the auto-recovery timer is already destroying this pool
+                // (it fired before shutdown cleared the handle), await that destroy instead of
+                // racing a second one — the double-destroy race of the 2026-10-08 crash chain.
+                const destroyPromise = this.destroyPoolOnce(this.pool);
                 destroyPromise.catch((err: Error) => logger.debug(`[WorkerPoolManager] Background pool destroy rejection: ${err.message}`));
                 await raceWithDeadline(destroyPromise, 5000);
             } catch (e) {

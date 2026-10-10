@@ -20,14 +20,23 @@ export function setWorkerId(id: string): void {
 }
 
 /**
- * Handle ERR_IPC_CHANNEL_CLOSED when poolifier tries to send messages during shutdown
+ * Handle benign closed-channel IPC errors when poolifier tears down a worker's
+ * channel. Symmetric with the master-side classification (isBenignClusterIpcError):
+ * the write failed because the pipe is already gone, which is not a health signal.
+ *
+ * The old narrow check (ERR_IPC_CHANNEL_CLOSED only) re-threw EPIPE/ECONNRESET as an
+ * uncaught worker-side exception → exit code 1. A worker that dies that way during
+ * teardown churn feeds the master's consecutive-error counter and re-spawns — the
+ * self-sustaining worker storm behind the 2026-10-08 crash chain. Swallowing the
+ * same benign set here stops that feedback; genuinely non-benign errors still
+ * re-throw (the worker's uncaught handler logs and exits, as designed).
  */
 export function setupIpcErrorHandler(): void {
   if (!cluster.isWorker || !cluster.worker) {
     return;
   }
   cluster.worker.on('error', (err: any) => {
-    if (err && err.code === 'ERR_IPC_CHANNEL_CLOSED') {
+    if (isBenignClusterIpcError(err)) {
       return;
     }
     throw err;
@@ -92,11 +101,64 @@ export function setupMasterIpcErrorHandler(): void {
     const w = (cluster.workers as any)?.[id];
     if (w) guardClusterWorker(w);
   }
+
+  // Prototype-level backstop: no cluster.Worker can ever emit 'error' without
+  // a listener, whatever path wiped its per-instance listeners.
+  guardWorkerEmitReemit();
 }
 
 /** Reset for tests — re-arms the one-time install guard. */
 export function __resetMasterIpcGuardForTests(): void {
   masterIpcGuardInstalled = false;
+}
+
+let workerEmitGuardPatched = false;
+let workerEmitOriginal: unknown = null;
+
+/**
+ * Last-resort defense against the crash class observed on 2026-10-08: an 'error'
+ * event emitted on a cluster.Worker with NO listeners throws inside EventEmitter
+ * (uncaughtException → the pi host exits). The per-worker guard above is re-armed
+ * after poolifier's removeAllListeners() by the re-attach patch in
+ * guardClusterWorker, but this patches the Worker PROTOTYPE so that no Worker can
+ * ever emit 'error' without a listener — whatever wipe path, re-emit timing, or
+ * pool generation is involved.
+ *
+ * The listener attached here can only be the first listener on a listener-less
+ * Worker (that is the exact state where EventEmitter would throw), so it can never
+ * shadow poolifier's own error accounting, which is always attached at fork time.
+ * Idempotent; master process only. Installed once by setupMasterIpcErrorHandler().
+ */
+export function guardWorkerEmitReemit(): void {
+  if (workerEmitGuardPatched || cluster.isWorker) return;
+  const Worker = (cluster as unknown as { Worker?: { prototype: { emit?: unknown } } }).Worker;
+  if (!Worker || !Worker.prototype) return;
+  workerEmitGuardPatched = true;
+  const origEmit = Worker.prototype.emit;
+  if (typeof origEmit !== 'function') return;
+  workerEmitOriginal = origEmit;
+  Worker.prototype.emit = function (this: any, event: string | symbol, ...args: unknown[]) {
+    if (event === 'error' && typeof this.listenerCount === 'function' && this.listenerCount('error') === 0) {
+      this.on('error', (err: any) => {
+        if (isBenignClusterIpcError(err)) {
+          logToDebugFile('DEBUG', `[Master] Last-resort guard swallowed listener-less IPC error: ${err?.code || err?.message}`);
+          return;
+        }
+        logToDebugFile('WARN', `[Master] Last-resort guard handled listener-less worker error: ${err?.stack || err?.message || err}`);
+      });
+    }
+    return origEmit.apply(this, [event, ...args]);
+  };
+}
+
+/** Reset for tests — restores the original prototype emit and re-arms the flag. */
+export function __resetWorkerEmitGuardForTests(): void {
+  if (workerEmitGuardPatched && workerEmitOriginal) {
+    const Worker = (cluster as unknown as { Worker?: { prototype: { emit?: unknown } } }).Worker;
+    if (Worker && Worker.prototype) Worker.prototype.emit = workerEmitOriginal;
+    workerEmitOriginal = null;
+  }
+  workerEmitGuardPatched = false;
 }
 
 function guardClusterWorker(worker: any): void {
@@ -135,6 +197,18 @@ function guardClusterWorker(worker: any): void {
       return ret;
     };
   }
+}
+
+/**
+ * Worker bootstrap marker. WARN (always recorded; INFO/DEBUG are gated behind
+ * PI_RESEARCH_DEBUG). If a worker later exits non-zero WITHOUT this line in the
+ * log, it died during top-level module evaluation — before its error handlers
+ * were installed — and left no diagnostic behind. The 2026-10-08 churn storm
+ * had exactly that signature (a burst of code-1 exits with zero worker-side log
+ * lines); this marker makes that class visible in post-mortems.
+ */
+export function markWorkerBootstrap(id: string): void {
+  logToDebugFile('WARN', `[Worker-${id}] Bootstrap complete (pid ${process.pid})`);
 }
 
 /**

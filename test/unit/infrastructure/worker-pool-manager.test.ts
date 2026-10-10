@@ -57,6 +57,12 @@ vi.mock('../../../src/infrastructure/browser/browser-cleanup.ts', () => ({
   cleanupOrphanedCamoufoxProcesses: vi.fn(async () => {}),
 }));
 
+// The bundle parse guard (execFileSync `node --check`): default no-op success;
+// the corrupted-bundle test flips it to throw once.
+vi.mock('node:child_process', () => ({
+  execFileSync: vi.fn(),
+}));
+
 // existsSync(workerPath) must be truthy so ensurePool() doesn't fail on the
 // missing-worker-bundle guard.
 vi.mock('node:fs', async (importOriginal) => {
@@ -93,6 +99,7 @@ vi.mock('poolifier', () => {
 
 import { WorkerPoolManager } from '../../../src/infrastructure/browser/worker-pool-manager.ts';
 import { ensureBrowserInstalled } from '../../../src/infrastructure/browser/ensure-browser.ts';
+import { execFileSync } from 'node:child_process';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -280,6 +287,65 @@ describe('WorkerPoolManager', () => {
 
       expect(manager.getPool()).toBeNull();
       expect(manager.isPoolShuttingDown()).toBe(false);
+    });
+  });
+
+  describe('destroy serialization (auto-recovery timer vs shutdown race)', () => {
+    it('auto-recovery timer and shutdown() share ONE destroy() call', async () => {
+      const m = new WorkerPoolManager();
+      await m.ensurePool();
+      const pool = poolRegistry.instances[0];
+      // Slow destroy so the shutdown call lands while it is in flight.
+      pool.destroy = vi.fn().mockImplementation(() => new Promise<void>(r => setTimeout(r, 400)));
+
+      // Trip the auto-recovery threshold via the pool's own exit handler
+      // (3 non-zero worker exits).
+      const opts = pool.opts as any;
+      for (let i = 0; i < 3; i++) opts.exitHandler(1);
+
+      // Let the 1 s reset timer fire: the destroy is now in flight.
+      await new Promise(r => setTimeout(r, 1100));
+      expect(pool.destroy).toHaveBeenCalledTimes(1);
+
+      // shutdown() races the in-flight auto-recovery destroy. clearTimeout in
+      // shutdown is a no-op here (the timer already fired), so without
+      // destroyPoolOnce this is exactly the "Cannot destroy an already
+      // destroying pool" double-destroy of the 2026-10-08 crash chain.
+      await m.shutdown();
+
+      // Exactly one destroy() for this pool — no second racing destroy.
+      expect(pool.destroy).toHaveBeenCalledTimes(1);
+      expect(m.getPool()).toBeNull();
+      expect(m.isPoolShuttingDown()).toBe(false);
+      // The instance is still reusable.
+      await expect(m.ensurePool()).resolves.not.toBeNull();
+    }, 15000);
+
+    it('swallows "Cannot destroy an already destroying pool" rejections', async () => {
+      const m = new WorkerPoolManager();
+      await m.ensurePool();
+      const pool = poolRegistry.instances[0];
+      pool.destroy = vi.fn().mockRejectedValue(new Error('Cannot destroy an already destroying pool'));
+
+      const opts = pool.opts as any;
+      for (let i = 0; i < 3; i++) opts.exitHandler(1);
+      // Wait for the reset timer to fire and the rejection to be swallowed.
+      await new Promise(r => setTimeout(r, 1300));
+
+      // Reset completed despite the rejection: state cleared, fresh pool builds
+      // without a spurious "being reset" error.
+      expect(m.getPool()).toBeNull();
+      await expect(m.ensurePool()).resolves.not.toBeNull();
+    }, 15000);
+  });
+
+  describe('worker bundle parse guard', () => {
+    it('fails loudly when the bundle does not parse (corrupted file)', async () => {
+      const m = new WorkerPoolManager();
+      vi.mocked(execFileSync).mockImplementationOnce(() => {
+        throw new Error('SyntaxError: Unexpected token');
+      });
+      await expect(m.ensurePool()).rejects.toThrow(/does not parse/);
     });
   });
 });

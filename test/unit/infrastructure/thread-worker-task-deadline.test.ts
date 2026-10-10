@@ -51,6 +51,7 @@ vi.mock('../../../src/infrastructure/browser/thread-worker-lifecycle.ts', () => 
   setupOrphanProtection: vi.fn(),
   createKillHandler: vi.fn(() => () => {}),
   setBrowserCleanup: vi.fn(),
+  markWorkerBootstrap: vi.fn(),
 }));
 
 import {
