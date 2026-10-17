@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.12] - 2026-10-17
+
+### Changed
+
+- **The pi host dev dependencies move 1.1.0 → 1.3.0** (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`, and the `pi-agent-core`/`pi-codemode`/`pi-mcp`/`pi-telemetry` they pull in; `@earendil-works/chord` drops out of the tree; the peer range stays `>=0.99.0 <2`). The 1.1.0 → 1.3.0 declaration diff (installed trees, 2026-10-17): `pi-coding-agent`'s extension surface file (`dist/core/extensions/types.d.ts`) changes in exactly four places — `BeforeAgentStartEvent` becomes a `messageType`-discriminated union (`BeforeAgentStartUserEvent` / `BeforeAgentStartCustomEvent`) because `before_agent_start` now also fires for idle `pi.sendMessage(..., { triggerTurn: true })` runs, `ToolNamespace` gains `aliases?`, `ToolDefinition` gains `reachesTools?`, and `ToolInfo` picks up `reachesTools`. `pi-ai` removes the `assistant-message-frame` module (`AssistantMessageFrame*`, `reduceAssistantMessageFrames`) — the only breaking removal across the two releases, and one this package never imports — and adds the OpenRouter routing schemas and `splitErrorToolResultImages`; its thinking-level types move to `providers/model-schema.d.ts` but are re-exported from the root unchanged. `pi-tui` adds the fake-cursor helpers. Nothing this package consumes is removed or re-signed: the four type-checks (TypeScript 6 and 7, src and tests) pass against 1.3.0, and `typebox` still pins `1.3.27` in `pi-ai` and `pi-coding-agent`, so the lockstep rule and the 0.99.0 floor are unchanged.
+- **`PI_TESTED_MAX_VERSION` moves to 1.3.0** (`src/core/pi-version.ts`), so a pi 1.2.x or 1.3.x host runs without the "newer than the tested ceiling" notice. pi-research never triggers the new firing path — all its `pi.sendMessage` calls are `customType` deliveries without `triggerTurn`, and both `pi.sendUserMessage` calls already pass `deliverAs` — and its `before_agent_start` handler reads only `systemPrompt`/`systemPromptOptions`, present on both union members.
+
+### Fixed
+
+- **Worker exits during a process-group teardown no longer trip the pool health counter.** `isShuttingDown` only covers the pool's own `shutdown()`, but a process-group signal (a cron wrapper's `timeout N`) SIGTERMs the workers in the same instant as the master, BEFORE the pool's shutdown begins, so those exits landed as unexpected deaths and could log the pool unhealthy on a process that was exiting anyway. The exit handler now also ignores non-zero exits while `PI_PROCESS_EXITING` is set — the flag the SDK signal handler sets synchronously as its first action. The `sdk.ts` teardown comment now says which deaths each teardown path covers. New unit tests pin both sides: flag set → three exits, counter 0, no auto-recovery destroy; flag unset → counted.
+- In-range lockfile refresh from the 1.3.0 install: nothing else moved.
+
 ## [1.7.11] - 2026-10-10
 
 ### Fixed

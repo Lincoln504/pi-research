@@ -130,8 +130,25 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 99, patch: 0 };
  * and an optional `AuthProvider.agentName`; `@earendil-works/pi-tui` adds the OSC 7501
  * program-status helpers and `Text.setPaddingX`. `docs/extensions.md` is unchanged,
  * and nothing was removed or re-signed, so the 0.99.0 floor is unchanged too.
+ *
+ * 1.2.0 and 1.3.0 (2026-10-12 / 2026-10-15) were verified on 2026-10-17 by diffing
+ * the installed declaration trees of all three packages, 1.1.0 against 1.3.0:
+ * `@earendil-works/pi-coding-agent`'s extension surface file
+ * (`dist/core/extensions/types.d.ts`) changes in exactly four places: `BeforeAgentStartEvent`
+ * becomes a `messageType`-discriminated union (`BeforeAgentStartUserEvent` / `BeforeAgentStartCustomEvent`)
+ * because `before_agent_start` now also fires for idle `pi.sendMessage(..., { triggerTurn: true })`
+ * runs, `ToolNamespace` gains `aliases?`, `ToolDefinition` gains `reachesTools?`, and `ToolInfo`
+ * picks up `reachesTools`. `@earendil-works/pi-ai` removes the `assistant-message-frame`
+ * module (`AssistantMessageFrame*`, `reduceAssistantMessageFrames`) — a breaking removal this
+ * package never imports — and adds the OpenRouter routing schemas and
+ * `splitErrorToolResultImages`; its thinking-level types move to `providers/model-schema.d.ts`
+ * but are re-exported from the root unchanged. `@earendil-works/pi-tui` adds the fake-cursor
+ * helpers (`renderFakeCursor`, `FAKE_CURSOR_START/END`) and is otherwise unchanged.
+ * Nothing this package consumes is removed or re-signed; the four type-checks pass against
+ * 1.3.0 (TypeScript 6 and 7, src and tests), and `typebox` still pins 1.3.27 in `pi-ai`
+ * and `pi-coding-agent`, so the lockstep rule and the 0.99.0 floor are unchanged.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 1, patch: 0 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 3, patch: 0 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 

@@ -365,8 +365,14 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     // sdk_shutdown cleanup list is empty ("No cleanup tasks registered"), and the scheduler's cluster workers died mid-DAG-disposal —
     // with code null — while the worker pool was still live, which the pool's
     // exitHandler counted as unexpected deaths ("3 consecutive exits → pool
-    // unhealthy") on a process that was exiting anyway. Shutting down here puts
-    // those deaths inside the pool's intentional-destroy window instead. Both
+    // unhealthy") on a process that was exiting anyway. For a signal received
+    // by the master only, shutting down here puts those deaths inside the
+    // pool's intentional-destroy window. A process-GROUP signal (e.g. `timeout
+    // N` from a cron wrapper) SIGTERMs the workers in the same instant the
+    // master runs its handler, so those deaths land BEFORE this task starts —
+    // they are silenced instead by the PI_PROCESS_EXITING flag the handler
+    // sets synchronously as its first action (see the exitHandler in
+    // worker-pool-manager.ts). Both
     // teardown paths are idempotent (the later DAG dispose no-ops), and the task
     // is bounded well inside the 15s signal force-exit deadline. Registered per
     // init: runCleanup detaches the task set after running, so re-init gets a

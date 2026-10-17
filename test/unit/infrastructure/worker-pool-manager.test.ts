@@ -339,6 +339,38 @@ describe('WorkerPoolManager', () => {
     }, 15000);
   });
 
+  describe('PI_PROCESS_EXITING guard (process-group teardown noise)', () => {
+    it('does not count non-zero worker exits as health faults while PI_PROCESS_EXITING is set', async () => {
+      // A process-group signal (`timeout N` from a cron wrapper) SIGTERMs the
+      // workers in the same instant the master runs its handler — BEFORE the
+      // pool's own shutdown() sets isShuttingDown. The SDK signal handler sets
+      // PI_PROCESS_EXITING synchronously as its first action, so exits arriving
+      // after the flag is teardown noise on a dying process, not a fault.
+      const m = new WorkerPoolManager();
+      await m.ensurePool();
+      const opts = poolRegistry.instances[0].opts as any;
+      process.env['PI_PROCESS_EXITING'] = '1';
+      try {
+        // Three non-zero exits would normally trip the auto-recovery threshold.
+        for (let i = 0; i < 3; i++) opts.exitHandler(1);
+        expect((m as any).consecutiveErrors).toBe(0);
+        // No auto-recovery destroy was queued for a healthy pool.
+        expect(poolRegistry.instances[0].destroy).not.toHaveBeenCalled();
+      } finally {
+        delete process.env['PI_PROCESS_EXITING'];
+      }
+    });
+
+    it('still counts non-zero exits when the flag is unset (baseline)', async () => {
+      const m = new WorkerPoolManager();
+      await m.ensurePool();
+      const opts = poolRegistry.instances[0].opts as any;
+      expect(process.env['PI_PROCESS_EXITING']).toBeUndefined();
+      opts.exitHandler(1);
+      expect((m as any).consecutiveErrors).toBe(1);
+    });
+  });
+
   describe('worker bundle parse guard', () => {
     it('fails loudly when the bundle does not parse (corrupted file)', async () => {
       const m = new WorkerPoolManager();

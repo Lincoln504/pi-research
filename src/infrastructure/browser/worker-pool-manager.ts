@@ -340,7 +340,17 @@ export class WorkerPoolManager implements IService {
                         // the 2026-09-01/02 logs coincided with SDK SIGTERM shutdown, tripping
                         // "3 consecutive exits → pool unhealthy" once per dying session. Not a
                         // queue-capacity or OOM problem: zero exits occurred during live research.
-                        if (code !== 0 && !this.isShuttingDown && this.poolEpoch === myEpoch) {
+                        //
+                        // The mid-shutdown flag alone does NOT cover process-GROUP signals: a cron
+                        // wrapper like `timeout N` SIGTERMs the whole process group, so the
+                        // workers die in the same instant as the master — BEFORE the pool's own
+                        // shutdown() runs and sets isShuttingDown (the scheduler reaches
+                        // workerPoolManager.shutdown() only after service lookups, a state read
+                        // and server.stop()). The SDK signal handler sets PI_PROCESS_EXITING
+                        // synchronously as its first action (sdk.ts _onSignal), before any
+                        // teardown await, so any exit arriving after that flag is teardown
+                        // noise on a dying process, not a health fault.
+                        if (code !== 0 && !this.isShuttingDown && !process.env['PI_PROCESS_EXITING'] && this.poolEpoch === myEpoch) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {

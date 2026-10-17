@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "1.7.11",
+  "version": "1.7.12",
   "description": "Web research for your agents with smart and safe tooling + knowledge store",
   "type": "module",
   "private": false,
@@ -119,11 +119,11 @@
     "image": "https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/hero.png"
   },
   "dependencies": {
+    "@camoufox/camoufox": "^0.5.7",
     "@kreuzberg/html-to-markdown-node": "^3.7.2",
     "@lancedb/lancedb": "0.39.0",
     "apache-arrow": "21.1.0",
     "bgutils-js": "^4.0.3",
-    "@camoufox/camoufox": "^0.5.7",
     "esbuild": "^0.28.2",
     "impit": "0.14.5",
     "jsdom": "^30.1.0",
