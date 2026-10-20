@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.13] - 2026-10-19
+
+### Changed
+
+- **`poolifier` 5.3.2 → 6.0.1** (caret). The API surface this package uses is byte-identical between the two versions' declarations (installed `.d.ts` diff, 2026-10-19): `FixedClusterPool`'s constructor `(numberOfWorkers, filePath, opts?)`, `ClusterWorker`'s constructor, the `WorkerChoiceStrategies` enumeration, and every `PoolOptions`/`WorkerOptions` field. The 6.0.0 breaking changes do not apply here: the deferred custom-operation-handler identity rule (this package registers plain task functions, no operation handlers) and the new Node engine requirement `^22.18.0 || >=24.3.0`, which our `engines` floor (`>=22.22.2`) and the CI Node (22.22.2) both satisfy. 6.0.1 also carries the 5.4.x fixes into the new major (worker launch option descriptors, 5.4.1; task lifecycle and type export fixes, 6.0.0).
+- **`@lancedb/lancedb` 0.39.0 → 0.40.0.** The surface this package uses (`connect`, `Connection`, `Table.createIndex`/`search`/`add`/`optimize`/`count`, `Index.fts()`/`Index.btree()`, `rerankers.RRFReranker`) is unchanged in the 0.39.0 → 0.40.0 `.d.ts` diff; the 0.40.0 changes are additive (views, materialized views, job pause/resume, blob read options, OAuth/catalog). The release line's node-side "update arrow to 21" fix aligns with this package's apache-arrow pin.
+- **`impit` 0.14.5 → 0.14.6** (patch). The JS bundle is unchanged between versions; the only declaration change is additive — `timeout` on `ImpitOptions` and request options accepts `null` (disabled timeout).
+- **`apache-arrow` stays 21.1.0; 21.2.0 is rejected by measurement.** With `apache-arrow` 21.2.0, the knowledge store unit suite fails 35/35 on both lancedb 0.39.0 and 0.40.0 (`Failed to read IPC file: Arrow error: Parser error: Unable to get root as footer: RangeOutOfBounds`) — an arrow IPC read failure between lancedb's native bindings and the JS layer. With 21.1.0, the same suite passes 36/36 on both lancedb versions. The exact pin and the `overrides` pin therefore stay at 21.1.0.
+- In-range lockfile refresh from the new install (undici, vitest, youtubei.js, jsdom, vite where the range moved); nothing else.
+
+### Verified
+
+Full gate suite against the new tree: lint, the four type-checks (TypeScript 6 and 7, src and tests), unit 3320, integration 103 serial + 57 parallel, depcruise (244 modules, Node 22.22.2), `npm audit` (0), production audit gate (0), verify-package manifest (247 files) and a fresh-install consumer boot (`pi-research --version` with the pi trio installed). Knowledge store matrix: lancedb 0.39.0/0.40.0 × apache-arrow 21.1.0/21.2.0 measured on the 36-case store suite — only the 21.1.0 column passes.
+
 ## [1.7.12] - 2026-10-17
 
 ### Changed
