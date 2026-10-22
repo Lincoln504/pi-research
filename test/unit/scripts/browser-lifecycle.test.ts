@@ -3,7 +3,7 @@
  * real `scripts/setup.cjs` and `scripts/cleanup.cjs` subprocesses.
  *
  * The scripts run from a throwaway "project root" (copies of the three shipped scripts)
- * whose node_modules holds a FAKE `@camoufox/camoufox` CLI that reproduces the two upstream
+ * whose node_modules holds a FAKE `camoufox` CLI that reproduces the two upstream
  * behaviours the design exists to survive:
  *   - `fetch` rm -rf's a non-empty install dir that has no `.0.5_FLAG` BEFORE downloading
  *     (so a legacy flat camoufox-js install is destroyed even when the download then fails);
@@ -91,9 +91,9 @@ beforeEach(() => {
   // deliberately ignores a custom dir. Fixtures and the fake CLI share this one value.
   layout = createRequire(path.join(proj, 'scripts', 'cleanup.cjs'))('./camoufox-layout.cjs') as LayoutModule;
   dir = layout.resolveInstall(pinnedEnv(), process.platform, home).dir;
-  const pkg = path.join(proj, 'node_modules', '@camoufox', 'camoufox');
+  const pkg = path.join(proj, 'node_modules', 'camoufox');
   fs.mkdirSync(path.join(pkg, 'dist', 'data-files'), { recursive: true });
-  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@camoufox/camoufox', version: '0.0.0-fake', bin: { camoufox: 'dist/__main__.js' } }));
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'camoufox', version: '0.0.0-fake', bin: { camoufox: 'dist/__main__.js' } }));
   fs.writeFileSync(path.join(pkg, 'dist', '__main__.js'), FAKE_CLI);
   fs.writeFileSync(path.join(pkg, 'dist', 'data-files', 'browser-pin.json'), JSON.stringify({ tag: 'v156.0.1-beta.34', repo: 'daijro/camoufox', repo_name: 'Official', version: '156.0.1', build: 'beta.34' }));
 });

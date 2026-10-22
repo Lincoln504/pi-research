@@ -189,7 +189,7 @@ describe('Linux display-mode integration tests', () => {
   // =========================================================================
   // Group 2: camoufox virtual-mode launch
   //
-  // These tests directly call @camoufox/camoufox (bypassing the browser pool) with
+  // These tests directly call camoufox (bypassing the browser pool) with
   // headless:'virtual' and no DISPLAY set. They prove the full Xvfb spawn-
   // and-kill lifecycle works correctly on this machine.
   //
@@ -217,7 +217,7 @@ describe('Linux display-mode integration tests', () => {
       // Confirm the resolved mode — this is what the browser worker would pass.
       expect(resolveHeadlessMode()).toBe('virtual');
 
-      const { Camoufox } = await import('@camoufox/camoufox');
+      const { Camoufox } = await import('camoufox');
 
       let browser: any;
       try {
@@ -235,7 +235,7 @@ describe('Linux display-mode integration tests', () => {
         expect(context).toBeDefined();
         await context.close();
       } finally {
-        // @camoufox/camoufox virtual mode: close() is synchronous (returns undefined),
+        // camoufox virtual mode: close() is synchronous (returns undefined),
         // unlike the Promise-returning close() in headless:true mode.
         if (browser) try { await browser.close(); } catch {}
       }
@@ -260,7 +260,7 @@ describe('Linux display-mode integration tests', () => {
       process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       expect(resolveHeadlessMode()).toBe('virtual');
 
-      const { Camoufox } = await import('@camoufox/camoufox');
+      const { Camoufox } = await import('camoufox');
 
       let browser: any;
       let pageTitle: string | undefined;

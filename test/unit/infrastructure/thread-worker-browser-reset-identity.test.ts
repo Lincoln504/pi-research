@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { createdInstances } = vi.hoisted(() => ({ createdInstances: [] as any[] }));
 
-vi.mock('@camoufox/camoufox', () => ({
+vi.mock('camoufox', () => ({
   Camoufox: vi.fn(async () => {
     const n = createdInstances.length + 1;
     const context = {

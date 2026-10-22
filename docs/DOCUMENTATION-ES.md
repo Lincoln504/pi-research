@@ -971,7 +971,7 @@ Diagnósticos y plataforma
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Sobrescribe el directorio de código fuente de la habilidad de investigación incluida, usado por el instalador de habilidades. |
 | `PI_RESEARCH_PURGE_BROWSERS` | _(sin definir)_ | Lo lee el `scripts/cleanup.cjs` incluido: defina `1` para borrar también la caché compartida del navegador camoufox (conservada por defecto porque otras instalaciones pueden usarla). Nota: npm ≥7 no ejecuta `preuninstall`, así que ese script no se dispara en `npm uninstall` — consulte [Habilidad de agente](#agent-skill). |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _(sin definir)_ | Defina `1` durante `npm install` para omitir la descarga del navegador camoufox (se obtiene perezosamente en el primer uso; convención estándar de Playwright). |
-| `CAMOUFOX_INSTALL_DIR` | _(caché de usuario)_ | Reubica la descarga del navegador. Lo honra pi-research, no el lanzador: `@camoufox/camoufox` lee solo la variable de caché de la plataforma, así que pi-research mapea este valor a ella — `XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows — y la exporta a la descarga posterior a la instalación y a los workers del navegador, de modo que instalación y búsqueda no pueden desviarse. Se ignora en macOS, donde el lanzador deriva su caché solo de `$HOME`. Consulte [Arquitectura](#architecture). |
+| `CAMOUFOX_INSTALL_DIR` | _(caché de usuario)_ | Reubica la descarga del navegador. Lo honra pi-research, no el lanzador: `camoufox` lee solo la variable de caché de la plataforma, así que pi-research mapea este valor a ella — `XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows — y la exporta a la descarga posterior a la instalación y a los workers del navegador, de modo que instalación y búsqueda no pueden desviarse. Se ignora en macOS, donde el lanzador deriva su caché solo de `$HOME`. Consulte [Arquitectura](#architecture). |
 | `PLAYWRIGHT_BROWSERS_PATH` | _(caché de usuario)_ | Alias de `CAMOUFOX_INSTALL_DIR`, aceptado por compatibilidad. |
 | `XDG_CACHE_HOME` | `~/.cache` | Variable XDG estándar. Cuando está definida, toda ruta `~/.cache/pi-research/...` de abajo se ancla en `$XDG_CACHE_HOME/pi-research/...` en su lugar. |
 | `PI_RESEARCH_BIN` (alias `PI_RESEARCH_PATH`) | _(auto)_ | Solo lanzador de la habilidad de agente: ruta explícita al binario del motor pi-research cuando debe omitirse la auto-resolución (PATH → instalación local → npx). Consulte [agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md). |
@@ -1508,9 +1508,9 @@ para que un bloqueo en uno no afecte al orquestador ni a otras sesiones.
 
 Pila de navegador fijada — los tres paquetes del navegador están acoplados y se actualizan
 juntos, porque cada rango flotante rompió instalaciones de consumo nuevas que nuestro
-lockfile enmascaraba. `@camoufox/camoufox` está fijado a su línea `0.5` (`^0.5.7`),
-`playwright-core` exacto en `1.62.1` e `impit` exacto en `0.14.5`. La fijación de playwright
-sigue al peer declarado por el lanzador: `@camoufox/camoufox` declara
+lockfile enmascaraba. `camoufox` está fijado exacto en `0.5.8`,
+`playwright-core` exacto en `1.62.1` e `impit` exacto en `0.14.6`. La fijación de playwright
+sigue al peer declarado por el lanzador: `camoufox` declara
 `peerDependencies: { "playwright-core": "<1.63" }` (`1.60.0` era el límite del viejo
 `camoufox-js`, que topaba en `<1.61.0`). `impit` sigue exacto porque los `overrides` de npm
 no se propagan a los consumidores, así que una fijación exacta es la única forma de forzar
@@ -1531,15 +1531,15 @@ una caché vieja seguían funcionando: por eso CI (caché nueva) se puso rojo y 
 locales siguieron verdes. No había pin que girar — la librería no tenía argumento de versión
 ni variable de entorno para el navegador.
 
-`@camoufox/camoufox` lo arregla estructuralmente: cada copia publicada lleva estampado el
-único build del navegador compilado desde las mismas fuentes (`browser-pin.json`; 0.5.7 fija
-`v156.0.1-beta.34`), y por defecto descarga y lanza exactamente ese build. Las dos mitades de
+`camoufox` lo arregla estructuralmente: cada copia publicada lleva estampado el
+único build del navegador compilado desde las mismas fuentes (`browser-pin.json`; 0.5.8 fija
+`v156.0.1-beta.36`, 0.5.7 fijaba `v156.0.1-beta.34`), y por defecto descarga y lanza exactamente ese build. Las dos mitades de
 la pila se publican juntas, así que un cambio de esquema no puede alcanzar a un lanzador que
 no lo entiende. El BINARIO del navegador ahora SÍ está fijado, donde la pila vieja lo dejaba
-flotando, y la consecuencia práctica se invierte: un `@camoufox/camoufox` obsoleto significa
+flotando, y la consecuencia práctica se invierte: un `camoufox` obsoleto significa
 un Firefox obsoleto, y el navegador solo se mueve cuando se mueve esta dependencia.
 
-La capa extra de instalación que esto añade: `@camoufox/camoufox` instala bajo
+La capa extra de instalación que esto añade: `camoufox` instala bajo
 `<INSTALL_DIR>/browsers/<repo>/<version>/` (multiversión, con `config.json`,
 `repo_cache.json` y un `.0.5_FLAG` encima) donde `camoufox-js` dejaba el navegador plano con
 un `version.json` en la raíz, y deriva `INSTALL_DIR` solo del directorio de caché de la
@@ -1549,7 +1549,7 @@ plataforma — no lee ni `CAMOUFOX_INSTALL_DIR` ni `PLAYWRIGHT_BROWSERS_PATH`.
 `test/unit/infrastructure/camoufox-layout.test.ts`) es el único resolutor de esa ubicación y
 del override que el lanzador sí lee (`XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows);
 también reconoce una instalación plana heredada, lo que importa porque `camoufox fetch`
-ejecuta `rm -rf INSTALL_DIR` sobre un directorio que no reconoce. `@camoufox/camoufox` no
+ejecuta `rm -rf INSTALL_DIR` sobre un directorio que no reconoce. `camoufox` no
 tiene dependencia de `better-sqlite3` (la superficie nativa en la ruta de lanzamiento es ya
 solo `impit`), así que el viejo bloqueador de scripts de instalación de npm en esta pila
 desapareció. Re-verifique un lanzamiento real al aumentarla — las suites unitarias y de

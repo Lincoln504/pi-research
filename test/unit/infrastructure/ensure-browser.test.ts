@@ -33,7 +33,7 @@ vi.mock('../../../src/logger.ts', () => ({
 }));
 
 // The pin this repo's installed launcher was released with.
-const pkgRoot = path.dirname(createRequire(import.meta.url).resolve('@camoufox/camoufox/package.json'));
+const pkgRoot = path.dirname(createRequire(import.meta.url).resolve('camoufox/package.json'));
 const PIN = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'dist', 'data-files', 'browser-pin.json'), 'utf8')) as {
   version: string; build: string; repo_name: string;
 };

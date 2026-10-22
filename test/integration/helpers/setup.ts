@@ -54,7 +54,7 @@ export async function setupLifecycle(): Promise<TestContext> {
       throw new Error(
         '[test] PI_RESEARCH_REQUIRE_BROWSER=1 but isBrowserAvailable() is false. ' +
         `Expected the camoufox binary at ${getCamoufoxBinaryPath()} on ${process.platform}. ` +
-        'Either the download failed or getBrowserCacheDir() no longer mirrors @camoufox/camoufox — ' +
+        'Either the download failed or getBrowserCacheDir() no longer mirrors camoufox — ' +
         'the latter silently empties this entire suite.',
       );
     }

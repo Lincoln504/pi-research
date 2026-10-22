@@ -94,12 +94,12 @@ removeInstalledSkills();
 const layout = require('./camoufox-layout.cjs');
 
 /**
- * Resolve the `camoufox` CLI entry of @camoufox/camoufox (see setup.cjs: run through
+ * Resolve the `camoufox` CLI entry of camoufox (see setup.cjs: run through
  * process.execPath with an argv array, never a shell string).
  */
 function resolveCamoufoxCli() {
   try {
-    const pkgJson = require.resolve('@camoufox/camoufox/package.json', { paths: [projectRoot] });
+    const pkgJson = require.resolve('camoufox/package.json', { paths: [projectRoot] });
     const pkg = require(pkgJson);
     const rel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin && pkg.bin.camoufox;
     if (rel) {

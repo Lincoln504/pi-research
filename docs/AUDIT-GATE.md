@@ -118,15 +118,15 @@ repository-wide override is what hid that here. It took the `transformers` 4.3.0
 
 Symlink following at the extraction destination (CWE-59) in adm-zip 0.5.9 through 0.6.0. Reaches
 the shipped tree as one deduped copy required by `onnxruntime-node` (via
-`@huggingface/transformers`) and `@camoufox/camoufox` (the browser launcher; `camoufox-js`
-before the 2026-10-05 replacement). Re-check on every release:
+`@huggingface/transformers`) and `camoufox` (the browser launcher; `@camoufox/camoufox` before
+the 2026-10-22 rename, `camoufox-js` before the 2026-10-05 replacement). Re-check on every release:
 
 1. Has a patched adm-zip shipped? `npm view adm-zip time --json` (0.6.0, published 2026-07-10, is
    the newest release; the advisory's `first_patched_version` was null as of 2026-09-09). Watch
    the in-progress upstream fix: cthackers/adm-zip PR #575 ("Update fix issue snyk symlink", open
    since 2026-09-01, rewrites `util/utils.js` with symlink regression tests).
 2. Have the parents moved? `npm view onnxruntime-node version dependencies.adm-zip` and
-   `npm view @camoufox/camoufox version dependencies.adm-zip`. Even the latest onnxruntime-node (1.29.0
+   `npm view camoufox version dependencies.adm-zip`. Even the latest onnxruntime-node (1.29.0
    as of 2026-09-09) still requires `^0.6.0`.
 3. Do NOT "fix" it by downgrading below 0.5.9: 0.5.8 and everything below 0.6.0 is covered by
    GHSA-xcpc-8h2w-3j85 (CVE-2026-39244, HIGH, patched exactly in 0.6.0). Both parents' declared

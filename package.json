@@ -120,11 +120,11 @@
     "image": "https://raw.githubusercontent.com/Lincoln504/pi-research/main/docs/media/hero.png"
   },
   "dependencies": {
-    "@camoufox/camoufox": "^0.5.7",
     "@kreuzberg/html-to-markdown-node": "^3.7.2",
     "@lancedb/lancedb": "0.40.0",
     "apache-arrow": "21.1.0",
     "bgutils-js": "^4.0.3",
+    "camoufox": "0.5.8",
     "esbuild": "^0.28.2",
     "impit": "0.14.6",
     "jsdom": "^30.1.0",

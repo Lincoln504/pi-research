@@ -4,7 +4,7 @@
  * npm 12 turns dependency install scripts off by default, and npm can drop a native
  * dependency's platform package (npm/cli#4828). The old launcher (camoufox-js) needed
  * better-sqlite3, whose binding came from such a script; the current one
- * (@camoufox/camoufox) has no better-sqlite3 and its one native module is `impit`.
+ * (camoufox) has no better-sqlite3 and its one native module is `impit`.
  * Either way the module imports fine and throws only at FIRST USE, with "Could not locate the bindings file". Nothing noticed:
  * `status` derived `ready` from credentials alone and said yes, `isBrowserAvailable()`
  * only stats the camoufox binary, and the first real symptom was every browser worker

@@ -7,7 +7,7 @@
  * between "where setup installed it" and "where the runtime looks" is exactly the
  * install/runtime mismatch this package has shipped before.
  *
- * Why this exists. `@camoufox/camoufox` (0.5.x) differs from the old `camoufox-js`:
+ * Why this exists. `camoufox` (0.5.x) differs from the old `camoufox-js`:
  *   - It installs under  <INSTALL_DIR>/browsers/<repo>/<version>/  (multi-version),
  *     with `config.json`, `repo_cache.json` and a `.0.5_FLAG` beside it. camoufox-js
  *     put the browser files FLAT in INSTALL_DIR with a root `version.json`.
@@ -53,7 +53,7 @@ export function customDir(env: NodeJS.ProcessEnv = process.env): string | null {
   return env['CAMOUFOX_INSTALL_DIR'] || env['PLAYWRIGHT_BROWSERS_PATH'] || null;
 }
 
-/** Mirrors @camoufox/camoufox paths.js userCacheDir('camoufox') for a given environment. */
+/** Mirrors camoufox paths.js userCacheDir('camoufox') for a given environment. */
 export function defaultInstallDir(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, home: string = os.homedir()): string {
   if (platform === 'win32') {
     const base = env['LOCALAPPDATA'] && path.win32.isAbsolute(env['LOCALAPPDATA'])
@@ -106,7 +106,7 @@ export function resolveInstall(env: NodeJS.ProcessEnv = process.env, platform: N
 /** Every `browsers/<repo>/<version>/` directory that holds a parseable version.json. */
 export interface InstalledBuild { repo: string; name: string; path: string; rel: string; version: string; build: string }
 
-/** The browser build @camoufox/camoufox was released with (repoName lowercased). */
+/** The browser build camoufox was released with (repoName lowercased). */
 export interface BrowserPin { repoName: string; version: string; build: string }
 
 export function listInstalls(dir: string): InstalledBuild[] {
@@ -194,8 +194,8 @@ export function hasExplicitChoice(dir: string): boolean {
 }
 
 /**
- * The browser build @camoufox/camoufox was released with, from its browser-pin.json,
- * or null when unpinned/unreadable. `packageRoot` is the @camoufox/camoufox directory.
+ * The browser build camoufox was released with, from its browser-pin.json,
+ * or null when unpinned/unreadable. `packageRoot` is the camoufox directory.
  */
 export function loadPin(packageRoot: string): BrowserPin | null {
   try {
@@ -207,11 +207,11 @@ export function loadPin(packageRoot: string): BrowserPin | null {
   }
 }
 
-/** The @camoufox/camoufox package directory as seen from `fromUrl`, or null. */
+/** The camoufox package directory as seen from `fromUrl`, or null. */
 export function findPackageRoot(fromUrl: string): string | null {
   try {
     const require = createRequire(fromUrl);
-    return path.dirname(require.resolve('@camoufox/camoufox/package.json'));
+    return path.dirname(require.resolve('camoufox/package.json'));
   } catch {
     return null;
   }

@@ -310,9 +310,9 @@ in one cannot affect the orchestrator or other sessions.
 
 Pinned browser stack — the three browser packages are coupled and upgraded together,
 because each floating range broke fresh consumer installs that our lockfile masked.
-`@camoufox/camoufox` is pinned to its `0.5` line (`^0.5.7`), `playwright-core` is exact at
-`1.62.1` and `impit` exact at `0.14.5`. The playwright pin follows the launcher's declared
-peer: `@camoufox/camoufox` declares
+`camoufox` is exact at `0.5.8`, `playwright-core` is exact at
+`1.62.1` and `impit` exact at `0.14.6`. The playwright pin follows the launcher's declared
+peer: `camoufox` declares
 `peerDependencies: { "playwright-core": "<1.63" }` (`1.60.0` was the old `camoufox-js`
 bound, which capped `<1.61.0`). `impit` stays exact because npm `overrides` do not
 propagate to consumers, so an exact pin is the only way to force a version downstream;
@@ -332,15 +332,20 @@ navigator.product in config`, while machines holding an older cached browser kep
 which is why CI (a fresh cache) went red while local runs stayed green. There was no pin to
 turn — the library had no version argument and no environment variable for the browser.
 
-`@camoufox/camoufox` fixes that structurally: every published copy is stamped with the one
-browser build compiled from the same sources (`browser-pin.json`; 0.5.7 pins
-`v156.0.1-beta.34`), and it fetches and launches exactly that build by default. The two
+The rename (2026-10-22). The scoped `@camoufox/camoufox` is deprecated on npm ("Moved to camoufox: npm i
+camoufox"), so every consumer install printed `npm warn deprecated`. The dependency is now `camoufox` `0.5.8`
+(exact), which has the same dependency shape and the same `playwright-core <1.63` peer, and pins browser
+`v156.0.1-beta.36` in place of `v156.0.1-beta.34`.
+
+`camoufox` fixes that structurally: every published copy is stamped with the one
+browser build compiled from the same sources (`browser-pin.json`; 0.5.8 pins
+`v156.0.1-beta.36`, 0.5.7 pinned `v156.0.1-beta.34`), and it fetches and launches exactly that build by default. The two
 halves of the stack are released together, so a schema change cannot reach a launcher that
 does not understand it. The browser BINARY is PINNED now, where the old stack left it
-floating, and the practical consequence runs the other way: a stale `@camoufox/camoufox`
+floating, and the practical consequence runs the other way: a stale `camoufox`
 means a stale Firefox, and the browser only moves when this dependency does.
 
-The extra install layer this adds: `@camoufox/camoufox` installs under
+The extra install layer this adds: `camoufox` installs under
 `<INSTALL_DIR>/browsers/<repo>/<version>/` (multi-version, with `config.json`,
 `repo_cache.json` and a `.0.5_FLAG` above it) where `camoufox-js` laid the browser flat
 with a root `version.json`, and it derives `INSTALL_DIR` only from the platform cache
@@ -351,7 +356,7 @@ directory — it reads neither `CAMOUFOX_INSTALL_DIR` nor `PLAYWRIGHT_BROWSERS_P
 location and for the override the launcher does read (`XDG_CACHE_HOME` on Linux,
 `LOCALAPPDATA` on Windows); it also recognises a legacy flat install, which matters
 because `camoufox fetch` runs `rm -rf INSTALL_DIR` over a directory it does not recognise.
-`@camoufox/camoufox` has no `better-sqlite3` dependency (the native surface on the launch
+`camoufox` has no `better-sqlite3` dependency (the native surface on the launch
 path is now only `impit`), so the old npm-install-script blocker on this stack is gone.
 Re-verify a real launch when bumping it — the unit and integration suites mock the browser
 and cannot catch a Juggler mismatch.

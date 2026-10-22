@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('@camoufox/camoufox', () => ({
+vi.mock('camoufox', () => ({
   Camoufox: vi.fn(async () => ({
     isConnected: vi.fn(() => true),
     newContext: vi.fn(async () => ({
@@ -24,7 +24,7 @@ vi.mock('@camoufox/camoufox', () => ({
   })),
 }));
 
-import { Camoufox } from '@camoufox/camoufox';
+import { Camoufox } from 'camoufox';
 
 describe('thread-worker-browser — launch prefs close the WebSocket SSRF channel', () => {
   beforeEach(() => {

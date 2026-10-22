@@ -20,13 +20,13 @@
  * bleed between concurrent or sequential tasks on the same worker) — only the
  * underlying browser PROCESS stays shared, which is what these tests exercise
  * against the REAL exported functions (not a reimplementation) with a mocked
- * @camoufox/camoufox.
+ * camoufox.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mockCamoufox = vi.fn();
-vi.mock('@camoufox/camoufox', () => ({
+vi.mock('camoufox', () => ({
   Camoufox: mockCamoufox,
 }));
 

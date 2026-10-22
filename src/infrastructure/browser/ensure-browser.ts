@@ -45,7 +45,7 @@ const POLL_INTERVAL_MS = 2000;
 /** In-process dedupe: concurrent pool inits / scrapers share one fetch. */
 let inFlight: Promise<void> | null = null;
 
-/** The paired browser build this installed @camoufox/camoufox was released with. */
+/** The paired browser build this installed camoufox was released with. */
 function currentPin(): BrowserPin | null {
   const root = findPackageRoot(import.meta.url);
   return root ? loadPin(root) : null;
@@ -65,11 +65,11 @@ export function isBrowserBinaryPresent(): boolean {
   }
 }
 
-/** Resolve the `camoufox` CLI entry (JS file) of @camoufox/camoufox, mirroring scripts/setup.cjs. */
+/** Resolve the `camoufox` CLI entry (JS file) of camoufox, mirroring scripts/setup.cjs. */
 function resolveCamoufoxCli(): string | null {
   try {
     const require = createRequire(import.meta.url);
-    const pkgJson = require.resolve('@camoufox/camoufox/package.json');
+    const pkgJson = require.resolve('camoufox/package.json');
     const pkg = JSON.parse(readFileSync(pkgJson, 'utf8')) as { bin?: string | Record<string, string> };
     const rel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.['camoufox'];
     if (rel) {
@@ -102,7 +102,7 @@ function runFetch(): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
     const cli = resolveCamoufoxCli();
     if (!cli) {
-      reject(new Error('@camoufox/camoufox is not installed (cannot find its CLI); run npm install'));
+      reject(new Error('camoufox is not installed (cannot find its CLI); run npm install'));
       return;
     }
     // The launcher reads only XDG_CACHE_HOME / LOCALAPPDATA: hand it the override derived

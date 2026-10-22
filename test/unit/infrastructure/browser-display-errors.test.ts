@@ -4,7 +4,7 @@
  * Two error-handling paths that cannot be exercised in integration tests without
  * destructive system changes (uninstalling Xvfb or removing the camoufox binary):
  *
- *   1. initBrowser() error handler: when @camoufox/camoufox throws a display-related
+ *   1. initBrowser() error handler: when camoufox throws a display-related
  *      error (CannotFindXvfb, CannotExecuteXvfb, or an error whose message
  *      contains 'Xvfb' / 'virtual display'), the worker must rethrow with an
  *      actionable human-readable message rather than a raw camoufox trace.
@@ -21,12 +21,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mock @camoufox/camoufox BEFORE importing thread-worker-browser.
-// The worker calls `await import('@camoufox/camoufox')` at runtime inside initBrowser(),
+// Mock camoufox BEFORE importing thread-worker-browser.
+// The worker calls `await import('camoufox')` at runtime inside initBrowser(),
 // so vi.mock intercepts that dynamic import and substitutes our factory.
 // ---------------------------------------------------------------------------
 const mockCamoufox = vi.fn();
-vi.mock('@camoufox/camoufox', () => ({
+vi.mock('camoufox', () => ({
   Camoufox: mockCamoufox,
 }));
 
@@ -46,8 +46,8 @@ import { formatHealthError } from '../../../src/tui/research-health.ts';
 const platformSpy = vi.mocked(nodeOs.platform);
 
 // ---------------------------------------------------------------------------
-// Named error classes that @camoufox/camoufox throws in real production scenarios.
-// We recreate them here because @camoufox/camoufox is mocked and not available for import.
+// Named error classes that camoufox throws in real production scenarios.
+// We recreate them here because camoufox is mocked and not available for import.
 // The worker checks `(e as any).constructor?.name` — NOT `instanceof` — so the
 // class name is the only property that matters.
 // ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ describe('initBrowser() Windows headed-launch fallback (#614)', () => {
 // ---------------------------------------------------------------------------
 // Tests: virtual-mode close() safety (headless:'virtual' returns void, not Promise)
 //
-// @camoufox/camoufox browser.close() is synchronous (returns undefined) when launched
+// camoufox browser.close() is synchronous (returns undefined) when launched
 // with headless:'virtual'. resetBrowser() and cleanupBrowser() must NOT chain
 // .catch() directly on the return value — they must wrap with Promise.resolve().
 // ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ describe('resetBrowser() / cleanupBrowser() safe with void close()', () => {
   });
 
   // A browser + context whose close() returns undefined (synchronous void),
-  // exactly as @camoufox/camoufox behaves when launched with headless:'virtual'. If the
+  // exactly as camoufox behaves when launched with headless:'virtual'. If the
   // production code chained .catch() directly on browser.close()/context.close()
   // instead of wrapping in Promise.resolve(), driving the REAL resetBrowser()/
   // cleanupBrowser() below would throw "Cannot read properties of undefined

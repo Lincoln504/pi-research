@@ -41,7 +41,7 @@ process.env['PI_RESEARCH_FORCE_READY'] = 'true';
 const unitHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-unit-home-'));
 process.env['HOME'] = unitHome;
 process.env['USERPROFILE'] = unitHome;
-// The platform cache roots too. @camoufox/camoufox computes its install dir at IMPORT
+// The platform cache roots too. camoufox computes its install dir at IMPORT
 // time from XDG_CACHE_HOME / LOCALAPPDATA (HOME only when those are unset), and its
 // launcher DELETES a non-empty install dir that lacks the compat flag ("Cleaning old
 // data...") before downloading ~1.3GB. A unit test that reaches the real launcher (for

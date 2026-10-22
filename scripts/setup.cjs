@@ -40,7 +40,7 @@ if (belowMinimum) {
 const layout = require('./camoufox-layout.cjs');
 
 /**
- * Resolve the `camoufox` CLI entry of @camoufox/camoufox.
+ * Resolve the `camoufox` CLI entry of camoufox.
  *
  * Dependencies are hoisted, so the package's own node_modules may be empty:
  * require.resolve finds the real location. We run the CLI's JS entry with
@@ -49,7 +49,7 @@ const layout = require('./camoufox-layout.cjs');
  */
 function resolveCamoufoxCli() {
   try {
-    const pkgJson = require.resolve('@camoufox/camoufox/package.json', { paths: [projectRoot] });
+    const pkgJson = require.resolve('camoufox/package.json', { paths: [projectRoot] });
     const pkg = require(pkgJson);
     const rel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin && pkg.bin.camoufox;
     if (rel) {
@@ -66,7 +66,7 @@ let browsersInstalled = false;
 // separate from browsersInstalled so the summary below still tells the truth.
 let fetchSkipped = false;
 
-// @camoufox/camoufox derives its install dir ONLY from the platform cache location
+// camoufox derives its install dir ONLY from the platform cache location
 // and ignores CAMOUFOX_INSTALL_DIR / PLAYWRIGHT_BROWSERS_PATH. The layout module turns
 // a user's custom dir into the variable it does read (XDG_CACHE_HOME / LOCALAPPDATA).
 // The same function runs at runtime (src/infrastructure/browser/config.ts), so the
@@ -134,7 +134,7 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
     // hanging `npm install` forever (the failure path below exits 0 and the browser is
     // re-fetchable). 45 min covers a working link down to ~500 KB/s.
     const runFetch = () => {
-      if (!cli) throw new Error('@camoufox/camoufox is not installed (cannot find its CLI)');
+      if (!cli) throw new Error('camoufox is not installed (cannot find its CLI)');
       const res = spawnSync(process.execPath, [cli, 'fetch'], { stdio: 'inherit', env, timeout: 45 * 60 * 1000 });
       if (res.error) throw res.error;
       if (res.status !== 0) throw new Error(`camoufox fetch exited with code ${res.status}`);

@@ -164,10 +164,11 @@ export async function initBrowser(): Promise<void> {
         // without our lockfile, so a floating range resolves to a newer, broken
         // version):
         //
-        //   • @camoufox/camoufox  ^0.5.7 (replaced camoufox-js 0.12.0, 2026-10-05).
+        //   • camoufox  0.5.8 exact (renamed from the deprecated @camoufox/camoufox
+        //     0.5.7 on 2026-10-22; replaced camoufox-js 0.12.0 on 2026-10-05).
         //     The launcher ships `dist/data-files/browser-pin.json` naming the ONE
-        //     browser build it was released and tested with (v156.0.1-beta.34 at
-        //     0.5.7), and by default fetches and launches exactly that build. The
+        //     browser build it was released and tested with (v156.0.1-beta.36 at
+        //     0.5.8, v156.0.1-beta.34 at 0.5.7), and by default fetches and launches exactly that build. The
         //     old camoufox-js had no such pairing: it took "the newest non-prerelease
         //     GitHub release", so when upstream flagged v156.0.1-beta.34
         //     non-prerelease on 2026-10-03 every fresh install got a browser whose
@@ -178,7 +179,7 @@ export async function initBrowser(): Promise<void> {
         //     the launcher it was verified against, and no longer on upstream's
         //     release timing.
         //   • playwright-core  1.62.1 (exact) → playwright-core and the Camoufox
-        //     build are one matched Juggler-protocol pair. @camoufox/camoufox
+        //     build are one matched Juggler-protocol pair. camoufox
         //     declares `peerDependencies: playwright-core "<1.63"` and mirrors it
         //     from its Python twin ("every Playwright minor is free to change
         //     Juggler, so the ceiling is bumped deliberately"). 1.61 added a
@@ -192,7 +193,7 @@ export async function initBrowser(): Promise<void> {
         //     installs our lockfile masks.
         //
         // better-sqlite3 is gone: it was camoufox-js's dependency, not ours, and
-        // @camoufox/camoufox has none. The one native module left on the launch
+        // camoufox has none. The one native module left on the launch
         // path is impit, probed by probeBrowserNativeDeps().
         //
         // Always re-verify a REAL headless run after touching any of this: the
@@ -200,9 +201,9 @@ export async function initBrowser(): Promise<void> {
         // reaches production with a fully green suite.
         let CamoufoxModule: any;
         try {
-          CamoufoxModule = await import('@camoufox/camoufox');
+          CamoufoxModule = await import('camoufox');
         } catch (e: unknown) {
-          throw new Error(`[Worker] @camoufox/camoufox not found in node_modules. Please run 'npm install'. Original error: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+          throw new Error(`[Worker] camoufox not found in node_modules. Please run 'npm install'. Original error: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
         }
 
         const { Camoufox } = CamoufoxModule;

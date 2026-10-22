@@ -943,7 +943,7 @@ API キー
 | `PI_RESEARCH_SKILL_DIR` | _（自動）_ | 同梱のリサーチスキルのソースディレクトリをオーバーライドします。スキルインストーラーが使用します。 |
 | `PI_RESEARCH_PURGE_BROWSERS` | _（未設定）_ | 同梱の `scripts/cleanup.cjs` が読み取ります: `1` を設定すると、共有の camoufox ブラウザキャッシュも削除します（他のインストールが使用している可能性があるため、デフォルトでは保持されます）。注意: npm ≥7 は `preuninstall` を実行しないため、このスクリプトは `npm uninstall` では発火しません — [エージェントスキル](#agent-skill)を参照してください。 |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _（未設定）_ | `npm install` 中に `1` を設定すると、camoufox ブラウザのダウンロードをスキップします（初回使用時に遅延取得されるようになります。Playwright の標準的な慣習）。 |
-| `CAMOUFOX_INSTALL_DIR` | _（ユーザーキャッシュ）_ | ブラウザのダウンロードを再配置します。pi-research は尊重しますが、ランチャーは尊重しません: `@camoufox/camoufox` はプラットフォームのキャッシュ変数のみを読むため、pi-research がこの値をそれへ変換し（Linux では `XDG_CACHE_HOME`、Windows では `LOCALAPPDATA`）、postinstall の取得とブラウザワーカーへエクスポートします。これによりインストールと検索がずれません。macOS では無視されます（ランチャーは `$HOME` からのみキャッシュを導出します）— [アーキテクチャ](#architecture)を参照。 |
+| `CAMOUFOX_INSTALL_DIR` | _（ユーザーキャッシュ）_ | ブラウザのダウンロードを再配置します。pi-research は尊重しますが、ランチャーは尊重しません: `camoufox` はプラットフォームのキャッシュ変数のみを読むため、pi-research がこの値をそれへ変換し（Linux では `XDG_CACHE_HOME`、Windows では `LOCALAPPDATA`）、postinstall の取得とブラウザワーカーへエクスポートします。これによりインストールと検索がずれません。macOS では無視されます（ランチャーは `$HOME` からのみキャッシュを導出します）— [アーキテクチャ](#architecture)を参照。 |
 | `PLAYWRIGHT_BROWSERS_PATH` | _（ユーザーキャッシュ）_ | 前述の変数のエイリアス。互換性のために受け付けられます。 |
 | `XDG_CACHE_HOME` | `~/.cache` | 標準の XDG 変数。設定すると、下記のすべての `~/.cache/pi-research/...` パスは代わりに `$XDG_CACHE_HOME/pi-research/...` を基準に置かれます。 |
 | `PI_RESEARCH_BIN`（エイリアス `PI_RESEARCH_PATH`） | _（自動）_ | エージェントスキルランチャー専用: 自動解決（PATH → ローカルインストール → npx）をバイパスすべきときに、pi-research エンジンのバイナリへの明示的なパス。[agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md) を参照してください。 |
@@ -1448,9 +1448,9 @@ src/
 
 固定されたブラウザスタック — 3 つのブラウザパッケージは結びついており、一緒にアップグレードします。
 どんな浮動範囲も、lockfile が隠していた間に新しい消費者インストールを壊してきたからです。
-`@camoufox/camoufox` はその `0.5` 系列（`^0.5.7`）、`playwright-core` は正確に `1.62.1`、`impit` は
-正確に `0.14.5` にピン留めされています。playwright のピン留めはランチャーが宣言する peer に従います:
-`@camoufox/camoufox` は `peerDependencies: { "playwright-core": "<1.63" }` を宣言しています
+`camoufox` は正確に `0.5.8`、`playwright-core` は正確に `1.62.1`、`impit` は
+正確に `0.14.6` にピン留めされています。playwright のピン留めはランチャーが宣言する peer に従います:
+`camoufox` は `peerDependencies: { "playwright-core": "<1.63" }` を宣言しています
 （`1.60.0` は旧 `camoufox-js` の `<1.61.0` という境界でした）。`impit` を正確にピン留めするのは、
 npm の `overrides` が消費者へ伝播しないため、下流にバージョンを強制する唯一の方法が正確なピン留め
 だからです。impit の `only-allow pnpm` プレインストールガード事故（0.13.1/0.14.0。0.14.1 で撤去）
@@ -1469,14 +1469,14 @@ npm の `overrides` が消費者へ伝播しないため、下流にバージョ
 あった理由です。無効にできるピンはありませんでした — ライブラリにはバージョン引数も、ブラウザ用の
 環境変数もありませんでした。
 
-`@camoufox/camoufox` はこれを構造的に解決します: 公開されたコピーはそれぞれ、同じソースから
-ビルドされた 1 つのブラウザビルドが刻印され（`browser-pin.json`。0.5.7 は `v156.0.1-beta.34` を
-固定）、既定でまさにそのビルドだけを取得・起動します。スタックの両半分は一緒にリリースされるため、
+`camoufox` はこれを構造的に解決します: 公開されたコピーはそれぞれ、同じソースから
+ビルドされた 1 つのブラウザビルドが刻印され（`browser-pin.json`。0.5.8 は `v156.0.1-beta.36` を
+固定。0.5.7 は `v156.0.1-beta.34`）、既定でまさにそのビルドだけを取得・起動します。スタックの両半分は一緒にリリースされるため、
 スキーマ変更がそれを理解しないランチャーに届くことはありません。したがってブラウザの**バイナリ**は、
 以前は浮動だったのが今やピン留めされています。実務的な含意は逆になりました: 古い
-`@camoufox/camoufox` は古い Firefox を意味し、ブラウザはこの依存関係が動くときにだけ動きます。
+`camoufox` は古い Firefox を意味し、ブラウザはこの依存関係が動くときにだけ動きます。
 
-これが追加するインストール層: `@camoufox/camoufox` は
+これが追加するインストール層: `camoufox` は
 `<INSTALL_DIR>/browsers/<repo>/<version>/` の下に（マルチバージョンで、`config.json`、
 `repo_cache.json`、`.0.5_FLAG` を上部に）インストールします。`camoufox-js` はルートの
 `version.json` とともにフラットに配置していました。また `INSTALL_DIR` はプラットフォームのキャッシュ
@@ -1486,7 +1486,7 @@ npm の `overrides` が消費者へ伝播しないため、下流にバージョ
 `test/unit/infrastructure/camoufox-layout.test.ts` の同じフィクスチャで駆動されます）が、その場所と
 ランチャーが実際に読む上書き（Linux では `XDG_CACHE_HOME`、Windows では `LOCALAPPDATA`）の
 唯一の解決器です。レガシーのフラットインストールも認識します — `camoufox fetch` は認識しない
-ディレクトリに対して `rm -rf INSTALL_DIR` を実行するため、これは重要です。`@camoufox/camoufox` は
+ディレクトリに対して `rm -rf INSTALL_DIR` を実行するため、これは重要です。`camoufox` は
 `better-sqlite3` 依存を持たない（起動経路のネイティブ面は `impit` のみ）ため、このスタックに関する
 npm インストールスクリプトの旧ブロッカーはなくなりました。引き上げるときは実際の起動を必ず
 再検証してください — ユニット/統合スイートはどちらもブラウザをモックしており、Juggler の不整合を

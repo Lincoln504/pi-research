@@ -23,7 +23,7 @@ import { createRequire } from 'node:module';
  * Where the Camoufox browser lives, and which environment overrides make the
  * browser launcher agree with that.
  *
- * `@camoufox/camoufox` derives its install directory ONLY from the platform cache
+ * `camoufox` derives its install directory ONLY from the platform cache
  * location (XDG_CACHE_HOME on Linux, LOCALAPPDATA on Windows, $HOME/Library/Caches on
  * macOS). Unlike the camoufox-js it replaced, it does NOT read CAMOUFOX_INSTALL_DIR
  * or PLAYWRIGHT_BROWSERS_PATH. Both variables are still honoured here as the
@@ -250,7 +250,7 @@ export function resolveHeadlessMode(): boolean | 'virtual' {
  * Check if the browser is available for meaningful browser pool testing.
  * 
  * Returns false if:
- * - @camoufox/camoufox package is not installed
+ * - camoufox package is not installed
  * - no browser build is installed under the cache dir (new `browsers/<repo>/<version>` layout)
  * - FULL_MOCK_MODE is active (both search and scrape mocked)
  * 
@@ -269,7 +269,7 @@ export function resolveHeadlessMode(): boolean | 'virtual' {
  *
  * History: camoufox-js required `better-sqlite3`, whose binding came from a dependency
  * INSTALL SCRIPT that npm 12 turns off, so the module imported fine and every browser
- * worker died at first use. `@camoufox/camoufox` has no better-sqlite3; the one native
+ * worker died at first use. `camoufox` has no better-sqlite3; the one native
  * module left in the launcher's path is `impit` (its IP/geo lookups), which resolves a
  * prebuilt platform package. That package can still be dropped by npm's optional-
  * dependency bug (npm/cli#4828), and the failure is again at first use, so the probe
@@ -300,7 +300,7 @@ function defaultNativeDepLoad(): void {
 export function isBrowserAvailable(): boolean {
     if (isFullMockMode()) return false;
     try {
-        import.meta.resolve('@camoufox/camoufox');
+        import.meta.resolve('camoufox');
         const root = findPackageRoot(import.meta.url);
         return isUsable(getCamoufoxBinaryPath(), root ? loadPin(root) : null);
     } catch {

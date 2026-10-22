@@ -9,7 +9,7 @@
  * between "where setup installed it" and "where the runtime looks" is exactly the
  * install/runtime mismatch this package has shipped before.
  *
- * Why this exists. `@camoufox/camoufox` (0.5.x) differs from the old `camoufox-js`:
+ * Why this exists. `camoufox` (0.5.x) differs from the old `camoufox-js`:
  *   - It installs under  <INSTALL_DIR>/browsers/<repo>/<version>/  (multi-version),
  *     with `config.json`, `repo_cache.json` and a `.0.5_FLAG` beside it. camoufox-js
  *     put the browser files FLAT in INSTALL_DIR with a root `version.json`.
@@ -54,7 +54,7 @@ function customDir(env = process.env) {
   return env.CAMOUFOX_INSTALL_DIR || env.PLAYWRIGHT_BROWSERS_PATH || null;
 }
 
-/** Mirrors @camoufox/camoufox paths.js userCacheDir('camoufox') for a given environment. */
+/** Mirrors camoufox paths.js userCacheDir('camoufox') for a given environment. */
 function defaultInstallDir(env = process.env, platform = process.platform, home = os.homedir()) {
   if (platform === 'win32') {
     const base = env.LOCALAPPDATA && path.win32.isAbsolute(env.LOCALAPPDATA)
@@ -183,9 +183,9 @@ function hasExplicitChoice(dir) {
 }
 
 /**
- * The browser build @camoufox/camoufox was released with, from its browser-pin.json
+ * The browser build camoufox was released with, from its browser-pin.json
  * (`{ repoName, version, build }`, repoName lowercased), or null when unpinned/unreadable.
- * `packageRoot` is the directory of the @camoufox/camoufox package.
+ * `packageRoot` is the directory of the camoufox package.
  */
 function loadPin(packageRoot) {
   try {
@@ -197,10 +197,10 @@ function loadPin(packageRoot) {
   }
 }
 
-/** The @camoufox/camoufox package directory as seen from `fromDir`, or null. */
+/** The camoufox package directory as seen from `fromDir`, or null. */
 function findPackageRoot(fromDir) {
   try {
-    return path.dirname(require.resolve('@camoufox/camoufox/package.json', { paths: [fromDir] }));
+    return path.dirname(require.resolve('camoufox/package.json', { paths: [fromDir] }));
   } catch (_) {
     return null;
   }

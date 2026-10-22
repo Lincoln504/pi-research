@@ -73,7 +73,7 @@ describe('browser-config', () => {
             expect(getBrowserCacheDir()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
-        it('Windows: mirrors @camoufox/camoufox userCacheDir (doubled camoufox segment, homedir fallback)', () => {
+        it('Windows: mirrors camoufox userCacheDir (doubled camoufox segment, homedir fallback)', () => {
             osMock.current = 'win32';
             delete process.env['LOCALAPPDATA'];
             expect(getBrowserCacheDir()).toBe(
@@ -97,7 +97,7 @@ describe('browser-config', () => {
         });
 
         it('translates a custom PLAYWRIGHT_BROWSERS_PATH into the XDG_CACHE_HOME the launcher reads', () => {
-            // @camoufox/camoufox ignores PLAYWRIGHT_BROWSERS_PATH and CAMOUFOX_INSTALL_DIR
+            // camoufox ignores PLAYWRIGHT_BROWSERS_PATH and CAMOUFOX_INSTALL_DIR
             // and derives its install dir from the platform cache root only. The worker
             // must be told in THAT variable or install and launch resolve to different
             // directories; the two user-facing variables are removed so nothing nested
@@ -274,7 +274,7 @@ describe('browser-config', () => {
             expect(getCamoufoxBinaryPath()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
-        it('Windows: mirrors @camoufox/camoufox userCacheDir (doubled camoufox segment, homedir fallback)', () => {
+        it('Windows: mirrors camoufox userCacheDir (doubled camoufox segment, homedir fallback)', () => {
             osMock.current = 'win32';
             delete process.env['LOCALAPPDATA'];
             expect(getCamoufoxBinaryPath()).toBe(

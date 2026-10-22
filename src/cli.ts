@@ -821,7 +821,7 @@ async function cmdStatus(json?: boolean): Promise<number> {
   // previously assumed away here with "nothing else fails". The launcher's native
   // module (`impit`) resolves a prebuilt platform package; if npm drops it (npm/cli#4828)
   // the module fails at first use. (Historically this was better-sqlite3, a dependency
-  // of the camoufox-js launcher this package replaced with @camoufox/camoufox.)
+  // of the camoufox-js launcher this package replaced with camoufox.)
   // When it is missing every browser worker dies and SEARCH IS DEAD — not degraded — while the knowledge store keeps
   // working because onnxruntime and lancedb both ship their binaries. That is not a
   // capability note, so it gates `ready`: a build that cannot search cannot research.
