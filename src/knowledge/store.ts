@@ -1653,7 +1653,15 @@ export class KnowledgeStore implements IKnowledgeStore {
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_clear_duration_ms', duration);
         metrics.increment('knowledge_store_clear_total', 1, { status: 'success' });
-        metrics.setGauge('knowledge_store_total_documents', 0);
+        // Report what is actually left in THIS store's scope. A caller-supplied `filter`
+        // clears only part of it, so a hard-coded 0 here made the gauge claim an empty
+        // store while rows remained (count() refreshes it, but only when next called).
+        // Best-effort: a failed recount must not turn a successful clear into an error.
+        try {
+          metrics.setGauge('knowledge_store_total_documents', await table.countRows(this.getScopeFilter()));
+        } catch {
+          // gauge stays at its previous value until the next count()
+        }
         logger.info(`[store] Knowledge store cleared for scope: ${scopeFilter}`);
         return;
       } catch (err) {

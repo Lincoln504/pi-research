@@ -696,6 +696,25 @@ describe('KnowledgeStore', () => {
     expect(await store.count()).toBe(1);
   });
 
+  it('clear(filter) reports the rows that remain in the total-documents gauge, not a hard-coded 0', async () => {
+    await store.open();
+    const mk = (n: string) => ({
+      url: `https://example.com/gauge-${n}`,
+      text: `Gauge ${n}`,
+      metadata: { title: n, ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    });
+    await store.addDocuments([mk('a'), mk('b')]);
+    const spy = vi.spyOn(metrics, 'setGauge');
+    await store.clear("url = 'https://example.com/gauge-a'");
+    const calls = spy.mock.calls.filter(c => c[0] === 'knowledge_store_total_documents');
+    expect(calls.at(-1)?.[1]).toBe(1);
+    expect(await store.count()).toBe(1);
+    await store.clear();
+    expect(spy.mock.calls.filter(c => c[0] === 'knowledge_store_total_documents').at(-1)?.[1]).toBe(0);
+    spy.mockRestore();
+  });
+
   it('should successfully re-embed documents using temp table strategy', async () => {
     // 1. Initial setup with model A
     const modelA = 'Xenova/all-MiniLM-L6-v2';
