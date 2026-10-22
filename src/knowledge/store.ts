@@ -102,6 +102,13 @@ export class KnowledgeStore implements IKnowledgeStore {
   // 'bm25' owns activeBm25TableName).
   private otherModeTableName: string | null = null;
   private manifestPath: string;
+  // The state of the manifest FILE at the last loadManifest(): 'absent' (no
+  // file — no migration state is known), 'loaded' (parsed — the live table
+  // name is positively identified), or 'corrupt' (the file EXISTS but did not
+  // parse — the live table name is UNKNOWN, so consumers of it such as
+  // pruneOrphanedMigrationDirs must treat the store's data layout as unknown
+  // rather than as "no migration in flight").
+  private manifestLoadState: 'absent' | 'loaded' | 'corrupt' = 'absent';
   private isClosing = false;
   private activeWrites = new Set<Promise<any>>();
   // Last recorded model/schema migration (persisted in the store manifest).
@@ -177,6 +184,11 @@ export class KnowledgeStore implements IKnowledgeStore {
   private async loadManifest(): Promise<void> {
     try {
       if (fs.existsSync(this.manifestPath)) {
+        // Optimistically 'corrupt': a successful parse below flips it to
+        // 'loaded'. A readFile/parse failure lands in the catch, which keeps
+        // 'corrupt' — the file existed, so its contents are authoritative
+        // evidence that a migration state may be persisted in there.
+        this.manifestLoadState = 'corrupt';
         const content = await fsPromises.readFile(this.manifestPath, 'utf-8');
         const manifest = JSON.parse(content);
         const savedVectorTable = typeof manifest.activeTableName === 'string' ? manifest.activeTableName : null;
@@ -196,6 +208,9 @@ export class KnowledgeStore implements IKnowledgeStore {
         if (manifest.prevMigration && typeof manifest.prevMigration.model === 'string') {
           this.prevMigration = { model: manifest.prevMigration.model, ts: Number(manifest.prevMigration.ts) || 0 };
         }
+        this.manifestLoadState = 'loaded';
+      } else {
+        this.manifestLoadState = 'absent';
       }
     } catch (err) {
       logger.warn('[store] Failed to load manifest, using default table name:', err);
@@ -1477,6 +1492,16 @@ export class KnowledgeStore implements IKnowledgeStore {
     // the manifest points at — never reap dirs when we can't positively
     // establish which one is live.
     if (!this.table) return;
+    // A manifest that EXISTS but failed to parse means the live table name is
+    // unknown: loadManifest fell back to the default, so an orphan scan would
+    // classify the real live `knowledge_migration_<ts>` dir (the persisted
+    // re-embed rename-failure state) as garbage and delete it. Skip pruning
+    // entirely in that state; the dirs can be reaped once a valid manifest is
+    // back (the next successful open rewrites it).
+    if (this.manifestLoadState === 'corrupt') {
+      logger.warn('[store] Skipping migration-dir pruning: the manifest exists but is unparseable, so the live table cannot be positively identified.');
+      return;
+    }
     try {
       // The dir the manifest currently points at is the live table — NEVER
       // delete it, even if its name contains `_migration_`/`_backup_` (a

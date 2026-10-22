@@ -125,4 +125,44 @@ describe('KnowledgeStore fault injection (real LanceDB)', () => {
     fs.rmSync(path.join(dir, 'knowledge.lance'), { recursive: true, force: true });
     await expect(store.search('gone')).rejects.toThrow();
   });
+
+  it('a corrupt manifest with live data in a migration-named table does NOT prune the live table', async () => {
+    // The exact residual risk: a persisted re-embed rename-failure leaves the
+    // live data in `knowledge_migration_<ts>.lance` with the manifest pointing
+    // at it. If the manifest then becomes unparseable, loadManifest falls back
+    // to the default table name, open() creates a fresh `knowledge` table, and
+    // the orphan scan would classify the REAL live migration dir as garbage.
+    const first = mk(makeEmbedder());
+    await first.open();
+    await first.addDocuments([doc('live')]);
+    await first.close();
+    const migName = `knowledge_migration_${Date.now()}`;
+    fs.renameSync(path.join(dir, 'knowledge.lance'), path.join(dir, `${migName}.lance`));
+    // The persisted state: a valid manifest pointing at the migration-named table.
+    fs.writeFileSync(path.join(dir, 'store-manifest.json'), JSON.stringify({ activeTableName: migName }));
+    // Now corrupt the manifest (the atomic write makes this unlikely in practice;
+    // disk failure or tampering is the realistic path).
+    fs.writeFileSync(path.join(dir, 'store-manifest.json'), '{"activeTableName": "knowl');
+    const second = mk(makeEmbedder());
+    await second.open();
+    // The store serves the (empty) default table, but the live data must survive.
+    expect(await second.count()).toBe(0);
+    expect(fs.existsSync(path.join(dir, `${migName}.lance`))).toBe(true);
+  });
+
+  it('an orphaned migration dir IS still pruned when the manifest is absent (regression guard)', async () => {
+    // The corrupt-manifest hardening must not disable pruning in the safe case:
+    // no manifest means no migration state is known, so orphan reaping proceeds.
+    const first = mk(makeEmbedder());
+    await first.open();
+    await first.addDocuments([doc('orphan')]);
+    await first.close();
+    const migName = `knowledge_migration_${Date.now()}`;
+    fs.renameSync(path.join(dir, 'knowledge.lance'), path.join(dir, `${migName}.lance`));
+    fs.rmSync(path.join(dir, 'store-manifest.json'));
+    const second = mk(makeEmbedder());
+    await second.open();
+    expect(await second.count()).toBe(0);
+    expect(fs.existsSync(path.join(dir, `${migName}.lance`))).toBe(false);
+  });
 });
