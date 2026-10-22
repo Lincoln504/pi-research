@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.16] - 2026-10-22
+
+### Changed
+
+- **The repository's own dependency tree no longer carries LanceDB's bundled `@huggingface/transformers` 3.0.2.** `package.json` `overrides` gains `"@lancedb/lancedb": { "@huggingface/transformers": "$@huggingface/transformers" }`, which collapses the copy `@lancedb/lancedb` 0.40.0 declares as an exact-pinned optional dependency onto the root's 4.3.1. This removes the second `onnxruntime-node` (1.19.2, with its install script), `openai`, `node-fetch`, `jinja` and the rest of LanceDB's nested tree (11 lock entries, 120 lines, deletions only) and makes the dev/CI/test tree the same shape the consumer recipe below produces. Nothing at runtime changes: LanceDB is used for storage only, and embeddings already ran through the root copy. `test/unit/package.test.ts` pins both the override and the absence of any nested `@lancedb/lancedb/node_modules/@huggingface/*` lock entry (it fails on the 1.7.15 tree, passes now). Verified: `npm ci --dry-run` clean, `npm audit` 0, `npm ls` shows one `transformers@4.3.1` and one `sharp@0.35.5`.
+
+### Documentation
+
+- **Consumer-side fix for the `sharp` 0.33.5 `npm audit` finding is now one override that removes the chain, not just patches `sharp`** (GitHub issue "Vulnerable transitive sharp dependency through LanceDB's optional Transformers dependency"). `overrides: {"@lancedb/lancedb": {"@huggingface/transformers": "^4.3.1"}}` in the consumer's `package.json` (for `pi install`: `~/.pi/agent/npm/package.json`, which pi's `ensureNpmProject` creates only when absent and so never overwrites). Measured 2026-10-22 on the packed 1.7.15 tarball in three install shapes (`--legacy-peer-deps`, plain `npm install`, and pi's `--prefix` layout): nested `transformers@3.0.2` and `sharp@0.33.5` gone, one `transformers@4.3.1` and one `sharp@0.35.5`, `npm audit --omit=dev` 0 (4 HIGH without), and a LanceDB create/add/vector-query round trip passes with no `sharp` or `@huggingface` module in `require.cache`. The npm `$name` form does NOT work from a consumer root (it resolves against the consumer's own direct dependencies, which lack `transformers`; measured: nested 3.0.2 and 4 HIGH remained), so the version is spelled out. The narrower `sharp` override stays documented as the fallback.
+- **`docs/AUDIT-GATE.md`** records the permanent answer to "should we use LanceDB's bundled transformers": no, because the root copy gives control of the model, ONNX runtime, quantization and device policy, and the override is safe only because pi-research never loads LanceDB's embedding registry. The stale "0.39.0 is the newest stable" LanceDB claim was corrected (0.40.0 stable, `preview` 0.41.0-beta.12, both pinning transformers 3.0.2). README limitations list carries the new recipe.
+
 ## [1.7.15] - 2026-10-21
 
 ### Fixed

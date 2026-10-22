@@ -175,13 +175,51 @@ is not fixable from here:
   entirely (the 3.1.x/3.2.x line kept `^0.33.5`). pi-research uses transformers only
   for text `feature-extraction`, so the vulnerable libvips/libheif decoders are never invoked —
   the exposure is a scanner finding, not a reachable path.
-  - Consumer-side remedies, both re-verified against the 1.7.8 tarball on 2026-10-05:
+  - **Preferred consumer-side remedy (measured 2026-10-22, 1.7.15 tarball): remove the vulnerable
+    chain instead of patching `sharp`.** A root override that collapses LanceDB's copy onto
+    pi-research's own `transformers`:
+
+    ```json
+    { "overrides": { "@lancedb/lancedb": { "@huggingface/transformers": "^4.3.1" } } }
+    ```
+
+    | Install shape (scratch project, `--ignore-scripts`) | `npm ls` | `npm audit --omit=dev` | LanceDB create/add/vector-query |
+    | --- | --- | --- | --- |
+    | no override | `transformers@3.0.2` + `sharp@0.33.5` nested under LanceDB | 4 HIGH | n/a |
+    | override, `npm install --legacy-peer-deps` (the `pi install` shape) | one `transformers@4.3.1`, LanceDB's `deduped`, one `sharp@0.35.5` | 0 | passes, 0 `sharp`/`@huggingface` modules in `require.cache` |
+    | override, plain `npm install` (peers auto-installed) | same | 0 | not re-run (same tree) |
+    | override in `~/.pi/agent/npm/package.json`, `npm install <tarball> --prefix <dir> --legacy-peer-deps` (pi's managed layout) | same | 0 | not re-run (same tree) |
+
+    Why the version is spelled out: npm's `$name` form refers to a dependency of the CONSUMER's own
+    root `package.json`, and a consumer has no direct `@huggingface/transformers` entry (measured:
+    `"$@huggingface/transformers"` in a consumer root left the nested `3.0.2` in place and 4 HIGH).
+    `^4.3.1` dedupes onto whatever 4.x pi-research resolves, so the recipe survives later patch bumps.
+    pi's package manager creates `~/.pi/agent/npm/package.json` only when it is absent
+    (`ensureNpmProject`, `package-manager.js`), so an `overrides` entry added there persists across
+    `pi install` / `pi update`. This repository itself carries the `$`-form of the same override
+    (`package.json` `overrides`), where `@huggingface/transformers` IS a root dependency, so the
+    in-repo tree, CI and tests run on the clean shape; `test/unit/package.test.ts` pins both the
+    override and the absence of a nested `@lancedb/lancedb/node_modules/@huggingface/*` lock entry.
+  - Fallback consumer-side remedies, both re-verified against the 1.7.8 tarball on 2026-10-05:
     - a root `overrides: {"sharp": "^0.35.4"}` gives `npm audit` 0 and dedupes a single
       `sharp@0.35.5` into LanceDB's `transformers@3.0.2`, so the store keeps working;
     - `npm install --omit=optional` plus `npm audit --omit=optional` reports 0 as well, but it
       also drops LanceDB's own native binding, so the knowledge store disables (`DISABLED('native')`)
       rather than degrading to BM25. Not a substitute for the override when the store is wanted.
   - Consuming LanceDB's own embedding function is the only reason to keep `sharp` unoverridden.
+  - **Why pi-research uses its own `transformers` 4.3.1 and not LanceDB's bundled 3.0.2.**
+    - LanceDB is used for storage only (`src/knowledge/lancedb-loader.ts`); embeddings run through
+      `pipeline('feature-extraction', …)` from the root copy (`transformers-loader.ts`,
+      `embedder-init.ts`), which is what lets this package choose the model, the ONNX runtime
+      (`onnxruntime-node` 1.30.0 vs the 1.19.2 that 3.0.2 carries), the quantization and the
+      WebGPU/CPU device policy, and move them on its own schedule. 3.0.2 predates all of that.
+    - Using the bundled copy would gain one fewer package in the tree, and lose the model/device
+      control, the WebGPU probe path, and every `transformers` 4.x fix. It would still leave
+      LanceDB's exact pin as the ceiling of our embedding stack.
+    - Collapsing LanceDB's optional copy onto ours (the override above) is safe here because
+      LanceDB reaches `transformers` only from its own embedding registry, which pi-research never
+      loads. It would NOT be safe for a consumer who also calls LanceDB's embedding functions: that
+      code was written against the 3.x API.
   - Shipping an `npm-shrinkwrap.json` does NOT propagate it either. Tested 2026-10-05: the file was
     added to `files[]`, `npm pack` included it in the tarball (`package/npm-shrinkwrap.json`
     confirmed in the archive), and a scratch consumer resolving that tarball still nested

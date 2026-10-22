@@ -297,6 +297,31 @@ describe('package-lock.json — phantom-optional stubs survive regeneration', ()
 });
 
 
+describe('package-lock.json — LanceDB bundled transformers is overridden onto the root copy', () => {
+  // @lancedb/lancedb pins the OPTIONAL dependency @huggingface/transformers at exactly
+  // 3.0.2, which drags in sharp 0.33.5 (3 HIGH advisories) and a second onnxruntime-node.
+  // pi-research never uses LanceDB's embedding integration (storage only), so the root
+  // `overrides` entry collapses LanceDB's copy onto the root 4.3.1. This keeps the
+  // repo's own tree, CI and test runs on the same shape the consumer-side recipe in
+  // docs/AUDIT-GATE.md produces. See that file before touching either side.
+  it('declares the override and carries no nested transformers under LanceDB', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf-8')) as {
+      overrides?: Record<string, unknown>;
+    };
+    expect(pkg.overrides?.['@lancedb/lancedb']).toEqual({
+      '@huggingface/transformers': '$@huggingface/transformers',
+    });
+    const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package-lock.json'), 'utf-8')) as {
+      packages: Record<string, unknown>;
+    };
+    const nested = Object.keys(lock.packages).filter((k) =>
+      k.startsWith('node_modules/@lancedb/lancedb/node_modules/@huggingface/'),
+    );
+    expect(nested, 'LanceDB regained its own bundled @huggingface/* copy').toEqual([]);
+  });
+});
+
+
 describe('version sync across release artifacts', () => {
   // The three release gates (verify-package.cjs manifest mode, the release
   // workflow's grep, prepublishOnly) all assert package.json and SKILL.md carry

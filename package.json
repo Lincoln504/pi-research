@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "1.7.15",
+  "version": "1.7.16",
   "description": "Web research for your agents with smart and safe tooling + knowledge store",
   "type": "module",
   "private": false,
@@ -158,7 +158,10 @@
     "jsdom": {
       "undici": "^8.10.2"
     },
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.0",
+    "@lancedb/lancedb": {
+      "@huggingface/transformers": "$@huggingface/transformers"
+    }
   },
   "devDependencies": {
     "@earendil-works/pi-ai": ">=0.99.0 <2",
