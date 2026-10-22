@@ -18,7 +18,7 @@
  *   PLAYWRIGHT_INSTALL_DEPS=true        - also install Linux system deps (or pass --system-deps)
  */
 
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { existsSync, readdirSync, statSync } = require('fs');
 const { homedir } = require('os');
 const path = require('path');
@@ -98,7 +98,13 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
       // ships the same `install-deps` subcommand (verified: its CLI lists it).
       const playwrightCoreBin = path.join(projectRoot, 'node_modules', '.bin', isWindows ? 'playwright-core.cmd' : 'playwright-core');
       const cli = existsSync(playwrightCoreBin) ? playwrightCoreBin : 'playwright-core';
-      execSync(`"${cli}" install-deps`, { stdio: 'inherit', env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' } });
+      // spawnSync with an ARGV ARRAY (no shell), for the same reason the browser fetch
+      // below and prepare.cjs do: `cli` sits under the project root, so a shell string
+      // would execute `$(...)` or backticks in a directory name at install time.
+      // This branch is Linux-only, so no `.cmd` shim (which needs a shell) is involved.
+      const res = spawnSync(cli, ['install-deps'], { stdio: 'inherit', env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' } });
+      if (res.error) throw res.error;
+      if (res.status !== 0) throw new Error(`playwright-core install-deps exited with ${res.signal ? `signal ${res.signal}` : `code ${res.status}`}`);
     } catch (e) {
       console.warn(`WARNING: could not install system dependencies. Run: sudo apt-get install -y libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1\nReason: ${e instanceof Error ? e.message : String(e)}\n(These are the libraries headless camoufox needs. Xvfb is NOT required for the default headless mode — only add it if you opt into virtual-display mode with PI_RESEARCH_USE_XVFB=true.)`);
     }

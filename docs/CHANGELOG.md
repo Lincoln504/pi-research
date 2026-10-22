@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.15] - 2026-10-21
+
+### Fixed
+
+- **`scripts/setup.cjs` still ran its Linux `install-deps` step through a shell string.** `execSync(`"${cli}" install-deps`)` interpolated a path under the package directory into `/bin/sh -c`, so with `PLAYWRIGHT_INSTALL_DEPS=true` (or `--system-deps`) a package directory whose name contained `$(...)` or backticks would execute it at install time. `prepare.cjs`, `cleanup.cjs` and the browser fetch in the same file already used `spawnSync` with an argv array for exactly this reason; this was the lone holdout. It is now `spawnSync(cli, ['install-deps'])` with the exit status and spawn error converted back into the existing "could not install system dependencies" warning. New `test/unit/scripts/install-script-shell-safety.test.ts` fails on any `execSync`/`exec`/`shell: true` in the shipped install-time scripts (`setup`, `cleanup`, `prepare`, `build`, `camoufox-layout`); verified to fail against the previous `setup.cjs`. `scripts/ensure-native-deps.cjs` keeps its `execSync` deliberately: it is CI-only, not in `files[]`, and its command string is built from repo-pinned versions, not from a user-controlled path.
+- **The research panel's wave animation indexed outside its trail array at width 1.** `computeHeadState` clamped the last cell index to at least 1, so with a single available cell the head landed on index 1, grew `waveColors` to two entries, and the width check in `generateWaveFill` then discarded the trail on every frame. Output stayed correct (the fill loop is bounded by `available`), so nothing visibly broke, but the animation silently lost its trail state at that width. The clamp is now 0. `src/tui/research-panel-wave.ts` previously had no test at all; `test/unit/tui/research-panel-wave.test.ts` now pins cell count, colour-channel range, resize handling, the edge-impact glyphs, an unparseable accent colour and a huge frame counter. It found the width-1 bug on its first run.
+
+### Changed
+
+- **The BotGuard interpreter is size- and type-checked before `new Function` compiles it** (`src/youtube/potoken.ts`). The script is fetched over HTTPS and running it is inherent to PoToken minting, so this does not change the trust model; it only refuses a non-string or implausibly large (over 8 MiB; real ones are a few hundred KB) value instead of compiling it.
+- **`npm run lock:restore-stubs`** (`scripts/restore-lock-stubs.cjs`) re-adds the two kreuzberg phantom-musl lockfile stubs that every plain `npm install` / `npm update` / `--package-lock-only` drops and that break `npm ci` on CI. It reads the version from the parent's own `optionalDependencies`, is idempotent, and was verified byte-identical against the committed lockfile after deleting both stubs. `test/unit/package.test.ts`'s failure message now points at it. Run it, then `npm ci --dry-run`, after any lockfile regeneration.
+
+### Verified
+
+Audit findings checked and left unchanged: `.github/workflows/release.yml` (SHA-pinned actions, `id-token` only in the publish job, which installs nothing and publishes the vetted tarball, CI-green gate on the tagged commit); the 5 npm 12 "install scripts not yet covered by allowScripts" packages (`@google/genai`, `onnxruntime-node` x2, `protobufjs`, `webgpu`) do not affect this package: the allow-scripts setting lives in the user's `~/.npmrc`, not the repository, and the measured finding in the 1.6.x entries stands that none of these needs its script to function; the SSRF stack (`validateUrlForSSRF`, connect-time IP pin, per-hop redirect validation).
+
 ## [1.7.14] - 2026-10-21
 
 ### Changed

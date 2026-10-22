@@ -94,6 +94,9 @@ let wedged = false;
 // timer on the browser page-creation mutex in thread-worker-messaging.ts.
 const MINT_HARD_RELEASE_MS = 5 * 60 * 1000;
 
+/** Upper bound on the BotGuard interpreter source compiled via `new Function` (real ones are a few hundred KB). */
+const MAX_INTERPRETER_CHARS = 8 * 1024 * 1024;
+
 /**
  * Mint a session-bound token (for `identifiers[0]`, the visitorData) plus one
  * content-bound token per remaining identifier (the video IDs), all from a
@@ -235,6 +238,12 @@ async function doMint(
 
     const interpreter = challenge.interpreterJavascript?.privateDoNotAccessOrElseSafeScriptWrappedValue;
     if (!interpreter) throw new Error('BotGuard interpreter script missing');
+    // Bound what reaches `new Function`: the value crossed the network inside a parsed
+    // JSON envelope, so refuse anything that is not a string or is implausibly large
+    // (real BotGuard interpreters are a few hundred KB) rather than compile it.
+    if (typeof interpreter !== 'string' || interpreter.length > MAX_INTERPRETER_CHARS) {
+      throw new Error('BotGuard interpreter script has an unexpected shape or size');
+    }
     // Eval in the Node realm so the VM and bgutils share one Uint8Array realm.
     // The interpreter is YouTube's BotGuard VM, fetched over HTTPS from Google's
     // attestation endpoint by bgutils — running it is required and inherent to

@@ -263,8 +263,9 @@ describe('package-lock.json — phantom-optional stubs survive regeneration', ()
   // npm 11.19 included) silently DROPS these stubs and breaks `npm ci` on CI
   // with `Missing: @kreuzberg/...-musl@ from lock file`. This has now happened
   // twice (2026-06-24, 2026-08-20). This test makes the constraint enforced
-  // in-repo: if you regenerated the lock and landed here, re-add the two
-  // nested stubs (and re-run `npm ci --dry-run` to confirm sync) before
+  // in-repo: if you regenerated the lock and landed here, run
+  // `npm run lock:restore-stubs` (scripts/restore-lock-stubs.cjs re-adds both
+  // entries) and re-run `npm ci --dry-run` to confirm sync before
   // pushing. Clears when kreuzberg publishes the musl variants or drops the
   // references — at that point delete this test along with the stubs.
   it('keeps the VERSIONED optional stubs for kreuzberg\'s phantom musl variants (npm 12 form)', () => {

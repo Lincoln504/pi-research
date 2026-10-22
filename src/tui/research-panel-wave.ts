@@ -137,7 +137,10 @@ function ageToColor(
  * headPos is returned as a float for smooth interpolation.
  */
 function computeHeadState(frame: number, available: number): { headPos: number; goingRight: boolean; isDwelling: boolean } {
-  const M = Math.max(1, available - 1);
+  // Last valid cell index. Clamped at 0, not 1: with a single cell the head must stay
+  // on cell 0, because index 1 is outside the trail array (it silently grew the array
+  // to 2 entries, so the width check in generateWaveFill reset the trail every frame).
+  const M = Math.max(0, available - 1);
   const D = DWELL_FRAMES;
   const halfPeriod = PERIOD_FRAMES / 2;
   const pos = frame % PERIOD_FRAMES;
