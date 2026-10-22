@@ -147,8 +147,18 @@ export const PI_MIN_VERSION: SemverParts = { major: 0, minor: 99, patch: 0 };
  * Nothing this package consumes is removed or re-signed; the four type-checks pass against
  * 1.3.0 (TypeScript 6 and 7, src and tests), and `typebox` still pins 1.3.27 in `pi-ai`
  * and `pi-coding-agent`, so the lockstep rule and the 0.99.0 floor are unchanged.
+ *
+ * 1.4.0 (2026-10-21) was verified on 2026-10-21 by diffing the published tarballs:
+ * `@earendil-works/pi-coding-agent`'s extension surface file
+ * (`dist/core/extensions/types.d.ts`) is byte-identical, and its `package.json` still pins
+ * `typebox` at `1.3.27`, so the lockstep rule and the 0.99.0 floor are unchanged. The host's
+ * own changes are internal: `pi-tui` fixes the unclosed `$$`/`\[` display-math swallowing of
+ * later Markdown tables and renders bold/italic next to CJK punctuation (rendering fixes this
+ * package's custom TUI panels do not share), and restores terminal modes on unclean exit. The
+ * `before_provider_headers` attribution-header change and the `generateSummary()`
+ * `reserveTokens` change touch no API this package registers or calls.
  */
-export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 3, patch: 0 };
+export const PI_TESTED_MAX_VERSION: SemverParts = { major: 1, minor: 4, patch: 0 };
 
 export type PiCompatibilityLevel = 'ok' | 'unparseable' | 'too-old' | 'untested';
 

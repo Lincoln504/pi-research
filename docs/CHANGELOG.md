@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.14] - 2026-10-21
+
+### Changed
+
+- **The pi host dev dependencies move 1.3.0 → 1.4.0** (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`, and the `pi-agent-core`/`pi-codemode`/`pi-mcp`/`pi-telemetry` they pull in; the peer range stays `>=0.99.0 <2`). The 1.3.0 → 1.4.0 diff of the published tarballs (2026-10-21): `pi-coding-agent`'s extension surface file (`dist/core/extensions/types.d.ts`) is byte-identical, and its `package.json` still pins `typebox` at `1.3.27`, so the lockstep rule and the 0.99.0 floor are unchanged. `pi-tui`'s changes are render-internal and touch nothing this package consumes: the unclosed `$$`/`\[` display-math no longer swallows later Markdown tables (the "text not filling in" class of symptom in model replies), bold/italic now render next to CJK punctuation, and terminal modes are restored on unclean exit. `pi-ai`'s `before_provider_headers` attribution-header change and the `generateSummary()` `reserveTokens` change touch no handler this package registers and no call it makes.
+- **`PI_TESTED_MAX_VERSION` moves to 1.4.0** (`src/core/pi-version.ts`), so a pi 1.4.x host runs without the "newer than the tested ceiling" notice. No handler in this package needed re-signing: the `before_agent_start` handler still reads only `systemPrompt`/`systemPromptOptions` (present on both union members), and both `pi.sendUserMessage` calls already pass `deliverAs`.
+- **In-range lockfile refresh from the 1.4.0 install** (pi trio, `undici`, `vitest`, `@vitest/coverage-v8`, `vite`, `jsdom`, `poolifier`, `youtubei.js`, `npm-check-updates`); dev pins move `@huggingface/transformers` 4.3.0 → 4.3.1, `eslint` 10.11.0 → 10.13.0, and `@typescript-eslint/*` 8.71.0 → 8.72.0.
+- **`playwright-core` stays 1.62.1; 1.64.1 is rejected by coupling.** `@camoufox/camoufox` 0.5.7 pins `playwright-core` at 1.62.0 with an override ceiling of `<1.63`, because every Playwright minor is free to change Juggler (the wire protocol Camoufox speaks); a bump to 1.64.1 would cross that ceiling and is not measurable without a full browser re-validation. `apache-arrow` stays 21.1.0 (the 21.2.0 IPC read failure measured in 1.7.13) and `typebox` stays 1.3.27 (pi host lockstep).
+
+### Verified
+
+Full gate suite against the new tree: lint, the four type-checks (TypeScript 6 and 7, src and tests), unit, integration (serial + parallel), `npm audit` (0), production audit gate, and a fresh-install consumer boot. Knowledge store suite green on the pinned lancedb 0.40.0 / apache-arrow 21.1.0 pair.
+
 ## [1.7.13] - 2026-10-19
 
 ### Changed

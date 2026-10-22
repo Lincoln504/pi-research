@@ -387,8 +387,8 @@ warns on every startup when a host-provided package (`typebox`, `@sinclair/typeb
 loader and create a second live module instance (`resource-loader.js`,
 `collectExtensionPackageWarnings`; pi `docs/packages.md`). Under pi the host's own copy is used,
 so the two agree on `Value.Check`/`Convert` by construction. `@earendil-works/pi-ai` and
-`@earendil-works/pi-coding-agent` 1.0.0 through 1.3.0 all pin `1.3.27` (re-checked 2026-10-17 in
-the installed 1.3.0 packages' `package.json`, previously 2026-10-08 in 1.1.0), which is why the devDependency, and so every test run and
+`@earendil-works/pi-coding-agent` 1.0.0 through 1.4.0 all pin `1.3.27` (re-checked 2026-10-21 in
+the published 1.4.0 packages' `package.json`, previously 2026-10-17 in 1.3.0), which is why the devDependency, and so every test run and
 the type-check, stays on exactly that version: bump it in lockstep with the pi host, not
 independently. A standalone CLI/SDK install resolves the peer automatically on npm >= 7; the
 `pi-research` bin preflights it with the pi packages and exits 78 with the remedy when a
