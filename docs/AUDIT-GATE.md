@@ -159,11 +159,18 @@ The `adm-zip 0.5.18` group left the consumer tree on 2026-10-01 with the
 `adm-zip ^0.6.0` dedupes to the patched 0.6.1 everywhere in the graph). One group remains and
 is not fixable from here:
 
-- **`sharp` via `@lancedb/lancedb` 0.39.0.** LanceDB's `optionalDependencies` pins
+- **`sharp` via `@lancedb/lancedb`.** LanceDB's `optionalDependencies` pins
   `@huggingface/transformers` at exactly `3.0.2`, whose `sharp ^0.33.5` resolves to the vulnerable
-  `0.33.5`. Every published LanceDB version was checked on 2026-10-05 — 0.39.0 is the newest
-  stable and the 0.40.0 betas (through `0.40.0-beta.12`, the `preview` dist-tag) all pin the same
-  exact `3.0.2` — so no bump moves it. Upstream is the only fix: `transformers` 4.3.0 is the first
+  `0.33.5`. Re-checked 2026-10-22 (GitHub issue "Vulnerable transitive sharp dependency through
+  LanceDB's optional Transformers dependency"): 0.40.0 is the newest stable (it was 0.39.0 on
+  2026-10-05) and the `preview` dist-tag `0.41.0-beta.12` pins the same exact `3.0.2`, so no bump
+  moves it. Re-measured 2026-10-22 against the 1.7.15 tarball (`npm install --ignore-scripts
+  --legacy-peer-deps` in a scratch project, `npm audit --omit=dev`): 4 HIGH without a consumer
+  override, 0 HIGH with `overrides: {"sharp": "^0.35.4"}` (nested `sharp@0.35.5 deduped`).
+  Reachability, checked 2026-10-22: `src/` has no `@lancedb/lancedb/embedding` import and no
+  `sharp` call, and `require('@lancedb/lancedb')` leaves no `sharp` or `@huggingface` module in
+  `require.cache`. LanceDB reaches `transformers` only from `dist/embedding/transformers.js`,
+  loaded lazily inside its embedding registry (`dist/embedding/index.js:20`). Upstream is the only fix: `transformers` 4.3.0 is the first
   release whose `sharp ^0.35.4` is clear, and `transformers` 3.0.3 dropped the `sharp` dependency
   entirely (the 3.1.x/3.2.x line kept `^0.33.5`). pi-research uses transformers only
   for text `feature-extraction`, so the vulnerable libvips/libheif decoders are never invoked —
