@@ -101,7 +101,7 @@ describe('Extended Tools Integration', () => {
       expect(text).toContain('CVE-2024-21626');
 
       // Check for markdown structure
-      expect(text).toMatch(/^#+\s/); // Headers
+      expect(text).toMatch(/^#+\s/m); // Headers
     }, 60000);
 
     it('should search for multiple CVEs in single request', async (ctx) => {
