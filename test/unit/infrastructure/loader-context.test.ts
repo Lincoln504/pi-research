@@ -79,8 +79,17 @@ describe('CJS loader context (pi transform pipeline)', () => {
     // Build the exact installed layout in the sandboxed unit HOME: the compat
     // flag plus the paired build (pin from browser-pin.json: official
     // 156.0.1 beta.36). The directory hash is not part of the pin match.
-    const home = process.env['HOME']!;
-    const cacheDir = path.join(home, '.cache', 'camoufox');
+    bundleToCjs(path.join(repoRoot, 'src/infrastructure/browser/config.ts'), path.join(bundleDir, 'config.cjs'));
+    const mod = require(path.join(bundleDir, 'config.cjs')) as {
+      isBrowserAvailable: () => boolean;
+      getCamoufoxBinaryPath: () => string;
+    };
+    // The cache directory the module ITSELF computes (platform-specific: XDG on
+    // Linux, ~/Library on macOS, %LOCALAPPDATA% on Windows — the unit env
+    // sandboxes all of those). Never hard-code the Linux layout here: the
+    // pre-fix failure mode is a path mismatch, and this test must not
+    // reproduce one.
+    const cacheDir = mod.getCamoufoxBinaryPath();
     fs.rmSync(cacheDir, { recursive: true, force: true });
     fs.mkdirSync(path.join(cacheDir, 'browsers', 'official'), { recursive: true });
     fs.writeFileSync(path.join(cacheDir, '.0.5_FLAG'), '');
@@ -91,8 +100,6 @@ describe('CJS loader context (pi transform pipeline)', () => {
     // skips one too.
     fs.writeFileSync(path.join(installDir, 'version.json'), JSON.stringify({ version: '156.0.1', build: 'beta.36' }));
 
-    bundleToCjs(path.join(repoRoot, 'src/infrastructure/browser/config.ts'), path.join(bundleDir, 'config.cjs'));
-    const mod = require(path.join(bundleDir, 'config.cjs')) as { isBrowserAvailable: () => boolean };
     // Pre-fix: false (import.meta.resolve threw in the CJS bundle).
     expect(mod.isBrowserAvailable()).toBe(true);
 
