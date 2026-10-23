@@ -245,6 +245,28 @@ function verifyManifest() {
     if (!set.has(req)) fail(`Missing from published tarball: ${req}`);
   }
 
+  // LanceDB is shipped INSIDE the tarball (scripts/prepack-lancedb.cjs) so consumers never
+  // resolve its optional @huggingface/transformers 3.0.2 / sharp 0.33.5 chain. Three ways
+  // this silently regresses, each caught here: the bundle is dropped (consumers get the
+  // registry copy and the vulnerable chain back), the optional edges are not stripped (same),
+  // or a native binding gets bundled (a ~200 MB .node file for one platform).
+  const bundled = new Set(entry?.bundled ?? []);
+  for (const dep of ['@lancedb/lancedb', '@opentelemetry/api', 'reflect-metadata']) {
+    if (!bundled.has(dep)) fail(`${dep} is not bundled into the tarball (bundleDependencies / scripts/prepack-lancedb.cjs).`);
+  }
+  for (const b of bundled) {
+    if (/^@lancedb\/lancedb-/.test(b)) fail(`native binding ${b} was bundled into the tarball; it must resolve per platform from the registry.`);
+  }
+  if (typeof entry?.size === 'number' && entry.size > 8 * 1024 * 1024) {
+    fail(`tarball is ${(entry.size / 1048576).toFixed(1)} MB; something large was bundled (expected < 8 MB).`);
+  }
+  try {
+    const w = JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules/@lancedb/lancedb/package.json'), 'utf8'));
+    if (w.optionalDependencies) fail('the bundled @lancedb/lancedb still declares optionalDependencies (prepack-lancedb.cjs did not run).');
+  } catch (e) {
+    fail(`cannot read the bundled @lancedb/lancedb manifest: ${e.message}`);
+  }
+
   // Every exports target must be in the tarball.
   for (const t of exportsTargets()) {
     if (t !== 'package.json' && !set.has(t)) fail(`exports target not shipped: ${t}`);
@@ -263,6 +285,8 @@ function verifyManifest() {
   verifyLocalRequiresShipped(files);
 
   for (const f of files) {
+    // Files of a deliberately bundled dependency are third-party content, checked above.
+    if ([...bundled].some((d) => f.startsWith(`node_modules/${d}/`))) continue;
     for (const { re, what } of FORBIDDEN) {
       if (re.test(f)) fail(`Forbidden ${what} leaked into tarball: ${f}`);
     }
@@ -327,6 +351,20 @@ function verifyInstalled(pkgDir) {
   for (const t of binTargets()) {
     if (!fs.existsSync(path.join(pkgDir, t))) fail(`Installed bin target missing: ${t}`);
   }
+
+  // The bundled LanceDB wrapper must be the stripped copy, and a native binding for THIS
+  // platform must have been installed beside it (the wrapper no longer pulls it in itself).
+  const bundledWrapper = path.join(pkgDir, 'node_modules', '@lancedb', 'lancedb', 'package.json');
+  if (!fs.existsSync(bundledWrapper)) {
+    fail('Installed package has no bundled @lancedb/lancedb.');
+  } else if (JSON.parse(fs.readFileSync(bundledWrapper, 'utf8')).optionalDependencies) {
+    fail('Installed bundled @lancedb/lancedb still declares optionalDependencies.');
+  }
+  const hoisted = path.join(pkgDir, '..', '..', '@lancedb');
+  const nested = path.join(pkgDir, 'node_modules', '@lancedb');
+  const bindings = [hoisted, nested].flatMap((d) => (fs.existsSync(d) ? fs.readdirSync(d) : []))
+    .filter((n) => /^lancedb-/.test(n));
+  if (bindings.length === 0) fail('No @lancedb/lancedb-<platform> native binding was installed beside the bundled wrapper.');
 
   // Executable scripts MUST start with a shebang. npm relies on it (not the exec
   // bit) to run a `bin` on Linux/macOS; an esbuild bundle has none unless the

@@ -111,7 +111,8 @@
     "lock:restore-stubs": "node scripts/restore-lock-stubs.cjs",
     "analyze:dependencies": "ncu",
     "//analyze:compatibility": "depngn needs a node-version argument and a TTY (it calls stdout.clearLine): in CI or a pipe run it as: script -qec \"npx depngn 22.22.2\" /dev/null. Many entries report n/a (it cannot read engines for packages without the field).",
-    "analyze:compatibility": "depngn 22.22.2"
+    "analyze:compatibility": "depngn 22.22.2",
+    "prepack": "node scripts/prepack-lancedb.cjs"
   },
   "pi": {
     "extensions": [
@@ -135,15 +136,27 @@
     "undici": "^8.11.2",
     "youtubei.js": "^18.0.0"
   },
+  "bundleDependencies": [
+    "@lancedb/lancedb",
+    "@opentelemetry/api",
+    "reflect-metadata"
+  ],
+  "optionalDependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "webgpu": "^0.6.0",
+    "@lancedb/lancedb-darwin-arm64": "0.40.0",
+    "@lancedb/lancedb-linux-x64-gnu": "0.40.0",
+    "@lancedb/lancedb-linux-arm64-gnu": "0.40.0",
+    "@lancedb/lancedb-linux-x64-musl": "0.40.0",
+    "@lancedb/lancedb-linux-arm64-musl": "0.40.0",
+    "@lancedb/lancedb-win32-x64-msvc": "0.40.0",
+    "@lancedb/lancedb-win32-arm64-msvc": "0.40.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.99.0 <2",
     "@earendil-works/pi-coding-agent": ">=0.99.0 <2",
     "@earendil-works/pi-tui": ">=0.99.0 <2",
     "typebox": ">=1.3.27 <2"
-  },
-  "optionalDependencies": {
-    "@huggingface/transformers": "4.3.1",
-    "webgpu": "^0.6.0"
   },
   "overrides": {
     "brace-expansion": "^5.0.12",

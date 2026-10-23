@@ -5,10 +5,24 @@ license covers this project's own source code only.
 
 This package depends on third-party software distributed under its own license
 terms. Dependencies are resolved and installed by npm at install time (by
-reference); they are **not** bundled into this package's published artifacts
-(the esbuild-bundled entry points — `dist/cli.mjs`, `dist/thread-worker.mjs` — are
+reference); they are **not** bundled into this package's published artifacts, with the one exception
+below (the esbuild-bundled entry points — `dist/cli.mjs`, `dist/thread-worker.mjs` — are
 built with `--packages=external`, and the remaining `dist/` files are copied
 first-party sources, so no third-party code is inlined).
+
+### Bundled third-party code: `@lancedb/lancedb`
+
+One dependency IS redistributed inside the published tarball (`bundleDependencies`, under
+`node_modules/@lancedb/lancedb`, with its runtime dependencies `@opentelemetry/api` and
+`reflect-metadata`): LanceDB's Node.js wrapper, **Apache-2.0**, Copyright LanceDB Authors
+(https://github.com/lancedb/lancedb). It is shipped as published upstream, with its own
+`NODEJS_THIRD_PARTY_LICENSES.md` and `RUST_THIRD_PARTY_LICENSES.html`, except that
+`scripts/prepack-lancedb.cjs` removes the `optionalDependencies` field from its `package.json`
+(recording the original under `x-pi-research-original-optionalDependencies`) so consumers do not
+resolve its pinned `@huggingface/transformers` 3.0.2 and `sharp` 0.33.5 (see `docs/AUDIT-GATE.md`).
+`@opentelemetry/api` is Apache-2.0 and `reflect-metadata` is Apache-2.0; each carries its own
+license file in the bundle. The per-platform LanceDB native bindings are NOT bundled; npm installs
+them separately.
 
 ### Notable dependency licensing
 

@@ -175,7 +175,32 @@ is not fixable from here:
   entirely (the 3.1.x/3.2.x line kept `^0.33.5`). pi-research uses transformers only
   for text `feature-extraction`, so the vulnerable libvips/libheif decoders are never invoked —
   the exposure is a scanner finding, not a reachable path.
-  - **Preferred consumer-side remedy (measured 2026-10-22, 1.7.15 tarball): remove the vulnerable
+  - **Fixed in the package itself from 1.7.18: LanceDB is bundled, so no consumer override is needed.**
+    `bundleDependencies` ships `@lancedb/lancedb` (plus its runtime closure, `@opentelemetry/api` and
+    `reflect-metadata`) inside the tarball, and `scripts/prepack-lancedb.cjs` (the `prepack` step)
+    strips every optional edge from the bundled copy's `package.json`, keeping the original list under
+    `x-pi-research-original-optionalDependencies`. npm installs a bundled dependency's files as shipped
+    and resolves only the edges its manifest declares, so the exact `@huggingface/transformers` 3.0.2 pin
+    and its `sharp` 0.33.5 chain never reach the consumer's tree. The seven LanceDB platform bindings,
+    unreachable through the stripped wrapper, are declared as root `optionalDependencies` at the wrapper's
+    version (npm picks the right one per os/cpu/libc and hoists it beside the bundle, where the wrapper's
+    loader finds it). Measured 2026-10-23 on a packed tarball, both install shapes (`--legacy-peer-deps`
+    and plain), `--ignore-scripts`: `npm audit --omit=dev` 0, one `transformers@4.3.1`, one `sharp@0.35.5`,
+    LanceDB create + count round trip passes. Two things were tried and rejected on the way: stripping only
+    `transformers`/`openai` made npm bundle the packing machine's native binding (a 78 MB tarball with one
+    platform's ~200 MB `.node`), hence the strip-all; and an `npm-shrinkwrap.json` (see below).
+    Guards: `verify-package.cjs` fails the manifest if the three packages are not bundled, if any
+    `@lancedb/lancedb-*` binding is bundled, if the tarball exceeds 8 MB, or if the bundled wrapper still
+    declares optional edges, and fails the installed check if no platform binding landed beside it;
+    `test/unit/scripts/prepack-lancedb.test.ts` pins the root declarations to the wrapper's own list.
+    Cost: LanceDB is pinned to what each pi-research release ships (consumers cannot override it, which
+    was already an exact pin), and a LanceDB bump must keep `bundleDependencies`, the platform
+    `optionalDependencies` and the dependency pin in step (the script fails `npm pack` if they drift).
+    **clearsWhen:** LanceDB stops pinning `@huggingface/transformers` 3.0.2 (or moves it out of
+    `optionalDependencies`); then delete `scripts/prepack-lancedb.cjs`, `bundleDependencies`, the platform
+    `optionalDependencies` and the verify-package checks. Upstream has no issue open for this as of
+    2026-10-23, and its newest preview (0.41.0-beta.12) keeps the pin.
+  - **Consumer-side remedy for releases before 1.7.18 (measured 2026-10-22, 1.7.15 tarball): remove the vulnerable
     chain instead of patching `sharp`.** A root override that collapses LanceDB's copy onto
     pi-research's own `transformers`:
 
@@ -225,7 +250,8 @@ is not fixable from here:
     confirmed in the archive), and a scratch consumer resolving that tarball still nested
     `sharp 0.33.5` under `@lancedb/lancedb`. npm rebuilds the nested placement from the parent's
     declared range, so a packed tree pins nothing below the top level. Only a root `overrides`
-    entry in the consumer's own project reaches it. Do not re-open this as an in-repo fix.
+    entry in the consumer's own project reaches it. (Bundling the dependency, above, is the in-repo fix
+    that works; shrinkwrap is not.)
 
 **Cleared 2026-10-05: `brace-expansion 5.0.9` inside the pi host's `npm-shrinkwrap.json`.** pi 1.0.1
 (changelog: "Fixed installations resolving vulnerable `brace-expansion` 5.0.9 by pinning

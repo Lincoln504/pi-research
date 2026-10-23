@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.18] - 2026-10-23
+
+### Security
+
+- **Consumers no longer need an `overrides` entry to avoid LanceDB's vulnerable `sharp`.** `@lancedb/lancedb` pins its optional `@huggingface/transformers` at exactly 3.0.2 (`sharp` ^0.33.5, three high advisories), and npm honours `overrides` only from the install root, so every consumer's `npm audit` reported 4 high (GitHub issue "Vulnerable transitive sharp dependency through LanceDB's optional Transformers dependency"). The package now ships LanceDB inside its own tarball: `bundleDependencies` lists `@lancedb/lancedb`, `@opentelemetry/api` and `reflect-metadata`; the new `prepack` step `scripts/prepack-lancedb.cjs` strips every optional edge from the bundled copy's manifest; and the seven LanceDB platform bindings are declared as root `optionalDependencies` at the wrapper's version so npm still installs the one matching the platform. Measured on the packed tarball in both install shapes: `npm audit --omit=dev` 0 (was 4 high), one `transformers@4.3.1`, one `sharp@0.35.5`, a LanceDB create/count round trip passes. pi-research never used LanceDB's embedding registry, so nothing was lost. The tarball grows from 1.4 MB to 1.8 MB.
+- **`verify-package.cjs` guards the bundle.** The manifest check fails if the three packages are not bundled, if a native `@lancedb/lancedb-*` binding got bundled (a first attempt that stripped only two edges shipped a 78 MB tarball carrying one platform's binary), if the tarball exceeds 8 MB, or if the bundled wrapper still declares optional edges; the installed check fails if no platform binding landed beside the bundle. `test/unit/scripts/prepack-lancedb.test.ts` pins the root declarations to the wrapper's own platform list, so a LanceDB bump that forgets one fails before release.
+
+### Documentation
+
+- **`docs/AUDIT-GATE.md`** documents the bundling fix, why shrinkwrap and a partial strip were rejected, and the `clearsWhen` condition (LanceDB dropping the transformers 3.0.2 pin).
+
 ## [1.7.17] - 2026-10-23
 
 ### Security

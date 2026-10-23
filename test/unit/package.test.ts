@@ -183,8 +183,10 @@ describe('npm pack', () => {
 
   it('should have reasonable total file count', () => {
     // We expect around 100-200 files (not too many, not too few)
-    expect(packFiles.length).toBeGreaterThan(50);
-    expect(packFiles.length).toBeLessThan(500);
+    // Counted without the bundled dependencies (node_modules/**), which are third-party content.
+    const own = packFiles.filter(f => !f.startsWith('node_modules/'));
+    expect(own.length).toBeGreaterThan(50);
+    expect(own.length).toBeLessThan(500);
   });
 
   it('should include source files from all key modules', () => {
@@ -201,9 +203,13 @@ describe('npm pack', () => {
     expect(packFiles.includes('package-lock.json')).toBe(false);
   });
 
-  it('should NOT include node_modules', () => {
-    const nodeModulesFiles = packFiles.filter(f => f.includes('node_modules'));
-    expect(nodeModulesFiles.length).toBe(0);
+  it('should NOT include node_modules, except the deliberately bundled dependencies', () => {
+    // bundleDependencies + scripts/prepack-lancedb.cjs (docs/AUDIT-GATE.md); no native binding.
+    const bundled = ['@lancedb/lancedb', '@opentelemetry/api', 'reflect-metadata'];
+    const stray = packFiles.filter(f => f.includes('node_modules')
+      && !bundled.some(d => f.startsWith(`node_modules/${d}/`)));
+    expect(stray).toEqual([]);
+    expect(packFiles.some(f => f.startsWith('node_modules/@lancedb/lancedb-'))).toBe(false);
   });
 
   it('should NOT include CI/CD workflow files', () => {
