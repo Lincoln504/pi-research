@@ -17,9 +17,9 @@
  * into the agent-skill launcher.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 /** The peer dependencies the engine imports at startup. */
@@ -36,13 +36,38 @@ function binsOnPath(name) {
   const exts = process.platform === 'win32' ? (process.env['PATHEXT'] ?? '.EXE;.CMD').split(';') : [''];
   const out = [];
   for (const dir of (process.env['PATH'] ?? '').split(delimiter)) {
-    if (!dir) continue;
+    // Absolute entries only: a relative one (`node_modules/.bin`, `.`) resolves against the
+    // cwd, and a hostile checkout could plant a `pi` there that leads to ITS node_modules.
+    if (!dir || !isAbsolute(dir)) continue;
     for (const ext of exts) {
       const candidate = join(dir, name + ext);
       if (existsSync(candidate)) out.push(candidate);
     }
   }
   return out;
+}
+
+/**
+ * `npm root -g`, run from the home directory — never the cwd, which may be an untrusted
+ * checkout. On Windows npm is a .cmd shim, and running it through cmd.exe would search the
+ * cwd first (a planted npm.cmd would run); instead run npm's own script with the Node that is
+ * already running us, no shell involved.
+ */
+function npmGlobalRoot() {
+  try {
+    let command = 'npm';
+    let args = ['root', '-g'];
+    if (process.platform === 'win32') {
+      const cli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      if (!existsSync(cli)) return null;
+      command = process.execPath;
+      args = [cli, 'root', '-g'];
+    }
+    const r = spawnSync(command, args, { encoding: 'utf8', timeout: 8000, cwd: homedir() });
+    return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -66,21 +91,25 @@ export function candidateNodeModulesDirs({ spawnNpm = false } = {}) {
       /* dangling link: skip */
     }
   }
+  // pi's own managed install (pi 1.x): ~/.pi/agent/install/releases/<current-version>/node_modules.
+  // The `pi` on PATH is then a shell script, not a link into node_modules, so the lookup above
+  // cannot see it.
+  try {
+    const agentDir = process.env['PI_CODING_AGENT_DIR'] || join(homedir(), '.pi', 'agent');
+    const current = readFileSync(join(agentDir, 'install', 'current-version'), 'utf8').trim();
+    if (/^[A-Za-z0-9._+-]+$/.test(current) && current !== '.' && current !== '..') {
+      dirs.add(join(agentDir, 'install', 'releases', current, 'node_modules'));
+    }
+  } catch {
+    /* no managed install */
+  }
   // The global root of the Node that is running us, without spawning npm.
   dirs.add(join(dirname(process.execPath), '..', 'lib', 'node_modules'));
   dirs.add(join(dirname(process.execPath), 'node_modules'));
   dirs.add(join(homedir(), '.bun', 'install', 'global', 'node_modules'));
   if (spawnNpm) {
-    try {
-      const r = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['root', '-g'], {
-        encoding: 'utf8',
-        timeout: 8000,
-        shell: process.platform === 'win32',
-      });
-      if (r.status === 0 && r.stdout.trim()) dirs.add(r.stdout.trim());
-    } catch {
-      /* npm not on PATH */
-    }
+    const root = npmGlobalRoot();
+    if (root) dirs.add(root);
   }
   return [...dirs];
 }

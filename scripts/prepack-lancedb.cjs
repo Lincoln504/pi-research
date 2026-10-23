@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * prepack: ship @lancedb/lancedb inside the tarball, minus its two optional
- * dependencies that have no use here.
+ * prepack: ship @lancedb/lancedb inside the tarball with ALL of its optional
+ * dependencies removed (two of which have no use here; see below for the platform bindings).
  *
  * Why: @lancedb/lancedb declares `@huggingface/transformers` 3.0.2 (an EXACT pin, which
  * needs sharp ^0.33.5 — three high advisories) and `openai` as optionalDependencies.
@@ -11,8 +11,9 @@
  * sharp unless they added their own override. A published npm-shrinkwrap.json does not
  * help (measured: npm re-resolves the pin). Bundling is the one packaging-level fix:
  * npm installs a bundled dependency's files as shipped, and resolves only the edges its
- * package.json declares. This script removes those two edges from the copy that gets
- * bundled and checks the rest of the bundle is self-consistent.
+ * package.json declares. This script removes those two edges (and the platform-binding
+ * ones, which are re-declared at the root) from the copy that gets bundled, and checks
+ * the rest of the bundle is self-consistent.
  *
  * This repo never uses LanceDB's embedding registry (embeddings run through the root
  * @huggingface/transformers), so nothing in the wrapper needs either package.

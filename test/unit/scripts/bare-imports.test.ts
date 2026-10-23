@@ -20,6 +20,11 @@ describe('bare-imports — standalone worker bundles must only import installed 
     expect([...bareImports(src)].sort()).toEqual(['@scope/pkg', 'dynamic-pkg', 'poolifier', 're-exported', 'side-effect']);
   });
 
+  it('also sees minified imports and require() calls, but not a `.from("x")` method call', () => {
+    const src = 'import{a}from"min-pkg";const b=require("cjs-pkg/sub");export*from"star-pkg";x.from("not-a-pkg-lookalike-but-matches");y.join(",");';
+    expect([...bareImports(src)].sort()).toEqual(['cjs-pkg', 'min-pkg', 'star-pkg']);
+  });
+
   it('counts dependencies and optionalDependencies as installed, and peers as not', () => {
     const names = installedRuntimeNames({ dependencies: { a: '1' }, optionalDependencies: { b: '1' }, peerDependencies: { typebox: '1' } });
     expect([...names].sort()).toEqual(['a', 'b']);

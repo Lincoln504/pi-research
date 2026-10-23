@@ -1,7 +1,6 @@
 # 研究文档（中文）
 
-## Pi 扩展 {#pi-extension}
-
+## Pi 扩展
 pi-research 以 [pi](https://github.com/earendil-works/pi) 的**扩展**形式集成
 （`src/index.ts`）：一个多智能体网络研究引擎，带有一个直接注册在 pi 进程内的实时终端
 界面（TUI）。
@@ -72,13 +71,13 @@ pi -p "对 AI 推理硬件格局做一次深入的全面调研"
 
 如果想独立于其他前端配置 pi 扩展，可以在 `~/.pi/research/pi.env` 添加一个可选的叠加
 文件（它只对 pi 扩展叠加在 `config.env` 之上）。完整的配置模型、优先级以及全部环境
-变量清单见[配置](#configuration)。
+变量清单见[配置](#配置)。
 
 ### 编码智能体技能安装器
 
 `/research-config` 菜单可以把 `pi-research` 技能安装到本机检测到的其他编码智能体中，
 让它们通过 CLI 执行网络研究，也可以再将其移除 —— 移除时依据清单精确到创建的每个链接。
-完整安装流程见[智能体技能](#agent-skill)。
+完整安装流程见[智能体技能](#智能体技能)。
 
 ### 生命周期
 
@@ -88,8 +87,7 @@ pi -p "对 AI 推理硬件格局做一次深入的全面调研"
   resume / fork 则在进程不退出的情况下完成清理。
 
 扩展状态按 pi 会话隔离，因此 `/reload` 是安全的。
-## 智能体技能 {#agent-skill}
-
+## 智能体技能
 pi-research 也以可移植的[智能体技能](https://agentskills.io/specification)（Agent Skill）
 形式发布，因此任何遵循同一 `SKILL.md` 目录模型、兼容技能机制的编码智能体 —— Claude、
 OpenAI Codex CLI 等 —— 都可以用 pi-research 执行网络研究。
@@ -108,20 +106,9 @@ npm install -g @lincoln504/pi-research   # 引擎（把 `pi-research` 加入 PAT
 pi-research skill install                # 把技能链接到每个已检测到的智能体
 ```
 
-本包无需编译，也无需任何审批：启动路径上唯一的原生部分是 `impit`，它自带预编译二进制。隐身浏览器
-（安装后 1GB 以上）由 `postinstall` 脚本在 npm 执行依赖安装脚本时下载 —— npm 10 至 11.19 会执行
-（11.16–11.19 附带警告），本包要求的 Node 22.22.2 自带的 npm 即在其中，因此安装过程就会下载。
-npm 12（当前 npm）默认阻止依赖安装脚本（Node 24/25 自带的 npm 是 11.19.0，仍会执行），浏览器改为首次抓取时按需下载。两种情况第一次抓取都需要几分钟。可用
-`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 主动推迟（见
-[README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)）。
+隐身浏览器（约 1GB）只下载一次，具体在安装时还是首次抓取时，取决于 npm 版本；无需任何审批。
 
-全局安装也会把宿主包 `@earendil-works/pi-*` 作为 peer 依赖一并装上（npm ≥7 会自动解析）。
-如果安装时跳过了 peer 依赖（`--legacy-peer-deps`、yarn classic），引擎将无法导入其模型
-注册表，启动器会说明这一点并以退出码 78 结束。请直接安装所需的包：
-
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
+`@earendil-works/pi-*` 与 `typebox` 是 peer 依赖。全局安装会一并装上。如果安装时跳过了 peer 依赖（`pi install`、`--legacy-peer-deps`、yarn classic），启动器会先查找 pi 自带的副本（`PI_RESEARCH_HOST_DIR`、`pi` 命令所在目录、pi 的托管安装、npm 全局根目录），都找不到时以退出码 78 结束并给出解决办法。详见[故障排查](https://github.com/Lincoln504/pi-research/blob/main/docs/TROUBLESHOOTING.md)（英文）。
 
 `skill install` 只针对 `$HOME` 下已经搭建好的智能体，绝不会覆盖插槽中的其他技能，并把
 自己创建的内容记入清单，让 `pi-research skill uninstall` 能精确移除。运行 `pi-research
@@ -136,7 +123,7 @@ PI_RESEARCH_MODEL=provider/model-id
 ```
 
 如果使用 `pi`，API 密钥会自动来自 pi 的配置（`~/.pi/agent/auth.json`）；否则还需要设置
-`PI_RESEARCH_API_KEY`（写进同一个文件，或作为环境变量）。见[配置](#configuration)。
+`PI_RESEARCH_API_KEY`（写进同一个文件，或作为环境变量）。见[配置](#配置)。
 
 Windows 上请从 `cmd` 运行 `pi-research`，或使用 `pi-research.cmd`：PowerShell 的默认执行
 策略（`Restricted`）会阻止 npm 的 `.ps1` 垫片（提示 "running scripts is disabled"）；也
@@ -167,8 +154,7 @@ pi-research 引擎  ——  CLI（dist/cli.mjs）
 `knowledge-config [set <模式>]`（显示/设置按目录生效的知识存储模式）以及 `status`
 （检查检测与配置状态）。
 
-### 安装流程 {#安装流程}
-
+### 安装流程
 技能源码位于包内的 `agent-skill/pi-research/`。所谓安装，就是把该目录链接到每个智能体
 的技能文件夹。
 
@@ -215,7 +201,7 @@ pi-research 引擎  ——  CLI（dist/cli.mjs）
 
 - Node.js >= 22.22.2
 - `pi-research` 安装到启动器能找到的位置，并配置好模型（`PI_RESEARCH_MODEL`）和 API
-  密钥。见[配置](#configuration)。
+  密钥。见[配置](#配置)。
 
 ```bash
 npm install -g @lincoln504/pi-research
@@ -228,10 +214,9 @@ node "<skill_dir>/scripts/run.mjs" status   # 验证引擎能否被检测到
 的 readme（`agent-skill/pi-research/README.md`）和
 `agent-skill/pi-research/references/configuration.md` 为直接浏览技能的用户提供了同样的
 详细信息。
-## SDK {#sdk}
-
+## SDK
 面向脚本、CI 和自定义工具链的高层研究 SDK。配置相关（分层模型、TUI 设置、全部环境
-变量）见[配置](#configuration)。
+变量）见[配置](#配置)。
 
 ### 安装
 
@@ -242,12 +227,7 @@ node "<skill_dir>/scripts/run.mjs" status   # 验证引擎能否被检测到
 npm install @lincoln504/pi-research
 ```
 
-本包不需要编译：启动路径上唯一的原生部分是 `impit`，它自带预编译二进制。隐身浏览器
-由 `postinstall` 脚本在 npm 执行依赖安装脚本时下载（npm 10 至 11.19 会执行，11.16–11.19 附带警告，
-Node 22.22.2 自带的 npm（10.9.7）即属此类），在 npm 12（当前 npm；Node 24/25 自带的 11.19.0 仍会执行）上改为首次抓取时按需下载。（早期版本文档中的 `npm approve-scripts better-sqlite3` + `npm rebuild`
-组合，是用来修复旧 `camoufox-js` 启动器的 —— 它的 `better-sqlite3` 绑定由安装脚本下载；
-2026-10-05 改用 `@camoufox/camoufox` 后该依赖已完全移除，而且在 npm 12.0.2 上，
-approve 也没办法让被跳过的脚本跑起来。）
+隐身浏览器（约 1GB）只下载一次，在安装时还是首次抓取时取决于 npm 版本。`@earendil-works/pi-*` 与 `typebox` 是 peer 依赖：如果安装跳过了 peer 依赖（`--legacy-peer-deps`、yarn classic），请直接安装 `@earendil-works/pi-ai`、`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui` 与 `typebox`，或参阅[故障排查](https://github.com/Lincoln504/pi-research/blob/main/docs/TROUBLESHOOTING.md)（英文）。
 
 然后选择模型：向 `initResearchSDK` 传入 `model`，或设置 `PI_RESEARCH_MODEL`（环境变量
 或 `~/.pi/research/config.env`）。SDK 绝不跟随 pi 扩展内选中的模型；只有当两者都未设置
@@ -365,8 +345,7 @@ LanceDB 句柄或 worker 进程。
 SDK 不写报告文件。报告导出是前端（接入载体）的职责 —— pi 扩展和 CLI / 智能体技能在
 `PI_RESEARCH_REPORT_EXPORT_ENABLED=true` 时执行导出。
 
-### API 参考 {#api-参考}
-
+### API 参考
 除标注 *仅 sdk 子路径* 的两项外，以下列表中的每项都同时从 `@lincoln504/pi-research` 和
 `@lincoln504/pi-research/sdk` 导出 —— 包入口刻意不重复发布这两项。除 `repairJson` 和
 `getSDKContainer` 外，每次调用都要求先执行 `initResearchSDK()`，否则抛出
@@ -444,7 +423,7 @@ SDK 不写报告文件。报告导出是前端（接入载体）的职责 ——
 | `cwd` | 日志和知识存储的工作目录。 |
 | `verbose` | 把日志镜像到控制台。 |
 
-配置优先级、按前端区分的叠加层、完整的环境变量参考，见[配置](#configuration)。
+配置优先级、按前端区分的叠加层、完整的环境变量参考，见[配置](#配置)。
 
 ### 健康与知识存储 API
 
@@ -470,8 +449,7 @@ const result = await getResearchHealth();
 在其智能体流水线中使用此 SDK：每次调查都调用 `initResearchSDK` 和研究入口（
 `runQuickResearch` / `runDeepResearch`），并直接使用 `scrapeUrl`、`verifyUrl` 和
 `repairJson` 导出。
-## 知识存储 {#knowledge-store}
-
+## 知识存储
 知识存储是既往研究发现的本地向量数据库。它是可选缓存（没有它研究照常工作），有两种
 截然不同的使用方式：
 
@@ -508,11 +486,11 @@ const result = await getResearchHealth();
 |------|----------|
 | `global`（默认） | 所有目录共享一个知识存储。在一个项目里缓存的发现，可以在任何其他项目检索到。 |
 | `project` | 发现限定在创建它的工作目录内；只有该目录能检索。 |
-| `none` | 知识存储禁用 —— 不读不写，`research_knowledge_search` 工具不向智能体公开，`/knowledge-store` 不可用。重新启用无需重启（注册机制见 [Pi 扩展](#pi-extension)）。 |
+| `none` | 知识存储禁用 —— 不读不写，`research_knowledge_search` 工具不向智能体公开，`/knowledge-store` 不可用。重新启用无需重启（注册机制见 [Pi 扩展](#pi-扩展)）。 |
 
 在 pi 扩展里用 `/research-config` TUI（知识模式）更改当前目录的模式，或在独立 CLI 上
 运行 `pi-research knowledge-config set <none|project|global>`（只能选一个值）。该设置
-持久化到按目录的项目注册表 —— 完整优先级链见[配置](#configuration)。更改在下次运行
+持久化到按目录的项目注册表 —— 完整优先级链见[配置](#配置)。更改在下次运行
 生效 —— 无需重启。
 
 所有作用域共享同一个物理 LanceDB 目录；项目行和全局行靠列区分（归一化的 workspace 路径
@@ -684,9 +662,8 @@ Intel Mac（`darwin-x64`）上两个组件都没有预编译二进制，所以�
 | 模型初始化超时（毫秒） | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` |
 | 重新探测 WebGPU | `PI_RESEARCH_WEBGPU_REPROBE` | _（未设置）_ |
 
-完整配置模型见[配置](#configuration)；知识存储在引擎中的位置见[架构](#architecture)。
-## 配置 {#configuration}
-
+完整配置模型见[配置](#配置)；知识存储在引擎中的位置见[架构](#架构)。
+## 配置
 所有前端（pi 扩展、Claude Code 等技能兼容宿主运行的独立 CLI / 智能体技能，以及 SDK）
 共享同一个配置模型。本文档先介绍 `/research-config` TUI 中暴露的设置，然后是完整的
 环境变量参考，最后说明配置各层如何解析。
@@ -725,7 +702,7 @@ SDK —— 上，菜单无法渲染：`/research-config` 会说明原因，并�
 嵌入设备在菜单里提供两个选项。GPU 对应自动检测路径：pi-research 会探测 WebGPU 是否
 真的能在这台机器上运行，不能则回退到 CPU。CPU 强制仅 CPU 推理。原始强制 GPU（不探测）
 只能通过环境变量 `PI_RESEARCH_EMBEDDING_DEVICE=webgpu` 触达，用于基准测试 —— 见
-[知识存储文档](#knowledge-store)。
+[知识存储文档](#知识存储)。
 
 嵌入模型、嵌入设备、缓存保留这三行，只有在知识模式不是 `none` 时才显示。
 
@@ -805,7 +782,7 @@ LLM 输出与推理
 
 知识存储
 
-每个值的含义见[知识存储文档](#knowledge-store)。
+每个值的含义见[知识存储文档](#知识存储)。
 
 | 变量 | 默认值 | 范围 | 说明 |
 |----------|---------|-------|-------------|
@@ -844,9 +821,9 @@ API 密钥
 | `PI_RESEARCH_PDF_WORKER` | _（未设置）_ | 设为 `off` 强制 PDF 解析在主线程执行（1.6.6 之前的行为），绕过 worker 线程卸载。针对 worker 或打包问题的应急开关；默认在其 bundle 存在时于 worker 中解析。 |
 | `PI_RESEARCH_USE_XVFB` | _（未设置）_ | 仅 Linux。裸 TTY 运行是真正无头的，不需要 X 服务器；设为 `true` 可选用虚拟帧缓冲（`sudo apt install xvfb`）。 |
 | `PI_RESEARCH_SKILL_DIR` | _（自动）_ | 覆盖技能安装器使用的随包研究技能源码目录。 |
-| `PI_RESEARCH_PURGE_BROWSERS` | _（未设置）_ | 由随包 `scripts/cleanup.cjs` 读取：设为 `1` 同时删除共享的 camoufox 浏览器缓存（默认保留，因为其他安装可能使用）。注意 npm ≥7 不运行 `preuninstall`，因此该脚本在 `npm uninstall` 时不会触发 —— 见[智能体技能](#agent-skill)。 |
+| `PI_RESEARCH_PURGE_BROWSERS` | _（未设置）_ | 由随包 `scripts/cleanup.cjs` 读取：设为 `1` 同时删除共享的 camoufox 浏览器缓存（默认保留，因为其他安装可能使用）。注意 npm ≥7 不运行 `preuninstall`，因此该脚本在 `npm uninstall` 时不会触发 —— 见[智能体技能](#智能体技能)。 |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _（未设置）_ | 在 `npm install` 期间设为 `1` 以跳过 camoufox 浏览器下载（改为首次使用时惰性获取；Playwright 标准约定）。 |
-| `CAMOUFOX_INSTALL_DIR` | _（用户缓存）_ | 重定位浏览器下载。pi-research 认可它，启动器不认可：`camoufox` 只读平台的缓存变量，因此 pi-research 把该值映射过去（Linux 上是 `XDG_CACHE_HOME`，Windows 上是 `LOCALAPPDATA`），并导出给 postinstall 抓取和浏览器 worker，使安装与查找不会漂移。macOS 上忽略（启动器只从 `$HOME` 推导缓存）—— 见[架构](#architecture)。 |
+| `CAMOUFOX_INSTALL_DIR` | _（用户缓存）_ | 重定位浏览器下载。pi-research 认可它，启动器不认可：`camoufox` 只读平台的缓存变量，因此 pi-research 把该值映射过去（Linux 上是 `XDG_CACHE_HOME`，Windows 上是 `LOCALAPPDATA`），并导出给 postinstall 抓取和浏览器 worker，使安装与查找不会漂移。macOS 上忽略（启动器只从 `$HOME` 推导缓存）—— 见[架构](#架构)。 |
 | `PLAYWRIGHT_BROWSERS_PATH` | _（用户缓存）_ | `CAMOUFOX_INSTALL_DIR` 的别名，为兼容而接受。 |
 | `XDG_CACHE_HOME` | `~/.cache` | 标准 XDG 变量。设置后，下面所有 `~/.cache/pi-research/...` 路径改为扎根于 `$XDG_CACHE_HOME/pi-research/...`。 |
 | `PI_RESEARCH_BIN`（别名 `PI_RESEARCH_PATH`） | _（自动）_ | 仅智能体技能启动器：需要绕过自动解析（PATH → 本地安装 → npx）时，指向 pi-research 引擎二进制的显式路径。见 [agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md)。 |
@@ -1016,8 +993,7 @@ provider。该类别中的任何对象（经由 OpenRouter 的 Qwen，或任何�
 
 路径可通过 `PI_RESEARCH_STATE_DIR`、`PI_RESEARCH_KNOWLEDGE_DIR` 和
 `PI_RESEARCH_TMP_DIR` 重定位。
-## 架构 {#architecture}
-
+## 架构
 pi-research 是 pi 的 TUI 扩展，用于多智能体网络研究。它运行在 pi 进程内，注册自己的
 工具和命令，并管理自己的浏览器 worker 进程池、服务注册表和本地知识存储。一个引擎支撑
 全部前端：除 pi 扩展外，它还以独立 CLI、可移植智能体技能（任何技能兼容宿主运行的同一
@@ -1129,7 +1105,7 @@ LLM 调用约定。协调者、路由器、综合器、JSON 修复和知识抽�
 研究，一个能力强的模型否则会把回合浪费在搜索本地文件系统上。两个排除面 —— `excludeTools`
 列表（CLI 上为 `--exclude-tools`，扩展里为 `excludeTools` 工具参数）和
 `PI_RESEARCH_DISABLED_TOOLS` —— 在这个默认之上严格加法：只能移除能力（见
-[配置](#configuration)）。1.3.10 之前，非空 `excludeTools` 列表会替换默认值，因此点名
+[配置](#配置)）。1.3.10 之前，非空 `excludeTools` 列表会替换默认值，因此点名
 任何其他工具都会悄悄重新启用 `grep`。
 
 研究员不能写文件、不能运行 shell 命令，也不能触达这些工具之外的网络。
@@ -1182,7 +1158,7 @@ drop / backup / re-embed 逻辑本身在 `store.ts`）。
 
 知识存储需要原生 ONNX runtime 和 LanceDB 绑定。在没有预编译二进制的平台上 —— 尤其是
 Intel macOS（`darwin-x64`）—— 它缺席：健康检查报告"已禁用但健康"，研究在无缓存下照常
-运行。完整子系统和平台矩阵见[知识存储](#knowledge-store)。
+运行。完整子系统和平台矩阵见[知识存储](#知识存储)。
 
 ### 服务与生命周期
 

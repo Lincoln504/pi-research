@@ -36,5 +36,6 @@ transcripts, advisories) with an LLM that holds tools. The relevant boundaries:
   This reduces, but does not eliminate, prompt-injection risk. Treat research output as
   untrusted input in the host agent.
 - **Dependency audit.** `npm audit --omit=dev` runs on every push and release
-  (`docs/AUDIT-GATE.md`). npm `overrides` in this package do not reach consumers; see that
-  document for the one consumer-side override that applies today.
+  (`docs/AUDIT-GATE.md`). npm `overrides` in this package do not reach consumers, so releases before 1.7.18 needed a
+  consumer-side override for a transitive `sharp` advisory; from 1.7.18 the affected dependency is
+  bundled without it and nothing needs overriding (details in that document).

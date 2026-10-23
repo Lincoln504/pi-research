@@ -34,6 +34,7 @@
     "docs/CONFIGURATION.md",
     "docs/KNOWLEDGE-STORE.md",
     "docs/AGENT-SKILL.md",
+    "docs/TROUBLESHOOTING.md",
     "docs/ARCHITECTURE.md",
     "scripts/setup.cjs",
     "scripts/cleanup.cjs",

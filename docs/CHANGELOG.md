@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.20] - 2026-10-23
+
+### Fixed
+
+- **The host-package lookup finds pi 1.x's managed install.** On a real machine (a user's `~/.local/bin/pi` is a shell script that runs `~/.pi/agent/install/releases/<version>/node_modules/.bin/pi`) nothing was found, so the agent skill and CLI still stopped with "missing required runtime dependencies" after 1.7.19 although pi's own copies were on disk. `src/host-roots.mjs` now also searches `<agent dir>/install/releases/<current-version>/node_modules` (`~/.pi/agent`, or `PI_CODING_AGENT_DIR`); the version string is validated so it cannot point outside the releases directory.
+
+### Security
+
+- **Hardening of that lookup, from review of 1.7.19.** Relative `PATH` entries are ignored (a `pi` planted at `./node_modules/.bin/pi` in an untrusted checkout could nominate that checkout's `node_modules`); `npm root -g` runs from the home directory instead of the current directory; on Windows it runs `npm-cli.js` with the running Node, with no shell, so a planted `npm.cmd` in the current directory can no longer be executed by cmd.exe's current-directory-first search.
+
+### CI
+
+- **`scripts/bare-imports.cjs` sees minified `import{a}from"x"`, `import"x"` and `require("x")` forms**, not only whitespace-separated `import ... from "x"` (a build with minification would have slipped past the gate). Specifiers must look like package names, so string fragments no longer match.
+
+### Documentation
+
+- **New `docs/TROUBLESHOOTING.md`** holds what used to be spread over the README and three other docs: the worker-start failure of 1.7.9-1.7.18, a `pi update` that errors because of a malformed source, the host-package lookup order and its fixes, the one-time browser download, and the old `sharp` audit finding. The README keeps one line and a link for each (10.2 KB to 6.9 KB), drops audit and install-script history, no longer says the standalone CLI "installs it as a dependency" (the host packages are peers), and mentions quick mode (depth 0).
+- **Corrected:** `docs/ARCHITECTURE.md` said an in-session agent can never request quick mode and named the replaced `@camoufox/camoufox` launcher as current; `SECURITY.md` described a consumer override as still needed; `docs/PI-EXTENSION.md` omitted depth 0; `docs/SDK.md` and `docs/AGENT-SKILL.md` named one peer where four are needed and carried changelog narrative; `docs/CONFIGURATION.md` and `.env.example` now list `PI_RESEARCH_HOST_DIR` and `PI_RESEARCH_NO_HOST_FALLBACK` and no longer call `.env.example` exhaustive.
+- **The ES, JA and ZH documents** had in-page links to anchors GitHub does not create (`{#id}` heading suffixes) and carried the stale `approve-scripts`/`better-sqlite3` and one-peer install text; the suffixes are gone, the links point at the real headings, and the install text matches the English docs.
+
 ## [1.7.19] - 2026-10-23
 
 ### Fixed

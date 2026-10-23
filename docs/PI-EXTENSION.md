@@ -7,7 +7,7 @@ TUI registered directly in the pi process.
 ### Usage
 
 The `research` tool is auto-registered, so the model invokes it
-from natural language, and the tool understands the depth needed (1–3) from the query.
+from natural language, and the tool understands the depth needed (1–3, or 0 when quick mode is enabled) from the query.
 
 ```bash
 pi -p "research the latest developments in WebAssembly"

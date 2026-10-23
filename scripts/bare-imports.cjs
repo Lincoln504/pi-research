@@ -27,14 +27,27 @@ function packageName(spec) {
   return spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
 }
 
-/** Bare package names an ESM bundle imports (static, dynamic and re-export forms). */
+/**
+ * Bare package names a bundle imports, in every form esbuild emits or a hand-written file may
+ * use: `import x from "p"` / `import{x}from"p"` (minified, no whitespace), `import "p"`,
+ * `export … from "p"`, `import("p")` and `require("p")` / `createRequire(...)("p")`.
+ * Text that merely MENTIONS an import inside a string is matched too; that fails closed (a
+ * false alarm to look at, never a missed import).
+ */
 function bareImports(source) {
   const out = new Set();
-  const re = /(?:^|[\s;}(])(?:import|export)\s*(?:[^'"()]*?\sfrom\s*)?["']([^"'./][^"']*)["']|\bimport\s*\(\s*["']([^"'./][^"']*)["']\s*\)/gm;
-  for (const m of source.matchAll(re)) {
-    const spec = m[1] ?? m[2];
-    if (spec.startsWith('node:') || builtinModules.includes(spec.split('/')[0])) continue;
-    out.add(packageName(spec));
+  const patterns = [
+    /\bfrom\s*["']([@A-Za-z0-9_][^"'\s]*)["']/g,
+    /\bimport\s*["']([@A-Za-z0-9_][^"'\s]*)["']/g,
+    /\bimport\s*\(\s*["']([@A-Za-z0-9_][^"'\s]*)["']\s*\)/g,
+    /\brequire\s*\(\s*["']([@A-Za-z0-9_][^"'\s]*)["']\s*\)/g,
+  ];
+  for (const re of patterns) {
+    for (const m of source.matchAll(re)) {
+      const spec = m[1];
+      if (spec.startsWith('node:') || builtinModules.includes(spec.split('/')[0])) continue;
+      out.add(packageName(spec));
+    }
   }
   return out;
 }

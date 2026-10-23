@@ -1,7 +1,6 @@
 # 研究ドキュメント（日本語）
 
-## Pi 拡張 {#pi-extension}
-
+## Pi 拡張
 pi-research は [pi](https://github.com/earendil-works/pi) の**拡張機能**（`src/index.ts`）
 として統合されます。リアルタイムのターミナル UI（TUI）を備えたマルチエージェント型
 ウェブリサーチエンジンであり、pi のプロセス内に直接登録されて動作します。
@@ -75,14 +74,14 @@ pi の再起動なしで変更を反映させるためです（pi にはツー�
 
 pi 拡張機能を他のフロントエンドとは独立して設定するには、任意のオーバーレイファイルを
 `~/.pi/research/pi.env` に置きます（pi 拡張機能に限り、`config.env` の上に積み重ねられます）。
-設定モデルの全体像、優先順位、環境変数の完全な一覧は[設定](#configuration)を参照してください。
+設定モデルの全体像、優先順位、環境変数の完全な一覧は[設定](#設定)を参照してください。
 
 ### エージェントスキルインストーラー
 
 `/research-config` のメニューから、このマシンで検出された他のコーディングエージェントに
 `pi-research` スキルをインストール（CLI 経由でウェブリサーチを実行させる）したり、
 逆にアンインストールしたりできます。アンインストールはマニフェストに基づく正確なクリーンアップで
-行われます。インストールの全フローは[エージェントスキル](#agent-skill)を参照してください。
+行われます。インストールの全フローは[エージェントスキル](#エージェントスキル)を参照してください。
 
 ### ライフサイクル
 
@@ -94,8 +93,7 @@ pi 拡張機能を他のフロントエンドとは独立して設定するに�
 
 拡張機能の状態は pi のセッションごとに分離されているため、`/reload` を安全に実行できます。
 
-## エージェントスキル {#agent-skill}
-
+## エージェントスキル
 pi-research は、持ち運び可能な
 [エージェントスキル](https://agentskills.io/specification)（Agent Skill）としても配布されて
 います。スキルに対応したコーディングエージェントであれば、同じ `SKILL.md`
@@ -118,23 +116,9 @@ npm install -g @lincoln504/pi-research   # エンジン（`pi-research` が PATH
 pi-research skill install                # 検出された各エージェントにスキルをリンク
 ```
 
-ビルドも承認も不要です。起動経路で唯一のネイティブ要素は `impit` で、プリビルド済みバイナリを
-同梱しています。ステルスブラウザ（インストール後 1GB 超）は、npm が依存のインストール
-スクリプトを実行する場合に `postinstall` が取得します（npm 10〜11.19 は実行する、11.16〜11.19
-は警告付きで実行。Node 22.22.2 に同梱の npm もこれに該当し、本パッケージの最低要件です）。
-npm 12（現在の npm）ではスクリプトは既定でブロックされ（Node 24/25 に同梱の npm は
-11.19.0 で、引き続き実行する）、ブラウザは初回のスクレイプ時に遅延取得されます。いずれの場合も初回のスクレイプには数分かかります。`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` で明示的に後回しに
-できます（[README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install) 参照）。
+ステルスブラウザ（約 1GB）は、npm のバージョンに応じてインストール時または初回のスクレイプ時に一度だけダウンロードされます。承認は不要です。
 
-グローバルインストールでは、ホスト側の `@earendil-works/pi-*` パッケージも peer 依存と
-して導入されます（npm ≥7 が自動解決）。peer 依存をスキップするインストール
-（`--legacy-peer-deps`、yarn classic）ではエンジンがモデルレジストリを読み込めず、
-ランチャーがその旨を表示して終了コード 78 で停止します。必要なパッケージを直接追加して
-ください:
-
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
+`@earendil-works/pi-*` と `typebox` は peer 依存です。グローバルインストールでは自動的に導入されます。peer 依存をスキップするインストール（`pi install`、`--legacy-peer-deps`、yarn classic）では、ランチャーが pi 側のコピー（`PI_RESEARCH_HOST_DIR`、`pi` コマンドの場所、pi の管理インストール、npm のグローバルルート）を探して使用し、見つからなければ解決方法を示して終了コード 78 で停止します。詳細は[トラブルシューティング](https://github.com/Lincoln504/pi-research/blob/main/docs/TROUBLESHOOTING.md)（英語）を参照してください。
 
 `skill install` は `$HOME` 配下に既に構成されているエージェントのみを対象とし、同じ場所に
 ある異なるスキルを決して上書きせず、作成した内容を記録します。そのため
@@ -152,7 +136,7 @@ PI_RESEARCH_MODEL=provider/model-id
 
 `pi` を使っている場合、API キーは pi の設定（`~/.pi/agent/auth.json`）から自動的に取得され
 ます。それ以外は `PI_RESEARCH_API_KEY` も設定してください（同じファイル内、または環境変数）。
-[設定](#configuration)を参照してください。
+[設定](#設定)を参照してください。
 
 Windows では `pi-research` を `cmd` から実行するか、`pi-research.cmd` を使用してください。
 PowerShell のデフォルト実行ポリシー（`Restricted`）は npm の `.ps1` シムをブロックします
@@ -185,8 +169,7 @@ pi-research エンジン  —  CLI（dist/cli.mjs）
 `knowledge "<クエリ>"`（過去の成果を検索）、`knowledge-config [set <モード>]`
 （ディレクトリごとのナレッジストアモードの表示/設定）、`status`（検出と設定の確認）です。
 
-### インストールフロー {#インストールフロー}
-
+### インストールフロー
 スキルのソースコードはパッケージ内の `agent-skill/pi-research/` にあります。インストールとは、
 そのディレクトリを各エージェントのスキルフォルダへリンクすることです。
 
@@ -241,7 +224,7 @@ pi-research エンジン  —  CLI（dist/cli.mjs）
 
 - Node.js >= 22.22.2
 - ランチャーから見つけられる場所にインストールされた `pi-research` に加え、設定済みのモデル
-  （`PI_RESEARCH_MODEL`）と API キー。[設定](#configuration)を参照してください。
+  （`PI_RESEARCH_MODEL`）と API キー。[設定](#設定)を参照してください。
 
 ```bash
 npm install -g @lincoln504/pi-research
@@ -256,10 +239,9 @@ pi-research を自動的に起動します。パッケージ同梱の readme
 `agent-skill/pi-research/references/configuration.md` には、スキルを直接読む人のために
 同じ詳細がまとめられています。
 
-## SDK {#sdk}
-
+## SDK
 スクリプト・CI・カスタムツール向けの高レベルなリサーチ SDK です。設定（レイヤーモデル、
-TUI 設定、すべての環境変数）については[設定](#configuration)を参照してください。
+TUI 設定、すべての環境変数）については[設定](#設定)を参照してください。
 
 ### インストール
 
@@ -271,17 +253,7 @@ import が解決するように、プロジェクトの依存としてインス�
 npm install @lincoln504/pi-research
 ```
 
-ビルドは不要です。起動経路で唯一のネイティブ要素は `impit` で、プリビルド済みバイナリを
-同梱しており、実行時に読み込みます。ステルスブラウザは、npm が
-インストールスクリプトを実行する場合は `postinstall` が取得し（npm 10〜11.19 は実行、
-11.16〜11.19 は警告付き。Node 22.22.2 同梱の npm（10.9.7）も Node 24/25 同梱の
-npm（11.19.0）もこれに該当）、npm 12（現在の npm）では初回のスクレイプ時に
-遅延取得されます。（旧バージョンのドキュメントに
-あった `npm approve-scripts better-sqlite3` + `npm rebuild` の組み合わせは
-旧 `camoufox-js` ランチャーを修復するためのものです。その `better-sqlite3` バインディングは
-インストールスクリプトでダウンロードされていました。2026-10-05 の `@camoufox/camoufox` への
-移行でこの依存は完全に消え、しかも npm 12.0.2 では approve してもスキップされたスクリプトを
-実行できません。）
+ステルスブラウザ（約 1GB）は、npm のバージョンに応じてインストール時または初回のスクレイプ時に一度だけダウンロードされます。`@earendil-works/pi-*` と `typebox` は peer 依存です。peer 依存をスキップする場合（`--legacy-peer-deps`、yarn classic）は、`@earendil-works/pi-ai`、`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui`、`typebox` を追加するか、[トラブルシューティング](https://github.com/Lincoln504/pi-research/blob/main/docs/TROUBLESHOOTING.md)（英語）を参照してください。
 
 次にモデルを選びます。`initResearchSDK` に `model` を渡すか、`PI_RESEARCH_MODEL`
 （環境変数または `~/.pi/research/config.env`）を設定します。SDK は pi 拡張機能内で選択された
@@ -416,8 +388,7 @@ SDK はレポートファイルを書き出しません。レポートのエク�
 pi 拡張機能と CLI / エージェントスキルが `PI_RESEARCH_REPORT_EXPORT_ENABLED=true` のときに
 実行します。
 
-### API リファレンス {#api-リファレンス}
-
+### API リファレンス
 *sdk サブパス専用* と示した 2 つを除き、以下はすべて `@lincoln504/pi-research` と
 `@lincoln504/pi-research/sdk` の両方からエクスポートされます — パッケージのエントリ
 ポイントはこの 2 つを意図的に再公開していません。`repairJson` と `getSDKContainer` を除く
@@ -498,7 +469,7 @@ pi 拡張機能と CLI / エージェントスキルが `PI_RESEARCH_REPORT_EXPO
 | `verbose` | ログをコンソールにミラーします。 |
 
 設定の優先順位、フロントエンドごとのオーバーレイ、環境変数の完全なリファレンスは
-[設定](#configuration)を参照してください。
+[設定](#設定)を参照してください。
 
 ### ヘルスおよびナレッジストア API
 
@@ -528,8 +499,7 @@ const result = await getResearchHealth();
 （`runQuickResearch` / `runDeepResearch`）を呼び出し、`scrapeUrl`、`verifyUrl`、
 `repairJson` の各エクスポートを直接使用します。
 
-## ナレッジストア {#knowledge-store}
-
+## ナレッジストア
 ナレッジストアは、過去のリサーチ成果を保存するローカルのベクトルデータベースです。
 オプションのキャッシュであり（ストアがなくてもリサーチは動作します）、次の 2 つの異なる
 方法で使われます。
@@ -572,12 +542,12 @@ URL は重複排除されます。変更のないページはスキップされ�
 |------|----------|
 | `global`（デフォルト） | すべてのディレクトリで単一のストアを共有します。あるプロジェクトで保存した成果は、他のどのプロジェクトからでも取得できます。 |
 | `project` | 成果は作成された作業ディレクトリに限定され、そのディレクトリだけが取得できます。 |
-| `none` | ストアは無効化されます — 何も読み書きされず、`research_knowledge_search` ツールはエージェントにアナウンスされず、`/knowledge-store` も利用できません。再有効化に再起動は不要です（登録の詳細は [Pi 拡張](#pi-extension) を参照）。 |
+| `none` | ストアは無効化されます — 何も読み書きされず、`research_knowledge_search` ツールはエージェントにアナウンスされず、`/knowledge-store` も利用できません。再有効化に再起動は不要です（登録の詳細は [Pi 拡張](#pi-拡張) を参照）。 |
 
 現在のディレクトリのモードは、pi 拡張機能の `/research-config` TUI（ナレッジモード）か、
 スタンドアロン CLI では `pi-research knowledge-config set <none|project|global>`
 （1 つの値のみ選択）で変更します。設定はディレクトリごとのプロジェクトレジストリに保存され
-ます。優先順位チェーンの全体は[設定](#configuration)を参照してください。変更は次の実行から
+ます。優先順位チェーンの全体は[設定](#設定)を参照してください。変更は次の実行から
 適用されます — 再起動は不要です。
 
 すべてのスコープは単一の物理的な LanceDB ディレクトリを共有します。project 行と global 行は
@@ -773,11 +743,10 @@ Intel Mac（`darwin-x64`）にはどちらのコンポーネントのプリビ�
 | モデル初期化タイムアウト（ms） | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` |
 | WebGPU 再プローブ | `PI_RESEARCH_WEBGPU_REPROBE` | _（未設定）_ |
 
-設定モデルの全体は[設定](#configuration)を、ストアがエンジン内でどう位置づけられているかは
-[アーキテクチャ](#architecture)を参照してください。
+設定モデルの全体は[設定](#設定)を、ストアがエンジン内でどう位置づけられているかは
+[アーキテクチャ](#アーキテクチャ)を参照してください。
 
-## 設定 {#configuration}
-
+## 設定
 すべてのフロントエンド（pi 拡張機能、スキル対応ホストが実行するスタンドアロン CLI /
 エージェントスキル、SDK）は、単一の設定モデルを共有します。このドキュメントでは、まず
 `/research-config` TUI に露出している設定を説明し、次に環境変数の完全なリファレンス、最後に
@@ -819,7 +788,7 @@ RPC、web hub、print、JSON、SDK — ではメニューを表示できませ�
 このマシンで本当に動くかをプローブし、動かなければ CPU にフォールバックします。CPU は CPU
 のみの推論を強制します。生の強制 GPU（プローブなし）には、ベンチマーク用に環境変数
 `PI_RESEARCH_EMBEDDING_DEVICE=webgpu` でしか届きません —
-[ナレッジストアのドキュメント](#knowledge-store)を参照してください。
+[ナレッジストアのドキュメント](#ナレッジストア)を参照してください。
 
 埋め込みモデル・埋め込みデバイス・キャッシュ保持の行は、ナレッジモードが `none` でないときに
 のみ表示されます。
@@ -902,7 +871,7 @@ LLM 出力と推論
 
 ナレッジストア
 
-各値の意味は[ナレッジストアのドキュメント](#knowledge-store)を参照してください。
+各値の意味は[ナレッジストアのドキュメント](#ナレッジストア)を参照してください。
 
 | 変数 | デフォルト | 範囲 | 説明 |
 |----------|---------|-------|-------------|
@@ -941,9 +910,9 @@ API キー
 | `PI_RESEARCH_PDF_WORKER` | _（未設定）_ | `off` を設定すると、PDF 解析をメインスレッドで強制実行します（1.6.6 以前の動作）。ワーカースレッドへのオフロードを回避します。ワーカーやパッケージングの問題向けの緊急スイッチ。デフォルトでは、そのバンドルが存在すればワーカー内で解析します。 |
 | `PI_RESEARCH_USE_XVFB` | _（未設定）_ | Linux のみ。素の TTY での実行は真にヘッドレスであり、X サーバーは不要です。`true` を設定すると仮想フレームバッファを選択します（`sudo apt install xvfb`）。 |
 | `PI_RESEARCH_SKILL_DIR` | _（自動）_ | 同梱のリサーチスキルのソースディレクトリをオーバーライドします。スキルインストーラーが使用します。 |
-| `PI_RESEARCH_PURGE_BROWSERS` | _（未設定）_ | 同梱の `scripts/cleanup.cjs` が読み取ります: `1` を設定すると、共有の camoufox ブラウザキャッシュも削除します（他のインストールが使用している可能性があるため、デフォルトでは保持されます）。注意: npm ≥7 は `preuninstall` を実行しないため、このスクリプトは `npm uninstall` では発火しません — [エージェントスキル](#agent-skill)を参照してください。 |
+| `PI_RESEARCH_PURGE_BROWSERS` | _（未設定）_ | 同梱の `scripts/cleanup.cjs` が読み取ります: `1` を設定すると、共有の camoufox ブラウザキャッシュも削除します（他のインストールが使用している可能性があるため、デフォルトでは保持されます）。注意: npm ≥7 は `preuninstall` を実行しないため、このスクリプトは `npm uninstall` では発火しません — [エージェントスキル](#エージェントスキル)を参照してください。 |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _（未設定）_ | `npm install` 中に `1` を設定すると、camoufox ブラウザのダウンロードをスキップします（初回使用時に遅延取得されるようになります。Playwright の標準的な慣習）。 |
-| `CAMOUFOX_INSTALL_DIR` | _（ユーザーキャッシュ）_ | ブラウザのダウンロードを再配置します。pi-research は尊重しますが、ランチャーは尊重しません: `camoufox` はプラットフォームのキャッシュ変数のみを読むため、pi-research がこの値をそれへ変換し（Linux では `XDG_CACHE_HOME`、Windows では `LOCALAPPDATA`）、postinstall の取得とブラウザワーカーへエクスポートします。これによりインストールと検索がずれません。macOS では無視されます（ランチャーは `$HOME` からのみキャッシュを導出します）— [アーキテクチャ](#architecture)を参照。 |
+| `CAMOUFOX_INSTALL_DIR` | _（ユーザーキャッシュ）_ | ブラウザのダウンロードを再配置します。pi-research は尊重しますが、ランチャーは尊重しません: `camoufox` はプラットフォームのキャッシュ変数のみを読むため、pi-research がこの値をそれへ変換し（Linux では `XDG_CACHE_HOME`、Windows では `LOCALAPPDATA`）、postinstall の取得とブラウザワーカーへエクスポートします。これによりインストールと検索がずれません。macOS では無視されます（ランチャーは `$HOME` からのみキャッシュを導出します）— [アーキテクチャ](#アーキテクチャ)を参照。 |
 | `PLAYWRIGHT_BROWSERS_PATH` | _（ユーザーキャッシュ）_ | 前述の変数のエイリアス。互換性のために受け付けられます。 |
 | `XDG_CACHE_HOME` | `~/.cache` | 標準の XDG 変数。設定すると、下記のすべての `~/.cache/pi-research/...` パスは代わりに `$XDG_CACHE_HOME/pi-research/...` を基準に置かれます。 |
 | `PI_RESEARCH_BIN`（エイリアス `PI_RESEARCH_PATH`） | _（自動）_ | エージェントスキルランチャー専用: 自動解決（PATH → ローカルインストール → npx）をバイパスすべきときに、pi-research エンジンのバイナリへの明示的なパス。[agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md) を参照してください。 |
@@ -1139,8 +1108,7 @@ pi-research の状態はすべて、独自の名前空間 `~/.pi/research/` の�
 パスは `PI_RESEARCH_STATE_DIR`、`PI_RESEARCH_KNOWLEDGE_DIR`、`PI_RESEARCH_TMP_DIR` で
 再配置できます。
 
-## アーキテクチャ {#architecture}
-
+## アーキテクチャ
 pi-research は、マルチエージェントのウェブリサーチ向けの pi 用 TUI 拡張機能です。pi の
 プロセス内で動作し、ツールとコマンドを登録し、独自のブラウザワーカープール、サービス
 レジストリ、ローカルのナレッジストアを管理します。単一のエンジンがすべてのフロントエンドを
@@ -1268,7 +1236,7 @@ LLM 呼び出しの規約。コーディネーター、ルーター、シンセ�
 システムを検索するターンを浪費してしまうためです。2 つの除外サーフェス — `excludeTools` リスト
 （CLI では `--exclude-tools`、拡張機能では `excludeTools` ツールパラメータ）と
 `PI_RESEARCH_DISABLED_TOOLS` — は、このデフォルトの上に厳密に加算されます: 能力を奪うことだけが
-できます（[設定](#configuration)を参照）。1.3.10 より前は、空でない `excludeTools` リストがデフォルトを
+できます（[設定](#設定)を参照）。1.3.10 より前は、空でない `excludeTools` リストがデフォルトを
 置き換えていたため、他の任意のツールを名指しすると `grep` が静かに再有効化されていました。
 
 リサーチャーはファイルに書き込めず、シェルコマンドを実行できず、これらのツールの外側のネットワークに
@@ -1329,7 +1297,7 @@ drop / backup / re-embed のロジック自体は `store.ts` にあります）�
 ストアにはネイティブの ONNX ランタイムと LanceDB バインディングが必要です。プリビルドバイナリのない
 プラットフォーム — とりわけ Intel macOS（`darwin-x64`）— では欠席します: ヘルスチェックは
 「無効だが健全」と報告し、リサーチはキャッシュなしで動作します。サブシステムの全体とプラットフォーム
-マトリクスは[ナレッジストア](#knowledge-store)を参照してください。
+マトリクスは[ナレッジストア](#ナレッジストア)を参照してください。
 
 ### サービスとライフサイクル
 

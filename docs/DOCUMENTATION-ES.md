@@ -1,7 +1,6 @@
 # Documentación de pi-research (ES)
 
-## Extensión de Pi {#pi-extension}
-
+## Extensión de Pi
 pi-research se integra como una **extensión** de
 [pi](https://github.com/earendil-works/pi) (`src/index.ts`): un motor de investigación web
 multiagente con una interfaz de usuario de terminal (TUI) en tiempo real, registrada
@@ -78,14 +77,14 @@ Los ajustes se gestionan con `/research-config`, que edita dos capas:
 Para configurar la extensión de pi de forma independiente de los demás front-ends, añada un
 archivo de superposición opcional en `~/.pi/research/pi.env` (se apila sobre `config.env`
 únicamente para la extensión de pi). El modelo completo de configuración, la precedencia y
-la lista completa de variables de entorno se detallan en [Configuración](#configuration).
+la lista completa de variables de entorno se detallan en [Configuración](#configuración).
 
 ### Instalador de la habilidad de agente
 
 El menú de `/research-config` puede instalar la habilidad `pi-research` en los demás
 agentes de codificación detectados en esta máquina para que ejecuten investigación web a
 través de la CLI, y volver a eliminarla — con una limpieza exacta, trazada mediante un
-manifiesto. Consulte [Habilidad de agente](#agent-skill) para el flujo completo de
+manifiesto. Consulte [Habilidad de agente](#habilidad-de-agente-agent-skill) para el flujo completo de
 instalación.
 
 ### Ciclo de vida
@@ -97,8 +96,7 @@ instalación.
   de proceso; recarga / nueva / reanudar / bifurcar limpian sin salir del proceso.
 
 El estado de la extensión está aislado por sesión de pi, por lo que `/reload` es seguro.
-## Habilidad de agente (Agent Skill) {#agent-skill}
-
+## Habilidad de agente (Agent Skill)
 pi-research se distribuye también como una
 [Habilidad de agente](https://agentskills.io/specification) portable (Agent Skill), de modo
 que cualquier agente de codificación compatible con habilidades que use el mismo modelo de
@@ -121,25 +119,9 @@ npm install -g @lincoln504/pi-research   # el motor (deja `pi-research` en el PA
 pi-research skill install                # enlaza la habilidad en cada agente detectado
 ```
 
-El paquete no requiere ninguna compilación ni aprobación: la única pieza nativa en la ruta de
-lanzamiento es `impit`, que trae binarios precompilados. El navegador sigiloso (más de 1GB instalado) lo
-descarga el script `postinstall` cuando npm ejecuta los scripts de instalación de dependencias, lo
-que hacen npm 10 a 11.19 (11.16–11.19 con una advertencia) — incluido el npm incluido en
-Node 22.22.2, el mínimo que este paquete exige (10.9.7), y el npm incluido en Node 24/25
-(11.19.0) —, así que espere la descarga durante la instalación. En npm 12, el npm actual, los
-scripts se bloquean por defecto y el navegador se descarga de forma perezosa en la primera
-extracción; en ambos casos la primera extracción tarda unos minutos. Use
-`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` para posponerla deliberadamente (consulte el
-[README](https://github.com/Lincoln504/pi-research/blob/main/README.md#install)).
+El navegador sigiloso (unos 1 GB) se descarga una sola vez, durante la instalación o en la primera extracción según su versión de npm; no hay nada que aprobar.
 
-La instalación global también trae los paquetes anfitriones `@earendil-works/pi-*` como
-dependencias de par (npm ≥7 las resuelve). Si su instalación omite las dependencias de par
-(`--legacy-peer-deps`, yarn classic), el motor no puede importar su registro de modelos: el
-lanzador lo indica y sale con código 78. Añada el paquete que necesita directamente:
-
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
+Los paquetes `@earendil-works/pi-*` y `typebox` son dependencias de par. La instalación global las trae. Si su instalación las omite (`pi install`, `--legacy-peer-deps`, yarn classic), el lanzador busca las copias de pi (`PI_RESEARCH_HOST_DIR`, el directorio detrás del comando `pi`, la instalación gestionada de pi, la raíz global de npm) y, si no encuentra ninguna, sale con código 78 y nombra la solución. Detalles en la [guía de solución de problemas](https://github.com/Lincoln504/pi-research/blob/main/docs/TROUBLESHOOTING.md) (en inglés).
 
 `skill install` solo apunta a agentes ya configurados bajo `$HOME`, nunca sobrescribe una
 habilidad distinta en el mismo espacio, y registra lo que creó para que `pi-research skill
@@ -157,7 +139,7 @@ PI_RESEARCH_MODEL=provider/model-id
 
 Si usa `pi`, la clave de API proviene automáticamente de su configuración de pi
 (`~/.pi/agent/auth.json`); de lo contrario defina también `PI_RESEARCH_API_KEY` (en el
-mismo archivo o como variable de entorno). Consulte [Configuración](#configuration).
+mismo archivo o como variable de entorno). Consulte [Configuración](#configuración).
 
 En Windows, ejecute `pi-research` desde `cmd` o use `pi-research.cmd`: la directiva de
 ejecución predeterminada de PowerShell (`Restricted`) bloquea los shims `.ps1` de npm
@@ -191,8 +173,7 @@ clave de API. Expone cuatro subcomandos: `research "<consulta>"` (investigación
 (mostrar/establecer el modo de almacén de conocimiento por directorio) y `status`
 (inspeccionar detección/configuración).
 
-### Flujo de instalación {#flujo-de-instalación}
-
+### Flujo de instalación
 El código fuente de la habilidad vive en `agent-skill/pi-research/` dentro del paquete.
 Instalar significa enlazar ese directorio en la carpeta de habilidades de cada agente.
 
@@ -249,7 +230,7 @@ Manual. Enlace simbólicamente el directorio en la carpeta de habilidades de cua
 - Node.js >= 22.22.2
 - `pi-research` instalado donde el lanzador pueda encontrarlo, además de un modelo
   configurado (`PI_RESEARCH_MODEL`) y una clave de API. Consulte
-  [Configuración](#configuration).
+  [Configuración](#configuración).
 
 ```bash
 npm install -g @lincoln504/pi-research
@@ -262,11 +243,10 @@ Una vez instalado, pida al agente que investigue algo — su sistema de habilida
 pi-research automáticamente. El readme incluido en el paquete
 (`agent-skill/pi-research/README.md`) y `agent-skill/pi-research/references/configuration.md`
 contienen los mismos detalles para quien explore la habilidad directamente.
-## SDK {#sdk}
-
+## SDK
 Un SDK de investigación de alto nivel para scripts, CI y herramientas personalizadas. Para
 la configuración (el modelo de capas, los ajustes de la TUI y todas las variables de
-entorno) consulte [Configuración](#configuration).
+entorno) consulte [Configuración](#configuración).
 
 ### Instalación
 
@@ -278,16 +258,7 @@ pueden importar:
 npm install @lincoln504/pi-research
 ```
 
-El paquete no necesita compilar nada: la única pieza nativa en la ruta de lanzamiento es
-`impit`, que trae binarios precompilados. El navegador sigiloso lo
-descarga el script `postinstall` cuando npm ejecuta los scripts de instalación de dependencias
-(npm 10 a 11.19 los ejecutan, 11.16–11.19 con una advertencia; el npm incluido en Node 22.22.2
-(10.9.7) y el incluido en Node 24/25 (11.19.0) están en ese grupo), y en npm 12, el npm
-actual, se descarga de forma perezosa en la primera extracción. (El par `npm approve-scripts better-sqlite3` + `npm rebuild`
-documentado por versiones anteriores reparaba el antiguo lanzador `camoufox-js`, cuyo binario
-`better-sqlite3` venía de un script de instalación — el cambio a `@camoufox/camoufox` del
-2026-10-05 eliminó esa dependencia, y en npm 12.0.2 una aprobación no logra ejecutar un script
-omitido de todos modos.)
+El navegador sigiloso (unos 1 GB) se descarga una sola vez, durante la instalación o en la primera extracción según su versión de npm. Los paquetes `@earendil-works/pi-*` y `typebox` son dependencias de par: si su instalación las omite (`--legacy-peer-deps`, yarn classic), añada `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` y `typebox`, o consulte la [guía de solución de problemas](https://github.com/Lincoln504/pi-research/blob/main/docs/TROUBLESHOOTING.md) (en inglés).
 
 Después elija el modelo: pase `model` a `initResearchSDK`, o defina `PI_RESEARCH_MODEL`
 (env o `~/.pi/research/config.env`). El SDK nunca sigue el modelo seleccionado dentro de la
@@ -428,8 +399,7 @@ El SDK no escribe archivos de informe. La exportación de informes es una preocu
 front-end — la extensión de pi y la CLI / habilidad de agente la hacen cuando
 `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
 
-### Referencia de API {#referencia-de-api}
-
+### Referencia de API
 Todo lo siguiente se exporta desde `@lincoln504/pi-research` y
 `@lincoln504/pi-research/sdk`, salvo las dos marcadas *solo subruta sdk* — el punto de
 entrada del paquete deliberadamente no las vuelve a publicar. Toda llamada excepto
@@ -511,7 +481,7 @@ suponen que usted gestiona el contenedor de servicios por su cuenta.
 | `verbose` | Refleja los registros en la consola. |
 
 Para la precedencia de configuración, las capas superpuestas por front-end y la referencia
-completa de variables de entorno, consulte [Configuración](#configuration).
+completa de variables de entorno, consulte [Configuración](#configuración).
 
 ### APIs de estado y almacén de conocimiento
 
@@ -540,8 +510,7 @@ El proyecto [Wall of Shame](https://wallofshame.io) ([repositorio](https://githu
 usa este SDK en su pipeline de agentes: llama a `initResearchSDK` y a los puntos de entrada de
 investigación (`runQuickResearch` / `runDeepResearch`) por investigación, y usa las
 exportaciones `scrapeUrl`, `verifyUrl` y `repairJson` directamente.
-## Almacén de conocimiento {#knowledge-store}
-
+## Almacén de conocimiento
 El almacén de conocimiento es una base de datos vectorial local de hallazgos de
 investigaciones anteriores. Es una caché opcional (la investigación funciona sin ella) y se
 usa de dos maneras distintas:
@@ -587,12 +556,12 @@ un ajuste con alcance de proyecto que puede cambiar por directorio:
 |------|----------|
 | `global` (predeterminado) | Un único almacén compartido por todos los directorios. Un hallazgo guardado en un proyecto se puede recuperar desde cualquier otro. |
 | `project` | Los hallazgos quedan limitados al directorio de trabajo donde se crearon; solo ese directorio los recupera. |
-| `none` | El almacén se deshabilita — no se lee ni se escribe nada, la herramienta `research_knowledge_search` no se anuncia al agente y `/knowledge-store` no está disponible. Rehabilitarlo no requiere reinicio (consulte [Extensión de Pi](#pi-extension) para los detalles de registro). |
+| `none` | El almacén se deshabilita — no se lee ni se escribe nada, la herramienta `research_knowledge_search` no se anuncia al agente y `/knowledge-store` no está disponible. Rehabilitarlo no requiere reinicio (consulte [Extensión de Pi](#extensión-de-pi) para los detalles de registro). |
 
 Cambie el modo del directorio actual con la TUI de `/research-config` (Modo de Conocimiento)
 en la extensión de pi, o con `pi-research knowledge-config set <none|project|global>` (elija
 un solo valor) en la CLI independiente. El ajuste persiste en el registro de proyectos por
-directorio — consulte [Configuración](#configuration) para la cadena completa de precedencia.
+directorio — consulte [Configuración](#configuración) para la cadena completa de precedencia.
 El cambio aplica en la siguiente ejecución — sin reinicio.
 
 Todos los alcances comparten un único directorio físico de LanceDB; las filas de proyecto y
@@ -798,10 +767,9 @@ comando manual de mantenimiento.
 | Tiempo de espera de init del modelo (ms) | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` |
 | Volver a probar WebGPU | `PI_RESEARCH_WEBGPU_REPROBE` | _(sin definir)_ |
 
-Consulte [Configuración](#configuration) para el modelo de configuración completo y
-[Arquitectura](#architecture) para cómo encaja el almacén en el motor.
-## Configuración {#configuration}
-
+Consulte [Configuración](#configuración) para el modelo de configuración completo y
+[Arquitectura](#arquitectura) para cómo encaja el almacén en el motor.
+## Configuración
 Todos los front-ends (la extensión de pi, la CLI independiente / habilidad de agente que
 ejecutan Claude Code y otros hosts compatibles con habilidades, y el SDK) comparten un
 único modelo de configuración. Este documento cubre primero los ajustes expuestos en la TUI
@@ -844,7 +812,7 @@ El Dispositivo de Incrustación ofrece dos opciones en el menú. GPU corresponde
 detección automática: pi-research comprueba si WebGPU funciona de verdad en esta máquina y
 cae a CPU si no. CPU fuerza la inferencia solo en CPU. La GPU forzada cruda (sin prueba) solo
 es alcanzable mediante la variable de entorno `PI_RESEARCH_EMBEDDING_DEVICE=webgpu`, para
-hacer benchmarks — consulte el [documento del almacén de conocimiento](#knowledge-store).
+hacer benchmarks — consulte el [documento del almacén de conocimiento](#almacén-de-conocimiento).
 
 Las filas Modelo de Incrustación, Dispositivo de Incrustación y Retención de Caché solo
 aparecen cuando el Modo de Conocimiento no es `none`.
@@ -929,7 +897,7 @@ Estas son perillas avanzadas solo por entorno (no están en la TUI).
 
 Almacén de conocimiento
 
-Consulte el [documento del almacén de conocimiento](#knowledge-store) para saber qué hace
+Consulte el [documento del almacén de conocimiento](#almacén-de-conocimiento) para saber qué hace
 cada valor.
 
 | Variable | Predeterminado | Rango | Descripción |
@@ -969,9 +937,9 @@ Diagnósticos y plataforma
 | `PI_RESEARCH_PDF_WORKER` | _(sin definir)_ | Defina `off` para forzar el análisis PDF al hilo principal (comportamiento previo a 1.6.6), evitando la descarga a los hilos de worker. Interruptor de emergencia para problemas de worker o empaquetado; el predeterminado ejecuta el análisis en un worker cuando su bundle está presente. |
 | `PI_RESEARCH_USE_XVFB` | _(sin definir)_ | Solo Linux. Las ejecuciones en TTY puro son verdaderamente sin pantalla y no necesitan servidor X; defina `true` para optar a un framebuffer virtual (`sudo apt install xvfb`). |
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Sobrescribe el directorio de código fuente de la habilidad de investigación incluida, usado por el instalador de habilidades. |
-| `PI_RESEARCH_PURGE_BROWSERS` | _(sin definir)_ | Lo lee el `scripts/cleanup.cjs` incluido: defina `1` para borrar también la caché compartida del navegador camoufox (conservada por defecto porque otras instalaciones pueden usarla). Nota: npm ≥7 no ejecuta `preuninstall`, así que ese script no se dispara en `npm uninstall` — consulte [Habilidad de agente](#agent-skill). |
+| `PI_RESEARCH_PURGE_BROWSERS` | _(sin definir)_ | Lo lee el `scripts/cleanup.cjs` incluido: defina `1` para borrar también la caché compartida del navegador camoufox (conservada por defecto porque otras instalaciones pueden usarla). Nota: npm ≥7 no ejecuta `preuninstall`, así que ese script no se dispara en `npm uninstall` — consulte [Habilidad de agente](#habilidad-de-agente-agent-skill). |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | _(sin definir)_ | Defina `1` durante `npm install` para omitir la descarga del navegador camoufox (se obtiene perezosamente en el primer uso; convención estándar de Playwright). |
-| `CAMOUFOX_INSTALL_DIR` | _(caché de usuario)_ | Reubica la descarga del navegador. Lo honra pi-research, no el lanzador: `camoufox` lee solo la variable de caché de la plataforma, así que pi-research mapea este valor a ella — `XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows — y la exporta a la descarga posterior a la instalación y a los workers del navegador, de modo que instalación y búsqueda no pueden desviarse. Se ignora en macOS, donde el lanzador deriva su caché solo de `$HOME`. Consulte [Arquitectura](#architecture). |
+| `CAMOUFOX_INSTALL_DIR` | _(caché de usuario)_ | Reubica la descarga del navegador. Lo honra pi-research, no el lanzador: `camoufox` lee solo la variable de caché de la plataforma, así que pi-research mapea este valor a ella — `XDG_CACHE_HOME` en Linux, `LOCALAPPDATA` en Windows — y la exporta a la descarga posterior a la instalación y a los workers del navegador, de modo que instalación y búsqueda no pueden desviarse. Se ignora en macOS, donde el lanzador deriva su caché solo de `$HOME`. Consulte [Arquitectura](#arquitectura). |
 | `PLAYWRIGHT_BROWSERS_PATH` | _(caché de usuario)_ | Alias de `CAMOUFOX_INSTALL_DIR`, aceptado por compatibilidad. |
 | `XDG_CACHE_HOME` | `~/.cache` | Variable XDG estándar. Cuando está definida, toda ruta `~/.cache/pi-research/...` de abajo se ancla en `$XDG_CACHE_HOME/pi-research/...` en su lugar. |
 | `PI_RESEARCH_BIN` (alias `PI_RESEARCH_PATH`) | _(auto)_ | Solo lanzador de la habilidad de agente: ruta explícita al binario del motor pi-research cuando debe omitirse la auto-resolución (PATH → instalación local → npx). Consulte [agent-skill/pi-research/references/configuration.md](../agent-skill/pi-research/references/configuration.md). |
@@ -1178,8 +1146,7 @@ Todo el estado de pi-research vive bajo su propio espacio de nombres, `~/.pi/res
 
 Las rutas pueden reubicarse con `PI_RESEARCH_STATE_DIR`, `PI_RESEARCH_KNOWLEDGE_DIR` y
 `PI_RESEARCH_TMP_DIR`.
-## Arquitectura {#architecture}
-
+## Arquitectura
 pi-research es una extensión TUI de pi para investigación web multiagente. Se ejecuta dentro
 del proceso de pi, registra sus herramientas y comandos, y gestiona su propio grupo de
 procesos de navegador, su registro de servicios y su almacén de conocimiento local. Un solo
@@ -1315,7 +1282,7 @@ gastaría turnos buscando en el sistema de archivos local. Ambas superficies de 
 la lista `excludeTools` (`--exclude-tools` en la CLI, el parámetro de herramienta
 `excludeTools` en la extensión) y `PI_RESEARCH_DISABLED_TOOLS` — son estrictamente aditivas
 sobre ese predeterminado: solo pueden quitar capacidades (consulte
-[Configuración](#configuration)). Antes de 1.3.10 una lista `excludeTools` no vacía
+[Configuración](#configuración)). Antes de 1.3.10 una lista `excludeTools` no vacía
 reemplazaba el predeterminado, de modo que nombrar cualquier otra herramienta re-habilitaba
 silenciosamente `grep`.
 
@@ -1381,7 +1348,7 @@ lógica drop / backup / re-embed en sí vive en `store.ts`).
 El almacén necesita binarios nativos de runtime ONNX y LanceDB. En plataformas sin binario
 precompilado — notablemente macOS Intel (`darwin-x64`) — está ausente: la verificación de
 estado lo reporta deshabilitado-pero-saludable y la investigación corre sin la caché.
-Consulte [Almacén de conocimiento](#knowledge-store) para el subsistema completo y la matriz
+Consulte [Almacén de conocimiento](#almacén-de-conocimiento) para el subsistema completo y la matriz
 de plataformas.
 
 ### Servicios y ciclo de vida

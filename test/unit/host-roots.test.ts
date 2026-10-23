@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { findHostPackages, hostDirs, HOST_PACKAGES } from '../../src/host-roots.mjs';
+import { candidateNodeModulesDirs, findHostPackages, hostDirs, HOST_PACKAGES } from '../../src/host-roots.mjs';
 import { initialize, resolve as hookResolve } from '../../src/host-resolve-hook.mjs';
 
 function pkg(root: string, name: string) {
@@ -52,6 +52,43 @@ describe('host-roots — finding pi\'s copies of the peer dependencies', () => {
     process.env['PI_RESEARCH_NO_HOST_FALLBACK'] = '1';
     expect(findHostPackages(['@earendil-works/pi-coding-agent']).found.size).toBe(0);
     delete process.env['PI_RESEARCH_NO_HOST_FALLBACK'];
+  });
+
+  it('finds the host in pi\'s managed install (releases/<current-version>), which `pi` reaches through a shell script', () => {
+    const agentDir = join(base, 'agent');
+    const releaseNm = join(agentDir, 'install', 'releases', '1.4.0', 'node_modules');
+    pkg(releaseNm, '@earendil-works/pi-tui');
+    mkdirSync(join(agentDir, 'install'), { recursive: true });
+    writeFileSync(join(agentDir, 'install', 'current-version'), '1.4.0\n');
+    delete process.env['PI_RESEARCH_HOST_DIR'];
+    process.env['PI_CODING_AGENT_DIR'] = agentDir;
+    process.env['PATH'] = join(base, 'no-bin'); // vitest's PATH carries the repo's own node_modules/.bin/pi
+    const { found } = findHostPackages(['@earendil-works/pi-tui']);
+    expect(found.get('@earendil-works/pi-tui')).toBe(releaseNm);
+    // a hostile version string cannot walk out of the releases directory
+    writeFileSync(join(agentDir, 'install', 'current-version'), '../../../etc\n');
+    expect(candidateNodeModulesDirs().some((d: string) => d.includes('etc'))).toBe(false);
+    process.env['PATH'] = saved['PATH'];
+    delete process.env['PI_CODING_AGENT_DIR'];
+  });
+
+  it('ignores relative PATH entries, so a planted pi in the cwd cannot nominate a node_modules', () => {
+    const evil = join(base, 'evil');
+    pkg(join(evil, 'node_modules'), '@earendil-works/pi-tui');
+    mkdirSync(join(evil, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(join(evil, 'node_modules', '.bin', 'pi'), '#!/bin/sh\n', { mode: 0o755 });
+    const cwd = process.cwd();
+    delete process.env['PI_RESEARCH_HOST_DIR'];
+    process.env['PI_CODING_AGENT_DIR'] = join(base, 'no-agent');
+    try {
+      process.chdir(evil);
+      process.env['PATH'] = join('node_modules', '.bin');
+      expect(candidateNodeModulesDirs().some((d: string) => d.includes('evil'))).toBe(false);
+    } finally {
+      process.chdir(cwd);
+      process.env['PATH'] = saved['PATH'];
+      delete process.env['PI_CODING_AGENT_DIR'];
+    }
   });
 
   it('covers exactly the peers the shim requires', () => {

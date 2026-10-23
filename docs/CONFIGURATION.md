@@ -58,7 +58,7 @@ CPU/RAM-sensitive and set only via `PI_RESEARCH_WORKER_THREADS`.
 
 Every setting is also an environment variable. The repo's
 [`.env.example`](https://github.com/Lincoln504/pi-research/blob/main/.env.example)
-is the canonical, exhaustive list with inline notes; this section groups the same
+is a commented template with inline notes; this section is the reference, grouping the
 variables with their defaults and valid ranges.
 Out-of-range numeric values are clamped (with a warning); an invalid enum value
 falls back to the default (with a warning).
@@ -75,12 +75,12 @@ Research
 | `PI_RESEARCH_MAX_RESEARCHERS` (TUI) | `3` | 1–5 | Parallel researchers. |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` (TUI) `[project]` | `1` | 0–3 | Depth for `/research` and the CLI when `--depth` is omitted (0=quick single-pass — requires `PI_RESEARCH_QUICK_RESEARCH` —, 1=normal, 2=deep, 3=ultra). The agent-facing `research` tool-usage prompt renders its depth guidance relative to this setting too: when quick is the configured default, depth 0 is the ordinary choice; a user who keeps the default (1) gets byte-identical guidance. |
 | `PI_RESEARCH_QUICK_RESEARCH` (TUI) `[project]` | `false` | `true` · `false` | Opt-in gate for depth-0 (quick) research. When `false` (default), the agent-facing `research` tool keeps its upstream `minimum: 1` schema — agents can neither see nor send depth 0 — and a `DEFAULT_RESEARCH_DEPTH` of 0 resolves to 1. Toggling applies on the next session. |
-| `PI_RESEARCH_QUICK_MAX_QUERIES` | `3` | 1–10 | Max queries per `search` call in quick (depth 0) research. Applies to every quick run — the pi extension tool, the CLI, and the SDK's `--depth 0` — since they share the same researcher session factory. Deliberately below deep research's 30-query cap; the ceiling of 10 keeps quick mode from ever exceeding the old 5–10 prompt guidance. |
+| `PI_RESEARCH_QUICK_MAX_QUERIES` | `3` | 1–10 | Max queries per `search` call in quick (depth 0) research. Applies to every quick run — the pi extension tool, the CLI, and the SDK's `--depth 0` — since they share the same researcher session factory. Deliberately below deep research's 30-query cap; the ceiling is 10. |
 | `PI_RESEARCH_QUICK_MAX_SCRAPE_URLS` | `5` | 1–20 | Max URLs fetched per scrape batch in quick (depth 0) research. Separate from `PI_RESEARCH_MAX_SCRAPE_URLS` (deep, `8`) because quick mode answers a single-fact question and the deep budget pulls in pages that question does not need; `PI_RESEARCH_MAX_SCRAPE_BATCHES` still caps how many batches a quick run may use. Applies to every quick run (pi extension tool, CLI, SDK `--depth 0`). |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` (TUI) | `2` | 0–99 | Scrape batches per researcher (0 = unlimited). When prompt caching is known to be active for the resolved research model (Anthropic API models, or a provider route explicitly configured for Anthropic-style cache control), the effective limit is this value plus one — the cached prompt prefix makes the extra batch cheap. |
 | `PI_RESEARCH_MAX_GATHERING_CALLS` | `12` | 1–100 | Shared web-gathering calls per researcher (`search` + `security_search` + `stackexchange` + `youtube_transcript`). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
-| `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | Maximum URLs fetched per scrape batch. URLs past the cap are listed under "Not Fetched — Over Batch Cap" and must be requested in a later batch. (Promoted from a hardcoded constant so it is env/config-file tunable like every other scrape knob.) |
+| `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | Maximum URLs fetched per scrape batch. URLs past the cap are listed under "Not Fetched — Over Batch Cap" and must be requested in a later batch. |
 | `PI_RESEARCH_SCRAPE_SECOND_PAGE` | `false` | true/false | Also fetch DuckDuckGo results page 2 for every search query, roughly doubling the candidate links each query contributes. Each query's page-2 fetch degrades gracefully — if page 2 fails or does not exist, the page-1 results are kept. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
@@ -164,7 +164,9 @@ Diagnostics & platform
 | `PI_RESEARCH_STATE_DIR` | `~/.pi/research/state` | Override the state directory (active sessions, browser status, project registry). |
 | `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `100` | TUI refresh debounce (0–1000 ms). |
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | _(unset)_ | Set `1`/`true` to skip the pre-flight browser/embedding health check and rely on per-task timeouts. **Depth 0 (quick) only** — depth 1-3 runs have no such pre-flight check, so this has no effect on them. |
-| `PI_RESEARCH_PDF_WORKER` | _(unset)_ | Set `off` to force PDF parsing onto the main thread (pre-1.6.6 behavior), bypassing the worker-threads offload. Kill-switch for worker or bundling issues; the default runs the parse in a worker when its bundle is present. |
+| `PI_RESEARCH_HOST_DIR` | _(unset)_ | A `node_modules` directory (or its parent) holding pi's copies of the peer dependencies (`@earendil-works/pi-*`, `typebox`). Searched first when the standalone engine cannot find them beside itself. See [Troubleshooting](TROUBLESHOOTING.md#the-agent-skill-or-cli-says-cannot-start--missing-required-runtime-dependencies). |
+| `PI_RESEARCH_NO_HOST_FALLBACK` | _(unset)_ | Set `1` to turn the host-package lookup off and require peers installed beside the engine. |
+| `PI_RESEARCH_PDF_WORKER` | _(unset)_ | Set `off` to force PDF parsing onto the main thread (in-process, no worker), bypassing the worker-threads offload. Kill-switch for worker or bundling issues; the default runs the parse in a worker when its bundle is present. |
 | `PI_RESEARCH_USE_XVFB` | _(unset)_ | Linux only. Bare-TTY runs are true-headless and need no X server; set `true` to opt into a virtual framebuffer (`sudo apt install xvfb`). |
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Override the bundled research-skill source directory used by the skill installer. |
 | `PI_RESEARCH_PURGE_BROWSERS` | _(unset)_ | Read by the bundled `scripts/cleanup.cjs`: set `1` to also delete the shared camoufox browser cache (kept by default because other installs may use it). Note npm ≥7 does not run `preuninstall`, so that script does not fire on `npm uninstall` — see [AGENT-SKILL.md](AGENT-SKILL.md). |

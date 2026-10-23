@@ -21,21 +21,13 @@ npm install -g @lincoln504/pi-research   # the engine (puts `pi-research` on PAT
 pi-research skill install                # link the skill into every detected agent
 ```
 
-npm 12, the current npm, blocks dependency install scripts by default — and
-none are needed: the only native piece on the launch path is `impit`, which ships
-prebuilt binaries, and the stealth browser self-provisions on its first use (the first
-scrape takes a few minutes). On npm 10 through 11.19 the `postinstall` fetch runs
-during install instead; that is the npm bundled with Node 24/25 (11.19.0) and with
-the Node 22.22.2 floor (10.9.7). No approval is required (see the [README](../README.md#install)).
+The stealth browser (about 1 GB) downloads once, at install or on the first scrape depending
+on your npm version; nothing needs approving (see [Troubleshooting](TROUBLESHOOTING.md#the-first-scrape-takes-minutes-or-install-downloads-over-a-gigabyte)).
 
-The global install also brings the `@earendil-works/pi-*` host packages in as peer
-dependencies (npm ≥7 resolves them). If your install skips peers
-(`--legacy-peer-deps`, yarn classic), the engine cannot import its model registry —
-the launcher says so and exits 78. Add the package it needs directly:
-
-```bash
-npm install -g @earendil-works/pi-coding-agent
-```
+The `@earendil-works/pi-*` host packages and `typebox` are peer dependencies. A global install
+brings them in; an install that skips peers (`pi install`, `--legacy-peer-deps`, yarn classic) has the
+launcher look for pi's own copies, and if it finds none it exits 78 naming the fix. See
+[Troubleshooting](TROUBLESHOOTING.md#the-agent-skill-or-cli-says-cannot-start--missing-required-runtime-dependencies).
 
 `skill install` targets only agents already set up under `$HOME`, never overwrites a
 different skill in the slot, and records what it created so `pi-research skill uninstall`

@@ -13,24 +13,12 @@ run the `pi` extension, which keeps its own private copy your scripts can't impo
 npm install @lincoln504/pi-research
 ```
 
-The `@earendil-works/pi-*` host packages are peer dependencies, so npm ≥7 installs them
-with the command above. If your install skips peers — `--legacy-peer-deps`, yarn
-classic — the SDK cannot import them, so add the one it loads directly:
-
-```bash
-npm install @earendil-works/pi-coding-agent
-```
-
-npm 12, the current npm, blocks dependency install scripts by default. Nothing
-here needs them: the only native piece on the launch path is `impit`, which ships
-prebuilt binaries, and the stealth browser self-provisions on its first use. On npm 10
-through 11.19 the `postinstall` fetch runs during install instead; that is the npm
-bundled with Node 24/25 (11.19.0) and with the Node 22.22.2 floor (10.9.7). (The
-`npm approve-scripts better-sqlite3` + `npm rebuild` pair documented by earlier
-releases repaired the old `camoufox-js` launcher, whose `better-sqlite3` binding came
-from an install script — the 2026-10-05 move to `@camoufox/camoufox` removed that
-dependency entirely, and on npm 12.0.2 an approval does not make a skipped script run
-anyway.)
+The `@earendil-works/pi-*` host packages and `typebox` are peer dependencies, so npm ≥7 installs them
+with the command above. If your install skips peers (`--legacy-peer-deps`, yarn classic), add the
+four it needs (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`,
+`typebox`) or see [Troubleshooting](TROUBLESHOOTING.md#the-agent-skill-or-cli-says-cannot-start--missing-required-runtime-dependencies).
+The stealth browser (about 1 GB) downloads once, at install or on the first scrape depending on your
+npm version ([details](TROUBLESHOOTING.md#the-first-scrape-takes-minutes-or-install-downloads-over-a-gigabyte)).
 
 Then pick the model: pass `model` to `initResearchSDK`, or set `PI_RESEARCH_MODEL`
 (env or `~/.pi/research/config.env`). The SDK never follows the model selected

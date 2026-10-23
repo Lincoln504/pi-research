@@ -26,7 +26,7 @@ pi CLI
    task's complexity, guided by the tool's usage prompt (`src/prompts/research-tool-usage.md`).
    CLI and SDK callers pass the depth explicitly.
 2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below). The pi extension's
-   tool and the TUI are restricted to levels 1–3; the CLI, SDK, and agent skill can pass 0.
+   tool and the TUI offer levels 1–3 unless `PI_RESEARCH_QUICK_RESEARCH=true` opts in to depth 0; the CLI, SDK, and agent skill can pass 0 (the CLI gates it on the same setting).
 3. On the deep path the coordinator plans the research tracks and runs one initial
    search burst, then hands each researcher a set of result URLs to start from.
 4. Researchers scrape and read those pages through the scrape tooling and return cited
@@ -44,9 +44,9 @@ point. It dispatches on depth.
 
 Depth 0 — quick (`QuickResearchOrchestrator`): a single researcher runs directly with
 all tools; there is no coordinator, no planning phase, and no rounds. Depth 0 is
-reachable only through the SDK (`runQuickResearch`) or the CLI (`--depth 0`, which the
-agent skill can pass). The pi extension's `research` tool has a minimum depth of 1, so
-an in-session agent can never request quick mode.
+reachable through the SDK (`runQuickResearch`) or the CLI (`--depth 0`, which the
+agent skill can pass). The pi extension's `research` tool has a minimum depth of 1 unless
+`PI_RESEARCH_QUICK_RESEARCH=true`, so an in-session agent cannot request quick mode by default.
 
 Depth 1–3 — deep (`DeepResearchOrchestrator`): the run proceeds in **rounds**. A round
 is one coordinate → research → route cycle — the round's agenda is planned (by the
@@ -321,7 +321,8 @@ why floating ranges are not trusted here. Rationale in full:
 `src/infrastructure/browser/thread-worker-browser.ts`.
 
 The launcher replacement (2026-10-05). `camoufox-js` `0.12.0` was replaced by
-`@camoufox/camoufox` `0.5.7` after the former broke every fresh install. On 2026-10-03
+`@camoufox/camoufox` `0.5.7` after the former broke every fresh install; that package was
+later renamed on npm, and the launcher is now `camoufox` `0.5.8`. On 2026-10-03
 `v156.0.1-beta.34` was published to the `daijro/camoufox` releases WITHOUT the prerelease
 flag, and the 156-series browser schema had dropped `navigator.product` (with
 `appName`/`appCodeName`). `camoufox-js` `0.12.0` still sent those properties, and its
@@ -390,7 +391,7 @@ Validation library — `typebox` (TypeBox 1.x, unscoped package name) is a PEER 
 warns on every startup when a host-provided package (`typebox`, `@sinclair/typebox`, the
 `@earendil-works/pi-*` packages) sits in `dependencies`, because an installed copy can bypass the
 loader and create a second live module instance (`resource-loader.js`,
-`collectExtensionPackageWarnings`; pi `docs/packages.md`). Under pi the host's own copy is used,
+`collectExtensionPackageWarnings`; `docs/packages.md` in the pi repository). Under pi the host's own copy is used,
 so the two agree on `Value.Check`/`Convert` by construction. `@earendil-works/pi-ai` and
 `@earendil-works/pi-coding-agent` 1.0.0 through 1.4.0 all pin `1.3.27` (re-checked 2026-10-21 in
 the published 1.4.0 packages' `package.json`, previously 2026-10-17 in 1.3.0), which is why the devDependency, and so every test run and
