@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { findHostPackages, hostDirs, HOST_PACKAGES } from '../../src/host-roots.mjs';
 import { initialize, resolve as hookResolve } from '../../src/host-resolve-hook.mjs';
 
@@ -61,7 +62,7 @@ describe('host-roots — finding pi\'s copies of the peer dependencies', () => {
     await initialize({ dirs: [globalRoot] });
     const failing = Object.assign(new Error('nope'), { code: 'ERR_MODULE_NOT_FOUND' });
     const next = vi.fn(async (spec: string, ctx: { parentURL?: string }) => {
-      if (ctx.parentURL?.includes(globalRoot.replace(/\\/g, '/'))) return { url: `file://fallback/${spec}`, shortCircuit: true };
+      if (ctx.parentURL === pathToFileURL(join(globalRoot, '__host__.mjs')).href) return { url: `file://fallback/${spec}`, shortCircuit: true };
       throw failing;
     });
     const rescued = await hookResolve('@earendil-works/pi-coding-agent/dist/x.js', { parentURL: 'file:///elsewhere/a.mjs' }, next);
