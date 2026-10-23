@@ -300,7 +300,12 @@ function defaultNativeDepLoad(): void {
 export function isBrowserAvailable(): boolean {
     if (isFullMockMode()) return false;
     try {
-        import.meta.resolve('camoufox');
+        // findPackageRoot() anchors on a file path (createRequire), so it works in
+        // every loader context. The previous import.meta.resolve() call was the
+        // failure mode: pi loads the extension through a transform pipeline where
+        // import.meta compiles to an empty object, import.meta.resolve is
+        // undefined, the call throws, and the catch reported an installed browser
+        // as missing ("Browser engine not installed" before every research run).
         const root = findPackageRoot(import.meta.url);
         return isUsable(getCamoufoxBinaryPath(), root ? loadPin(root) : null);
     } catch {

@@ -5,7 +5,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
 import os from 'node:os';
 import { KnowledgeStore } from '../../../src/knowledge/store.ts';

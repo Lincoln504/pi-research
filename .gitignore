@@ -9,6 +9,7 @@ node_modules/
 
 # Generated files
 /tmp/
+test/unit/cjs-bundles/
 
 # Research output files
 pi-research-*.md

@@ -12,7 +12,7 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 
 **KNOWLEDGE SEARCH (a knowledge store is enabled)**
 
-Check the knowledge store first. For a web-research question, call `research_knowledge_search` before the live `research` tool — it is a local lookup (instant, no network) and covers both the Project and User knowledge stores, so the live tool is only needed when the store doesn't already answer the question.
+Check the knowledge store first. For a web-research question, call `research_knowledge_search` before the live `research` tool — it is a local lookup (instant, no network) and covers both the Project and User knowledge stores, so the live tool is only needed when the store doesn't already answer the question. Where a question turns on the current state of things, stored material can be stale enough to mislead — treat it as a lead, not a source.
 
 - Workflow:
   1. Call `research_knowledge_search` with the question.
