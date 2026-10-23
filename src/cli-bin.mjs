@@ -35,7 +35,10 @@
  */
 
 import { existsSync } from 'node:fs';
+import { register } from 'node:module';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findHostPackages, hostDirs } from './host-roots.mjs';
 
 const REQUIRED_PEERS = [
   '@earendil-works/pi-ai',
@@ -84,8 +87,26 @@ function probePeer(name) {
 }
 
 const status = new Map(REQUIRED_PEERS.map((name) => [name, probePeer(name)]));
-const missing = REQUIRED_PEERS.filter((name) => status.get(name) === 'missing');
+let missing = REQUIRED_PEERS.filter((name) => status.get(name) === 'missing');
 const broken = REQUIRED_PEERS.filter((name) => status.get(name) === 'broken');
+
+// Peers that do not resolve from here are very often still on the machine: pi keeps its own
+// copies, and a global `npm install -g @earendil-works/pi-coding-agent` puts them in the
+// global root. Node's ESM resolver never looks in either from this package's directory
+// (a `pi install` managed tree, installed with --legacy-peer-deps, has no peers at all), so
+// register a resolve hook that falls back to them. See host-roots.mjs. Only names that
+// failed normal resolution are searched for, and only those the search found are rescued.
+if (missing.length > 0 && broken.length === 0) {
+  try {
+    const { found } = findHostPackages(missing);
+    if (found.size > 0) {
+      register('./host-resolve-hook.mjs', import.meta.url, { data: { dirs: hostDirs(found) } });
+      missing = missing.filter((name) => !found.has(name));
+    }
+  } catch {
+    /* fall through to the message below */
+  }
+}
 
 if (missing.length > 0 || broken.length > 0) {
   // The remedy names the packages that are ACTUALLY absent. It used to hardcode
@@ -94,6 +115,10 @@ if (missing.length > 0 || broken.length > 0) {
   // one: the instruction named a package the user already had, and following it
   // changed nothing. Reported by review 2026-10-01.
   const needsInstall = [...missing, ...broken];
+  // The tree this package sits in, when it is a node_modules install (the pi-managed one).
+  const installRoot = /^(.*)[\\/]node_modules[\\/](?:@[^\\/]+[\\/])?[^\\/]+[\\/]dist$/.exec(
+    dirname(fileURLToPath(import.meta.url)),
+  )?.[1];
   const lines = [
     '',
     'Error: pi-research cannot start — it is missing required runtime dependencies:',
@@ -102,15 +127,22 @@ if (missing.length > 0 || broken.length > 0) {
     '',
     'These are PEER dependencies. pi provides its own copies when it loads this',
     'package as an extension, and npm >= 7 installs them automatically for a',
-    'standalone (global or project) install. This install skipped them, which is',
-    'what --legacy-peer-deps, yarn classic, and a pnpm config with',
-    'auto-install-peers=false do.',
+    'standalone (global or project) install. This install skipped them (what',
+    '--legacy-peer-deps, which `pi install` always passes, yarn classic and a pnpm',
+    'config with auto-install-peers=false do), and no copy was found where pi or a',
+    'global npm install would have put one.',
     '',
-    'Install the missing package(s), or reinstall this package, which resolves',
-    'them as peers:',
+    'Any ONE of these fixes it:',
     '',
+    ...(installRoot
+      ? [
+          `    npm install --prefix "${installRoot}" --legacy-peer-deps ${needsInstall.join(' ')}`,
+          '                      # into the tree this package is installed in (kept across `pi update`)',
+        ]
+      : []),
     `    npm install -g ${needsInstall.join(' ')}`,
-    '    npm install -g @lincoln504/pi-research',
+    '                      # a global install is found automatically',
+    '    export PI_RESEARCH_HOST_DIR=/path/to/node_modules   # a directory that holds them',
     '',
   ];
   process.stderr.write(lines.join('\n'));

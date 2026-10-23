@@ -706,6 +706,9 @@ jobs:
         run: node scripts/verify-package.cjs manifest
       - name: Pack real tarball
         run: |
+          # --ignore-scripts skips the prepack lifecycle: strip the bundled LanceDB explicitly
+          # (scripts/prepack-lancedb.cjs) instead of relying on an earlier step having done it.
+          node scripts/prepack-lancedb.cjs
           TAR_FILE="$(npm pack --ignore-scripts | tail -1)"
           echo "TAR_FILE=$TAR_FILE" >> "$GITHUB_ENV"
       - name: Install packed tarball in a clean project (strict, real setup)
@@ -738,6 +741,25 @@ jobs:
           echo "BIN_DIR=$WORK/node_modules/.bin" >> "$GITHUB_ENV"
       - name: Verify installed package layout (entry points, bundles, worker, prompts)
         run: node scripts/verify-package.cjs installed "$INSTALLED_DIR"
+      - name: Install the tarball the way `pi install` does (peers NOT installed) and start the workers
+        # pi runs npm with --legacy-peer-deps, so peerDependencies (typebox, @earendil-works/*)
+        # are never installed there; the host supplies them to IN-PROCESS extension code only.
+        # The browser worker is a plain Node child process, so any peer import in it dies at
+        # import time (v1.7.9-v1.7.18: ERR_MODULE_NOT_FOUND typebox, exit 1, every search
+        # failed). The strict install above has peers present and cannot see that class;
+        # this one can. `installed` mode starts both worker bundles standalone.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
+        run: |
+          PIWORK="$(mktemp -d)"
+          cp "$TAR_FILE" "$PIWORK/"
+          cd "$PIWORK"
+          npm init -y >/dev/null
+          npm install --legacy-peer-deps "./$TAR_FILE"
+          test ! -d node_modules/typebox || { echo "typebox unexpectedly installed; this step no longer tests the pi shape"; exit 1; }
+          cd "$GITHUB_WORKSPACE"
+          node scripts/verify-package.cjs installed "$PIWORK/node_modules/@lincoln504/pi-research"
       - name: Run the installed CLI (resolution smoke-test)
         # Existence checks cannot catch a resolution failure. dist/cli.mjs is built
         # with esbuild `packages: 'external'`, so every bare import resolves at

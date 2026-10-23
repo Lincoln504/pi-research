@@ -21,6 +21,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir, constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { findHostPackages } from '../../../src/host-roots.mjs';
 import { fileURLToPath } from 'node:url';
 
 const PKG = '@lincoln504/pi-research';
@@ -260,9 +261,19 @@ function depResolvableFrom(anchorDir: string): boolean {
   for (;;) {
     if (existsSync(join(dir, 'node_modules', ...depSegs, 'package.json'))) return true;
     const parent = dirname(dir);
-    if (parent === dir) return false;
+    if (parent === dir) break;
     dir = parent;
   }
+  // Not beside the engine — but the engine's bin shim falls back to the host's own copies
+  // (a global npm install, the directory behind `pi`, PI_RESEARCH_HOST_DIR; see
+  // src/host-roots.mjs). Only refuse to launch when that lookup finds nothing either.
+  return findHostPackages([REQUIRED_DEP]).missing.length === 0;
+}
+
+/** The install root an engine package dir sits in (the directory holding its node_modules), or the dir itself. */
+function enginePrefix(pkgDir: string): string {
+  const m = /^(.*)[\\/]node_modules[\\/](?:@[^\\/]+[\\/])?[^\\/]+$/.exec(pkgDir);
+  return m?.[1] ?? pkgDir;
 }
 
 function depMissing(pkgDir: string): never {
@@ -272,15 +283,18 @@ function depMissing(pkgDir: string): never {
     `'${REQUIRED_DEP}' is not installed alongside it.`,
     '',
     'The standalone engine imports this package at startup, so it cannot run',
-    'without it. These three options all work:',
+    'without it, and none was found where pi or a global npm install puts one.',
+    'Any ONE of these fixes it:',
     '',
-    '    npm install -g @earendil-works/pi-coding-agent   # install just the missing host package',
-    '    npm install -g @lincoln504/pi-research           # global — brings it in with the engine',
-    '                                                     # (npm >= 7 resolves peer dependencies)',
+    `    npm install --prefix "${enginePrefix(pkgDir)}" --legacy-peer-deps @earendil-works/pi-ai @earendil-works/pi-coding-agent @earendil-works/pi-tui typebox`,
+    '                      # into the tree the engine is installed in (kept across `pi update`)',
+    '    npm install -g @earendil-works/pi-coding-agent       # a global install is found automatically',
+    '    npm install -g @lincoln504/pi-research               # global — brings the peers in with the engine',
+    '    export PI_RESEARCH_HOST_DIR=/path/to/node_modules    # a directory that holds them',
     '    # or point the launcher at a working engine:  export PI_RESEARCH_PATH=/path/to/pi-research',
     '',
-    'This happens when the install skipped peer dependencies (--legacy-peer-deps,',
-    'yarn classic), or when pi itself provides the host package only in-process.',
+    'This happens when the install skipped peer dependencies (--legacy-peer-deps, which',
+    '`pi install` always passes; yarn classic): pi itself provides them only in-process.',
     '',
     `(engine located at: ${pkgDir})`,
     '',

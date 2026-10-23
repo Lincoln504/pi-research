@@ -51,13 +51,16 @@ pi-research skill install
 
 No extra setup is needed. The package ships ready-made bindings for every platform and declares no build step, so there is nothing to approve or compile. The stealth browser (1GB+ installed) is fetched by the `postinstall` script whenever npm runs dependency install scripts — which is npm 10 through 11.19 (11.16–11.19 print a warning) — and that includes the npm bundled with the Node 22.22.2 floor this package requires (10.9.7) and the npm bundled with Node 24/25 (11.19.0), so expect the fetch during install. npm 12, the current npm, blocks dependency install scripts by default, and the browser is then fetched lazily on the first scrape instead. Either way the first scrape takes a few minutes until it is in place. Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to defer the fetch deliberately.
 
-The `@earendil-works/pi-*` host packages are **peer dependencies**. pi supplies its own copies when it loads this as an extension, and npm ≥7 installs them automatically for a standalone (global or project) install. An install that skips peers does not get them: `npm install --legacy-peer-deps`, yarn classic, and `pi install` itself (it passes that flag on purpose) are all in that group. The standalone engine and the agent-skill launcher then stop with a message naming the missing package; add it with:
+The `@earendil-works/pi-*` host packages are **peer dependencies**. pi supplies its own copies when it loads this as an extension, and npm ≥7 installs them automatically for a standalone (global or project) install. An install that skips peers does not get them: `npm install --legacy-peer-deps`, yarn classic, and `pi install` itself (it passes that flag on purpose) are all in that group. The standalone engine and the agent-skill launcher look for the host's copies where pi or a global npm install puts them (the global npm root of the running Node, the directory behind the `pi` command, bun's global root, or a directory named by `PI_RESEARCH_HOST_DIR`) and use them when they are not installed beside the engine, so a `pi install` plus a global pi works for agents with no extra step. When nothing is found they stop with a message naming the missing packages and the commands that fix it:
 
 ```bash
+# into the tree pi-research is installed in (for pi: ~/.pi/agent/npm); kept across `pi update`
+npm install --prefix ~/.pi/agent/npm --legacy-peer-deps @earendil-works/pi-ai @earendil-works/pi-coding-agent @earendil-works/pi-tui typebox
+# or a global install, which is found automatically
 npm install -g @earendil-works/pi-coding-agent
 ```
 
-Standalone use needs that package on disk because the CLI and SDK import it directly. In pi, nothing is needed: the host's own copy is aliased in for both.
+`PI_RESEARCH_NO_HOST_FALLBACK=1` turns the lookup off. Inside pi nothing is needed: the host's own copy is aliased in for the extension, and the browser worker bundle carries the one peer it needs (`typebox`) itself.
 
 In pi, the extension works out of the box on the session's model and pi's configuration. Standalone use ([agent skill](docs/AGENT-SKILL.md) or [SDK](docs/SDK.md)) needs a model configured. See [Configuration](docs/CONFIGURATION.md).
 
@@ -66,6 +69,8 @@ In pi, the extension works out of the box on the session's model and pi's config
 `pi update --extensions` moves every installed extension to its newest published version; `pi update npm:@lincoln504/pi-research` targets only this one. A versioned source (`npm:@lincoln504/pi-research@1.7.9`) is pinned and never updates — remove and reinstall it to move versions.
 
 ### Uninstall
+
+If `pi update` prints errors for this extension, check `~/.pi/agent/settings.json` (`pi list`) for a source spelled `npm:lincoln504/pi-research`, without the `@`. npm reads `lincoln504/pi-research` as a GitHub `user/repo`, so pi installs the repository's main branch (building it, and registering the extension a second time) instead of the published release. Run `pi remove npm:lincoln504/pi-research`, then `pi install npm:@lincoln504/pi-research`.
 
 `pi remove npm:@lincoln504/pi-research` removes the extension. `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. npm 7+ no longer runs `preuninstall`, so nothing else is removed on its own: skill links into other agents (Claude Code, Codex, …), the state directory (`~/.pi/research/state`), and the cache (`~/.cache/pi-research`, including any downloaded embedding models) stay in place. Remove the skill links first with `pi-research skill uninstall` (or `/research-config` → Remove from External Agents), then remove the rest with `pi-research cleanup`: The shared stealth-browser cache (`~/.cache/camoufox`) is preserved unless `PI_RESEARCH_PURGE_BROWSERS=1`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
 
@@ -98,7 +103,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds.
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
 - pi (`@earendil-works/pi-coding-agent`) 0.99.0 or newer, including the 1.x line. The pi extension uses the host's copy while the standalone CLI and agent skill install it as a dependency. A host newer than the last version this release was tested against still runs, with a one-line notice; the tested ceiling is in `src/core/pi-version.ts`.
 - Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them. Prefer no embedding model at all? Set `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25` for a pure lexical (BM25) knowledge store — see [KNOWLEDGE-STORE.md](docs/KNOWLEDGE-STORE.md).
-- `npm audit` on a consumer project may report a high-severity `sharp` 0.33.5 chain under `@lancedb/lancedb`. LanceDB pins an old `@huggingface/transformers` and npm ignores a dependency's `overrides`, so only the consuming project can fix it. pi-research never calls that copy. Add `"overrides": {"@lancedb/lancedb": {"@huggingface/transformers": "^4.3.1"}}` to the consuming project's `package.json` (for `pi install`, to `~/.pi/agent/npm/package.json`) to remove that chain entirely (measured 0 advisories on every install shape). The narrower `"overrides": {"sharp": "^0.35.4"}` also clears it. Details in [AUDIT-GATE.md](docs/AUDIT-GATE.md).
+- `npm audit` on a consumer project reported a high-severity `sharp` 0.33.5 chain under `@lancedb/lancedb` for every release before 1.7.18: LanceDB pins an old `@huggingface/transformers` as an optional dependency and npm ignores a dependency's `overrides`. From 1.7.18 the package ships LanceDB bundled with those optional edges removed, so no override is needed (measured 0 advisories on every install shape). On an older release, add `"overrides": {"@lancedb/lancedb": {"@huggingface/transformers": "^4.3.1"}}` to the consuming project's `package.json` (for `pi install`, to `~/.pi/agent/npm/package.json`). Details in [AUDIT-GATE.md](docs/AUDIT-GATE.md).
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
 
 ### Channels

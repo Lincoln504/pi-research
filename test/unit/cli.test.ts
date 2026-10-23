@@ -1779,11 +1779,14 @@ describe('skill launcher subprocess', () => {
     });
 
     it('exits 78 with the install remedy instead of a stack trace', () => {
-      const r = runSkill(['status'], { PI_RESEARCH_PATH: engineDir });
+      // Hermetic: a developer machine usually HAS a global pi, which the host fallback would find.
+      const r = runSkill(['status'], { PI_RESEARCH_PATH: engineDir, PI_RESEARCH_NO_HOST_FALLBACK: '1' });
 
       expect(r.status).toBe(78);
       expect(r.stderr).toContain('@earendil-works/pi-coding-agent');
       expect(r.stderr).toContain('npm install -g @earendil-works/pi-coding-agent');
+      // The remedy must name the layout-specific command that actually works for this install.
+      expect(r.stderr).toContain(`npm install --prefix "${engineDir}" --legacy-peer-deps`);
       expect(r.stderr).not.toContain('ERR_MODULE_NOT_FOUND');
       // The engine must not have been spawned: the point is to fail before it does.
       expect(r.stdout).not.toContain('engine ran');

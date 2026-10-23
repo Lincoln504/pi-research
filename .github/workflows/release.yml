@@ -211,6 +211,19 @@ jobs:
           # The agent-skill launcher is the entry point coding agents actually
           # invoke, and it is a separate bundle with its own resolution logic.
           node node_modules/@lincoln504/pi-research/agent-skill/pi-research/scripts/run.mjs --help > /dev/null
+
+          # The pi shape: `pi install` runs npm with --legacy-peer-deps, so peerDependencies
+          # are NOT installed, and the browser worker (a plain Node child process) cannot lean
+          # on the host for them. Install that way and start the workers standalone
+          # (verify-package.cjs installed). v1.7.9-v1.7.18 shipped a worker importing the peer
+          # `typebox`: it died at import, exit 1, for every pi install user.
+          cd /tmp
+          rm -rf pi-test-install-legacy && mkdir pi-test-install-legacy && cd pi-test-install-legacy
+          npm init -y > /dev/null
+          npm install --legacy-peer-deps "${{ github.workspace }}/${TAR_FILE}"
+          test ! -d node_modules/typebox || { echo "typebox unexpectedly installed; this no longer tests the pi shape"; exit 1; }
+          node "${{ github.workspace }}/scripts/verify-package.cjs" installed \
+            "$(pwd)/node_modules/@lincoln504/pi-research"
           echo "OK: Install smoke-test passed (files present AND the installed CLI runs)"
 
       - name: Upload vetted tarball

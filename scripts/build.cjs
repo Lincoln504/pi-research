@@ -36,6 +36,7 @@ const COMMON = {
 };
 
 const p = (...segs) => path.join(ROOT, ...segs);
+const { installedRuntimeNames } = require('./bare-imports.cjs');
 
 // The out-of-process WebGPU viability probe is plain .mjs (not bundled). It must
 // sit next to the bundled entry points so the embedder can resolve it relative to
@@ -57,6 +58,9 @@ function copyWebGpuProbe() {
 function copyCliBin() {
   fs.mkdirSync(p('dist'), { recursive: true });
   fs.copyFileSync(p('src', 'cli-bin.mjs'), p('dist', 'cli-bin.mjs'));
+  // The shim imports these two next to itself (peer-dependency fallback; see host-roots.mjs).
+  fs.copyFileSync(p('src', 'host-roots.mjs'), p('dist', 'host-roots.mjs'));
+  fs.copyFileSync(p('src', 'host-resolve-hook.mjs'), p('dist', 'host-resolve-hook.mjs'));
   // copyFileSync preserves the SOURCE mode. The source is committed executable
   // (100755) so this is belt-and-braces, but nothing about the shipped bin should
   // depend on the source file's mode or on the umask of whatever builds it. The
@@ -70,8 +74,19 @@ function copyCliBin() {
 // Build the browser worker bundle. Factored out so the cli target can guarantee
 // it exists when built in isolation (`build:cli`), not only via `build all`.
 function buildWorker() {
+  // The worker is a poolifier cluster child: a plain Node process that gets no help from
+  // pi's extension loader (which aliases the peer `typebox` for in-process code only), and
+  // `pi install` never installs peers (--legacy-peer-deps). So what npm really installs for
+  // a consumer — dependencies and optionalDependencies — stays external, and everything
+  // else it imports (today: `typebox`) is bundled in. v1.7.9-v1.7.18 left typebox external,
+  // and every worker died at import for `pi install` users. verify-package.cjs scans the
+  // result (scripts/bare-imports.cjs) so a future peer import fails the build, not a user.
+  const pkg = require(p('package.json'));
+  const external = [...installedRuntimeNames(pkg)].flatMap((n) => [n, `${n}/*`]);
+  const { packages: _external, ...common } = COMMON;
   return esbuild.build({
-    ...COMMON,
+    ...common,
+    external,
     entryPoints: [p('src', 'infrastructure', 'browser', 'thread-worker.ts')],
     outfile: p('src', 'infrastructure', 'browser', 'thread-worker.mjs'),
   });

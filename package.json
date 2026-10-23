@@ -17,6 +17,8 @@
   "files": [
     "src/",
     "dist/cli-bin.mjs",
+    "dist/host-roots.mjs",
+    "dist/host-resolve-hook.mjs",
     "dist/cli.mjs",
     "dist/thread-worker.mjs",
     "dist/pdf-extract-worker.mjs",
@@ -37,6 +39,7 @@
     "scripts/cleanup.cjs",
     "scripts/camoufox-layout.cjs",
     "scripts/build.cjs",
+    "scripts/bare-imports.cjs",
     "scripts/prepare.cjs",
     "LICENSE",
     "docs/THIRD-PARTY-NOTICES.md",

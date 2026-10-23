@@ -65,6 +65,8 @@ describe('pi-research bin shim', () => {
     mkdirSync(path.join(workDir, 'dist'), { recursive: true });
     shim = path.join(workDir, 'dist', 'cli-bin.mjs');
     copyFileSync(SHIM_SOURCE, shim);
+    // The shim imports its peer-dependency fallback from beside itself.
+    for (const f of ['host-roots.mjs', 'host-resolve-hook.mjs']) copyFileSync(path.join(REPO, 'src', f), path.join(workDir, 'dist', f));
     writeFileSync(path.join(workDir, 'dist', 'cli.mjs'), STUB_CLI);
   });
 
@@ -77,6 +79,9 @@ describe('pi-research bin shim', () => {
       encoding: 'utf-8',
       cwd: workDir,
       timeout: 20_000,
+      // Hermetic: a developer machine usually HAS a global pi, which the host fallback would find
+      // (that behaviour has its own tests in host-roots.test.ts).
+      env: { ...process.env, PI_RESEARCH_NO_HOST_FALLBACK: '1' },
     });
     return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
   }
@@ -96,6 +101,36 @@ describe('pi-research bin shim', () => {
     );
     expect(r.stderr).not.toContain('ERR_MODULE_NOT_FOUND');
     expect(r.stdout).not.toContain('engine ran');
+  });
+
+  it('starts when the peers exist only in the host\'s own tree (PI_RESEARCH_HOST_DIR), via the resolve hook', () => {
+    rmSync(path.join(workDir, 'node_modules'), { recursive: true, force: true });
+    const hostRoot = mkdtempSync(path.join(tmpdir(), 'pi-research-host-'));
+    try {
+      for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-coding-agent', '@earendil-works/pi-tui', 'typebox']) {
+        hostPackage(hostRoot, name);
+      }
+      // An engine that really imports the host packages, so the resolver (not the shim's probe) is what is tested.
+      const engine = path.join(workDir, 'dist', 'cli.mjs');
+      const original = readFileSync(engine, 'utf-8');
+      writeFileSync(engine, `import { host } from '@earendil-works/pi-coding-agent';\nimport 'typebox';\n${original}\nconsole.log('host import ok: ' + host);\n`);
+      try {
+        const r = spawnSync(process.execPath, [shim, 'status'], {
+          encoding: 'utf-8',
+          cwd: workDir,
+          timeout: 20_000,
+          env: { ...process.env, PI_RESEARCH_HOST_DIR: path.join(hostRoot, 'node_modules') },
+        });
+        expect(r.stderr).not.toContain('ERR_MODULE_NOT_FOUND');
+        expect(r.status).toBe(0);
+        expect(r.stdout).toContain('engine ran');
+        expect(r.stdout).toContain('host import ok: true');
+      } finally {
+        writeFileSync(engine, original);
+      }
+    } finally {
+      rmSync(hostRoot, { recursive: true, force: true });
+    }
   });
 
   it('names only the package that is actually missing', () => {

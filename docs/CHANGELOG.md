@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.19] - 2026-10-23
+
+### Fixed
+
+- **Search workers no longer die at import for every `pi install` user (v1.7.9-v1.7.18).** The browser worker (`dist/thread-worker.mjs`, a poolifier cluster child, i.e. a plain Node process) imported the peer dependency `typebox`, which became a peer in 1.7.9. pi installs with `--legacy-peer-deps`, so peers are never installed there, and pi supplies `typebox` to extension code only in-process: the worker exited with code 1 within ~200 ms (`ERR_MODULE_NOT_FOUND`), every search failed with "Worker exited before completing the task", and pool auto-recovery looped. Found on a user's machine (Jasper's logs: 669 worker exits across 4 days, each pool start killing all three workers) and reproduced from a clean `pi install` of 1.7.15. The strict-resolution install the release job ran has peers present and could not see it, and the repository's dev tree has `typebox` as a devDependency. The worker is now bundled with `typebox` inline (`scripts/build.cjs`: everything npm installs for a consumer stays external, everything else is bundled), growing it from ~140 KB to ~530 KB.
+- **The agent skill and the standalone CLI work from a `pi install` tree.** The engine's bin shim stopped with "required runtime dependency ... is not installed alongside it" on every call, because the pi-managed tree has no host packages and Node's ESM resolver ignores NODE_PATH and the global npm root, so the documented remedy (`npm install -g @earendil-works/pi-coding-agent`) could not help either (reproduced on a machine that HAS a global pi). The shim now finds the host's copies where pi or a global npm install puts them (`src/host-roots.mjs`: `PI_RESEARCH_HOST_DIR`, the directory behind `pi` on PATH, the running Node's global root, bun's global root, then `npm root -g`) and registers a resolve hook (`src/host-resolve-hook.mjs`) that falls back to them for the four host packages only, after normal resolution fails. The skill launcher uses the same lookup before refusing to start. `PI_RESEARCH_NO_HOST_FALLBACK=1` turns it off. When nothing is found, the message names the commands that work for the layout, including `npm install --prefix <install root> --legacy-peer-deps ...`, which `pi update` keeps.
+
+### CI
+
+- **A second consumer install in the shape `pi install` uses** (`npm install --legacy-peer-deps`, peers absent) runs in both `ci.yml` and the release `test-install` job, and `verify-package.cjs installed` now statically scans the worker bundles for imports that are not installed dependencies (`scripts/bare-imports.cjs`) and STARTS both worker bundles standalone. Run against the published 1.7.18 it fails on all three counts.
+- **The "Pack real tarball" step runs the LanceDB strip explicitly** (`npm pack --ignore-scripts` skips `prepack`).
+
+### Documentation
+
+- **README:** the peer-dependency paragraph describes the host lookup and the working remedies; the `sharp` note says 1.7.18 removed the need for an override; a troubleshooting entry for a `pi update` that errors because `settings.json` lists `npm:lincoln504/pi-research` (no `@`), which npm reads as a GitHub shorthand and which makes pi install the repository's main branch and register the extension twice.
+
 ## [1.7.18] - 2026-10-23
 
 ### Security

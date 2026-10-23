@@ -54,6 +54,10 @@ const REQUIRED = [
   // statically, and only then loads the bundle. A missing shim means `bin`
   // resolves to nothing, so npm installs a command that does not exist.
   'dist/cli-bin.mjs',
+  // The shim's peer-dependency fallback (imported next to it; without them the shim itself
+  // fails to load, before it can print anything).
+  'dist/host-roots.mjs',
+  'dist/host-resolve-hook.mjs',
   // Out-of-process WebGPU viability probe (cli.mjs spawns it; shipped via files[])
   'dist/webgpu-probe.mjs',
   // Agent skill — the launcher + definition that coding agents load
@@ -294,6 +298,7 @@ function verifyManifest() {
 
   verifyPromptsInSync();
   verifyLocalRequiresShipped(files);
+  verifyWorkerBundlesSelfSufficient(ROOT);
 
   for (const f of files) {
     // Files of a deliberately bundled dependency are third-party content, checked above.
@@ -336,6 +341,30 @@ function verifyLocalRequiresShipped(shipped) {
   }
 }
 
+/**
+ * The worker bundles run as plain Node processes and must resolve every bare import from
+ * the installed package's own dependencies — never from a peer, which `pi install`
+ * (--legacy-peer-deps) does not install. See scripts/bare-imports.cjs. Statically scans
+ * the bundles in `dir`, then actually STARTS each standalone: a worker that cannot import
+ * its dependencies exits 1 with ERR_MODULE_NOT_FOUND, exactly how v1.7.9-v1.7.18 broke.
+ */
+function verifyWorkerBundlesSelfSufficient(dir, { run = false } = {}) {
+  const { unresolvableImports } = require('./bare-imports.cjs');
+  const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  for (const { file, name } of unresolvableImports(dir, pkg)) {
+    fail(`${file} imports "${name}", which is not an installed dependency (peers are not installed by pi install --legacy-peer-deps): the worker would die at import. Bundle it (scripts/build.cjs) or make it a dependency.`);
+  }
+  if (!run) return;
+  const { spawnSync } = require('child_process');
+  for (const rel of ['dist/thread-worker.mjs', 'dist/pdf-extract-worker.mjs']) {
+    if (!fs.existsSync(path.join(dir, rel))) continue;
+    const r = spawnSync(process.execPath, [path.join(dir, rel)], { cwd: dir, encoding: 'utf8', timeout: 20000 });
+    if (r.status !== 0 || /ERR_MODULE_NOT_FOUND|Cannot find (package|module)/.test(r.stderr || '')) {
+      fail(`${rel} does not start standalone (exit ${r.status}): ${(r.stderr || '').split('\n').find((l) => /Error|Cannot find/.test(l)) ?? ''}`);
+    }
+  }
+}
+
 function verifyInstalled(pkgDir) {
   if (!pkgDir || !fs.existsSync(pkgDir)) {
     fail(`installed package dir not found: ${pkgDir}`);
@@ -365,6 +394,8 @@ function verifyInstalled(pkgDir) {
 
   // The bundled LanceDB wrapper must be the stripped copy, and a native binding for THIS
   // platform must have been installed beside it (the wrapper no longer pulls it in itself).
+  verifyWorkerBundlesSelfSufficient(pkgDir, { run: true });
+
   const bundledWrapper = path.join(pkgDir, 'node_modules', '@lancedb', 'lancedb', 'package.json');
   if (!fs.existsSync(bundledWrapper)) {
     fail('Installed package has no bundled @lancedb/lancedb.');
