@@ -19,24 +19,27 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import * as esbuild from 'esbuild';
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const bundleDir = path.join(__dirname, 'cjs-bundles');
-const esbuildBin = path.join(repoRoot, 'node_modules', '.bin', 'esbuild');
 
-function bundleToCjs(source: string, outFile: string): void {
-  const result = spawnSync(esbuildBin, [
-    source,
-    '--bundle',
-    '--platform=node',
-    '--format=cjs',
-    `--outfile=${outFile}`,
-    '--external:node:*',
-  ], { encoding: 'utf-8' });
-  if (result.status !== 0) {
-    throw new Error(`esbuild failed for ${source}:\n${result.stderr}`);
+async function bundleToCjs(source: string, outFile: string): Promise<void> {
+  // The esbuild JS API (not the CLI): it locates and spawns the platform
+  // native binary itself, so it works identically on Linux, macOS and
+  // Windows (the .bin shim is a .cmd on Windows, which spawnSync cannot
+  // execute directly).
+  const result = await esbuild.build({
+    entryPoints: [source],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile: outFile,
+    external: ['node:*'],
+  });
+  if (result.errors.length > 0) {
+    throw new Error(`esbuild failed for ${source}:\n${JSON.stringify(result.errors)}`);
   }
   // Reproduce pi's actual loader (jiti) exactly: jiti's CJS output shims
   // `import.meta.url` (to the file's own URL) but NOT `import.meta.resolve`
@@ -63,8 +66,8 @@ describe('CJS loader context (pi transform pipeline)', () => {
     fs.rmSync(bundleDir, { recursive: true, force: true });
   });
 
-  it('checkModule resolves installed packages from the CJS bundle', () => {
-    bundleToCjs(path.join(repoRoot, 'src/web-research/utils.ts'), path.join(bundleDir, 'utils.cjs'));
+  it('checkModule resolves installed packages from the CJS bundle', async () => {
+    await bundleToCjs(path.join(repoRoot, 'src/web-research/utils.ts'), path.join(bundleDir, 'utils.cjs'));
     const mod = require(path.join(bundleDir, 'utils.cjs')) as { checkModule: (name: string) => boolean };
     // Both are direct dependencies of this package: resolvable from any file
     // inside the repo tree. The pre-fix code returned false for both here
@@ -75,11 +78,11 @@ describe('CJS loader context (pi transform pipeline)', () => {
     expect(mod.checkModule('definitely-not-a-real-package-xyz')).toBe(false);
   });
 
-  it('isBrowserAvailable reports an installed browser from the CJS bundle', () => {
+  it('isBrowserAvailable reports an installed browser from the CJS bundle', async () => {
     // Build the exact installed layout in the sandboxed unit HOME: the compat
     // flag plus the paired build (pin from browser-pin.json: official
     // 156.0.1 beta.36). The directory hash is not part of the pin match.
-    bundleToCjs(path.join(repoRoot, 'src/infrastructure/browser/config.ts'), path.join(bundleDir, 'config.cjs'));
+    await bundleToCjs(path.join(repoRoot, 'src/infrastructure/browser/config.ts'), path.join(bundleDir, 'config.cjs'));
     const mod = require(path.join(bundleDir, 'config.cjs')) as {
       isBrowserAvailable: () => boolean;
       getCamoufoxBinaryPath: () => string;
