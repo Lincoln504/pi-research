@@ -5,17 +5,17 @@
  * Proves the knowledge-store's Arrow/LanceDB boundary works when pi-research
  * is resolved from a fresh npm consumer install. The pin rationale
  * (docs/ARCHITECTURE.md, "Pinned data stack"): apache-arrow must be the exact
- * 21.1.0 because lancedb 0.37.x's Rust reader cannot parse 21.2.0 IPC, and
- * every lancedb release through 0.37 declares a conservative peer ceiling of
- * `>=15.0.0 <=18.1.0`. npm therefore resolves a hoisted 18.1.0 copy for
- * lancedb and nests the pinned 21.1.0 under the package — two Arrow copies in
- * the consumer tree, unlike the single-copy dev tree the override produces.
+ * 21.1.0 because lancedb 0.37.x's Rust reader cannot parse 21.2.0 IPC.
+ * Before 1.7.18 LanceDB was resolved from the registry, so a consumer tree held TWO
+ * Arrow copies (its declared peer ceiling `<=18.1.0` hoisted for LanceDB, our 21.1.0
+ * nested under the package). LanceDB is now bundled inside the package
+ * (scripts/prepack-lancedb.cjs) and shares the single 21.1.0 copy, the same layout the
+ * dev tree and every test run on; this probe asserts that layout actually works.
  *
  * This script replicates src/knowledge/store-schema.ts's createStoreTable call
  * shape (same fields, same FTS/BTree index set, same reopen-from-disk) using
- * exactly the resolution a consumer process gets: the Arrow copy nested under
- * the installed package (21.1.0) and the lancedb npm hoisted for its peer
- * range. It is the regression net for that boundary — the dev-tree integration
+ * exactly the resolution a consumer process gets, resolved from the installed
+ * package. It is the regression net for that boundary — the dev-tree integration
  * suite cannot catch a divergence that only exists in the consumer layout.
  *
  * Usage: node scripts/consumer-interop-probe.cjs <tree-root> <package-dir>
@@ -36,27 +36,44 @@ function fail(message) {
 if (!treeRoot || !packageDir) {
   fail('usage: node scripts/consumer-interop-probe.cjs <tree-root> <package-dir>');
 }
-if (!fs.existsSync(path.join(treeRoot, 'node_modules', '@lancedb', 'lancedb'))) {
-  fail(`lancedb not found under ${treeRoot}/node_modules`);
+// Resolve exactly as the consumer's process does, from the installed package: LanceDB is
+// bundled inside it (scripts/prepack-lancedb.cjs), and apache-arrow is the single copy the
+// package depends on.
+const { createRequire } = require('node:module');
+const fromPackage = createRequire(path.join(packageDir, 'package.json'));
+let lancedb;
+let arrow21;
+try {
+  lancedb = fromPackage('@lancedb/lancedb');
+  arrow21 = fromPackage('apache-arrow');
+} catch (e) {
+  fail(`cannot resolve @lancedb/lancedb / apache-arrow from ${packageDir}: ${e.message}`);
 }
-if (!fs.existsSync(path.join(packageDir, 'node_modules', 'apache-arrow'))) {
-  fail(`apache-arrow not found nested under ${packageDir}/node_modules`);
+if (!fs.existsSync(path.join(packageDir, 'node_modules', '@lancedb', 'lancedb', 'package.json'))) {
+  fail(`@lancedb/lancedb is not bundled inside ${packageDir}`);
 }
-
-// Bare-specifier resolution from the package (like Node/jiti resolves in-host):
-// the NESTED arrow copy under the package wins for pi-research code. Resolve by
-// absolute path so the probe never depends on the script's own CWD.
-const arrow21 = require(path.join(packageDir, 'node_modules', 'apache-arrow'));
-const lancedb = require(path.join(treeRoot, 'node_modules', '@lancedb', 'lancedb'));
 const { Schema, Field, Float32, FixedSizeList, Utf8, Int64, Bool } = arrow21;
 const { Index } = lancedb;
 
-let arrowVersion = '?';
-try { arrowVersion = require(path.join(packageDir, 'node_modules', 'apache-arrow', 'package.json')).version; } catch {}
-let lancedbVersion = '?';
-try { lancedbVersion = require(path.join(treeRoot, 'node_modules', '@lancedb', 'lancedb', 'package.json')).version; } catch {}
+// `pkg/package.json` is not an exports subpath of every package, so walk up from the
+// resolved entry file to the manifest that carries the name.
+function versionOf(name) {
+  try {
+    let dir = path.dirname(fromPackage.resolve(name));
+    for (let i = 0; i < 6; i++, dir = path.dirname(dir)) {
+      const f = path.join(dir, 'package.json');
+      if (fs.existsSync(f)) {
+        const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+        if (j.name === name) return j.version;
+      }
+    }
+  } catch {}
+  return '?';
+}
+const arrowVersion = versionOf('apache-arrow');
+const lancedbVersion = versionOf('@lancedb/lancedb');
 console.error(
-  `consumer-interop-probe: arrow ${arrowVersion} (nested/ours) \u00d7 lancedb ${lancedbVersion} (hoisted)`,
+  `consumer-interop-probe: arrow ${arrowVersion} (ours) \u00d7 lancedb ${lancedbVersion} (bundled)`,
 );
 
 const { tmpdir } = require('node:os');

@@ -23,7 +23,7 @@
 
 'use strict';
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -180,12 +180,23 @@ function verifyVersionSync() {
 function verifyManifest() {
   verifyVersionSync();
 
+  // --ignore-scripts skips the prepack lifecycle, so run the LanceDB bundle strip explicitly:
+  // without it npm bundles this machine's native binding into the listing (~78 MB).
+  try {
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'prepack-lancedb.cjs')], { cwd: ROOT, stdio: ['ignore', 'ignore', 'inherit'] });
+  } catch (e) {
+    fail(`scripts/prepack-lancedb.cjs failed: ${e.message}`);
+    return;
+  }
+
   let raw;
   try {
     raw = execSync('npm pack --dry-run --json --ignore-scripts', {
       cwd: ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      // The bundled dependencies add ~700 entries to the listing; the 1 MB default overflows.
+      maxBuffer: 64 * 1024 * 1024,
     });
   } catch (e) {
     fail(`npm pack --dry-run failed: ${e.message}`);

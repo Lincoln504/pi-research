@@ -411,8 +411,9 @@ advisory-ridden `0.5.18`, and neither range can be lifted downstream (npm ignore
 dependency's `overrides`, so the repository's own `sharp`/`adm-zip` overrides reach only the
 tree rooted here). `4.3.0` ships `sharp ^0.35.4` and `onnxruntime-node 1.30.0`
 (`adm-zip ^0.6.0`), which clears both advisory groups for consumers as well. It also moves the
-native stack with it (onnxruntime-web `1.26.0-dev.20260416` → `1.31.0-dev.20260914`, left
-overridden at the stable `1.24.3` as before) and reshapes the tree (`global-agent` 3.0.0 →
+native stack with it (onnxruntime-web `1.26.0-dev.20260416` → `1.31.0-dev.20260914`; the
+stable `1.24.3` override was removed in 1.7.18 because npm 12 will not pack with overrides that
+touch bundled packages, and consumers never received it anyway) and reshapes the tree (`global-agent` 3.0.0 →
 4.1.3, dropping seven packages from its old subtree: `roarr`, `boolean`, `detect-node`, `es6-error`,
 `json-stringify-safe`, `semver-compare`, `sprintf-js`).
 

@@ -64,6 +64,25 @@ if (wrapper.optionalDependencies || !wrapper[MARK]) {
 }
 const kept = Object.fromEntries(Object.entries(original).filter(([name]) => PLATFORM.test(name)));
 
+// 1b. Widen the wrapper's apache-arrow peer range to the exact version this package depends
+//     on. The wrapper declares `>=15 <=18.1.0`; with it bundled, the consumer tree holds a
+//     single apache-arrow (our pinned 21.1.0, the same copy the dev tree and every test run
+//     against), so npm would mark that peer edge invalid and `npm ls` would exit non-zero in
+//     every consumer project. The original range is kept under a marker key.
+const PEER_MARK = 'x-pi-research-original-peerDependencies';
+const arrowPin = root.dependencies?.['apache-arrow'];
+if (!arrowPin) fail('package.json must pin apache-arrow as a dependency.');
+const originalPeers = wrapper[PEER_MARK] ?? wrapper.peerDependencies ?? {};
+if (originalPeers['apache-arrow']) {
+  const widened = { ...originalPeers, 'apache-arrow': `${originalPeers['apache-arrow']} || ${arrowPin}` };
+  if (wrapper.peerDependencies?.['apache-arrow'] !== widened['apache-arrow'] || !wrapper[PEER_MARK]) {
+    wrapper[PEER_MARK] = originalPeers;
+    wrapper.peerDependencies = widened;
+    fs.writeFileSync(wrapperPath, JSON.stringify(wrapper, null, 2) + '\n');
+    console.log(`prepack-lancedb: widened the bundled apache-arrow peer range to "${widened['apache-arrow']}".`);
+  }
+}
+
 // 2. The platform bindings are therefore no longer reachable through the wrapper, so the
 //    root must declare each one, at the wrapper's own version. npm resolves them per
 //    os/cpu/libc and hoists them next to the bundled wrapper, where its loader finds them.
@@ -85,4 +104,12 @@ for (const dep of Object.keys(wrapper.dependencies ?? {})) {
     if (!bundled.has(d2)) fail(`bundleDependencies is missing ${d2}, a runtime dependency of ${dep}.`);
   }
 }
+// 4. npm computes the bundle from node_modules/.package-lock.json (the hidden lockfile)
+//    whenever it considers it current, and it does NOT notice an edited package.json inside
+//    node_modules: the first pack after an install would still bundle the stripped
+//    wrapper's old optional edges (measured: a 229 MB tarball carrying the native binding).
+//    Removing the file forces npm to read the manifests; it rebuilds the file itself.
+const hidden = path.join(ROOT, 'node_modules', '.package-lock.json');
+if (fs.existsSync(hidden)) fs.rmSync(hidden, { force: true });
+
 console.log(`prepack-lancedb: @lancedb/lancedb ${wrapper.version} bundle OK (${Object.keys(kept).length} platform bindings declared at the root).`);
