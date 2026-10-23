@@ -106,6 +106,9 @@ describe('KnowledgeStore fault injection (real LanceDB)', () => {
   });
 
   it('an unusable (read-only) dbDir makes open() fail loudly and a later open() genuinely retries', async () => {
+    // POSIX-only semantics: Windows ignores mode bits (NTFS uses ACLs), so a
+    // 0o500 dir is writable there and open() cannot be made to fail this way.
+    if (process.platform === 'win32') return;
     if (process.getuid?.() === 0) return; // root ignores mode bits
     const sub = path.join(dir, 'ro-parent');
     fs.mkdirSync(sub, { mode: 0o500 });
