@@ -500,7 +500,10 @@ describe('buildSteeringResult — tri-state answer steering', () => {
   it('omits the Sources section when there are no citations', () => {
     const out = buildSteeringResult({ answer_status: 'yes', synthesis: 'Answer, no citations.', citations: [] }, []);
     const text = (out.content[0] as any).text as string;
-    expect(text).toBe('Answer, no citations.');
+    // Framed as untrusted at the hand-off boundary; the body itself is unchanged.
+    expect(text.endsWith('\n\nAnswer, no citations.')).toBe(true);
+    expect(text).toContain('UNTRUSTED');
+    expect((out.details as { untrusted?: boolean }).untrusted).toBe(true);
     expect(text).not.toContain('### Sources');
   });
 });

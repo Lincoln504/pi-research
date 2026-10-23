@@ -337,6 +337,7 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
 
 import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 import { safeGetApiKeyAndHeaders } from '../core/llm/model-registry-factory.ts';
+import { frameUntrustedReport } from '../utils/untrusted-notice.ts';
 
 // ---------------------------------------------------------------------------
 // Phase 4: Stateless Background Execution + Agentic Repair
@@ -799,8 +800,9 @@ export function buildSteeringResult(
     metrics.increment('research_knowledge_search_total', 1, { status: 'partial' });
     report += '\n\n' + RESEARCH_KNOWLEDGE_MAYBE_STRING;
     return {
-      content: [{ type: 'text', text: report }],
+      content: [{ type: 'text', text: frameUntrustedReport(report) }],
       details: {
+        untrusted: true,
         source: 'research_knowledge_search',
         found: true,
         answerStatus: 'maybe',
@@ -814,8 +816,9 @@ export function buildSteeringResult(
   metrics.increment('research_knowledge_search_total', 1, { status: 'found' });
   metrics.increment('research_knowledge_search_citations_total', result.citations.length);
   return {
-    content: [{ type: 'text', text: report }],
+    content: [{ type: 'text', text: frameUntrustedReport(report) }],
     details: {
+      untrusted: true,
       source: 'research_knowledge_search',
       found: true,
       answerStatus: 'yes',

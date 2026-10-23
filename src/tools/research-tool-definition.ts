@@ -40,6 +40,7 @@ import { isPromptCachingActiveForModel } from '../core/llm/research-model-resolv
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
 import { extractRunStats, buildResearchSummary } from '../utils/metrics-summary.ts';
+import { frameUntrustedReport } from '../utils/untrusted-notice.ts';
 
 /**
  * Append a unified research summary to the result.
@@ -536,8 +537,9 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         });
 
         return {
-          content: [{ type: 'text', text: researchRunResult.result }],
+          content: [{ type: 'text', text: researchRunResult.result === 'Research cancelled.' ? researchRunResult.result : frameUntrustedReport(researchRunResult.result) }],
           details: {
+            untrusted: true,
             totalTokens: researchRunResult.tokens,
             researchId: researchRunResult.researchId,
             ...(researchRunResult.cancelled ? { cancelled: true } : {}),

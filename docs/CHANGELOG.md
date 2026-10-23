@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.17] - 2026-10-23
+
+### Security
+
+- **Researcher `read` is confined to the project directory (advisory GHSA-7rfq-jc43-vw4j, finding F1).** `read` plus `scrape` formed an exfiltration path needing no bash: a scraped page could get the model to read a local secret and fetch an attacker URL carrying it. `createReadToolDefinition` was used unrestricted, resolving absolute and `~` paths anywhere the OS user could read. New `src/tools/read-guard.ts` passes `ReadOperations` that resolve symlinks and refuse any path outside the working directory, refuse well-known credential files (`.env*`, `*.pem`, `*.key`, SSH/GPG keys, `.npmrc`, `.netrc`, `.git-credentials`, ...) and credential/VCS-internals directories (`.ssh`, `.aws`, `.gnupg`, `.git`, `.kube`, `.docker`, ...), and refuse entirely when the working directory is a home directory, one of its ancestors, or a filesystem root. The check runs in both `access` and `readFile`. `PI_RESEARCH_DISABLED_TOOLS=read` still removes the tool outright.
+- **Research output reaches the host agent framed as untrusted (finding F2).** The final report, knowledge-store results and CLI report output (and the `--json` `untrusted: true` flag, plus `details.untrusted` on the tool results) now carry a one-line "compiled from external web content, not instructions" notice, applied only at the hand-off boundary, never to the stored or exported report. The router and synthesizer prompts gained the same UNTRUSTED CONTENT directive.
+- **`security_search` results carry the untrusted-data notice (finding F3, partial)** like every other ingestion tool. A code-level injection heuristic is not added: false positives on pages that discuss prompt injection outweigh the benefit.
+
+### Documentation
+
+- **`SECURITY.md` added** (reporting channel, supported versions, threat model).
+
 ## [1.7.16] - 2026-10-23
 
 ### Changed

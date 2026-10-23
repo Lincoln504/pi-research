@@ -47,6 +47,7 @@ import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFil
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { buildModelRegistry, safeGetAvailable } from './core/llm/model-registry-factory.ts';
 import { RESEARCH_TOOL_NAMES } from './constants.ts';
+import { frameUntrustedReport } from './utils/untrusted-notice.ts';
 import { isBrowserAvailable, probeBrowserNativeDeps } from './infrastructure/browser/config.ts';
 
 // ---------------------------------------------------------------------------
@@ -698,6 +699,7 @@ export async function cmdResearch(args: ResearchArgs): Promise<number> {
       // (outcome/errorReport were snapshotted right after the run resolved — see above.)
       toStdout(pretty({
         ok: true,
+        untrusted: true,
         depth,
         report,
         ...(reportPath ? { reportPath } : {}),
@@ -715,7 +717,8 @@ export async function cmdResearch(args: ResearchArgs): Promise<number> {
       // (alongside the other lifecycle lines) so it never contaminates the report
       // text a plain-mode caller pipes from stdout.
       if (cancellationRequested) toStderr('[pi-research] run was cancelled — showing the partial report.\n');
-      toStdout(report.endsWith('\n') ? report : report + '\n');
+      const framed = frameUntrustedReport(report);
+      toStdout(framed.endsWith('\n') ? framed : framed + '\n');
     }
   } catch (err) {
     exit = await reportError(err, 'research', args.json);
@@ -792,8 +795,9 @@ export async function cmdKnowledge(queries: string[], json?: boolean): Promise<n
     // `ok: true` makes `ok` a reliable success/failure discriminant across every
     // knowledge JSON variant (disabled-store above, reportError's ok:false below,
     // and this success shape) — additive only, every existing field is unchanged.
-    toStdout(pretty({ ok: true, ...(cancellationRequested ? { cancelled: true } : {}), ...result }));
+    toStdout(pretty({ ok: true, ...(cancellationRequested ? { cancelled: true } : {}), ...result, ...(result.found !== 'no' ? { untrusted: true } : {}) }));
   } else {
+    // result.text already carries the untrusted-content framing (the knowledge tool adds it).
     toStdout((result.text.endsWith('\n') ? result.text : result.text + '\n'));
   }
   return exit;
