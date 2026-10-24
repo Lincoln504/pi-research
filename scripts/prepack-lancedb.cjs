@@ -22,6 +22,11 @@
  * LanceDB stops pinning transformers 3.0.2 (docs/AUDIT-GATE.md, "clearsWhen").
  *
  * Idempotent. Exits non-zero, failing `npm pack`, if the bundle would be incomplete.
+ *
+ * The wrapper manifest is rewritten as a fixed-point transform: applying it twice yields
+ * identical bytes, so the write is unconditional and there is no check-then-write on the
+ * wrapper file (CodeQL js/file-system-race). The absence checks that used to gate the
+ * writes are folded into the reads' error handling.
  */
 
 'use strict';
@@ -40,8 +45,12 @@ function fail(msg) {
 
 const root = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const wrapperPath = path.join(ROOT, PKG);
-if (!fs.existsSync(wrapperPath)) fail(`${PKG} is not installed — run npm ci first.`);
-const wrapper = JSON.parse(fs.readFileSync(wrapperPath, 'utf8'));
+let wrapper;
+try {
+  wrapper = JSON.parse(fs.readFileSync(wrapperPath, 'utf8'));
+} catch {
+  fail(`${PKG} is not installed — run npm ci first.`);
+}
 
 const bundled = new Set(root.bundleDependencies ?? []);
 if (!bundled.has('@lancedb/lancedb')) fail('package.json bundleDependencies must list @lancedb/lancedb.');
@@ -56,13 +65,8 @@ if (root.dependencies?.['@lancedb/lancedb'] !== wrapper.version) {
 //    The original list is kept under a marker key so the script stays idempotent and the
 //    shipped manifest says what was removed.
 const MARK = 'x-pi-research-original-optionalDependencies';
+const PEER_MARK = 'x-pi-research-original-peerDependencies';
 const original = wrapper[MARK] ?? wrapper.optionalDependencies ?? {};
-if (wrapper.optionalDependencies || !wrapper[MARK]) {
-  wrapper[MARK] = original;
-  delete wrapper.optionalDependencies;
-  fs.writeFileSync(wrapperPath, JSON.stringify(wrapper, null, 2) + '\n');
-  console.log('prepack-lancedb: stripped optionalDependencies from the bundled wrapper.');
-}
 const kept = Object.fromEntries(Object.entries(original).filter(([name]) => PLATFORM.test(name)));
 
 // 1b. Widen the wrapper's apache-arrow peer range to the exact version this package depends
@@ -70,19 +74,20 @@ const kept = Object.fromEntries(Object.entries(original).filter(([name]) => PLAT
 //     single apache-arrow (our pinned 21.1.0, the same copy the dev tree and every test run
 //     against), so npm would mark that peer edge invalid and `npm ls` would exit non-zero in
 //     every consumer project. The original range is kept under a marker key.
-const PEER_MARK = 'x-pi-research-original-peerDependencies';
 const arrowPin = root.dependencies?.['apache-arrow'];
 if (!arrowPin) fail('package.json must pin apache-arrow as a dependency.');
 const originalPeers = wrapper[PEER_MARK] ?? wrapper.peerDependencies ?? {};
-if (originalPeers['apache-arrow']) {
-  const widened = { ...originalPeers, 'apache-arrow': `${originalPeers['apache-arrow']} || ${arrowPin}` };
-  if (wrapper.peerDependencies?.['apache-arrow'] !== widened['apache-arrow'] || !wrapper[PEER_MARK]) {
-    wrapper[PEER_MARK] = originalPeers;
-    wrapper.peerDependencies = widened;
-    fs.writeFileSync(wrapperPath, JSON.stringify(wrapper, null, 2) + '\n');
-    console.log(`prepack-lancedb: widened the bundled apache-arrow peer range to "${widened['apache-arrow']}".`);
-  }
+
+const out = { ...wrapper };
+delete out.optionalDependencies;
+out[MARK] = original;
+const arrowPeer = originalPeers['apache-arrow'];
+if (arrowPeer) {
+  out[PEER_MARK] = originalPeers;
+  out.peerDependencies = { ...originalPeers, 'apache-arrow': `${arrowPeer} || ${arrowPin}` };
 }
+fs.writeFileSync(wrapperPath, JSON.stringify(out, null, 2) + '\n');
+console.log(`prepack-lancedb: bundled wrapper ready (${Object.keys(kept).length} platform bindings, optional edges stripped).`);
 
 // 2. The platform bindings are therefore no longer reachable through the wrapper, so the
 //    root must declare each one, at the wrapper's own version. npm resolves them per
@@ -100,8 +105,13 @@ for (const name of Object.keys(root.optionalDependencies ?? {})) {
 for (const dep of Object.keys(wrapper.dependencies ?? {})) {
   if (!bundled.has(dep)) fail(`bundleDependencies is missing ${dep}, a runtime dependency of @lancedb/lancedb.`);
   const sub = path.join(ROOT, 'node_modules', dep, 'package.json');
-  if (!fs.existsSync(sub)) fail(`${dep} is not installed.`);
-  for (const d2 of Object.keys(JSON.parse(fs.readFileSync(sub, 'utf8')).dependencies ?? {})) {
+  let subJson;
+  try {
+    subJson = JSON.parse(fs.readFileSync(sub, 'utf8'));
+  } catch {
+    fail(`${dep} is not installed.`);
+  }
+  for (const d2 of Object.keys(subJson.dependencies ?? {})) {
     if (!bundled.has(d2)) fail(`bundleDependencies is missing ${d2}, a runtime dependency of ${dep}.`);
   }
 }
@@ -110,7 +120,8 @@ for (const dep of Object.keys(wrapper.dependencies ?? {})) {
 //    node_modules: the first pack after an install would still bundle the stripped
 //    wrapper's old optional edges (measured: a 229 MB tarball carrying the native binding).
 //    Removing the file forces npm to read the manifests; it rebuilds the file itself.
+//    force: true makes the removal a no-op when the file is absent, so no existence check.
 const hidden = path.join(ROOT, 'node_modules', '.package-lock.json');
-if (fs.existsSync(hidden)) fs.rmSync(hidden, { force: true });
+fs.rmSync(hidden, { force: true });
 
 console.log(`prepack-lancedb: @lancedb/lancedb ${wrapper.version} bundle OK (${Object.keys(kept).length} platform bindings declared at the root).`);
