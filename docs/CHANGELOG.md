@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.21] - 2026-10-24
+
+### Fixed
+
+- **CodeQL `js/file-system-race` (CWE-367) in the LanceDB prepack script.** `scripts/prepack-lancedb.cjs` gated its two `fs.writeFileSync` calls on `node_modules/@lancedb/lancedb/package.json` with conditions derived from that file's own on-disk state (check-then-write). The transform is a fixed point (running it twice yields identical bytes), so the write is now unconditional and the absence checks are folded into the reads' error handling. Behavior is unchanged: idempotent, identical shipped manifest, identical fail gates.
+
+### Changed
+
+- **impit 0.14.6 to 0.14.7.** 0.14.7 bumps apify/rustls to verify ML-DSA signatures with rustls-webpki's real verifiers instead of an Ed25519 placeholder (apify/impit#574). Patch bump within camoufox 0.5.8's `^0.14.1` range.
+
+### Documentation
+
+- **Tightened the README.** Uninstall is one causal line, the pi requirement drops a developer-facing detail (the tested-ceiling file reference), the knowledge-store bullet splits into the transformers fallback and the BM25 opt-out, and a use-case item redundant with "Why" is removed.
+
 ## [1.7.20] - 2026-10-23
 
 ### Fixed

@@ -61,7 +61,7 @@ If something does not work, start with [Troubleshooting](docs/TROUBLESHOOTING.md
 
 ### Uninstall
 
-`pi remove npm:@lincoln504/pi-research` removes the extension; `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. Neither removes skill links into other agents, the state directory (`~/.pi/research/state`) or the cache (`~/.cache/pi-research`). Run `pi-research skill uninstall` first, then `pi-research cleanup`. See [AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow) for the full picture.
+`pi remove npm:@lincoln504/pi-research` removes the extension; `npm uninstall -g @lincoln504/pi-research` removes the standalone engine. Neither removes skill links, the state directory (`~/.pi/research/state`), or the cache (`~/.cache/pi-research`): run `pi-research skill uninstall`, then `pi-research cleanup` ([AGENT-SKILL.md](docs/AGENT-SKILL.md#installation-flow)).
 
 ### How it works
 
@@ -73,7 +73,7 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds;
 
 ### Use cases
 
-- Researching inside pi. No search subscription needed.
+- Researching inside pi.
 - Researching from Claude Code, Codex, or another coding agent while a cheaper or local model drives the run. The main agent's budget stays untouched.
 - Saving findings to a persistent, searchable knowledge store, scoped globally or per project.
 - Building agent systems that find and read web content, or collecting a dataset of web sources.
@@ -90,8 +90,9 @@ Three depth levels (normal, deep, ultra) set the team size and number of rounds;
 - Node.js >= 22.22.2
 - An LLM with a 100k+ context window (an API key or a local model)
 - Internet access on a residential IP, since search, scraping, and YouTube transcripts get bot-blocked from datacenter/VPS/cloud IPs
-- pi (`@earendil-works/pi-coding-agent`) 0.99.0 or newer, including the 1.x line. A host newer than the last version this release was tested against still runs, with a one-line notice; the tested ceiling is in `src/core/pi-version.ts`. The standalone CLI and skill use the host packages as peer dependencies (see [Troubleshooting](docs/TROUBLESHOOTING.md#the-agent-skill-or-cli-says-cannot-start--missing-required-runtime-dependencies)).
-- Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds, so everything works except local embeddings. The store tells you how to restore them. Prefer no embedding model at all? Set `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25` for a pure lexical (BM25) knowledge store — see [KNOWLEDGE-STORE.md](docs/KNOWLEDGE-STORE.md).
+- pi (`@earendil-works/pi-coding-agent`) 0.99.0 or newer, including the 1.x line. A host newer than this release's tested ceiling still runs, with a one-line notice. The standalone CLI and skill use the host packages as peer dependencies (see [Troubleshooting](docs/TROUBLESHOOTING.md#the-agent-skill-or-cli-says-cannot-start--missing-required-runtime-dependencies)).
+- Local knowledge-store embeddings need `@huggingface/transformers`, an optional dependency. If its native image chain (sharp) cannot install, npm skips it with a warning and the install still succeeds; everything works except local embeddings, and the store tells you how to restore them.
+- To run the knowledge store with no embedding model at all, set `PI_RESEARCH_KNOWLEDGE_STORE_RETRIEVAL=bm25` for a pure lexical (BM25) store. See [KNOWLEDGE-STORE.md](docs/KNOWLEDGE-STORE.md).
 - Cloudflare Turnstile and similar systems block scraping on some sites. A run compensates with a wide pool of search results to scrape.
 
 ### License
