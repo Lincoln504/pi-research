@@ -15,6 +15,9 @@ import {
   consumeQueuedMessages,
   popQueuedMessages,
   requeuePoppedMessage,
+  markSteeringForwardedToPi,
+  hasForwardedSteering,
+  startResearchSession,
   hasQueuedSteeringMessages,
   normalizeSessionId,
 } from '../../../src/orchestration/session-state.ts';
@@ -117,7 +120,7 @@ describe('Steering Messages', () => {
       const messages = getSteeringMessages(testSessionId);
       
       // Modify the returned array
-      messages.push({ id: 'fake', text: 'Hacked', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null });
+      messages.push({ id: 'fake', text: 'Hacked', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null, forwardedToPiAt: null });
       
       // Get messages again - should not include the hacked message
       const messagesAgain = getSteeringMessages(testSessionId);
@@ -472,6 +475,65 @@ describe('Steering Messages', () => {
       expect(normalizeSessionId('null')).toBe('default');
       expect(normalizeSessionId('')).toBe('default');
       expect(normalizeSessionId('valid-id')).toBe('valid-id');
+    });
+  });
+
+  // ─── forwarded-to-pi tracking (Alt+P → pi's own steering queue) ──────────────
+
+  describe('forwarded-to-pi tracking', () => {
+    /**
+     * A popped message is handed to pi with `deliverAs: 'steer'`. pi holds it in
+     * its own queue until the next agent step, and pi will NOT drain that queue
+     * once its run-abort latch is set. The global TUI controller therefore has to
+     * know whether such a message is outstanding before letting Esc fall through
+     * to pi's app.interrupt — otherwise the Esc that cancels research also
+     * destroys the message the user just popped into chat.
+     */
+    it('reports nothing forwarded for a queued or merely popped message', () => {
+      addSteeringMessage(testSessionId, 'queued one');
+      expect(hasForwardedSteering(testSessionId)).toBe(false);
+
+      const popped = popQueuedMessages(testSessionId);
+      expect(popped).toHaveLength(1);
+      expect(hasForwardedSteering(testSessionId)).toBe(false);
+    });
+
+    it('reports the message as outstanding once pi accepted it', () => {
+      addSteeringMessage(testSessionId, 'pop me');
+      const popped = popQueuedMessages(testSessionId);
+      markSteeringForwardedToPi(testSessionId, [popped[0]!.id]);
+      expect(hasForwardedSteering(testSessionId)).toBe(true);
+    });
+
+    it('a requeued message (pi refused the forward) is no longer outstanding', () => {
+      addSteeringMessage(testSessionId, 'pop me');
+      const popped = popQueuedMessages(testSessionId);
+      markSteeringForwardedToPi(testSessionId, [popped[0]!.id]);
+      requeuePoppedMessage(testSessionId, popped[0]!.id);
+      expect(hasForwardedSteering(testSessionId)).toBe(false);
+      expect(getQueuedSteeringMessages(testSessionId)).toHaveLength(1);
+    });
+
+    it('marking an unknown or still-queued id is a no-op', () => {
+      addSteeringMessage(testSessionId, 'stay queued');
+      const queued = getQueuedSteeringMessages(testSessionId);
+      markSteeringForwardedToPi(testSessionId, [queued[0]!.id, 'nope']);
+      expect(hasForwardedSteering(testSessionId)).toBe(false);
+    });
+
+    it('a new research run clears the marker (the previous run delivered it)', () => {
+      addSteeringMessage(testSessionId, 'pop me');
+      const popped = popQueuedMessages(testSessionId);
+      markSteeringForwardedToPi(testSessionId, [popped[0]!.id]);
+      startResearchSession(testSessionId);
+      expect(hasForwardedSteering(testSessionId)).toBe(false);
+    });
+
+    it('is scoped per pi session', () => {
+      addSteeringMessage(testSessionId, 'pop me');
+      const popped = popQueuedMessages(testSessionId);
+      markSteeringForwardedToPi(testSessionId, [popped[0]!.id]);
+      expect(hasForwardedSteering(otherSessionId)).toBe(false);
     });
   });
 });

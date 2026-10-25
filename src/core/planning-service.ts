@@ -16,6 +16,8 @@ import type {
   GeneratePlanOptions
 } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
+import { isRateLimitError, parseRetryAfterMs, rateLimitBackoffMs } from '../utils/provider-errors.ts';
 import { completeSimple } from './llm/pi-ai-completion.ts';
 import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
@@ -55,6 +57,26 @@ import {
 // (repeated full LLM_TIMEOUT_MS) still degrades to the deterministic fallback plan within a
 // sane wall-clock budget rather than multiplying a 5-minute timeout many times over.
 const LLM_MAX_RETRIES = 2;
+
+/**
+ * Let the coordinator / research-lead / synthesis retries spend a REAL wait on a rate
+ * limit instead of the 1s/2s ordinary step.
+ *
+ * Observed 2026-10-25: the round-2 router 429'd three times in ~4s (`retrying in
+ * 1098ms` / `2738ms` in the log) and the orchestrator degraded to "continue the prior
+ * agenda" while the provider's shared pool was still refusing requests six minutes
+ * later. The researcher loop got a 15s/30s/60s path for exactly this reason; without
+ * the same treatment here the highest-value calls in the run still give up in seconds.
+ *
+ * Returns null for every non-rate-limit error, so the ordinary curve (and its
+ * maxDelay bound) is untouched.
+ */
+function rateLimitDelayFor(nextAttempt: number, error: Error): number | null {
+  if (!isRateLimitError(error)) return null;
+  const delay = rateLimitBackoffMs(nextAttempt, parseRetryAfterMs(error));
+  metrics.increment('planning_rate_limit_backoff_total', 1, { nextAttempt: String(nextAttempt) });
+  return delay;
+}
 const LLM_RETRY_INITIAL_DELAY_MS = 1000;
 const LLM_RETRY_MAX_DELAY_MS = 8000;
 
@@ -479,6 +501,7 @@ export class PlanningService implements IPlanningService {
           label: 'coordinator-generatePlan',
           signal,
           isTransientError: (err) => isRetriableLlmError(err, signal),
+          delayFor: rateLimitDelayFor,
         },
       );
 
@@ -1148,6 +1171,7 @@ export class PlanningService implements IPlanningService {
         label,
         signal,
         isTransientError: (err) => isRetriableLlmError(err, signal),
+        delayFor: rateLimitDelayFor,
       },
     );
 

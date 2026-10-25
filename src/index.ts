@@ -22,7 +22,7 @@ import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './core/llm/prompts.ts';
 import { buildResearchDepthGuidance, buildEscalationNudge } from './prompts/research-depth-guidance.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, requeuePoppedMessage, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, requeuePoppedMessage, markSteeringForwardedToPi, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer, resetServiceContainer } from './core/service-registry.ts';
@@ -428,16 +428,22 @@ export default async function (pi: ExtensionAPI) {
       // into chat, the agent acts on it. (The input handler ignores source 'extension',
       // so this is not re-captured into the research queue.)
       let sent = 0;
+      const sentIds: string[] = [];
       for (const msg of popped) {
         try {
           await pi.sendUserMessage(msg.text, { deliverAs: 'steer' });
           sent++;
+          sentIds.push(msg.id);
         } catch (err) {
           // Never lose the user's words: restore the message to queued (still poppable).
           logger.warn('[pi-research] Failed to forward popped steering to pi:', err);
           requeuePoppedMessage(piSessionId, msg.id);
         }
       }
+      // Remember what pi now owns. pi holds it in its OWN steering queue until the
+      // next agent step, and the global TUI controller must not let an Esc destroy it
+      // on the way there (see hasForwardedSteering / the Esc branch).
+      markSteeringForwardedToPi(piSessionId, sentIds);
 
       if (ctx.hasUI) {
         if (sent > 0) {

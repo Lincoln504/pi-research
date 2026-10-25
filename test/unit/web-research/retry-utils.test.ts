@@ -126,6 +126,47 @@ describe('retry-utils', () => {
       expect(fn).toHaveBeenCalledTimes(3);
     });
 
+    it('a delayFor override replaces the step AND escapes maxDelay (provider-mandated wait)', async () => {
+      // maxDelay exists to bound the ORDINARY exponential step. A rate limit needs a real
+      // wait that is longer than that bound, so the override must win outright.
+      const fn = vi.fn()
+        .mockRejectedValueOnce(new Error('429 engine_overloaded'))
+        .mockResolvedValue('ok');
+      const delayFor = vi.fn(() => 30000);
+
+      const promise = retryWithBackoff(fn, {
+        initialDelay: 100,
+        maxDelay: 10000, // ignored by the override
+        maxRetries: 2,
+        delayFor,
+      });
+
+      await vi.advanceTimersByTimeAsync(29900);
+      expect(fn).toHaveBeenCalledTimes(1); // still waiting — the step would have fired at 150ms
+      await vi.advanceTimersByTimeAsync(200);
+
+      await expect(promise).resolves.toBe('ok');
+      expect(fn).toHaveBeenCalledTimes(2);
+      // nextAttempt is 1-based in the caller's terms: first retry = 2.
+      expect(delayFor).toHaveBeenCalledWith(2, expect.any(Error));
+    });
+
+    it('a null delayFor override keeps the exponential step', async () => {
+      const fn = vi.fn()
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockResolvedValue('ok');
+
+      const promise = retryWithBackoff(fn, {
+        initialDelay: 100,
+        maxRetries: 2,
+        delayFor: () => null,
+      });
+
+      await vi.advanceTimersByTimeAsync(150);
+      await expect(promise).resolves.toBe('ok');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
     it('stops retrying and surfaces the original error when the signal aborts during backoff', async () => {
       vi.useRealTimers(); // deterministic real-time abort instead of fake-timer microtask juggling
       const controller = new AbortController();

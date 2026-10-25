@@ -35,6 +35,18 @@ export interface RetryOptions {
   // When provided, aborting it short-circuits the inter-attempt backoff wait and
   // stops further retries, so a caller cancel isn't stuck behind a long sleep.
   readonly signal?: AbortSignal;
+  /**
+   * Optional per-attempt delay override. Return a value (ms) to use it instead of the
+   * exponential step, or null to keep the default. `nextAttempt` is 1-based in the
+   * caller's terms (2 = the first retry), i.e. the same numbering
+   * `rateLimitBackoffMs` uses.
+   *
+   * Exists for provider-mandated waits: a 429 against a shared pool needs tens of
+   * seconds, and `maxDelay` (10s here) exists to bound the ORDINARY step, not to cap a
+   * wait the provider asked for. The planning/router calls use it; see
+   * `rateLimitDelayFor` in src/core/planning-service.ts.
+   */
+  readonly delayFor?: (nextAttempt: number, error: Error) => number | null;
 }
 
 /**
@@ -285,7 +297,9 @@ export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options: Partial<RetryOptions> = {},
 ): Promise<T> {
-  const opts: Required<Omit<RetryOptions, 'signal'>> & { signal?: AbortSignal } = {
+  // `delayFor` stays optional (absent for every caller that does not override the wait),
+  // so it is excluded from the Required<> normalization rather than given a default.
+  const opts: Required<Omit<RetryOptions, 'signal' | 'delayFor'>> & RetryOptions = {
     maxRetries: 3,
     initialDelay: 1000,
     maxDelay: 10000,
@@ -324,7 +338,12 @@ export async function retryWithBackoff<T>(
       // Calculate delay with exponential backoff and jitter
       const baseDelay = opts.initialDelay * Math.pow(2, attempt);
       const jitter = Math.random() * 0.5 * baseDelay; // ±50% jitter
-      const delay = Math.min(baseDelay + jitter, opts.maxDelay);
+      // A caller that knows better (a provider-stated or rate-limit wait) wins over the
+      // step — including over maxDelay, which bounds only the ordinary step.
+      const override = opts.delayFor?.(attempt + 2, lastError);
+      const delay = override != null && Number.isFinite(override) && override > 0
+        ? Math.round(override)
+        : Math.min(baseDelay + jitter, opts.maxDelay);
 
       metrics.increment('retry_backoff_total', 1, { attempt: String(attempt), label: opts.label });
       metrics.observe('retry_backoff_delay_ms', delay, { attempt: String(attempt), label: opts.label });

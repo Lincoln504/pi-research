@@ -143,8 +143,20 @@ describe('logger', () => {
     it('asynchronously flushes buffered INFO without an explicit flush', async () => {
       const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       logger.info('auto-flushed');
-      await new Promise((resolve) => setTimeout(resolve, 50)); // setImmediate → flush → appendFile
-      expect(readFileSync(TEST_LOG_PATH, 'utf-8')).toContain('auto-flushed');
+      // Poll instead of sleeping a fixed 50ms for the setImmediate → flush →
+      // appendFile chain. Under the full parallel unit suite that chain regularly
+      // exceeds 50ms of scheduler time (this was the one failing test of 3366 on a
+      // 2026-10-25 full run, and it passes in isolation), so the fixed sleep tested
+      // machine load rather than the flush contract. The deadline stays generous but
+      // bounded: a genuine regression still fails, just later.
+      const deadline = Date.now() + 5_000;
+      let content = '';
+      while (Date.now() < deadline) {
+        content = existsSync(TEST_LOG_PATH) ? readFileSync(TEST_LOG_PATH, 'utf-8') : '';
+        if (content.includes('auto-flushed')) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(content).toContain('auto-flushed');
     });
 
     it('writes WARN/ERROR synchronously — durable with no flush', () => {

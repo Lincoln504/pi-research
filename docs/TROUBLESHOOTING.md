@@ -62,6 +62,22 @@ npm install -g @earendil-works/pi-coding-agent
 npm install -g @lincoln504/pi-research
 ```
 
+## Every browser scrape fails with "a response was served from a private/reserved address"
+
+This was a bug in releases before the one that ships `src/infrastructure/browser/proxy-prefs.ts`, and it only affects hosts that route the browser through the local SOCKS proxy (`~/.pi/research/proxy.json`). Through a SOCKS5 proxy Firefox cannot report the origin's address and reports `0.0.0.0`, which the SSRF rebinding backstop classified as reserved, so every browser-fallback scrape was refused — the only path that reads sites which answer plain fetches with `403`.
+
+Updating fixes it. To confirm the cause on an affected build, disable the proxy (rename `proxy.json`) and retry the same URL: if it now succeeds, that is this bug. The log signature is a `WARN` line `SSRF rebinding defense: a response connected to a private/reserved address; poisoning scrape of <url>` immediately followed by `Browser fallback did not yield content`.
+
+**What the fix does and does not cover.** The check it exempts compares the address Firefox actually connected to against the address the hostname resolves to — that comparison is what catches DNS rebinding. A SOCKS5 proxy makes it impossible: Firefox never sees the origin address. So with a proxy configured, a page that rebinds a public hostname to an internal address is not caught at bake time. Two things still apply. Request-time DNS validation still runs on every navigation and every subresource the page pulls in, and rejects a hostname that resolves into private space before the request is allowed out. And `scripts/ddg-socks-proxy.mjs` (the proxy this project ships instructions for) now refuses to CONNECT to a loopback, private, link-local, CGNAT, multicast or reserved destination, checking both the requested host and every address it resolves to. A third-party SOCKS proxy you point `proxy.json` at does not have that guard — do not route through one you do not trust.
+
+## The SOCKS proxy refuses a URL with "connection not allowed by ruleset"
+
+That is `scripts/ddg-socks-proxy.mjs` blocking an SSRF attempt, not a bug: the destination was loopback, private, link-local (`169.254.169.254` metadata included), CGNAT, multicast or reserved, spelled either as the host or as the address it resolves to. The log line names it: `[ddg-socks] refused private/reserved destination <host>:<port>` or `refused <host> — resolves to private/reserved <addr>`. A research run never needs such a destination. If you added the proxy for a private mirror, run that request without the proxy.
+
+## A research run used a different model than `~/.pi/research/config.env` says
+
+Before the release that fingerprints the config sources, `getConfig()` cached configuration for the life of the process and never re-read it. Editing `config.env` from another shell, editor or pi session therefore did not affect a session that was already running, however long it lived. Restart pi (the loaded code and the loaded config are both fixed at start-up) or set the value through `/research-config`, which calls `resetConfig()`. Confirm what a run actually used: the report footer names the model, and the log carries `Using model for researcher <id>: <provider>/<model>`.
+
 ## The first scrape takes minutes, or install downloads over a gigabyte
 
 The stealth browser (about 1 GB installed) is fetched by the `postinstall` script on npm 10 through

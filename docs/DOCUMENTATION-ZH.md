@@ -737,8 +737,8 @@ TUI 暴露的变量标记为 `(TUI)`。`[project]` 标记表示项目级键（�
 | `PI_RESEARCH_MAX_SCRAPE_URLS` | `8` | 1–20 | 每个抓取批次获取的 URL 数上限。超出上限的 URL 会列在 "Not Fetched — Over Batch Cap" 下，必须在后续批次中请求。（由硬编码常量提升而来，使其与其他抓取旋钮一样可通过环境/配置文件调节。） |
 | `PI_RESEARCH_SCRAPE_SECOND_PAGE` | `false` | true/false | 对每个搜索查询同时抓取 DuckDuckGo 结果第 2 页，大约使每个查询贡献的候选链接翻倍。第 2 页会优雅降级——若抓取失败或不存在，则保留第 1 页结果。 |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | 每项研究员请求的重试次数。 |
-| `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | 重试之间的基础延迟。 |
-| `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | 中止整个运行的不重复研究员失败数。调高可以让较慢、仍在进行的研究员先跑完再放弃。 |
+| `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | 重试之间的基础延迟，也是普通指数退避的上限。它**不**限制提供商要求的等待：速率限制（HTTP 429）会按 15 秒 / 30 秒 / 60 秒（±20% 抖动）重试，错误带 `Retry-After` 时按其值等待。 |
+| `PI_RESEARCH_MAX_FAILED_RESEARCHERS` | `2` | 1–10 | 中止整个运行的不重复研究员失败数。调高可以让较慢、仍在进行的研究员先跑完再放弃。提供商**容量**类失败（429 / 在途预算耗尽）会被记录并报告，但不计入该阈值。 |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | 浏览器 worker 进程数。越高吞吐越大，CPU/RAM 占用越高。它决定一次搜索突发*以多快排空*，而不是*可以多大* —— 大于进程池的突发会排队等候，不会被裁剪或超时。 |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | 每个 worker 进程的任务数。 |
 | `PI_RESEARCH_MAX_CONCURRENT_RUNS` | `3` | ≥1 | 机器级并发研究运行上限，覆盖**每个**进程（CLI、智能体技能、pi 扩展、SDK）。超出上限的运行排队而不是失败。所有并发运行共享一个经领导者选举产生的浏览器/嵌入进程池，因此过度订阅会同时拖垮所有运行。 |

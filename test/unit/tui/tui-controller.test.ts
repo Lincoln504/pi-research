@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   abortAllSessions: vi.fn(),
   refreshAllSessions: vi.fn(),
   hideMasterWidget: vi.fn(),
+  hasForwardedSteering: vi.fn(),
 }));
 
 vi.mock('../../../src/orchestration/session-state.ts', () => ({
@@ -24,6 +25,7 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   abortAllSessions: mocks.abortAllSessions,
   refreshAllSessions: mocks.refreshAllSessions,
   hideMasterWidget: mocks.hideMasterWidget,
+  hasForwardedSteering: mocks.hasForwardedSteering,
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -65,6 +67,7 @@ describe('Global TUI controller cancel keys', () => {
     editorText = '';
     inputHandler = null;
     mocks.getActiveSessionCount.mockReturnValue(1);
+    mocks.hasForwardedSteering.mockReturnValue(false);
     // Match pi's runtime: the Kitty protocol (with event types) is active.
     setKittyProtocolActive(true);
   });
@@ -125,9 +128,50 @@ describe('Global TUI controller cancel keys', () => {
     initGlobalTuiController(fakeUi(), 'pi-1');
     editorText = 'draft message';
 
-    inputHandler!(ESC);
+    const result = inputHandler!(ESC) as { consume?: boolean } | undefined;
 
     expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
+    // Nothing was handed to pi, so the key falls through and pi interrupts its
+    // own agent loop, as it always has.
+    expect(result?.consume).toBeUndefined();
+  });
+
+  /**
+   * Regression: steering the user POPPED into pi must survive the Esc that cancels
+   * research. pi delivers a `deliverAs: 'steer'` message at its next agent step, but
+   * its run loop only drains the steering queue while its own abort latch is clear
+   * (`!_agentRunAbortRequested && hasQueuedMessages()`). Falling through with Esc sets
+   * that latch, so the message popped via Alt+P was silently dropped by the same
+   * keystroke that cancelled the run. Consuming Esc keeps pi's turn alive long enough
+   * to deliver it; steering that was NOT popped stays in this extension's queue and is
+   * still dropped with the run.
+   */
+  it('Esc consumes the key when a popped steering message is queued in pi', () => {
+    mocks.hasForwardedSteering.mockReturnValue(true);
+    initGlobalTuiController(fakeUi(), 'pi-1');
+
+    const result = inputHandler!(ESC) as { consume?: boolean };
+
+    expect(mocks.abortAllSessions).toHaveBeenCalledWith('pi-1');
+    expect(result.consume).toBe(true);
+  });
+
+  it('Esc consumption is scoped to the active session and needs an active run', () => {
+    mocks.hasForwardedSteering.mockReturnValue(true);
+    mocks.getActiveSessionCount.mockReturnValue(0);
+    initGlobalTuiController(fakeUi(), 'pi-1');
+
+    const result = inputHandler!(ESC) as { consume?: boolean } | undefined;
+
+    expect(mocks.abortAllSessions).not.toHaveBeenCalled();
+    expect(result?.consume).toBeUndefined();
+  });
+
+  it('a Kitty Esc RELEASE with a forwarded message does not consume (release passthrough unchanged)', () => {
+    mocks.hasForwardedSteering.mockReturnValue(true);
+    initGlobalTuiController(fakeUi(), 'pi-1');
+
+    expect(inputHandler!(KITTY_ESC_RELEASE)).toBeUndefined();
   });
 
   it('getEditorText throwing is treated as an empty editor (aborts and consumes)', () => {

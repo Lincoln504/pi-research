@@ -235,9 +235,11 @@ describe('ResearchSynthesisService', () => {
       service.storeReport('test-session', '1.A', 'Alpha report content');
       service.storeReport('test-session', '1.B', 'Beta report content');
       const synthesis = service.buildFallbackSynthesis('test-session');
-      expect(synthesis).toContain('1.A');
+      // Ids are printed split from the round (see the doubled-prefix regression below),
+      // so both researchers stay identifiable without the raw `round.id` key.
+      expect(synthesis).toContain('Researcher A (round 1)');
       expect(synthesis).toContain('Alpha report content');
-      expect(synthesis).toContain('1.B');
+      expect(synthesis).toContain('Researcher B (round 1)');
       expect(synthesis).toContain('Beta report content');
       expect(synthesis).toContain('automated compilation');
       // The preamble must not assert WHY the synthesis step produced nothing: this
@@ -245,6 +247,24 @@ describe('ResearchSynthesisService', () => {
       // returned a report with no analysis in it, and telling a user the run was
       // interrupted when it was not is the misleading output it exists to prevent.
       expect(synthesis).not.toMatch(/interrupted/i);
+    });
+
+    it('does not label a round-1 researcher with a doubled round prefix', () => {
+      // Report keys are `${round}.${researcherId}` and planner-assigned ids are often
+      // dotted themselves (`1.3`), so the raw key for round 1's third researcher is
+      // `1.1.3` — printed as "Researcher 1.1.3" in the 2026-10-25 fallback, which
+      // reads as a researcher that never existed.
+      service.storeReport('test-session', '1.1.3', 'Gamma report content');
+      const synthesis = service.buildFallbackSynthesis('test-session');
+      expect(synthesis).toContain('Researcher 1.3 (round 1)');
+      expect(synthesis).not.toContain('Researcher 1.1.3');
+      expect(synthesis).toContain('Gamma report content');
+    });
+
+    it('keeps a non-numeric key verbatim (quick mode stores a plain id)', () => {
+      service.storeReport('test-session', 'quick', 'Quick report content');
+      const synthesis = service.buildFallbackSynthesis('test-session');
+      expect(synthesis).toContain('Researcher quick');
     });
 
     it('contains "Round 2" when currentRound is 2', () => {
@@ -803,8 +823,8 @@ describe('ResearchSynthesisService', () => {
     it('appends a formatted steering guidance section for active messages', () => {
       const input = 'Final report content';
       const messages = [
-        { id: '1', text: 'focus on modern times', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
-        { id: '2', text: 'ignore historical data', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+        { id: '1', text: 'focus on modern times', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null, forwardedToPiAt: null },
+        { id: '2', text: 'ignore historical data', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null, forwardedToPiAt: null },
       ];
       const result = service.appendSteeringGuidance(input, messages);
 
@@ -818,8 +838,8 @@ describe('ResearchSynthesisService', () => {
     it('appends guidance from SteeringMessage objects — only active messages', () => {
       const input = 'Final report content';
       const messages = [
-        { id: '1', text: 'focus on active', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
-        { id: '2', text: 'still queued', status: 'queued' as const, addedAt: Date.now(), consumedAt: null, poppedAt: null },
+        { id: '1', text: 'focus on active', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null, forwardedToPiAt: null },
+        { id: '2', text: 'still queued', status: 'queued' as const, addedAt: Date.now(), consumedAt: null, poppedAt: null, forwardedToPiAt: null },
       ];
       const result = service.appendSteeringGuidance(input, messages);
       
@@ -833,7 +853,7 @@ describe('ResearchSynthesisService', () => {
     it('excludes popped messages from SteeringMessage objects', () => {
       const input = 'Final report content';
       const messages = [
-        { id: '1', text: 'popped message', status: 'popped' as const, addedAt: Date.now(), consumedAt: null, poppedAt: Date.now() },
+        { id: '1', text: 'popped message', status: 'popped' as const, addedAt: Date.now(), consumedAt: null, poppedAt: Date.now(), forwardedToPiAt: null },
       ];
       const result = service.appendSteeringGuidance(input, messages);
       
@@ -844,7 +864,7 @@ describe('ResearchSynthesisService', () => {
     it('trims the synthesis before appending', () => {
       const input = '  Final report content  ';
       const messages = [
-        { id: '1', text: 'steer', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+        { id: '1', text: 'steer', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null, forwardedToPiAt: null },
       ];
       const result = service.appendSteeringGuidance(input, messages);
       expect(result.startsWith('Final report content')).toBe(true);

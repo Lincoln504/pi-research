@@ -38,6 +38,23 @@ const REQUIRED = [
   // Entry points (also cross-checked against package.json "exports")
   'src/index.ts',
   'src/sdk.ts',
+  // Source modules that the pi extension loads at RUNTIME as TypeScript (main /
+  // exports point at src/index.ts), so a missing one is ERR_MODULE_NOT_FOUND at
+  // extension load — for pi users only. Nothing else in this gate is per-module:
+  // `files: ["src/"]` ships the whole tree, so a future per-file `files[]` list or
+  // a new `.npmignore` rule would drop them silently. Two files that carry
+  // behaviour users depend on and that the bundled CLI cannot reveal as broken
+  // (its bundle inlines them) are named here explicitly.
+  'src/utils/provider-errors.ts',
+  'src/infrastructure/browser/proxy-prefs.ts',
+  'src/core/llm/coordinator-model.ts',
+  // The SOCKS proxy is shipped for hosts whose egress cannot reach a DuckDuckGo
+  // front-door (that is what it exists for), and it runs as a standalone `node`
+  // process, so the TS tree cannot supply its destination guard. A dropped helper is a
+  // silent failure: the proxy is launched outside this process, so nothing here would
+  // ever surface it.
+  'scripts/ddg-socks-proxy.mjs',
+  'scripts/lib/private-addresses.mjs',
   // Bundled runtime artifacts — the CLI/skill engine runs off these, and the
   // worker .mjs is what FixedClusterPool spawns.
   'src/infrastructure/browser/thread-worker.mjs',

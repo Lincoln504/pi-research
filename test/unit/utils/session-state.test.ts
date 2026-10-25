@@ -9,6 +9,7 @@ import {
   recordResearcherFailure,
   getFailedResearchers,
   shouldStopResearch,
+  hasOnlyCapacityFailures,
   getResearchStopMessage,
   registerSessionPanel,
   getPiActiveSessionOrder,
@@ -68,6 +69,83 @@ describe('utils/session-state', () => {
     expect(shouldStopResearch(piSessionId, sessionId)).toBe(false);
     
     recordResearcherFailure(piSessionId, sessionId, '2:1');
+    expect(shouldStopResearch(piSessionId, sessionId)).toBe(true);
+  });
+
+  /**
+   * A provider-capacity failure must not count toward the stop threshold.
+   *
+   * 2026-10-25 run-bfe347c3: three researchers planned; 1.1 and 1.2 each burned four
+   * attempts on the same DeepInfra `engine_overloaded` 429, tripping the default
+   * threshold of 2 while researcher 1.3 had produced a full report. The run stopped,
+   * explored one third of its angle set, and returned a raw compilation.
+   */
+  it('does not stop the run on capacity failures alone (rate limits are not a topic verdict)', () => {
+    const rateLimited = 'Model API rate limit (429) — wait a moment and retry. Details: 429: {"message":"Provider returned error","code":429,"metadata":{"raw":"inclusionai/ling-3.0-flash is temporarily rate-limited upstream ... engine_overloaded ..."}}';
+    recordResearcherFailure(piSessionId, sessionId, '1.1', rateLimited);
+    recordResearcherFailure(piSessionId, sessionId, '1.2', rateLimited);
+
+    // Both are still RECORDED (the summary and the zero-report gate need them) ...
+    expect(getFailedResearchers(piSessionId, sessionId)).toEqual(['1.1', '1.2']);
+    // ... but they do not end a run that has other research still to try.
+    expect(shouldStopResearch(piSessionId, sessionId)).toBe(false);
+  });
+
+  it('still stops once genuinely failed researchers reach the threshold alongside a capacity failure', () => {
+    recordResearcherFailure(piSessionId, sessionId, '1.1', 'Model API rate limit (429) — wait a moment and retry.');
+    recordResearcherFailure(piSessionId, sessionId, '1.2', 'Researcher 1.2 produced an ungrounded report: zero successful scrapes');
+    expect(shouldStopResearch(piSessionId, sessionId)).toBe(false);
+
+    recordResearcherFailure(piSessionId, sessionId, '1.3', 'Researcher 1.3 timed out after 300000ms');
+    expect(shouldStopResearch(piSessionId, sessionId)).toBe(true);
+  });
+
+  it('a 429 out-of-quota failure still counts (a spent account is not supply pressure)', () => {
+    const quota = '429: {"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}';
+    recordResearcherFailure(piSessionId, sessionId, '1.1', quota);
+    recordResearcherFailure(piSessionId, sessionId, '1.2', quota);
+    expect(shouldStopResearch(piSessionId, sessionId)).toBe(true);
+    expect(hasOnlyCapacityFailures(piSessionId, sessionId)).toBe(false);
+  });
+
+  it('reports a capacity-only round (the orchestrator tolerates exactly one)', () => {
+    const rateLimited = 'Model API rate limit (429) — wait a moment and retry. Details: 429: engine_overloaded';
+    expect(hasOnlyCapacityFailures(piSessionId, sessionId)).toBe(false); // no failures yet
+    recordResearcherFailure(piSessionId, sessionId, '1.1', rateLimited);
+    expect(hasOnlyCapacityFailures(piSessionId, sessionId)).toBe(true);
+    recordResearcherFailure(piSessionId, sessionId, '1.2', 'Researcher 1.2 produced an ungrounded report');
+    expect(hasOnlyCapacityFailures(piSessionId, sessionId)).toBe(false); // one real failure
+  });
+
+  it('the stop message separates capacity failures from the counted ones', () => {
+    const rateLimited = 'Model API rate limit (429) — wait a moment and retry.';
+    recordResearcherFailure(piSessionId, sessionId, '1.1', rateLimited);
+    recordResearcherFailure(piSessionId, sessionId, '1.2', 'Researcher 1.2 produced an ungrounded report');
+    recordResearcherFailure(piSessionId, sessionId, '1.3', 'Researcher 1.3 timed out after 300000ms');
+    const message = getResearchStopMessage(piSessionId, sessionId);
+    // Headline counts what actually stopped the run (2, not 3) ...
+    expect(message).toContain('Research stopped: 2 researcher(s) did not return a usable report: 1.2, 1.3');
+    // ... and the capacity failure is still reported, under its own heading.
+    expect(message).toContain('Provider capacity failures (excluded from the stop threshold): 1.1');
+    // The advice matches the cause: real failures, so "get a better model" is right.
+    expect(message).toContain('research model could not produce grounded results');
+  });
+
+  it('reads as a supply problem, not a model problem, when every failure was capacity', () => {
+    const rateLimited = 'Model API rate limit (429) — wait a moment and retry.';
+    recordResearcherFailure(piSessionId, sessionId, '1.1', rateLimited);
+    recordResearcherFailure(piSessionId, sessionId, '1.2', rateLimited);
+    const message = getResearchStopMessage(piSessionId, sessionId);
+    expect(message).toContain('no report was collected, and every recorded failure was a provider-capacity failure: 1.1, 1.2');
+    expect(message).toContain('the provider would not serve the requests');
+    // Telling the user to buy a different model for a supply problem is the misdiagnosis
+    // this branch exists to prevent.
+    expect(message).not.toContain('research model could not produce grounded results');
+  });
+
+  it('counts a failure with no recorded reason (conservative default)', () => {
+    recordResearcherFailure(piSessionId, sessionId, '1.1');
+    recordResearcherFailure(piSessionId, sessionId, '1.2');
     expect(shouldStopResearch(piSessionId, sessionId)).toBe(true);
   });
 

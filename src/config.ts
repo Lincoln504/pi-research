@@ -170,9 +170,24 @@ export const ConfigSchema = Type.Object({
    *  When set, this governs the evaluator/synthesis rounds and the researcher
    *  sub-agents (both deep and quick) and the knowledge synthesis background LLM.
    *  The initial coordinator (round 1 planning) uses the parent chat's model (ctx.model)
-   *  for prompt-cache continuity with the conversation that triggered research.
+   *  by DEFAULT, for prompt-cache continuity with the conversation that triggered
+   *  research; COORDINATOR_MODEL overrides that decision (see below).
    */
   RESEARCH_MODEL: Type.Optional(Type.String()),
+  /**
+   * Which model runs the INITIAL coordinator (round-1 planning), the one call that
+   * otherwise uses the parent chat's model (`ctx.model`) for prompt-cache continuity:
+   *   • `host` (default) — the chat's model, current behaviour.
+   *   • `research` — the RESEARCH_MODEL / researcher model, same as every later round.
+   *   • `provider/id` (or a bare id) — that model.
+   *
+   * Exists because the chat model is not always a good planner: a local single-seat
+   * server (llama-swap `concurrencyLimit: 1`, 4k output) turns the coordinator call into
+   * minutes of wall clock and can 429 the owner's own next prompt, while a hosted
+   * research model plans the same query in seconds. The cache-lineage benefit is real
+   * but must be opt-out-able. Unset = `host`.
+   */
+  COORDINATOR_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
   /** Directory for transient browser profile data. Defaults to a disk-backed
@@ -292,6 +307,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_QUICK_MAX_SCRAPE_URLS',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
+  'PI_RESEARCH_COORDINATOR_MODEL',
   'PI_RESEARCH_KNOWLEDGE_DIR',
   'PI_RESEARCH_TMP_DIR',
   'PI_RESEARCH_REPORT_EXPORT_ENABLED',
@@ -987,6 +1003,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_MIGRATION_STRATEGY: config.MIGRATION_STRATEGY,
     PI_RESEARCH_CONSOLE_LOG: String(config.CONSOLE_LOG),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
+    ...(config.COORDINATOR_MODEL ? { PI_RESEARCH_COORDINATOR_MODEL: config.COORDINATOR_MODEL } : {}),
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
     ...(config.TMP_DIR ? { PI_RESEARCH_TMP_DIR: config.TMP_DIR } : {}),
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
@@ -1166,8 +1183,46 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
 /**
  * Config cache keyed by normalized CWD.
  * Avoids stale cached config when the process CWD changes between sessions.
+ *
+ * The cache is keyed by CWD *and* a fingerprint of the files it was built from, so
+ * an edit to config.env made outside this process (an editor, sed, a second pi
+ * session, the standalone CLI) is picked up on the next getConfig() instead of being
+ * silently ignored until the process exits.
+ *
+ * Why this matters: pi sessions live for days. A process started 2026-10-22 18:30
+ * kept the RESEARCH_MODEL it read at startup (ling-3.0-flash) for the next 60 hours,
+ * even though config.env switched to deepseek-flash-latest at 20:13 that evening —
+ * two research runs on 2026-10-24/25 then used a model the user had already replaced,
+ * and one of them died on that model's upstream rate limit.
  */
 const configCache = new Map<string, Config>();
+
+/** configCache key → fingerprint of the config files that produced its entry. */
+const configFingerprints = new Map<string, string>();
+
+/**
+ * Identity of every file loadEnvFiles() reads for this (cwd, iface) pair.
+ *
+ * existsSync is checked before statSync so a missing file contributes a CONSTANT
+ * marker: a test that mocks node:fs (statSync returning a fresh Date.now() each
+ * call, existsSync false) must not make the cache look permanently stale, which
+ * would break setConfig()'s override-on-top-of-cache contract.
+ */
+function configSourcesFingerprint(cwd: string, iface?: ConfigInterface): string {
+  const sources = [getGlobalEnvFilePath(), getProjectSettingsRegistryPath(), getLocalEnvFilePath(cwd)];
+  if (iface) sources.push(getInterfaceEnvFilePath(iface));
+  return sources
+    .map((file) => {
+      try {
+        if (!fs.existsSync(file)) return `${file}=absent`;
+        const st = fs.statSync(file);
+        return `${file}=${st.mtimeMs}:${st.size}`;
+      } catch {
+        return `${file}=unreadable`;
+      }
+    })
+    .join('|');
+}
 
 /**
  * Internal factory for creating a configuration object from env.
@@ -1223,6 +1278,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MIGRATION_STRATEGY: parseEnvEnum(e, 'PI_RESEARCH_MIGRATION_STRATEGY', ['drop', 're-embed', 'backup'] as const, DEFAULTS.MIGRATION_STRATEGY),
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
+    COORDINATOR_MODEL: parseEnvString(e, 'PI_RESEARCH_COORDINATOR_MODEL', DEFAULTS.COORDINATOR_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
     TMP_DIR: parseEnvString(e, 'PI_RESEARCH_TMP_DIR', DEFAULTS.TMP_DIR),
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),
@@ -1276,12 +1332,24 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
 export function getConfig(cwd: string = process.cwd(), iface?: ConfigInterface): Config {
   const cacheKey = `${normalizeWorkspacePath(cwd)}:${iface ?? ''}`;
   const cached = configCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached && configFingerprints.get(cacheKey) === configSourcesFingerprint(cwd, iface)) {
+    return cached;
+  }
+  if (cached) {
+    logger.info(`[config] Configuration files changed on disk; reloading for ${cwd} (cached values were from process start)`);
+  }
 
+  // Fingerprint BEFORE the read, and store exactly that value: a write landing during
+  // loadEnvFiles then leaves the entry stale (fingerprint says "as it was before the
+  // read"), so the next call reloads. Fingerprinting after the read would stamp the
+  // entry fresh with the OLD values and reintroduce the very bug this cache check fixes,
+  // for one edit window.
+  const fingerprint = configSourcesFingerprint(cwd, iface);
   const e = loadEnvFiles(cwd, iface);
   const config = createConfig(e, process.env);
 
   configCache.set(cacheKey, config);
+  configFingerprints.set(cacheKey, fingerprint);
   return config;
 }
 
@@ -1293,10 +1361,15 @@ export function setConfig(config: Partial<Config>, iface?: ConfigInterface): voi
   const current = getConfig(process.cwd(), iface);
   const cacheKey = `${normalizeWorkspacePath(process.cwd())}:${iface ?? ''}`;
   configCache.set(cacheKey, { ...current, ...config });
+  // Pin the fingerprint to the CURRENT files so the override survives the next
+  // getConfig() — but still yields to a real on-disk change (the on-disk value wins
+  // over a process-local override, which is what a user editing config.env expects).
+  configFingerprints.set(cacheKey, configSourcesFingerprint(process.cwd(), iface));
 }
 
 export function resetConfig(): void {
   configCache.clear();
+  configFingerprints.clear();
   warnedLegacyEnvVars = false;
 }
 

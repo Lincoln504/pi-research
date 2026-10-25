@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isInFlightBudgetError, parseRetryAfterMs, isUnretriableResearcherError } from '../../../src/orchestration/researcher-executor.ts';
+import { isInFlightBudgetError, isUnretriableResearcherError } from '../../../src/orchestration/researcher-executor.ts';
+import { parseRetryAfterMs } from '../../../src/utils/provider-errors.ts';
 
 const REAL_MESSAGE = '2.1: Provider error - 402: {"message":"This request would exceed your available credits given your current in-flight requests. Retry after in-flight requests settle, or add credits.","code":402,"metadata":{"reason":"in_flight_budget_exhausted","limit_source":"openrouter_in_flight_budget","headers":{"Retry-After":"120"}}}';
 

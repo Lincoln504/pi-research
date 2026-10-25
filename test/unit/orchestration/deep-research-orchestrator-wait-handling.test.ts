@@ -103,6 +103,11 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
       clearReports: vi.fn(),
       getAllReports: vi.fn(() => new Map()),
       getAllDigests: vi.fn(() => new Map()),
+      getReport: vi.fn(),
+      getReportsForRound: vi.fn(() => new Map()),
+      // The round loop reads the cumulative report count before and after each round
+      // to detect a round that produced nothing (capacity-only grace round).
+      getReportCount: vi.fn(() => 0),
       ensureCitedLinks: vi.fn((_id: string, text: string) => text),
       appendSteeringGuidance: vi.fn((text: string) => text),
       appendMetadata: vi.fn((text: string) => text),

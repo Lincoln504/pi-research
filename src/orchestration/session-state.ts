@@ -6,6 +6,7 @@
  */
 
 import { generateSessionId as generateUniqueSessionId, clearAllSharedLinks } from '../utils/shared-links.ts';
+import { isCapacityFailureReason } from '../utils/provider-errors.ts';
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
 import type { ResearchPanelState } from '../types/research-panel-types.ts';
@@ -176,6 +177,7 @@ export function addSteeringMessage(piSessionId: string | undefined, message: str
       addedAt: Date.now(),
       consumedAt: null,
       poppedAt: null,
+      forwardedToPiAt: null,
     };
     
     logger.debug(`[session-state] Adding steering message to session ${sid}: ${message} (id: ${steeringMsg.id})`);
@@ -297,8 +299,51 @@ export function requeuePoppedMessage(piSessionId: string | undefined, messageId:
   if (!msg) return;
   msg.status = 'queued';
   msg.poppedAt = null;
+  msg.forwardedToPiAt = null;
   logger.debug(`[session-state] Restored popped steering message to queued in session ${sid} (id: ${messageId})`);
   refreshAllSessions(sid);
+}
+
+/**
+ * Record that a popped message was successfully handed to pi's own steering queue
+ * (Alt+P). Called only AFTER pi accepted it: a failed forward is requeued instead.
+ */
+export function markSteeringForwardedToPi(piSessionId: string | undefined, messageIds: readonly string[]): void {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state || messageIds.length === 0) return;
+  const now = Date.now();
+  const want = new Set(messageIds);
+  let marked = 0;
+  for (const msg of state.steeringMessages) {
+    if (msg.status === 'popped' && want.has(msg.id) && msg.forwardedToPiAt === null) {
+      msg.forwardedToPiAt = now;
+      marked++;
+    }
+  }
+  if (marked > 0) {
+    logger.debug(`[session-state] Marked ${marked} popped steering message(s) as forwarded to pi in session ${sid}`);
+  }
+}
+
+/**
+ * True while this pi session still has a steering message this extension handed to
+ * pi and pi has not necessarily delivered yet.
+ *
+ * Used by the global TUI controller: while streaming, pi's Esc handler is
+ * `restoreQueuedMessagesToEditor({abort:true})`, which CLEARS pi's steering queue,
+ * dumps the queued texts into the editor and aborts the turn. A popped message that
+ * fell through that path therefore stops being an instruction and a later editor
+ * clear loses it. See the Esc branch in tui-controller.ts.
+ *
+ * Deliberately a per-session read, not per-run: the marker is cleared when the run
+ * ends (the message is pruned with the run) or when a new run starts.
+ */
+export function hasForwardedSteering(piSessionId: string | undefined): boolean {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return false;
+  return state.steeringMessages.some(m => m.status === 'popped' && m.forwardedToPiAt !== null);
 }
 
 /**
@@ -502,6 +547,12 @@ export function startResearchSession(piSessionId: string | undefined, customRese
   const state = getPiState(sid);
   state.failures.set(researchId, []);
   state.failureReasons.set(researchId, new Map());
+  // A message forwarded to pi belongs to the run it was popped during: by the time a
+  // NEW run starts, pi has had its next agent step and delivered it. Keeping the
+  // marker would make the next run's FIRST Esc consume itself for no reason.
+  for (const msg of state.steeringMessages) {
+    if (msg.forwardedToPiAt !== null) msg.forwardedToPiAt = null;
+  }
   return researchId;
 }
 
@@ -684,11 +735,63 @@ export function getFailedResearchers(piSessionId: string | undefined, researchId
 const DEFAULT_MAX_FAILED_RESEARCHERS = 2;
 
 /**
+ * Failures that must NOT count toward the stop threshold.
+ *
+ * A provider-capacity failure (429 / upstream pool exhausted / in-flight budget) says
+ * nothing about whether the topic is researchable — the same model produces a report
+ * once the pool frees up. Counting it lets one upstream outage end an otherwise healthy
+ * run: on 2026-10-25 two of three researchers lost every attempt to a DeepInfra
+ * `engine_overloaded` 429, the threshold (2) tripped, and the run stopped with one
+ * third of its angle set explored and a raw-compilation fallback as the answer.
+ * Dropping these from the count keeps the run alive; it is still bounded by the round
+ * budget and RESEARCHER_TIMEOUT_MS, and each researcher still owns its own retries.
+ */
+function countTowardStopThreshold(reasons: Map<string, string> | undefined, researcherId: string): boolean {
+  return !isCapacityFailureReason(reasons?.get(researcherId));
+}
+
+/**
+ * True when this run has at least one recorded failure and EVERY one of them is a
+ * provider-capacity failure.
+ *
+ * Run-scoped and de-duplicated by design (`state.failures` keeps unique ids, first reason
+ * wins). It answers "has anything in this run failed for a non-capacity reason?", which is
+ * the right question when paired with "this round produced no report": a round cannot have
+ * produced nothing for a quality reason without recording a quality failure. It cannot
+ * attribute a single round, and no caller should read it that way.
+ *
+ * Used to bound the cost of an outage: capacity failures are excluded from
+ * shouldStopResearch, so a total outage would otherwise keep the run alive for every
+ * remaining round, paying a full search burst each time against a provider that cannot
+ * answer. The orchestrator allows exactly one such empty round (the outage may clear —
+ * the observed one lasted six minutes, and each round already spends ~100s in the
+ * researcher retries) and stops after a second.
+ */
+export function hasOnlyCapacityFailures(piSessionId: string | undefined, researchId: string): boolean {
+  const sid = normalizeSessionId(piSessionId);
+  const failed = getFailedResearchers(sid, researchId);
+  if (failed.length === 0) return false;
+  const reasons = peekPiState(sid)?.failureReasons.get(researchId);
+  return failed.every((id) => isCapacityFailureReason(reasons?.get(id)));
+}
+
+/**
  * Check if research should stop due to too many unique failures
  */
 export function shouldStopResearch(piSessionId: string | undefined, researchId: string, maxFailedResearchers: number = DEFAULT_MAX_FAILED_RESEARCHERS): boolean {
   const sid = normalizeSessionId(piSessionId);
-  return getFailedResearchers(sid, researchId).length >= maxFailedResearchers;
+  const failed = getFailedResearchers(sid, researchId);
+  if (failed.length === 0) return false;
+  // Peek, never create — same read-path rule as getResearcherFailureReasons.
+  const reasons = peekPiState(sid)?.failureReasons.get(researchId);
+  const counted = failed.filter((id) => countTowardStopThreshold(reasons, id));
+  if (counted.length !== failed.length) {
+    logger.debug(
+      `[ResearchSessionState] ${failed.length - counted.length} capacity failure(s) excluded from the stop threshold ` +
+      `(${counted.length}/${maxFailedResearchers} counted: ${counted.join(', ') || 'none'})`,
+    );
+  }
+  return counted.length >= maxFailedResearchers;
 }
 
 /**
@@ -697,7 +800,16 @@ export function shouldStopResearch(piSessionId: string | undefined, researchId: 
 export function getResearchStopMessage(piSessionId: string | undefined, researchId: string): string {
   const sid = normalizeSessionId(piSessionId);
   const failed = getFailedResearchers(sid, researchId);
-  const count = failed.length;
+  // Capacity failures do NOT count toward the threshold (see countTowardStopThreshold),
+  // so they must not inflate the headline either: it must agree with the rule that
+  // actually stopped the run. They are reported separately below, because the user still
+  // wants to know the provider refused them.
+  const stateForReasons = peekPiState(sid);
+  const reasonsForCount = stateForReasons?.failureReasons.get(researchId);
+  const countedFailures = failed.filter((id) => countTowardStopThreshold(reasonsForCount, id));
+  const capacityFailures = failed.filter((id) => !countTowardStopThreshold(reasonsForCount, id));
+  const count = countedFailures.length;
+  const failedList = countedFailures.length > 0 ? countedFailures.join(', ') : failed.join(', ');
 
   // Order the causes by likelihood. The pre-run health check verifies search and
   // scrape BEFORE researchers run, so when it passed (the normal case) the browser
@@ -715,14 +827,50 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
     ? ['Recorded errors:', ...[...reasons].map(([id, r]) => `• researcher ${id}: ${r}`), '']
     : [];
 
+  // Two headlines, because the two stoppage paths mean different things: a threshold stop
+  // has a real count to report; a capacity-only stop (the orchestrator's grace-round bound)
+  // has no counted failure at all, and "0 researcher(s) did not return a usable report"
+  // would read as nonsense.
+  //
+  // The capacity wording is deliberately about what is RECORDED, not about this round:
+  // the failure list is run-scoped and de-duplicated, so a round that failed the same
+  // researchers again adds nothing to it. "every recorded failure was a provider-capacity
+  // failure" is exactly true either way; "this round failed on capacity" would not be.
+  const headline = countedFailures.length > 0
+    ? `Research stopped: ${count} researcher(s) did not return a usable report: ${failedList}.`
+    : `Research stopped: no report was collected, and every recorded failure was a provider-capacity failure${failedList ? `: ${failedList}` : ''}.`;
+
   return [
-    `Research stopped: ${count} researcher(s) did not return a usable report: ${failed.join(', ')}.`,
+    headline,
     '',
+    ...(capacityFailures.length > 0
+      ? [
+          `Provider capacity failures (excluded from the stop threshold): ${capacityFailures.join(', ')}.`,
+          'Those researchers lost every retry to a rate limit or an exhausted in-flight budget,',
+          'not to anything about the topic. Retrying the run later is the repair.',
+          '',
+        ]
+      : []),
     ...recorded,
-    'Most likely cause — the research model could not produce grounded results:',
-    '• Try a more capable research model. Very small or "thinking-only" models often',
-    '  emit no final text after their tool calls, which fails every researcher.',
-    '• Verify the model is available and the API key / context settings are valid.',
+    // Only give the "get a better model" advice when the model's output was actually the
+    // problem. When every failure was the provider refusing to serve (a rate limit or an
+    // exhausted budget), the model never ran — telling the user to change models sends
+    // them to buy a different one for a supply problem.
+    ...(capacityFailures.length > 0 && capacityFailures.length === failed.length
+      ? [
+          'Most likely cause — the provider would not serve the requests:',
+          '• Every researcher lost its retries to a rate limit or an exhausted in-flight budget.',
+          '• Wait and retry. A shared/free upstream pool (OpenRouter free tier, for one) is',
+          '  routinely overloaded, and nothing about your setup needs to change.',
+          '• If it keeps happening, set PI_RESEARCH_MODEL to a model with a dedicated key or',
+          '  a provider that is not sharing a pool.',
+        ]
+      : [
+          'Most likely cause — the research model could not produce grounded results:',
+          '• Try a more capable research model. Very small or "thinking-only" models often',
+          '  emit no final text after their tool calls, which fails every researcher.',
+          '• Verify the model is available and the API key / context settings are valid.',
+        ]),
     '',
     'Less likely — a network or browser problem (only if the health check did NOT pass):',
     '• Verify the network connection is active.',

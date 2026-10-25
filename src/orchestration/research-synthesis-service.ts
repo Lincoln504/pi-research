@@ -283,8 +283,21 @@ export class ResearchSynthesisService implements IService {
       // the second, and telling a user the run was interrupted when it was not is exactly
       // the kind of misleading output this fallback exists to avoid.
       synthesis += `This is an automated compilation of ${reportCount} individual researcher report(s). The synthesis step did not produce a usable summary for this run, so the findings are presented as collected.\n\n`;
+      // Report keys are `${round}.${researcherId}` (see researcher-executor's storeReport),
+      // and planner-assigned researcher ids are frequently themselves dotted (`1.1`, `1.2`),
+      // so printing the raw key labelled round 1's third researcher as "Researcher 1.1.3" —
+      // ambiguous, and read as a researcher that never existed. Print the two fields
+      // separately: the round belongs in prose, the id verbatim.
       synthesis += Array.from(reports.entries())
-        .map(([id, report]) => `Researcher ${id}\n\n${report}`)
+        .map(([key, report]) => {
+          const dot = key.indexOf('.');
+          const round = dot > 0 ? key.slice(0, dot) : '';
+          const researcherId = dot > 0 ? key.slice(dot + 1) : key;
+          const label = round && /^\d+$/.test(round)
+            ? `Researcher ${researcherId} (round ${round})`
+            : `Researcher ${key}`;
+          return `${label}\n\n${report}`;
+        })
         .join('\n\n');
     }
 

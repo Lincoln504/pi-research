@@ -29,6 +29,7 @@
 
 import net from 'node:net';
 import dns from 'node:dns';
+import { isBlockedDestination, isBlockedProxyTarget } from './lib/private-addresses.mjs';
 
 const PORT = Number(process.env.DDG_SOCKS_PORT || 1080);
 const PINS = (process.env.DDG_PIN_IPS || '52.250.42.157,40.89.244.232').split(',').map((s) => s.trim()).filter(Boolean);
@@ -192,8 +193,34 @@ const server = net.createServer((client) => {
       }
       if (stage === 'connect') {
         stage = 'done';
+        // SSRF backstop for proxied traffic. The browser cannot check this itself through
+        // a SOCKS5 proxy (Firefox reports 0.0.0.0 as the origin address — see
+        // src/infrastructure/browser/proxy-prefs.ts), so the proxy is the last place that
+        // can refuse to reach internal infrastructure. A hostile page that gets the
+        // browser to request http://169.254.169.254/ or http://127.0.0.1:8443/ lands here.
+        if (isBlockedProxyTarget(targetHost)) {
+          console.error(`[ddg-socks] refused private/reserved destination ${targetHost}:${targetPort}`);
+          client.write(Buffer.from([0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0])); // not allowed by ruleset
+          client.destroy();
+          return;
+        }
         resolve(targetHost).then((addrs) => {
-          connectWithFallback(client, addrs, targetPort, (err, upstream) => {
+          const allowed = addrs.filter((addr) => {
+            // A DNS answer can point anywhere: check the ADDRESS, not just the hostname.
+            // The DDG pins are public by construction, so they pass this check too — no
+            // hostname-based bypass, because a bypass is what an attacker would aim for.
+            if (isBlockedDestination(addr)) {
+              console.error(`[ddg-socks] refused ${targetHost} — resolves to private/reserved ${addr}`);
+              return false;
+            }
+            return true;
+          });
+          if (allowed.length === 0) {
+            client.write(Buffer.from([0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0])); // not allowed by ruleset
+            client.destroy();
+            return;
+          }
+          return connectWithFallback(client, allowed, targetPort, (err, upstream) => {
             if (err) {
               client.write(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0])); // host unreachable
               client.destroy();

@@ -190,7 +190,7 @@ describe('TUI Research Panel', () => {
     it('should render queued steering messages with QUEUED prefix', async () => {
       const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
-        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
+        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null, forwardedToPiAt: null },
       ]);
 
       const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
@@ -213,7 +213,7 @@ describe('TUI Research Panel', () => {
     it('should render active steering messages with RESEARCH STEERING prefix', async () => {
       const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
-        { id: '1', text: 'Focus on Y', status: 'active', addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+        { id: '1', text: 'Focus on Y', status: 'active', addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null, forwardedToPiAt: null },
       ]);
 
       const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
@@ -251,7 +251,7 @@ describe('TUI Research Panel', () => {
     it('should not duplicate steering messages across multiple panels', async () => {
       const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
-        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
+        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null, forwardedToPiAt: null },
       ]);
 
       const state1 = createInitialPanelState('pi-session', 'research-1', 'query1', 'model');

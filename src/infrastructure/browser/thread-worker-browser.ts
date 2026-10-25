@@ -9,8 +9,7 @@
  */
 
 import { platform } from 'node:os';
-import { readFileSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { loadSocksProxyPrefs } from './proxy-prefs.ts';
 import { setupMocking } from './thread-worker-messaging.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
 import { resolveHeadlessMode, BROWSER_LAUNCH_TIMEOUT_MS, CONTEXT_CREATION_TIMEOUT_MS } from './config.ts';
@@ -21,25 +20,10 @@ import { resolveHeadlessMode, BROWSER_LAUNCH_TIMEOUT_MS, CONTEXT_CREATION_TIMEOU
 // returns an unreachable DuckDuckGo front-door IP from this machine's egress
 // path; the local proxy pins DDG hostnames to the verified-live IP. Uses a
 // file rather than env so a long-lived leader picks it up without a restart.
-function loadSocksProxyPrefs(): Record<string, string | number | boolean> {
-  try {
-    const p = `${homedir()}/.pi/research/proxy.json`;
-    if (!existsSync(p)) return {};
-    const cfg = JSON.parse(readFileSync(p, 'utf8')) as { host?: string; port?: number };
-    const host = cfg.host ?? '127.0.0.1';
-    const port = cfg.port ?? 1080;
-    return {
-      'network.proxy.type': 1,
-      'network.proxy.socks': host,
-      'network.proxy.socks_port': port,
-      'network.proxy.socks_remote_dns': true,
-      'network.proxy.socks_version': 5,
-      'network.proxy.no_proxies_on': '',
-    };
-  } catch {
-    return {};
-  }
-}
+//
+// The reader now lives in ./proxy-prefs.ts: the scrape path has to consult the
+// SAME setting to know that a response's serverAddr() is the proxy hop rather
+// than the origin (see isProxyHopAddress there).
 
 let browser: any = null;
 let initPromise: Promise<void> | null = null;

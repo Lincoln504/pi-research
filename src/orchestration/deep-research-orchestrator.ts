@@ -8,7 +8,7 @@ import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-codin
 import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons } from './session-state.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons, shouldStopResearch, createResearchStopError, hasOnlyCapacityFailures } from './session-state.ts';
 import { MAX_EXTRA_ROUNDS_WITH_STEERING, MIN_SYNTHESIS_PROSE_CHARS, SYNTHESIS_FALLBACK_NOTICE, resolveExcludedTools } from '../constants.ts';
 import { synthesisProseBody, isAnalysisFreeSynthesis } from '../utils/text-utils.ts';
 import {
@@ -28,6 +28,7 @@ import {
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { getConfig } from '../config.ts';
 import type { Config } from '../config.ts';
+import { findModelByReference, resolveCoordinatorModel } from '../core/llm/coordinator-model.ts';
 import type { PlanningService } from '../core/planning-service.ts';
 
 export interface DeepResearchOrchestratorOptions {
@@ -111,7 +112,32 @@ export class DeepResearchOrchestrator {
     // Later evaluator rounds (round 2+ routing) and final synthesis
     // use the research model (RESEARCH_MODEL override or host model),
     // which is also what the researcher sub-agents use.
-    const initialCoordinatorModel = (ctx.model as Model<any> | undefined) ?? model;
+    //
+    // PI_RESEARCH_COORDINATOR_MODEL overrides that first call: `research` (or an
+    // explicit provider/id) when the chat model is a poor or single-seat planner.
+    // See src/core/llm/coordinator-model.ts for the measured case.
+    const initialCoordinatorModel = resolveCoordinatorModel<Model<any>>({
+      setting: this.config.COORDINATOR_MODEL,
+      hostModel: ctx.model as Model<any> | undefined,
+      researchModel: model,
+      // STRICT lookup (never resolveResearchModel): that resolver always returns a
+      // model — it falls back through RESEARCH_MODEL to "first available" — so a typo
+      // would silently run on an arbitrary model AND never trigger onUnresolved.
+      findByReference: (reference) => {
+        try {
+          const registry = ctx.modelRegistry;
+          const all = (registry?.getAll?.() ?? []) as Model<any>[];
+          const available = (registry?.getAvailable?.() ?? []) as Model<any>[];
+          return findModelByReference(reference, all, available);
+        } catch {
+          return undefined;
+        }
+      },
+      onUnresolved: (reference) => logger.warn(
+        `[DeepOrchestrator] COORDINATOR_MODEL '${reference}' is not an available model; ` +
+        'falling back to the research model (not the chat model, which this setting exists to replace).',
+      ),
+    });
     const evaluatorModel = model;
     
     const orchestrationService = await this.getOrchestrationService();
@@ -162,6 +188,14 @@ export class DeepResearchOrchestrator {
 
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
+    // Rounds that produced ZERO new reports while every failure was a provider-capacity
+    // failure. Capacity failures are excluded from shouldStopResearch (one upstream
+    // outage must not end a healthy run), which would otherwise keep the run alive for
+    // every remaining round — a full search burst each time — against a provider that
+    // cannot answer. One such round is tolerated (the outage may clear; the observed one
+    // lasted six minutes and each round already spends ~100s in the researcher retries);
+    // a second consecutive one stops the run at the fallback synthesis.
+    let capacityOnlyRounds = 0;
     // Whether the ROUTER chose to finish inside the loop, as opposed to the loop ending
     // because the round budget ran out. The router never carries the report: it is asked
     // for a decision, is given no corpus to write from (it sees each report once, on the
@@ -366,6 +400,17 @@ export class DeepResearchOrchestrator {
         // Reset wait retry counter on successful actions
         waitRetryCount = 0;
 
+        // Stop BEFORE the round's search burst when the failure threshold is already
+        // crossed. runResearchers performs the same check, but only after the planner
+        // and the whole search phase have run: on 2026-10-25 round 2 fanned out 36
+        // searches (296 results) that runResearchers then discarded, because round 1
+        // had already crossed the threshold. The stop error is identical to the one
+        // runResearchers raises, so the run's outcome (fallback synthesis from the
+        // reports already collected) does not change — only the wasted work does.
+        if (shouldStopResearch(this.options.sessionId, researchId, this.config.MAX_FAILED_RESEARCHERS)) {
+          throw createResearchStopError(this.options.sessionId, researchId);
+        }
+
         // Track how many researchers were planned this round
         // updatePlanForRound has a comment "We'll update totalResearchersPlanned in the orchestrator"
         if (plan.action === 'delegate' && plan.researchers && plan.researchers.length > 0) {
@@ -377,6 +422,11 @@ export class DeepResearchOrchestrator {
             planningService.addToQueryHistory(researchId, plan.allQueries);
         }
         
+        // Report count BEFORE this round, for the capacity-only grace-round check below.
+        const reportsBeforeRound = (await getService<IResearchSynthesisService>(
+          ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container,
+        )).getReportCount(researchId);
+
         // 2. Search Phase + per-researcher store queries (run in parallel)
         let researcherLinks: Map<string, string[]> | undefined;
         let storeLinks: Map<string, { url: string; description: string }[]> | undefined;
@@ -456,6 +506,25 @@ export class DeepResearchOrchestrator {
                 currentRound: this.currentRound,
                 signal
             }, researcherLinks, storeLinks);
+
+            // Did this round produce anything? Report count is cumulative, so a delta is
+            // the only honest answer; the failure list is cumulative too, hence the
+            // "all recorded failures are capacity" check rather than a per-round one.
+            const reportsAfterRound = (await getService<IResearchSynthesisService>(
+              ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container,
+            )).getReportCount(researchId);
+            if (reportsAfterRound <= reportsBeforeRound && hasOnlyCapacityFailures(this.options.sessionId, researchId)) {
+              capacityOnlyRounds++;
+              logger.warn(
+                `[DeepOrchestrator] Round ${this.currentRound} produced no report and every failure was a provider ` +
+                `capacity failure (${capacityOnlyRounds} consecutive, 1 tolerated)`,
+              );
+              if (capacityOnlyRounds > 1) {
+                throw createResearchStopError(this.options.sessionId, researchId);
+              }
+            } else {
+              capacityOnlyRounds = 0;
+            }
         }
 
         // Esc/abort responsiveness: runResearchers returns NORMALLY when the signal

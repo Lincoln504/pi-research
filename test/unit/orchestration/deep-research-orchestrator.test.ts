@@ -11,6 +11,8 @@ import {
   getResearcherFailureReasons,
   consumeQueuedMessages,
   getSteeringMessages,
+  shouldStopResearch,
+  hasOnlyCapacityFailures,
 } from '../../../src/orchestration/session-state.ts';
 import { MAX_ROUNDS_LEVEL_1 } from '../../../src/constants.ts';
 
@@ -58,6 +60,16 @@ vi.mock('../../../src/orchestration/session-state.ts', () => ({
   // immediate synthesis). The hollow-run tests override these per-test.
   getFailedResearchers: vi.fn(() => []),
   getResearcherFailureReasons: vi.fn(() => ({})),
+  // The round loop now checks the stop threshold BEFORE the search burst, so the
+  // orchestrator imports these directly (runResearchers did the same check later).
+  // Default off: these suites exercise normal multi-round flow.
+  shouldStopResearch: vi.fn(() => false),
+  hasOnlyCapacityFailures: vi.fn(() => false),
+  createResearchStopError: vi.fn((_sid: string | undefined, researchId: string) => {
+    const err = new Error(`Research stopped: ${researchId}`) as Error & { code: string };
+    err.code = 'RESEARCH_STOPPED';
+    return err;
+  }),
 }));
 
 describe('DeepResearchOrchestrator', () => {
@@ -206,6 +218,51 @@ describe('DeepResearchOrchestrator', () => {
     expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
     expect(mockOrchestrationService.runSearchBurst).toHaveBeenCalled();
     expect(mockOrchestrationService.runResearchers).toHaveBeenCalled();
+  });
+
+  it('stops after one capacity-only empty round instead of burning every round', async () => {
+    // Capacity failures are excluded from the stop threshold (a healthy run must not end
+    // because one upstream pool is busy), so a TOTAL outage would otherwise fan out a full
+    // search burst every remaining round. One empty round is tolerated — the outage may
+    // clear — and a second consecutive one stops the run.
+    vi.mocked(shouldStopResearch).mockReturnValue(false);
+    vi.mocked(hasOnlyCapacityFailures).mockReturnValue(true);
+    mockSynthesisService.getReportCount.mockReturnValue(0);
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => ({
+      action: 'delegate',
+      researchers: [{ id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] }],
+      allQueries: ['q2'],
+    }));
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 });
+    // Nothing was collected, so the run has nothing to return: it stops (RESEARCH_STOPPED)
+    // rather than running a third round.
+    await expect(orchestrator.run()).rejects.toMatchObject({ code: 'RESEARCH_STOPPED' });
+
+    // Round 1 + one tolerated grace round. A third round never runs.
+    expect(mockOrchestrationService.runResearchers).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps researching when a round produced no report but the failures were not capacity', async () => {
+    // A quality failure is the model's problem, not supply: the round counter resets and
+    // the run continues to its full budget (the threshold, not this guard, decides).
+    vi.mocked(shouldStopResearch).mockReturnValue(false);
+    vi.mocked(hasOnlyCapacityFailures).mockReturnValue(false);
+    // A report exists (so the run has something to return) and none was added this round:
+    // the grace counter resets instead of climbing.
+    mockSynthesisService.getReportCount.mockReturnValue(1);
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => ({
+      action: 'delegate',
+      researchers: [{ id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] }],
+      allQueries: ['q2'],
+    }));
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 });
+    await orchestrator.run();
+
+    // Full budget for complexity 2 (round 3 goes straight to synthesis), not stopped early.
+    expect(mockOrchestrationService.runResearchers).toHaveBeenCalledTimes(2);
   });
 
   it('should handle multi-round research (delegate then synthesize)', async () => {
@@ -383,7 +440,7 @@ describe('DeepResearchOrchestrator', () => {
       // instead of findings matters.
       const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(consumeQueuedMessages).mockReturnValue([
-        { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+        { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null, forwardedToPiAt: null },
       ]);
       const digests = new Map([['1.1', 'Covered: alpha\nGaps: none\nSources: 3']]);
       mockSynthesisService.getAllDigests.mockReturnValue(digests);
@@ -705,8 +762,8 @@ describe('DeepResearchOrchestrator', () => {
     // getSteeringMessages (which also counts prior-run active messages).
     const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
     vi.mocked(consumeQueuedMessages).mockReturnValue([
-      { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
-      { id: '2', text: 'and Y', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+      { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null, forwardedToPiAt: null },
+      { id: '2', text: 'and Y', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null, forwardedToPiAt: null },
     ]);
 
     // Evaluator keeps delegating until the loop exits, then forced synthesis.
@@ -775,8 +832,8 @@ describe('DeepResearchOrchestrator', () => {
     // live `maxRounds` (base + steering bonus) on every call site.
     const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
     vi.mocked(consumeQueuedMessages).mockReturnValue([
-      { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
-      { id: '2', text: 'and Y', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+      { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null, forwardedToPiAt: null },
+      { id: '2', text: 'and Y', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null, forwardedToPiAt: null },
     ]);
 
     mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
@@ -815,6 +872,7 @@ describe('DeepResearchOrchestrator', () => {
         addedAt: 0,
         consumedAt: 0,
         poppedAt: null,
+        forwardedToPiAt: null,
       })),
     );
 

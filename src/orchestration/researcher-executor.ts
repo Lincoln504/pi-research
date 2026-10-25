@@ -24,6 +24,7 @@ import { isAbortSentinel, boundSessionAbort } from './abort-utils.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 import { search } from '../web-research/search.ts';
 import { RESEARCHER_DIGEST_SECTION } from '../utils/coverage-digest.ts';
+import { isRateLimitError, isSpentAccountError, parseRetryAfterMs, rateLimitBackoffMs } from '../utils/provider-errors.ts';
 
 /**
  * Failures a retry cannot fix, because the next attempt sends the same request to
@@ -50,14 +51,13 @@ import { RESEARCHER_DIGEST_SECTION } from '../utils/coverage-digest.ts';
  * bounding total retry time rather than by refusing the retry that usually works.
  */
 export function isUnretriableResearcherError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  // Matched on the provider's wording rather than a bare "402": a status code can
-  // appear inside an unrelated payload (a token count, a URL, a quoted response
-  // body), and this gate ends a researcher's run — it must not fire on a
-  // coincidence. Same reasoning as isTransientSynthesisError's boundary anchoring.
-  return message.includes('requires more credits')
-    || message.includes('insufficient credits')
-    || message.includes('insufficient_quota');
+  // Delegated to isSpentAccountError (src/utils/provider-errors.ts) so there is ONE
+  // wording list. Both answer the same question — "is this a balance that will not
+  // refill?" — and when they drifted, a 429 worded "exceeded your current quota" was
+  // retried on the ordinary curve here while the capacity classifier already refused to
+  // call it capacity. Both match the provider's wording, never a bare status code: a code
+  // can appear inside an unrelated payload, and this gate ends a researcher's run.
+  return isSpentAccountError(error);
 }
 
 /**
@@ -73,21 +73,6 @@ export function isInFlightBudgetError(error: unknown): boolean {
   const lower = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return lower.includes('in_flight_budget_exhausted')
     || lower.includes('would exceed your available credits given your current in-flight requests');
-}
-
-/**
- * The `Retry-After` a provider error asked for, in ms, clamped to [5s, 60s], or null when
- * the error carries none. Read out of the message because the researcher retry loop sees a
- * serialized provider error, not the raw Response headers: pi's `after_provider_response`
- * hook (src/index.ts) is the only place with headers, and it does not feed this loop.
- */
-export function parseRetryAfterMs(error: unknown): number | null {
-  const message = error instanceof Error ? error.message : String(error);
-  const m = /["']?retry-after["']?\s*[:=]\s*["']?(\d{1,4})/i.exec(message);
-  if (!m) return null;
-  const seconds = Number(m[1]);
-  if (!Number.isFinite(seconds) || seconds <= 0) return null;
-  return Math.min(Math.max(seconds, 5), 60) * 1000;
 }
 
 /**
@@ -244,8 +229,9 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     .replace('{{digest_section}}', () => RESEARCHER_DIGEST_SECTION)
     .trim();
 
-  // Set when the previous attempt failed on the provider's in-flight budget: the next
-  // backoff uses the provider's Retry-After instead of the small exponential step.
+  // Set when the previous attempt failed on the provider's in-flight budget or on a
+  // rate limit: the next backoff uses the provider's Retry-After (or the long
+  // rate-limit step) instead of the small exponential 1-2s step.
   let inFlightBackoffMs: number | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -259,9 +245,13 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       return;
     }
     if (attempt > 1) {
-      // A provider-declared in-flight window overrides the exponential step for exactly
-      // one attempt: the condition cannot clear in 1-2s, and the provider already said
-      // how long it needs (isInFlightBudgetError / parseRetryAfterMs).
+      // A provider-declared rate-limit / in-flight window overrides the exponential step
+      // for exactly one attempt: the condition cannot clear in 1-2s, and the provider
+      // already said how long it needs (isInFlightBudgetError / parseRetryAfterMs), or —
+      // for an unadorned 429 — the rate-limit step (rateLimitBackoffMs) applies instead
+      // of the ordinary 1s/2s/4s curve, which cannot outlast a shared-pool limit.
+      // RESEARCHER_MAX_RETRY_DELAY_MS caps the ORDINARY step only; it is user-tunable to
+      // as little as a second, so it must never shorten a provider-mandated wait.
       const delay = inFlightBackoffMs ?? Math.min(1000 * Math.pow(2, attempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
       inFlightBackoffMs = null;
       logger.warn(`[ResearcherExecutor] Researcher ${id} retry ${attempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
@@ -632,12 +622,22 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         break;
       }
 
-      // Transient provider condition that needs a real wait, not a retry loop: honor the
+      // Transient provider conditions that need a real wait, not a retry loop: honor the
       // Retry-After it returned (clamped) for the next attempt instead of 1-2s.
-      if (isInFlightBudgetError(err) && attempt < maxAttempts) {
-        inFlightBackoffMs = parseRetryAfterMs(err) ?? 15000;
-        metrics.increment('researcher_inflight_budget_backoff_total', 1, { mode: 'deep', complexity: String(complexity) });
-        logger.warn(`[ResearcherExecutor] Researcher ${id} hit the provider's in-flight budget; backing off ${inFlightBackoffMs}ms (provider Retry-After, else 15s) before attempt ${attempt + 1}`);
+      //   • in-flight budget (402): the account's own open requests must settle.
+      //   • rate limit / 429: the upstream provider's shared pool is full. Observed on
+      //     2026-10-25 lasting over six minutes, while four attempts spaced 1s/2s/4s
+      //     burned out in ~40s and failed two of three researchers.
+      if (attempt < maxAttempts) {
+        if (isInFlightBudgetError(err)) {
+          inFlightBackoffMs = parseRetryAfterMs(err) ?? 15000;
+          metrics.increment('researcher_inflight_budget_backoff_total', 1, { mode: 'deep', complexity: String(complexity) });
+          logger.warn(`[ResearcherExecutor] Researcher ${id} hit the provider's in-flight budget; backing off ${inFlightBackoffMs}ms (provider Retry-After, else 15s) before attempt ${attempt + 1}`);
+        } else if (isRateLimitError(err)) {
+          inFlightBackoffMs = rateLimitBackoffMs(attempt + 1, parseRetryAfterMs(err));
+          metrics.increment('researcher_rate_limit_backoff_total', 1, { mode: 'deep', complexity: String(complexity) });
+          logger.warn(`[ResearcherExecutor] Researcher ${id} hit a provider rate limit; backing off ${inFlightBackoffMs}ms before attempt ${attempt + 1}`);
+        }
       }
 
       if (attempt < maxAttempts) {

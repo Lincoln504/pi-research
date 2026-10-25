@@ -721,6 +721,62 @@ describe('config (refactored)', () => {
     });
   });
 
+  /**
+   * A pi session lives for days, and config.env can be edited from another process
+   * (an editor, sed, a second pi session, the standalone CLI). The cache used to be
+   * permanent for the process lifetime, keyed only by CWD, so a long-lived session
+   * kept the RESEARCH_MODEL it read at startup.
+   *
+   * Observed 2026-10-22..25 on this machine: pi pid 3347489 started 18:30; config.env
+   * was switched from ling-3.0-flash to deepseek-flash-latest at 20:13; every process
+   * started afterwards used deepseek, while 3347489 kept ling-3.0-flash for the next
+   * 60 hours and lost two research runs (run-73affa30, run-bfe347c3) to that model's
+   * upstream rate limit.
+   */
+  describe('config-file change invalidation', () => {
+    const CACHE_CWD = '/tmp/pi-research-config-cache-test';
+    const fsExists = vi.mocked(fs.existsSync);
+    const fsStat = vi.mocked(fs.statSync);
+    const fsRead = vi.mocked(fs.readFileSync);
+
+    afterEach(() => {
+      // Restore the file-level defaults this suite's other cases depend on.
+      fsExists.mockReturnValue(false);
+      fsStat.mockReturnValue({ mtimeMs: Date.now() } as never);
+      fsRead.mockReturnValue('' as never);
+      resetConfig();
+    });
+
+    it('reloads when config.env changes on disk, and serves the cache while it does not', () => {
+      let mtimeMs = 1_000;
+      let body = 'PI_RESEARCH_MODEL=openai/old-model\n';
+      fsExists.mockImplementation(((p: string) => String(p).endsWith('config.env')) as never);
+      fsStat.mockImplementation((() => ({ mtimeMs, size: body.length })) as never);
+      fsRead.mockImplementation(((p: string) => (String(p).endsWith('config.env') ? body : '')) as never);
+      resetConfig();
+
+      expect(getConfig(CACHE_CWD).RESEARCH_MODEL).toBe('openai/old-model');
+
+      // Unchanged files: the SAME cached object is returned (no re-read per call).
+      expect(getConfig(CACHE_CWD)).toBe(getConfig(CACHE_CWD));
+
+      // Another process rewrites config.env.
+      body = 'PI_RESEARCH_MODEL=openai/new-model\n';
+      mtimeMs = 2_000;
+      expect(getConfig(CACHE_CWD).RESEARCH_MODEL).toBe('openai/new-model');
+    });
+
+    it('does not invalidate on an unchanged missing file (mock-suite safety)', () => {
+      // existsSync false everywhere (the module-level default): the fingerprint is
+      // constant, so setConfig's override must survive repeated getConfig calls.
+      resetConfig();
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '300000' }, {});
+      setConfig(config);
+      expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(300000);
+      expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(300000);
+    });
+  });
+
   describe('env parsing edge cases', () => {
     it('ignores non-numeric values for numeric fields and uses defaults', () => {
       // createConfig uses parseInt which returns NaN for non-numeric strings;

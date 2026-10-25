@@ -9,7 +9,7 @@
 
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 import { isKeyRelease, matchesKey } from '@earendil-works/pi-tui';
-import { getActiveSessionCount, abortAllSessions, refreshAllSessions, hideMasterWidget } from '../orchestration/session-state.ts';
+import { getActiveSessionCount, abortAllSessions, refreshAllSessions, hideMasterWidget, hasForwardedSteering } from '../orchestration/session-state.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -139,6 +139,30 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
           abortAllSessions(state.piSessionId);
         } catch (err) {
           logger.error('[TUI] Failed to abort sessions on cancel:', err);
+        }
+
+        // EXCEPTION to the fall-through above: the user handed a steering message
+        // to pi (Alt+P) during this run, so pi is holding it in its own queue.
+        //
+        // pi's Esc-while-streaming path is `restoreQueuedMessagesToEditor({abort:
+        // true})` (verified in pi's bundled TUI): it calls `clearAllQueues()`, joins
+        // the queued texts into the EDITOR, and then aborts the turn. So falling
+        // through un-queues the popped message, turns it into editor text, and ends
+        // the turn — it is never delivered as an instruction, and any later editor
+        // clear loses it. That is the "my popped message vanished" report.
+        //
+        // Consuming the key skips that path: research still cancels (abortAllSessions
+        // above), the research tool returns into pi's turn, and pi drains its steering
+        // queue at the next step — exactly what "pop" promised. Steering the user did
+        // NOT pop never reached pi's queue, stays in this extension's state, and is
+        // still dropped with the run, as before.
+        //
+        // Cost, deliberately accepted: pi does not abort its own turn for this Esc. A
+        // second Esc (no active research) falls through normally, so the panic-cancel
+        // gesture is one extra keystroke away, not gone.
+        if (hasForwardedSteering(state.piSessionId)) {
+          logger.info('[TUI] Esc while a popped steering message is queued in pi — aborting research and consuming the key so pi delivers the message.');
+          return { consume: true };
         }
       }
       return undefined;

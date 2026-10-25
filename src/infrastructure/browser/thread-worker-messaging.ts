@@ -10,6 +10,7 @@ import { appendFileSync, promises as fsp } from 'node:fs';
 import { redactSecrets } from '../../utils/log-utils.ts';
 import { safeUnref } from '../../utils/safe-unref.ts';
 import { MAX_HTML_SIZE, MAX_PDF_SIZE } from '../../web-research/scraper-types.ts';
+import { isProxyHopAddress } from './proxy-prefs.ts';
 
 /**
  * Mutex lock to serialize page creation. Playwright/Firefox can deadlock if newPage()
@@ -824,6 +825,10 @@ export async function executeScrapeTask(
           .then((addr: { ipAddress?: string } | null) => {
             const ip = addr?.ipAddress;
             if (!ip || poisonedError) return;
+            // Through the configured SOCKS proxy Firefox reports the proxy hop
+            // (`0.0.0.0`), not the origin — validating that as if it were the
+            // origin condemned every proxied scrape. See isProxyHopAddress.
+            if (isProxyHopAddress(ip)) return;
             try {
               validateForWorkerSync(ip.includes(':') ? `http://[${ip}]/` : `http://${ip}/`);
             } catch (cause: unknown) {
@@ -879,7 +884,7 @@ export async function executeScrapeTask(
     // prevent the TCP connection itself, but it stops the rendered response (e.g. cloud IAM
     // credentials) from being exfiltrated to the researcher/report, which is the real harm here.
     const serverAddr = await response?.serverAddr().catch(() => null);
-    if (serverAddr?.ipAddress) {
+    if (serverAddr?.ipAddress && !isProxyHopAddress(serverAddr.ipAddress)) {
       const ip: string = serverAddr.ipAddress;
       validateForWorkerSync(ip.includes(':') ? `http://[${ip}]/` : `http://${ip}/`);
     }
@@ -1037,7 +1042,7 @@ export async function executeScrapeTask(
     // Re-validate the final rendered main-frame document's connected IP (catches a client-side
     // navigation to a DNS-rebinding host that occurred after the initial goto passed).
     const finalAddr = await finalMainFrameAddr;
-    if (finalAddr?.ipAddress) {
+    if (finalAddr?.ipAddress && !isProxyHopAddress(finalAddr.ipAddress)) {
       const fip: string = finalAddr.ipAddress;
       validateForWorkerSync(fip.includes(':') ? `http://[${fip}]/` : `http://${fip}/`);
     }

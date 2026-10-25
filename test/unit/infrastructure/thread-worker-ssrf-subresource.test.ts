@@ -23,6 +23,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // Hoisted mock fns so vi.mock's factory (hoisted above the imports) can
 // reference them. Each test drives what a hostname "resolves" to.
@@ -38,6 +41,7 @@ vi.mock('node:dns/promises', () => ({
 
 import { executeScrapeTask } from '../../../src/infrastructure/browser/thread-worker-messaging.ts';
 import { isBenignScrapeFailure } from '../../../src/web-research/scraper-utils.ts';
+import { isProxyHopAddress, resetSocksProxyCache, type SocksProxyEndpoint } from '../../../src/infrastructure/browser/proxy-prefs.ts';
 
 const FLAG = 'PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE';
 const PUBLIC_IP = '93.184.216.34';
@@ -120,7 +124,28 @@ describe('executeScrapeTask — subresource SSRF guard + response-side rebinding
     vi.clearAllMocks();
     delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
     delete process.env[FLAG];
+    delete process.env['PI_RESEARCH_PROXY_JSON'];
+    resetSocksProxyCache();
   });
+
+  /**
+   * Switch the worker onto a local SOCKS proxy (or off, with `null`).
+   *
+   * PROVEN behaviour, measured 2026-10-25 with camoufox 0.5.8 on this machine:
+   * with the proxy configured, `serverAddr()` for https://example.com reports
+   * `0.0.0.0`; without it, the origin's real IP. Firefox cannot report the origin
+   * address when a SOCKS5 proxy resolves and connects on its behalf.
+   */
+  function useProxy(proxy: SocksProxyEndpoint | null) {
+    if (proxy) {
+      const file = path.join(os.tmpdir(), `pi-research-proxy-${process.pid}-${Math.random().toString(36).slice(2)}.json`);
+      writeFileSync(file, JSON.stringify(proxy));
+      process.env['PI_RESEARCH_PROXY_JSON'] = file;
+    } else {
+      delete process.env['PI_RESEARCH_PROXY_JSON'];
+    }
+    resetSocksProxyCache();
+  }
 
   it('blocks a subresource whose hostname rebinds to the cloud-metadata address (request-time DNS)', async () => {
     const { context, getRouteHandler } = makeHarness();
@@ -244,6 +269,60 @@ describe('executeScrapeTask — subresource SSRF guard + response-side rebinding
     });
     const result = await executeScrapeTask(context, 'http://127.0.0.1:8080/');
     expect(result.html).toContain('lorem ipsum');
+  });
+
+  // ── Proxy-hop exemption (regression: every proxied scrape was poisoned) ─────
+
+  it('does NOT poison a proxied scrape whose serverAddr is 0.0.0.0 (the proxy hop, not the origin)', async () => {
+    // Regression for the 2026-09-03..2026-10-25 window: the SOCKS proxy landed two
+    // months after the serverAddr() backstop, and Firefox reports the proxy hop as
+    // 0.0.0.0, which isPrivateIp classifies as reserved. Every browser-fallback
+    // scrape therefore failed with 'Fetch blocked: ... private/reserved address' —
+    // removing the only path that reads sites which 403 a plain fetch.
+    useProxy({ host: '127.0.0.1', port: 1080 });
+    const { context, page } = makeHarness({ mainIp: '0.0.0.0' });
+    const result = await executeScrapeTask(context, 'https://proxied-site.example.com/');
+    expect(result.html).toContain('lorem ipsum');
+    expect(page.close).toHaveBeenCalled();
+  });
+
+  it('does NOT poison a proxied scrape whose serverAddr is the proxy endpoint itself', async () => {
+    useProxy({ host: '127.0.0.1', port: 1080 });
+    const { context } = makeHarness({ mainIp: '127.0.0.1' });
+    const result = await executeScrapeTask(context, 'https://proxied-site-2.example.com/');
+    expect(result.html).toContain('lorem ipsum');
+  });
+
+  it('still poisons a private address behind a proxy (the exemption is only the hop)', async () => {
+    useProxy({ host: '127.0.0.1', port: 1080 });
+    const { context } = makeHarness({ mainIp: '10.0.0.5' });
+    await expect(
+      executeScrapeTask(context, 'https://proxied-site-3.example.com/'),
+    ).rejects.toThrow(/^Fetch blocked:.*private\/reserved address/);
+  });
+
+  it('still poisons 0.0.0.0 with NO proxy configured (anomalous there, and the guard must not weaken)', async () => {
+    useProxy(null);
+    const { context } = makeHarness({ mainIp: '0.0.0.0' });
+    await expect(
+      executeScrapeTask(context, 'https://unproxied-site.example.com/'),
+    ).rejects.toThrow(/^Fetch blocked:.*private\/reserved address/);
+  });
+
+  it('isProxyHopAddress: nothing is a hop when no proxy is configured', () => {
+    expect(isProxyHopAddress('0.0.0.0', null)).toBe(false);
+    expect(isProxyHopAddress('::', null)).toBe(false);
+  });
+
+  it('isProxyHopAddress: covers unspecified and the configured host', () => {
+    const proxy = { host: '127.0.0.1', port: 1080 };
+    expect(isProxyHopAddress('0.0.0.0', proxy)).toBe(true);
+    expect(isProxyHopAddress('::', proxy)).toBe(true);
+    expect(isProxyHopAddress('127.0.0.1', proxy)).toBe(true);
+    expect(isProxyHopAddress('[::1]', { host: '::1', port: 1080 })).toBe(true);
+    // A real origin address is never a hop, even behind a proxy.
+    expect(isProxyHopAddress('93.184.216.34', proxy)).toBe(false);
+    expect(isProxyHopAddress('10.0.0.5', proxy)).toBe(false);
   });
 
   it('does not poison a scrape whose responses are all public or without serverAddr (cached/fulfilled)', async () => {
