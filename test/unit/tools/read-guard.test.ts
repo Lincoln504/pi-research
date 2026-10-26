@@ -24,6 +24,11 @@ describe('read guard', () => {
     writeFileSync(join(proj, '.envrc'), 'x');
     writeFileSync(join(proj, '.env.example'), 'KEY=');
     writeFileSync(join(proj, 'credentials.ts'), 'x');
+    writeFileSync(join(proj, 'server.key'), 'k');
+    writeFileSync(join(proj, 'id_ecdsa_sk'), 'k');
+    writeFileSync(join(proj, '.dockerconfigjson'), '{}');
+    mkdirSync(join(proj, '.terraform'));
+    writeFileSync(join(proj, '.terraform', 'credentials.tfrc.json'), '{}');
     mkdirSync(join(proj, '..data'));
     writeFileSync(join(proj, '..data', 'cfg.json'), '{}');
     writeFileSync(join(proj, '.ssh', 'config'), 'x');
@@ -51,11 +56,25 @@ describe('read guard', () => {
   });
 
   it('denies secret files and credential directories inside the project', async () => {
-    for (const p of ['.env', '.env.production', 'server.pem', '.envrc']) {
+    for (const p of [
+      '.env',
+      '.env.production',
+      'server.pem',
+      '.envrc',
+      'server.key',
+      'tls.key',
+      'id_ecdsa_sk',
+      'id_rsa_sk',
+      '.dockerconfigjson',
+      'service-account.json',
+    ]) {
       await expect(assertReadAllowed(proj, join(proj, p))).rejects.toThrow(/credential or secret/);
     }
     await expect(assertReadAllowed(proj, join(proj, '.ssh', 'config'))).rejects.toThrow(/credential or VCS/);
     await expect(assertReadAllowed(proj, join(proj, '.git', 'config'))).rejects.toThrow(/credential or VCS/);
+    await expect(
+      assertReadAllowed(proj, join(proj, '.terraform', 'credentials.tfrc.json')),
+    ).rejects.toThrow(/credential or VCS/);
   });
 
   it('allows env templates and a ..-prefixed child directory', async () => {

@@ -51,10 +51,17 @@ export function getSocksProxyEndpoint(): SocksProxyEndpoint | null {
       cached = null;
       return cached;
     }
-    const cfg = JSON.parse(readFileSync(file, 'utf8')) as { host?: string; port?: number };
-    const host = cfg.host ?? '127.0.0.1';
-    const port = cfg.port ?? 1080;
-    cached = host ? { host, port } : null;
+    const cfg = JSON.parse(readFileSync(file, 'utf8')) as { host?: unknown; port?: unknown };
+    // Type-check the values: a hand-edited file with a numeric host or an
+    // out-of-range port must mean "no proxy", not a browser launched with a
+    // nonsense endpoint.
+    const host = cfg.host === undefined ? '127.0.0.1' : typeof cfg.host === 'string' ? cfg.host.trim() : '';
+    const port = cfg.port === undefined ? 1080 : Number.isInteger(cfg.port) ? (cfg.port as number) : -1;
+    if (host === '' || port < 1 || port > 65535) {
+      cached = null;
+      return cached;
+    }
+    cached = { host, port };
     return cached;
   } catch {
     cached = null;
@@ -103,11 +110,15 @@ export function resetSocksProxyCache(): void {
  * The check is deliberately gated on a configured proxy: with no proxy, Firefox
  * reports the true remote address, and an unspecified address there is anomalous
  * enough to keep blocking.
+ *
+ * Only the unspecified addresses are exempt, never the proxy host itself:
+ * with the proxy on 127.0.0.1 (the normal configuration), an origin address of
+ * 127.0.0.1 is indistinguishable from a genuine loopback origin, and the
+ * conservative call is to poison the scrape. Measured with camoufox 0.5.8 the
+ * hop reports 0.0.0.0, which is covered above.
  */
 export function isProxyHopAddress(ip: string, proxy: SocksProxyEndpoint | null = getSocksProxyEndpoint()): boolean {
   if (!proxy) return false;
   const addr = ip.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (addr === '' || addr === '0.0.0.0' || addr === '::' || addr === '::0') return true;
-  const proxyHost = proxy.host.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  return addr === proxyHost;
+  return addr === '' || addr === '0.0.0.0' || addr === '::' || addr === '::0';
 }

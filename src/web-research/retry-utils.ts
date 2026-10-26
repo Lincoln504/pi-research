@@ -337,7 +337,7 @@ export async function retryWithBackoff<T>(
 
       // Calculate delay with exponential backoff and jitter
       const baseDelay = opts.initialDelay * Math.pow(2, attempt);
-      const jitter = Math.random() * 0.5 * baseDelay; // ±50% jitter
+      const jitter = Math.random() * 0.5 * baseDelay; // 0–50% positive jitter
       // A caller that knows better (a provider-stated or rate-limit wait) wins over the
       // step — including over maxDelay, which bounds only the ordinary step.
       const override = opts.delayFor?.(attempt + 2, lastError);

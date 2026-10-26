@@ -10,6 +10,7 @@
 // ./lancedb-loader.ts for why that matters.
 import type * as lancedb from '@lancedb/lancedb';
 import { logger } from '../logger.ts';
+import { sqlString } from './sql-utils.ts';
 import { metrics } from '../utils/metrics.ts';
 import { StoreDocument } from '../core/interfaces/knowledge-interfaces.ts';
 
@@ -376,9 +377,9 @@ export async function findDocumentsByUrl(
   const startTime = Date.now();
 
   // Escape single quotes in URL to prevent SQL injection
-  const escapedUrl = url.replace(/'/g, "''");
+  const escapedUrl = sqlString(url);
 
-  let filter = `url = '${escapedUrl}'`;
+  let filter = `url = ${escapedUrl}`;
   if (scopeFilter) {
     filter = `(${filter}) AND (${scopeFilter})`;
   }

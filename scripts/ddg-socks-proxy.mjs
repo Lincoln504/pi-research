@@ -29,6 +29,7 @@
 
 import net from 'node:net';
 import dns from 'node:dns';
+import { pipeline } from 'node:stream';
 import { isBlockedDestination, isBlockedProxyTarget } from './lib/private-addresses.mjs';
 
 const PORT = Number(process.env.DDG_SOCKS_PORT || 1080);
@@ -77,9 +78,15 @@ const DATA_DEADLINE_MS = 8000;
  * so the NEXT connection starts at the next front-door. The caller passes the
  * client socket precisely so it can be cut on that path.
  */
-function connectWithFallback(client, addrs, port, cb) {
+function connectWithFallback(client, host, addrs, port, cb) {
   let settled = false;
   let attempts = 0;
+  // Only DuckDuckGo front-doors rotate: for any other destination the address
+  // list comes from DNS and a "starting index" has no meaning, so a refused
+  // connection to an arbitrary host must not shift the pin order.
+  const rotate = (usedIdx) => {
+    if (isDdgHost(host)) pinIndex = (usedIdx + 1) % addrs.length;
+  };
   const tryNext = () => {
     if (settled) return;
     if (attempts >= addrs.length) {
@@ -96,7 +103,7 @@ function connectWithFallback(client, addrs, port, cb) {
         // Fast-fail both ends and rotate the starting pin for next time.
         sock.destroy();
         client.destroy();
-        pinIndex = (usedIdx + 1) % addrs.length;
+        rotate(usedIdx);
         console.error(`[ddg-socks] ${addr} connected but sent no data within ${DATA_DEADLINE_MS}ms — client cut, rotating pin`);
         return;
       }
@@ -126,7 +133,7 @@ function connectWithFallback(client, addrs, port, cb) {
       if (!settled) {
         // Connection refusal / reset — this address is dead from this egress
         // too; rotate past it for the next connection, same as a stall.
-        pinIndex = (usedIdx + 1) % addrs.length;
+        rotate(usedIdx);
         tryNext();
       }
     });
@@ -141,7 +148,13 @@ const server = net.createServer((client) => {
   let targetHost = '';
   let targetPort = 0;
 
-  client.on('data', (chunk) => {
+  const onData = (chunk) => {
+    // Cap the handshake buffer: a well-formed SOCKS request is under 300
+    // bytes. Anything larger is not a handshake and must not accumulate.
+    if (buf.length + chunk.length > 4096) {
+      client.destroy();
+      return;
+    }
     buf = Buffer.concat([buf, chunk]);
     try {
       if (stage === 'greet') {
@@ -193,13 +206,19 @@ const server = net.createServer((client) => {
       }
       if (stage === 'connect') {
         stage = 'done';
+        // Handshake complete: the tunnel below owns the stream from here on.
+        // Detach this listener, or `buf` would grow without bound for the
+        // lifetime of every long-lived proxied connection.
+        client.removeListener('data', onData);
         // SSRF backstop for proxied traffic. The browser cannot check this itself through
         // a SOCKS5 proxy (Firefox reports 0.0.0.0 as the origin address — see
         // src/infrastructure/browser/proxy-prefs.ts), so the proxy is the last place that
         // can refuse to reach internal infrastructure. A hostile page that gets the
         // browser to request http://169.254.169.254/ or http://127.0.0.1:8443/ lands here.
         if (isBlockedProxyTarget(targetHost)) {
-          console.error(`[ddg-socks] refused private/reserved destination ${targetHost}:${targetPort}`);
+          // JSON.stringify: targetHost is raw domain bytes from a SOCKS
+          // client and may carry newlines (log injection).
+          console.error(`[ddg-socks] refused private/reserved destination ${JSON.stringify(targetHost)}:${targetPort}`);
           client.write(Buffer.from([0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0])); // not allowed by ruleset
           client.destroy();
           return;
@@ -210,7 +229,7 @@ const server = net.createServer((client) => {
             // The DDG pins are public by construction, so they pass this check too — no
             // hostname-based bypass, because a bypass is what an attacker would aim for.
             if (isBlockedDestination(addr)) {
-              console.error(`[ddg-socks] refused ${targetHost} — resolves to private/reserved ${addr}`);
+              console.error(`[ddg-socks] refused ${JSON.stringify(targetHost)} — resolves to private/reserved ${addr}`);
               return false;
             }
             return true;
@@ -220,7 +239,7 @@ const server = net.createServer((client) => {
             client.destroy();
             return;
           }
-          return connectWithFallback(client, allowed, targetPort, (err, upstream) => {
+          return connectWithFallback(client, targetHost, allowed, targetPort, (err, upstream) => {
             if (err) {
               client.write(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0])); // host unreachable
               client.destroy();
@@ -233,8 +252,11 @@ const server = net.createServer((client) => {
             // waiting for this reply, as most do) had those bytes buffered in
             // `buf` — forward them before attaching pipe, or they are lost.
             if (buf.length) upstream.write(buf);
-            client.pipe(upstream);
-            upstream.pipe(client);
+            // pipeline() (not pipe) destroys BOTH ends when either one ends:
+            // a client RST used to leave the upstream socket open (fd leak).
+            pipeline([client, upstream], (err) => {
+              if (err) console.error(`[ddg-socks] tunnel closed: ${err.message}`);
+            });
           });
         }).catch(() => {
           client.write(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
@@ -244,7 +266,8 @@ const server = net.createServer((client) => {
     } catch {
       client.destroy();
     }
-  });
+  };
+  client.on('data', onData);
 });
 
 server.on('error', (err) => {

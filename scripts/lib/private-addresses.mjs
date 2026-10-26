@@ -75,7 +75,7 @@ function ipv6Hextets(address) {
 function isBlockedIpv6(address) {
   const hextets = ipv6Hextets(address);
   if (!hextets) return true; // unparseable → refuse
-  const [h0, h1, h2, h3, h4, h5, h6, h7] = hextets;
+  const [h0, h1, , , , h5, h6, h7] = hextets;
 
   // :: and ::1
   if (hextets.every((h) => h === 0)) return true;
@@ -85,10 +85,24 @@ function isBlockedIpv6(address) {
     const v4 = `${h6 >> 8}.${h6 & 0xff}.${h7 >> 8}.${h7 & 0xff}`;
     return isBlockedIpv4(v4);
   }
-  // fc00::/7 unique-local, fe80::/10 link-local, ff00::/8 multicast.
-  if ((h0 & 0xfe00) === 0xfc00) return true;
-  if ((h0 & 0xffc0) === 0xfe80) return true;
-  if ((h0 & 0xff00) === 0xff00) return true;
+  // fc00::/7 unique-local, fe80::/10 link-local, ff00::/8 multicast, and the
+  // deprecated site-local fec0::/10 (RFC 3879) — private/reserved space with
+  // no legitimate scrape target. Range checks mirror the TS classifier's
+  // string-prefix checks exactly (fc/fd, fe8–feb plus fec–fef, ff).
+  // fec0::/10 is a subset of fe80::/10, so the /10 range covers it.
+  if (h0 >= 0xfc00 && h0 <= 0xfdff) return true;
+  if (h0 >= 0xfe80 && h0 <= 0xfeff) return true;
+  if (h0 >= 0xff00) return true;
+  // 6to4 (2002::/16), Teredo (2001::/32) and NAT64 (64:ff9b::/96) tunnel an
+  // IPv4 address inside the IPv6 literal, so a public-looking literal can
+  // carry a private/loopback IPv4 (2002:7f00:1:: → 127.0.0.x,
+  // 64:ff9b::a9fe:a9fe → 169.254.169.254). Block the whole ranges, mirroring
+  // the TS classifier (isPrivateIpv6 in src/web-research/scraper-utils.ts).
+  if (h0 === 0x2002) return true;
+  // Teredo is 2001:0::/32, NOT the whole 2001::/32: 2001:4860:4860::8888
+  // (public DNS) must stay allowed, so the second hextet must be zero.
+  if (h0 === 0x2001 && h1 === 0) return true;
+  if (h0 === 0x0064 && h1 === 0xff9b) return true;
   return false;
 }
 

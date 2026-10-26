@@ -112,7 +112,7 @@
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "//deps:check": "dependency-cruiser 18.5 refuses Node 25 (supports ^22 || ^24 || >=26) while engines allows >=22.22.2: run this script under Node 22 or 24 (see .nvmrc).",
     "deps:check": "depcruise --config config/tooling/dependency-cruiser.cjs --output-type err-long src",
-    "deps:generate": "npx --yes madge@8.0.0 --image docs/deps.svg src/index.ts",
+    "deps:generate": "madge --image docs/deps.svg src/index.ts",
     "verify:changelog": "node scripts/verify-changelog.cjs",
     "lock:restore-stubs": "node scripts/restore-lock-stubs.cjs",
     "analyze:dependencies": "ncu",
@@ -139,8 +139,8 @@
     "pdf-oxide-wasm": "^0.3.77",
     "playwright-core": "1.62.1",
     "poolifier": "^6.0.1",
-    "undici": "^8.11.2",
-    "youtubei.js": "^18.0.0"
+    "undici": "^8.12.2",
+    "youtubei.js": "^18.3.0"
   },
   "bundleDependencies": [
     "@lancedb/lancedb",
@@ -149,14 +149,14 @@
   ],
   "optionalDependencies": {
     "@huggingface/transformers": "4.3.1",
-    "webgpu": "^0.6.0",
     "@lancedb/lancedb-darwin-arm64": "0.40.0",
-    "@lancedb/lancedb-linux-x64-gnu": "0.40.0",
     "@lancedb/lancedb-linux-arm64-gnu": "0.40.0",
-    "@lancedb/lancedb-linux-x64-musl": "0.40.0",
     "@lancedb/lancedb-linux-arm64-musl": "0.40.0",
+    "@lancedb/lancedb-linux-x64-gnu": "0.40.0",
+    "@lancedb/lancedb-linux-x64-musl": "0.40.0",
+    "@lancedb/lancedb-win32-arm64-msvc": "0.40.0",
     "@lancedb/lancedb-win32-x64-msvc": "0.40.0",
-    "@lancedb/lancedb-win32-arm64-msvc": "0.40.0"
+    "webgpu": "^0.6.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.99.0 <2",
@@ -172,7 +172,7 @@
     "vite": "^8.3.1",
     "adm-zip": "^0.6.1",
     "jsdom": {
-      "undici": "^8.10.2"
+      "undici": "^8.12.2"
     },
     "sharp": "^0.35.0",
     "@lancedb/lancedb": {
@@ -191,6 +191,7 @@
     "dependency-cruiser": "^18.5.0",
     "depngn": "^0.6.0",
     "eslint": "10.13.0",
+    "madge": "^8.0.0",
     "npm-check-updates": "^23.1.0",
     "typebox": "1.3.27",
     "typescript": ">=6.0.3 <6.1.0",

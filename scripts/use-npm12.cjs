@@ -57,8 +57,9 @@ function main() {
   const prefix = path.join(base, 'npm12');
   fs.rmSync(prefix, { recursive: true, force: true });
 
-  // Quote the prefix: RUNNER_TEMP can contain spaces on some images.
-  execFileSync(`npm install -g npm@12 --prefix "${prefix}"`, { stdio: 'inherit', shell: true });
+  // argv array, not a shell string: RUNNER_TEMP can contain spaces on some
+  // images, and a shell would parse it.
+  execFileSync('npm', ['install', '-g', 'npm@12', '--prefix', prefix], { stdio: 'inherit' });
 
   // npm's global prefix layout differs by platform (see cliCandidatesFor).
   const cliCandidates = cliCandidatesFor(prefix);

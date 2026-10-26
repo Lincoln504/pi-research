@@ -5,10 +5,12 @@ license covers this project's own source code only.
 
 This package depends on third-party software distributed under its own license
 terms. Dependencies are resolved and installed by npm at install time (by
-reference); they are **not** bundled into this package's published artifacts, with the one exception
-below (the esbuild-bundled entry points — `dist/cli.mjs`, `dist/thread-worker.mjs` — are
-built with `--packages=external`, and the remaining `dist/` files are copied
-first-party sources, so no third-party code is inlined).
+reference); they are **not** bundled into this package's published artifacts, with the
+two exceptions below: `@lancedb/lancedb` is redistributed in the tarball, and the
+esbuild-bundled browser worker `dist/thread-worker.mjs` (and its copy shipped at
+`src/infrastructure/browser/thread-worker.mjs`) inlines exactly one third-party
+package, `typebox` (MIT — see below). `dist/cli.mjs` inlines no third-party code,
+and the remaining `dist/` files are copied first-party sources.
 
 ### Bundled third-party code: `@lancedb/lancedb`
 
@@ -23,6 +25,17 @@ resolve its pinned `@huggingface/transformers` 3.0.2 and `sharp` 0.33.5 (see `do
 `@opentelemetry/api` is Apache-2.0 and `reflect-metadata` is Apache-2.0; each carries its own
 license file in the bundle. The per-platform LanceDB native bindings are NOT bundled; npm installs
 them separately.
+
+### Inlined third-party code: `typebox`
+
+The browser worker bundle (`dist/thread-worker.mjs`, and the copy of it shipped at
+`src/infrastructure/browser/thread-worker.mjs`) inlines exactly one third-party
+package: `typebox`, **MIT**, Copyright the TypeBox authors (https://github.com/sinclairtypebox/typebox).
+The worker is a poolifier cluster child: a plain Node process that gets no help from
+pi's extension loader (which aliases the peer `typebox` for in-process code only),
+and `pi install` never installs peers — so `typebox` is bundled into the worker
+rather than resolved at runtime. (`dist/cli.mjs` inlines nothing; only the worker
+bundle does.)
 
 ### Notable dependency licensing
 
@@ -40,16 +53,19 @@ own license.
 
 ua-parser-js
 
-`ua-parser-js` 2.x is licensed under AGPL-3.0-or-later. To keep this MIT-licensed
-package free of AGPL-licensed code in its dependency tree, `package.json`
-`overrides` pins `ua-parser-js` to the `1.x` line, which is MIT-licensed. The
-1.x and 2.x APIs are compatible for the only surface our direct dependency
-(`camoufox`, which declares `^2.0.2`) uses — it calls just
+`ua-parser-js` 2.x is licensed under AGPL-3.0-or-later. `package.json`
+`overrides` pins `ua-parser-js` to the `1.x` line (MIT) **in this package's own
+install tree** — i.e. this repository and its CI. The pin does NOT reach
+consumers: an npm `overrides` field only applies to the package that carries it,
+and the published tarball ships no lockfile, so a consumer's install resolves
+camoufox's declared `ua-parser-js ^2.0.2` itself and typically installs the 2.x
+(AGPL) copy alongside it. That is a property of the consumer's dependency tree,
+not of this package's artifacts: camoufox calls only
 `new UAParser(ua).getBrowser().name` and `.getOS().name`, both present in 1.x and
-verified against the pinned `1.0.41` — and the pin is behavior-neutral for this
-package's usage (no custom `navigator.userAgent`/`fingerprint` is passed to Camoufox).
-Re-check that surface on every `camoufox` bump: a 2.x-only call would make
-this override a runtime break, not just a licensing choice.
+2.x, so the pin is behavior-neutral here, and no AGPL code is bundled into, or
+redistributed by, this package. Re-check that call surface on every `camoufox`
+bump: a 2.x-only call would make the pin a runtime break, not just a licensing
+choice.
 
 youtubei.js / bgutils-js / jsdom (YouTube transcripts)
 

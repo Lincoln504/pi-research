@@ -53,6 +53,22 @@ describe('isBlockedDestination', () => {
     }
   });
 
+  it('blocks the IPv4-tunneling ranges (site-local, 6to4, Teredo, NAT64)', () => {
+    // These ranges wrap an IPv4 address inside the IPv6 literal, so a
+    // public-looking literal can carry a private/loopback IPv4 — the TS
+    // classifier (isPrivateIpv6) blocks the whole ranges, and this mirror
+    // must stay in step with it.
+    for (const ip of [
+      'fec0::1', 'fdff::1', // site-local fec0::/10
+      '2002:7f00:1::', '2002:127:0:0::1', // 6to4 wrapping 127.x
+      '2001:0:dead::beef', // Teredo (2001:0::/32)
+      '64:ff9b::a9fe:a9fe', // NAT64 wrapping 169.254.169.254
+      '64:ff9b:1::',
+    ]) {
+      expect(isBlockedDestination(ip), ip).toBe(true);
+    }
+  });
+
   it('judges an IPv4 embedded in IPv6 by the embedded address', () => {
     // ::ffff:127.0.0.1 is loopback however it is spelled.
     expect(isBlockedDestination('::ffff:127.0.0.1')).toBe(true);

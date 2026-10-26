@@ -37,7 +37,7 @@
 
 'use strict';
 
-const { execSync, spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -174,8 +174,11 @@ function ensureOptionalEmbedding() {
 
   // --no-save + --no-package-lock keep this repair out of package.json and the
   // tracked lockfile: the tree is repaired, the repository is not modified.
-  execSync(
-    `npm install --no-save --no-package-lock --no-audit --no-fund --legacy-peer-deps ${spec}`,
+  // argv array, not a shell string: spec is read from an installed
+  // package.json and must never be parsed by a shell.
+  execFileSync(
+    'npm',
+    ['install', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--legacy-peer-deps', spec],
     { stdio: 'inherit' },
   );
 
@@ -231,8 +234,11 @@ function main() {
   // --legacy-peer-deps mirrors how the project installs everywhere (a peer
   // conflict in the tree makes strict resolution ERESOLVE); --no-save keeps
   // package.json / lockfile untouched.
-  execSync(
-    `npm install --no-save --no-package-lock --no-audit --no-fund --legacy-peer-deps ${spec}`,
+  // argv array, not a shell string: spec is read from an installed
+  // package.json and must never be parsed by a shell.
+  execFileSync(
+    'npm',
+    ['install', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--legacy-peer-deps', spec],
     { stdio: 'inherit' },
   );
 

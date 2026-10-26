@@ -179,6 +179,10 @@ Diagnostics & platform
 | `PLAYWRIGHT_INSTALL_DEPS` | _(unset)_ | Linux only. Set `true` during `npm install` to also install system libraries via `npx playwright install-deps` (same as `npm run install:system-deps`). |
 | `PI_RESEARCH_STRICT_SETUP` | _(unset)_ | Read by the bundled `scripts/setup.cjs` during `npm install`. Set `1`/`true` to make a failed browser download fail the install instead of deferring it to first use. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
+| `PI_RESEARCH_PROXY_JSON` | `~/.pi/research/proxy.json` | Path of the SOCKS proxy config file the browser workers read (`{"host":"127.0.0.1","port":1080}`), routing every browser request through the local SOCKS proxy. Read fresh per scrape, so toggling needs no restart. See [Troubleshooting](TROUBLESHOOTING.md). |
+| `DDG_SOCKS_PORT` | `1080` | Port the local SOCKS proxy (`scripts/ddg-socks-proxy.mjs`, run under cron) listens on. Read by the proxy script, not the main runtime. |
+| `DDG_PIN_IPS` | `52.250.42.157,40.89.244.232` | Pinned DuckDuckGo front-door IPs for the local SOCKS proxy (comma-separated). The proxy rotates past any address that stalls, so the list self-heals; change it only for a different egress path. |
+| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Override the pi agent directory the standalone engine/launcher looks in for host config (settings.json, models.json). |
 
 Testing only — never enable in production
 

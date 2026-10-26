@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -138,8 +138,11 @@ describe('executeScrapeTask — subresource SSRF guard + response-side rebinding
    */
   function useProxy(proxy: SocksProxyEndpoint | null) {
     if (proxy) {
-      const file = path.join(os.tmpdir(), `pi-research-proxy-${process.pid}-${Math.random().toString(36).slice(2)}.json`);
-      writeFileSync(file, JSON.stringify(proxy));
+      // mkdtemp (0700) + 0600 file: a predictable world-writable temp name
+      // in a shared tmpdir is a race (CodeQL js/insecure-temporary-file).
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'pi-research-proxy-'));
+      const file = path.join(dir, 'proxy.json');
+      writeFileSync(file, JSON.stringify(proxy), { mode: 0o600 });
       process.env['PI_RESEARCH_PROXY_JSON'] = file;
     } else {
       delete process.env['PI_RESEARCH_PROXY_JSON'];
@@ -286,11 +289,16 @@ describe('executeScrapeTask — subresource SSRF guard + response-side rebinding
     expect(page.close).toHaveBeenCalled();
   });
 
-  it('does NOT poison a proxied scrape whose serverAddr is the proxy endpoint itself', async () => {
+  it('poisons a proxied scrape whose serverAddr is the proxy host itself (loopback origin is indistinguishable from the hop)', async () => {
+    // With the proxy on 127.0.0.1, an origin address of 127.0.0.1 is a genuine
+    // loopback origin as far as the guard can tell — the conservative call is to
+    // poison. (Measured camoufox behaviour reports the hop as 0.0.0.0, which
+    // the unspecified-address exemption above still covers.)
     useProxy({ host: '127.0.0.1', port: 1080 });
     const { context } = makeHarness({ mainIp: '127.0.0.1' });
-    const result = await executeScrapeTask(context, 'https://proxied-site-2.example.com/');
-    expect(result.html).toContain('lorem ipsum');
+    await expect(
+      executeScrapeTask(context, 'https://proxied-site-2.example.com/'),
+    ).rejects.toThrow(/^Fetch blocked:.*private\/reserved address/);
   });
 
   it('still poisons a private address behind a proxy (the exemption is only the hop)', async () => {
@@ -314,12 +322,14 @@ describe('executeScrapeTask — subresource SSRF guard + response-side rebinding
     expect(isProxyHopAddress('::', null)).toBe(false);
   });
 
-  it('isProxyHopAddress: covers unspecified and the configured host', () => {
+  it('isProxyHopAddress: covers only the unspecified addresses, never a real address', () => {
     const proxy = { host: '127.0.0.1', port: 1080 };
     expect(isProxyHopAddress('0.0.0.0', proxy)).toBe(true);
     expect(isProxyHopAddress('::', proxy)).toBe(true);
-    expect(isProxyHopAddress('127.0.0.1', proxy)).toBe(true);
-    expect(isProxyHopAddress('[::1]', { host: '::1', port: 1080 })).toBe(true);
+    // The proxy host itself is NOT a hop: with the proxy on loopback it is
+    // indistinguishable from a genuine loopback origin, which must be poisoned.
+    expect(isProxyHopAddress('127.0.0.1', proxy)).toBe(false);
+    expect(isProxyHopAddress('[::1]', { host: '::1', port: 1080 })).toBe(false);
     // A real origin address is never a hop, even behind a proxy.
     expect(isProxyHopAddress('93.184.216.34', proxy)).toBe(false);
     expect(isProxyHopAddress('10.0.0.5', proxy)).toBe(false);

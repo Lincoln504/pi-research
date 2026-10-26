@@ -15,10 +15,10 @@ import { basename, dirname, relative, isAbsolute, parse, sep } from 'node:path';
 import type { ReadOperations } from '@earendil-works/pi-coding-agent';
 
 /** Path segments that are never readable, wherever they sit under the project. */
-const DENIED_SEGMENTS = new Set(['.ssh', '.aws', '.gnupg', '.git', '.kube', '.docker', '.azure', '.gcloud']);
+const DENIED_SEGMENTS = new Set(['.ssh', '.aws', '.gnupg', '.git', '.kube', '.docker', '.azure', '.gcloud', '.terraform']);
 
 /** Basenames (lower-cased) and patterns that carry credentials. */
-const DENIED_BASENAME = /^(\.env(\..*)?|\.envrc|\.netrc|_netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf|\.htpasswd|\.dockercfg|\.vault-token|\.bash_history|\.zsh_history|kubeconfig|terraform\.tfstate(\..*)?|(credentials|secrets?)(\.(json|ya?ml|toml|env|ini|txt|xml))?|id_(rsa|dsa|ecdsa|ed25519)(\..*)?|.*\.(pem|p12|pfx|jks|keystore|kdbx|asc|gpg|tfvars)|.*[-_.](secret|secrets|credentials)\.(json|ya?ml|toml|env)|service-account.*\.json)$/;
+const DENIED_BASENAME = /^(\.env(\..*)?|\.envrc|\.netrc|_netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|\.my\.cnf|\.htpasswd|\.dockercfg|\.dockerconfigjson|\.vault-token|\.bash_history|\.zsh_history|kubeconfig|terraform\.tfstate(\..*)?|(credentials|secrets?)(\.(json|ya?ml|toml|env|ini|txt|xml))?|id_(rsa|dsa|ecdsa|ed25519)([._-].*)?|.*\.(pem|p12|pfx|jks|keystore|kdbx|asc|gpg|tfvars|key)|.*[-_.](secret|secrets|credentials)\.(json|ya?ml|toml|env)|service-account.*\.json)$/;
 
 /** Env templates are meant to be shared and hold no secrets. */
 const ALLOWED_ENV_TEMPLATE = /^\.env\.(example|sample|template|dist)$/;

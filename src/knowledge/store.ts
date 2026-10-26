@@ -9,6 +9,7 @@
 // hoisted into the CLI bundle and loaded at startup. See ./lancedb-loader.ts.
 import type * as lancedb from '@lancedb/lancedb';
 import { getLancedb } from './lancedb-loader.ts';
+import { sqlString } from './sql-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
 import { 
@@ -158,11 +159,11 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private getScopeFilter(): string {
-    const ws = this.getWorkspace().replace(/'/g, "''");
+    const ws = sqlString(this.getWorkspace());
 
     switch (this.options.knowledgeMode) {
       case 'project':
-        return `workspace = '${ws}'`;
+        return `workspace = ${ws}`;
       case 'global':
         return 'is_global = true';
       default: // 'none'
@@ -992,8 +993,8 @@ export class KnowledgeStore implements IKnowledgeStore {
       const table = await this.getFreshTable();
       const startTime = Date.now();
       try {
-        const escapedUrl = url.replace(/'/g, "''");
-        await table.delete(`url = '${escapedUrl}' AND (${scopeFilter})`);
+        const escapedUrl = sqlString(url);
+        await table.delete(`url = ${escapedUrl} AND (${scopeFilter})`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration);
         metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'success' });
@@ -1048,13 +1049,13 @@ export class KnowledgeStore implements IKnowledgeStore {
       const table = await this.getFreshTable();
       const startTime = Date.now();
       try {
-        const escapedUrl = url.replace(/'/g, "''");
-        const escapedType = ingestionType.replace(/'/g, "''");
+        const escapedUrl = sqlString(url);
+        const escapedType = sqlString(ingestionType);
         // Integer-coerced so the predicate can never carry anything but digits.
         const ageClause = Number.isFinite(olderThan as number)
           ? ` AND timestamp < ${Math.floor(olderThan as number)}`
           : '';
-        await table.delete(`url = '${escapedUrl}' AND ingestion_type = '${escapedType}' AND (${scopeFilter})${ageClause}`);
+        await table.delete(`url = ${escapedUrl} AND ingestion_type = ${escapedType} AND (${scopeFilter})${ageClause}`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
         metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
@@ -1096,13 +1097,13 @@ export class KnowledgeStore implements IKnowledgeStore {
       while (retryCount <= MAX_RETRIES) {
         const table = await this.getFreshTable();
         try {
-          const escapedUrl = url.replace(/'/g, "''");
-          const escapedType = ingestionType.replace(/'/g, "''");
+          const escapedUrl = sqlString(url);
+          const escapedType = sqlString(ingestionType);
           // valuesSql with integer-coerced literals: timestamp is an Int64 column,
           // and both inputs are integer-coerced so the SQL can never carry
           // anything but digits.
           await table.update({
-            where: `url = '${escapedUrl}' AND ingestion_type = '${escapedType}' AND timestamp = ${Math.floor(generationTs)} AND (${scopeFilter})`,
+            where: `url = ${escapedUrl} AND ingestion_type = ${escapedType} AND timestamp = ${Math.floor(generationTs)} AND (${scopeFilter})`,
             valuesSql: { timestamp: String(Math.floor(newTs)) },
           });
           logger.log(`[store] Refreshed timestamp for unchanged ${ingestionType} chunks of ${url}`);
@@ -1202,13 +1203,13 @@ export class KnowledgeStore implements IKnowledgeStore {
     const scopeFilter = this.getScopeFilter();
 
     const startTime = Date.now();
-    const escapedUrl = url.replace(/'/g, "''");
+    const escapedUrl = sqlString(url);
 
     // limit > 1 deliberately: after a failed prune two generations of this URL can
     // coexist, and LanceDB's fragment-scan order typically returns the OLDEST row
     // first — limit(1) would serve the superseded content (and feed its older
     // timestamp to the serve-age gate) until the next successful ingest.
-    const whereClause = `url = '${escapedUrl}' AND ingestion_type = 'synthesis-description' AND (${scopeFilter})`;
+    const whereClause = `url = ${escapedUrl} AND ingestion_type = 'synthesis-description' AND (${scopeFilter})`;
     let results = await table
       .query()
       .where(whereClause)
@@ -1622,10 +1623,10 @@ export class KnowledgeStore implements IKnowledgeStore {
         try {
           const table = await this.getFreshTable();
           const ws = normalizeWorkspacePath(workspace || this.getWorkspace());
-          const escaped = ws.replace(/'/g, "''");
+          const escaped = sqlString(ws);
 
           const [local, global] = await Promise.all([
-            table.countRows(`workspace = '${escaped}'`),
+            table.countRows(`workspace = ${escaped}`),
             table.countRows(`is_global = true`)
           ]);
 
