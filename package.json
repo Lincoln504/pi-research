@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "1.7.22",
+  "version": "1.7.23",
   "description": "Web research for your agents with smart and safe tooling + knowledge store",
   "type": "module",
   "private": false,
