@@ -9,7 +9,7 @@
  */
 
 import { constants } from 'node:fs';
-import { access, readFile, realpath } from 'node:fs/promises';
+import { access, open, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, relative, isAbsolute, parse, sep } from 'node:path';
 import type { ReadOperations } from '@earendil-works/pi-coding-agent';
@@ -89,7 +89,26 @@ export function createGuardedReadOperations(cwd: string): ReadOperations {
     readFile: async (p) => {
       // Re-checked at read time: the access() check and the read are separate calls.
       await assertReadAllowed(cwd, p);
-      return readFile(p);
+      // The policy check above resolves symlinks, then this open() runs a moment
+      // later: a local attacker with write access to the project can swap `p`
+      // for a symlink in between (TOCTOU). O_NOFOLLOW makes the open itself
+      // refuse a final-component symlink (ELOOP), and the stat on the fd
+      // rejects anything that is not a regular file. Reading through the fd
+      // (not the path) means the bytes come from the file the fd points at,
+      // not whatever the path resolves to at read time. The residual gap is an
+      // intermediate path component swapped for a directory symlink, which
+      // Node's public API cannot close (no openat-walk); it is documented in
+      // SECURITY.md.
+      const handle = await open(p, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile()) {
+          throw new ReadDeniedError('path is not a regular file');
+        }
+        return await readFile(handle);
+      } finally {
+        await handle.close();
+      }
     },
   };
 }

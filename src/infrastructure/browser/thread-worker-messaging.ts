@@ -267,7 +267,7 @@ export async function setupMocking(context: any): Promise<void> {
 async function extractSearchResults(page: any): Promise<any[]> {
   return await page.evaluate(() => {
     const found: any[] = [];
-    // @ts-ignore - document is available in browser context
+    // document is available in browser context (callback runs in the page)
     // eslint-disable-next-line no-undef
     const links = Array.from(document.querySelectorAll('a.result-link, a.result__a'));
     links.forEach((link: any) => {
@@ -985,7 +985,7 @@ export async function executeScrapeTask(
       try {
         await page.waitForFunction(
           () => {
-            // @ts-ignore - document is available in browser context
+            // document is available in browser context (callback runs in the page)
             // eslint-disable-next-line no-undef
             const body = document.body.innerHTML;
             return !body.includes('_cf_chl_') &&

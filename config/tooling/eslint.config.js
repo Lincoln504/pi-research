@@ -64,7 +64,18 @@ const config = [
       '@typescript-eslint': tseslint,
     },
     rules: {
+      // @typescript-eslint recommended ruleset (merged in flat-config style),
+      // then the project overrides below.
+      ...tseslint.configs.recommended.rules,
       // Override specific rules
+      //
+      // no-explicit-any is WARN, not off: 333 sites across 70 files (measured
+      // 2026-10-26). Each is a boundary type (camoufox/Playwright JSON, LLM
+      // responses) that needs a deliberate shape decision, so it is a tracked
+      // warning — every lint run surfaces it — not a silenced rule. A full
+      // any → unknown + narrowing pass is its own project; it must not ride
+      // on a security release.
+      '@typescript-eslint/no-explicit-any': 'warn',
       'no-console': 'off', // Allow console.log for debugging
       'no-unused-vars': 'off', // Disable in favor of TypeScript version
       'no-redeclare': 'off', // TypeBox uses const+type with same name (standard pattern)

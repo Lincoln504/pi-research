@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
-import { assertReadAllowed, createGuardedReadOperations } from '../../../src/tools/read-guard.ts';
+import { assertReadAllowed, createGuardedReadOperations, ReadDeniedError } from '../../../src/tools/read-guard.ts';
 import { frameUntrustedReport, UNTRUSTED_REPORT_NOTICE } from '../../../src/utils/untrusted-notice.ts';
 
 describe('read guard', () => {
@@ -53,6 +53,30 @@ describe('read guard', () => {
   it.skipIf(platform() === 'win32')('denies a symlink that escapes the project', async () => {
     await expect(assertReadAllowed(proj, join(proj, 'link.txt'))).rejects.toThrow(/outside the project/);
     await expect(createGuardedReadOperations(proj).readFile(join(proj, 'link.txt'))).rejects.toThrow(/read denied/);
+  });
+
+  it.skipIf(platform() === 'win32')('refuses a final-component symlink at open time, even when the policy check passes (TOCTOU backstop)', async () => {
+    // The policy check PASSES for this path: it resolves inside the project.
+    // Only the open-time O_NOFOLLOW + fstat defense can refuse it — this is
+    // the exact shape of the TOCTOU swap (a regular file replaced by a
+    // symlink between the check and the read).
+    const alias = join(proj, 'src', 'alias.txt');
+    symlinkSync(join(proj, 'src', 'a.ts'), alias);
+    try {
+      await expect(assertReadAllowed(proj, alias)).resolves.toBeUndefined();
+      let err: unknown;
+      try {
+        await createGuardedReadOperations(proj).readFile(alias);
+        err = new Error('read succeeded through a symlink');
+      } catch (e) {
+        err = e;
+      }
+      expect(err).not.toBeUndefined();
+      const code = (err as NodeJS.ErrnoException).code;
+      expect(code === 'ELOOP' || err instanceof ReadDeniedError).toBe(true);
+    } finally {
+      rmSync(alias, { force: true });
+    }
   });
 
   it('denies secret files and credential directories inside the project', async () => {

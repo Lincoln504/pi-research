@@ -24,7 +24,14 @@ transcripts, advisories) with an LLM that holds tools. The relevant boundaries:
   refuses well-known secret files and credential directories (`.env*`, `*.pem`, `*.key`,
   SSH/GPG keys, `.npmrc`, `.netrc`, `.git-credentials`, `.ssh/`, `.aws/`, `.git/`, …), and it
   refuses entirely when the working directory is a home directory or a filesystem root.
-  To remove it altogether, set `PI_RESEARCH_DISABLED_TOOLS=read` (or `--exclude-tools read`).
+  The read itself opens with `O_NOFOLLOW` and `fstat`s the fd, so a final path
+  component swapped for a symlink between the policy check and the open (a local
+  TOCTOU) is refused, and only regular files are read. The residual gap is an
+  *intermediate* path component swapped for a directory symlink, which Node's
+  public API cannot close (no `openat` walk); it requires a local attacker with
+  write access to the project and no read access elsewhere, and is rated Low.
+  To remove the tool altogether, set `PI_RESEARCH_DISABLED_TOOLS=read` (or
+  `--exclude-tools read`).
 - **`scrape` blocks private, loopback and link-local addresses** (SSRF), pinning the
   resolved IP at connect time. It cannot block a public attacker-controlled host, so the
   scrape tool and the file-read tool are deliberately not combined without confinement.

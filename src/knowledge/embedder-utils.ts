@@ -269,7 +269,7 @@ export async function initializeDawnWebGPU(): Promise<boolean> {
     // reason; the adapter probe below is the other native entry point and was
     // missing it, which is why a plain `knowledge` run still printed them.
     const adapter = await logger.runCapturingStderr(async () => {
-      // @ts-ignore — optional dependency
+      // webgpu is an optional dependency (types resolve because it is installed for dev)
       const { create, globals } = await import('webgpu');
       Object.assign(globalThis, globals);
       // Use Object.defineProperty — Node.js defines navigator as a configurable getter
