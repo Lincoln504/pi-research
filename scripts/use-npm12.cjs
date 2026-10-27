@@ -26,6 +26,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { npmInvocation } = require('./lib/npm-cmd.cjs');
 
 /**
  * Candidate bin dirs for a global prefix, platform-correct one first. npm puts
@@ -57,9 +58,14 @@ function main() {
   const prefix = path.join(base, 'npm12');
   fs.rmSync(prefix, { recursive: true, force: true });
 
-  // argv array, not a shell string: RUNNER_TEMP can contain spaces on some
-  // images, and a shell would parse it.
-  execFileSync('npm', ['install', '-g', 'npm@12', '--prefix', prefix], { stdio: 'inherit' });
+  // Run npm through the CLI bundled in the Node distribution, not a bare
+  // `npm` argv spawn: on Windows the npm on PATH is a `.cmd` shim a shell-less
+  // spawn cannot resolve (ENOENT), and direct `.cmd` spawns are rejected since
+  // CVE-2024-27980 (EINVAL), while a shell would parse the RUNNER_TEMP prefix.
+  // The bundled CLI is an absolute path: no PATH lookup, no shim, no shell.
+  // See scripts/lib/npm-cmd.cjs for the full story.
+  const { command, args } = npmInvocation();
+  execFileSync(command, [...args, 'install', '-g', 'npm@12', '--prefix', prefix], { stdio: 'inherit' });
 
   // npm's global prefix layout differs by platform (see cliCandidatesFor).
   const cliCandidates = cliCandidatesFor(prefix);

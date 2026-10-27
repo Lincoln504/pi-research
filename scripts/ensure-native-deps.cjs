@@ -40,6 +40,7 @@
 const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { npmInvocation } = require('./lib/npm-cmd.cjs');
 
 function log(msg) {
   process.stdout.write(`[ensure-native-deps] ${msg}\n`);
@@ -175,10 +176,13 @@ function ensureOptionalEmbedding() {
   // --no-save + --no-package-lock keep this repair out of package.json and the
   // tracked lockfile: the tree is repaired, the repository is not modified.
   // argv array, not a shell string: spec is read from an installed
-  // package.json and must never be parsed by a shell.
+  // package.json and must never be parsed by a shell. npm runs through the
+  // CLI bundled in the Node distribution (see scripts/lib/npm-cmd.cjs) — a
+  // bare `npm` argv spawn is unresolvable on Windows.
+  const { command, args } = npmInvocation();
   execFileSync(
-    'npm',
-    ['install', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--legacy-peer-deps', spec],
+    command,
+    [...args, 'install', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--legacy-peer-deps', spec],
     { stdio: 'inherit' },
   );
 
@@ -235,10 +239,13 @@ function main() {
   // conflict in the tree makes strict resolution ERESOLVE); --no-save keeps
   // package.json / lockfile untouched.
   // argv array, not a shell string: spec is read from an installed
-  // package.json and must never be parsed by a shell.
+  // package.json and must never be parsed by a shell. npm runs through the
+  // CLI bundled in the Node distribution (see scripts/lib/npm-cmd.cjs) — a
+  // bare `npm` argv spawn is unresolvable on Windows.
+  const { command, args } = npmInvocation();
   execFileSync(
-    'npm',
-    ['install', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--legacy-peer-deps', spec],
+    command,
+    [...args, 'install', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--legacy-peer-deps', spec],
     { stdio: 'inherit' },
   );
 
