@@ -17,10 +17,12 @@ import {
   isRateLimitError,
   isCapacityFailureReason,
   isSpentAccountError,
+  parseRetryAfterMs,
   rateLimitBackoffMs,
   clampRateLimitWait,
   RATE_LIMIT_BACKOFF_BASE_MS,
   RATE_LIMIT_BACKOFF_MAX_MS,
+  STATED_RETRY_AFTER_MAX_MS,
 } from '../../../src/utils/provider-errors.ts';
 
 // Verbatim shape from 2026-10-25, wrapped as pi-research's ensureAssistantResponse
@@ -44,9 +46,22 @@ describe('isRateLimitError', () => {
     expect(isRateLimitError(new Error('context overflow: you requested 142935 tokens'))).toBe(false);
   });
 
+  it('matches the 5xx overload class, which is as transient as a 429', () => {
+    // Verbatim shape from 2026-10-28 (issue #22): pi refuses a Retry-After longer
+    // than its own cap and surfaces the provider half as a 503.
+    expect(isRateLimitError(new Error(
+      'Provider error - Server requested 120s retry delay (max: 60s). 503 Provider returned error',
+    ))).toBe(true);
+    expect(isRateLimitError(new Error('502 Bad Gateway'))).toBe(true);
+    expect(isRateLimitError(new Error('504 Gateway Timeout'))).toBe(true);
+    expect(isRateLimitError(new Error('500 Internal Server Error'))).toBe(true);
+    expect(isRateLimitError(new Error('503 Service Unavailable'))).toBe(true);
+  });
+
   it('does not fire on unrelated provider failures', () => {
     expect(isRateLimitError(new Error('402: this request requires more credits'))).toBe(false);
     expect(isRateLimitError(new Error('400: invalid model id'))).toBe(false);
+    expect(isRateLimitError(new Error('404: model not found'))).toBe(false);
     expect(isRateLimitError(new Error('a stylesheet selector was overloaded'))).toBe(false);
   });
 
@@ -127,8 +142,11 @@ describe('rateLimitBackoffMs', () => {
 
   it("prefers the provider's stated window over the exponential step", () => {
     expect(rateLimitBackoffMs(2, 42_000, noJitter)).toBe(42_000);
-    // and still clamps it
-    expect(rateLimitBackoffMs(2, 900_000, noJitter)).toBe(60_000);
+    // A stated window longer than the EXPONENTIAL ceiling is honoured: clamping a
+    // provider's 120s to 60s only guarantees the retry fails too (issue #22).
+    expect(rateLimitBackoffMs(2, 120_000, noJitter)).toBe(120_000);
+    // ...but it still has its own, larger ceiling.
+    expect(rateLimitBackoffMs(2, 900_000, noJitter)).toBe(STATED_RETRY_AFTER_MAX_MS);
     expect(rateLimitBackoffMs(2, 10, noJitter)).toBe(1_000);
   });
 
@@ -136,5 +154,33 @@ describe('rateLimitBackoffMs', () => {
     expect(clampRateLimitWait(0)).toBe(1_000);
     expect(clampRateLimitWait(120_000)).toBe(60_000);
     expect(clampRateLimitWait(7_500)).toBe(7_500);
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('reads the header form', () => {
+    expect(parseRetryAfterMs(new Error('429 retry-after: 30'))).toBe(30_000);
+    expect(parseRetryAfterMs(new Error('{"retry-after":"45"}'))).toBe(45_000);
+  });
+
+  it("reads pi's refuse-the-cap sentence, which is the only statement of the window", () => {
+    expect(parseRetryAfterMs(new Error(
+      'Provider error - Server requested 120s retry delay (max: 60s). 503 Provider returned error',
+    ))).toBe(120_000);
+    expect(parseRetryAfterMs(new Error('Server requested 90s retry delay (max: 60s). 503'))).toBe(90_000);
+  });
+
+  it('reads the prose form', () => {
+    expect(parseRetryAfterMs(new Error('please retry after 20s'))).toBe(20_000);
+  });
+
+  it('clamps a stated window into [5s, STATED_RETRY_AFTER_MAX_MS]', () => {
+    expect(parseRetryAfterMs(new Error('retry-after: 1'))).toBe(5_000);
+    expect(parseRetryAfterMs(new Error('retry-after: 3600'))).toBe(STATED_RETRY_AFTER_MAX_MS);
+  });
+
+  it('returns null when nothing is stated', () => {
+    expect(parseRetryAfterMs(new Error('429 Too Many Requests'))).toBeNull();
+    expect(parseRetryAfterMs(undefined)).toBeNull();
   });
 });

@@ -30,6 +30,7 @@
 import net from 'node:net';
 import dns from 'node:dns';
 import { pipeline } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { isBlockedDestination, isBlockedProxyTarget } from './lib/private-addresses.mjs';
 
 const PORT = Number(process.env.DDG_SOCKS_PORT || 1080);
@@ -245,18 +246,27 @@ const server = net.createServer((client) => {
               client.destroy();
               return;
             }
-            // Success reply (IPv4 0.0.0.0:0 is acceptable)
-            client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
-            upstream.on('error', () => upstream.destroy());
-            // A client that pipelined its payload with the request (instead of
-            // waiting for this reply, as most do) had those bytes buffered in
-            // `buf` — forward them before attaching pipe, or they are lost.
-            if (buf.length) upstream.write(buf);
-            // pipeline() (not pipe) destroys BOTH ends when either one ends:
-            // a client RST used to leave the upstream socket open (fd leak).
-            pipeline([client, upstream], (err) => {
-              if (err) console.error(`[ddg-socks] tunnel closed: ${err.message}`);
-            });
+            // This callback runs from a socket 'connect' event, NOT from a promise
+            // chain: an exception thrown here is uncaught and ends the process.
+            // Every step that touches a socket therefore stays inside one guard.
+            try {
+              if (client.destroyed) {
+                upstream.destroy();
+                return;
+              }
+              // Success reply (IPv4 0.0.0.0:0 is acceptable)
+              client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+              upstream.on('error', () => upstream.destroy());
+              // A client that pipelined its payload with the request (instead of
+              // waiting for this reply, as most do) had those bytes buffered in
+              // `buf` — forward them before attaching the tunnel, or they are lost.
+              if (buf.length) upstream.write(buf);
+              attachTunnel(client, upstream);
+            } catch (attachErr) {
+              console.error(`[ddg-socks] failed to establish tunnel: ${attachErr && attachErr.message}`);
+              client.destroy();
+              upstream.destroy();
+            }
           });
         }).catch(() => {
           client.write(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
@@ -270,10 +280,80 @@ const server = net.createServer((client) => {
   client.on('data', onData);
 });
 
+/**
+ * Wire a client socket to an upstream socket in BOTH directions.
+ *
+ * Exported so the regression this replaced can be tested without network
+ * egress: 1.7.23 shipped `pipeline([client, upstream])`, which forwards only
+ * client→upstream. The tunnel accepted the SOCKS handshake, connected, and then
+ * black-holed every response, so every browser request through the proxy timed
+ * out. The unit suite stayed green because nothing tested the return path.
+ *
+ * TWO directional pipelines, not one array: `pipeline([a, b])` means `a → b`.
+ * pipeline (not pipe) is still the right primitive — it destroys both ends when
+ * either ends, which is what closed the file-descriptor leak on a client RST.
+ */
+export function attachTunnel(client, upstream) {
+  const onError = (err) => {
+    // A HALF-CLOSE is normal tunnel teardown (HTTP/1.0 `Connection: close`, a
+    // TLS close_notify, either peer hanging up first), and an already-dead pair
+    // is the same race seen twice. Logging either would fill the journal with
+    // one line per request. Genuine faults still log.
+    if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE' && err.code !== 'ERR_STREAM_UNABLE_TO_PIPE') {
+      console.error(`[ddg-socks] tunnel closed: ${err.message}`);
+    }
+    client.destroy();
+    upstream.destroy();
+  };
+
+  // A peer can be gone by the time the upstream connect resolves: browsers open
+  // speculative SOCKS connections and drop them, and this proxy's own
+  // DATA_DEADLINE cuts both ends on a stall. `pipeline()` THROWS
+  // ERR_STREAM_UNABLE_TO_PIPE synchronously on a closed/destroyed endpoint —
+  // `pipe()` did not — and that throw lands in a socket 'connect' handler, i.e.
+  // OUTSIDE every promise chain and try/catch in this file, so it killed the
+  // daemon. Measured 2026-10-30: 20 restarts in a few minutes, every one this
+  // error. Attaching a tunnel to a dead pair must be a no-op.
+  if (client.destroyed || upstream.destroyed) {
+    client.destroy();
+    upstream.destroy();
+    return;
+  }
+  try {
+    pipeline(client, upstream, onError);
+    pipeline(upstream, client, onError);
+  } catch (err) {
+    onError(err);
+  }
+}
+
 server.on('error', (err) => {
   console.error(`[ddg-socks] server error: ${err.message}`);
+  // A proxy that is ALIVE but not listening is the worst state: the supervisor
+  // thinks it is up, Restart=always never fires, and every browser request fails
+  // at connect with no explanation. EADDRINUSE/EACCES are not recoverable in
+  // process, so exit non-zero and let the supervisor retry.
+  process.exit(1);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[ddg-socks] SOCKS5 listening on 127.0.0.1:${PORT} (pins: ${PINS.join(',')})`);
-});
+/**
+ * Start listening. Separated from module load so a test can import attachTunnel
+ * (and the guard helpers) without binding port 1080.
+ */
+export function startProxy(port = PORT) {
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`[ddg-socks] SOCKS5 listening on 127.0.0.1:${port} (pins: ${PINS.join(',')})`);
+  });
+  return server;
+}
+
+// Main-module guard: `process.argv[1]` is absent when imported by a test runner.
+const isMainModule = (() => {
+  try {
+    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMainModule) startProxy();

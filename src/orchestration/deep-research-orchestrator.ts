@@ -7,6 +7,7 @@
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
+import { describeProxyIfBroken } from '../infrastructure/browser/proxy-health.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages, getFailedResearchers, getResearcherFailureReasons, shouldStopResearch, createResearchStopError, hasOnlyCapacityFailures } from './session-state.ts';
 import { MAX_EXTRA_ROUNDS_WITH_STEERING, MIN_SYNTHESIS_PROSE_CHARS, SYNTHESIS_FALLBACK_NOTICE, resolveExcludedTools } from '../constants.ts';
@@ -150,6 +151,22 @@ export class DeepResearchOrchestrator {
     // which already passes ctx).
     await orchestrationService.cleanupResearchServices(undefined, researchId, ctx, this.config);
     
+    // A configured-but-broken SOCKS proxy fails EVERY browser request. Only the
+    // UI health gate and the quick orchestrator run a pre-flight check; a deep
+    // run has no such gate, so without this the whole search burst is spent
+    // first (36 queries, ~7 minutes on 2026-10-30) and then dies with the
+    // generic "Search completely failed". One probe costs seconds.
+    //
+    // Bounded generously (3s connect + 6s data): the point is to catch a dead or
+    // one-way tunnel, not to convict a proxy that is merely slow on a loaded box.
+    const proxyDiagnosis = await describeProxyIfBroken();
+    if (proxyDiagnosis) {
+      throw new Error(
+        `Research cannot start: ${proxyDiagnosis} ` +
+        'Repair or remove ~/.pi/research/proxy.json (docs/TROUBLESHOOTING.md), then rerun.',
+      );
+    }
+
     logger.log(`[DeepOrchestrator] Starting multi-round research (complexity ${complexity}) for: "${query}" (Run: ${researchId})`);
     metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(complexity) });
 

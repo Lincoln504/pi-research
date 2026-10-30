@@ -7,6 +7,7 @@
 import { runWorkerSearch } from '../infrastructure/browser/task-execution-service.ts';
 import { getMaxWorkers, COLD_START_ALLOWANCE_MS } from '../infrastructure/browser/config.ts';
 import { isTaskTimeoutError, isNativeBindingError } from '../infrastructure/browser/browser-error-utils.ts';
+import { describeProxyIfBroken } from '../infrastructure/browser/proxy-health.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { normalizeUrl } from '../utils/url-utils.ts';
@@ -339,9 +340,18 @@ export async function performSearch(
             );
         }
 
+        // Name the actual cause when the configured proxy is the cause. Without
+        // this the message lists three hypotheses (workers, DuckDuckGo, load) and
+        // none of them is "the local SOCKS proxy is a black hole", which is what
+        // every one of these failures was between 2026-10-28 and 2026-10-30.
+        // Cheap: this branch only runs after a burst has already failed.
+        const proxyDiagnosis = await describeProxyIfBroken();
         throw new Error(
             `Search completely failed: ${reason}. ` +
-            `Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under extreme load.` +
+            (proxyDiagnosis
+                ? `${proxyDiagnosis} Every browser request is routed through the configured proxy, ` +
+                  `so no search can succeed until it forwards traffic or ~/.pi/research/proxy.json is removed.`
+                : `Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under extreme load.`) +
             (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
         );
     }

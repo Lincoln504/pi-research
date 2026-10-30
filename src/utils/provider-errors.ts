@@ -64,10 +64,25 @@ export function isRateLimitError(error: unknown): boolean {
   if (isSpentAccountError(error)) return false;
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return /\b429\b/.test(msg)
+    // A provider that is OVERLOADED says 5xx, and pi passes the status through:
+    //   "503 Provider returned error"
+    // That is as transient as a 429 and must take the same long-wait path. Before
+    // this, a 503 fell through to the ordinary 1s/2s curve and killed the run
+    // (2026-10-28, eight consecutive runs lost while the search burst had already
+    // collected 48-104 results).
+    || /\b50[0234]\b/.test(msg)
+    || msg.includes('service unavailable')
+    || msg.includes('bad gateway')
+    || msg.includes('gateway timeout')
     || msg.includes('rate limit')
     || msg.includes('rate-limit')
     || msg.includes('rate limited')
     || msg.includes('too many requests')
+    // pi's own client throws this sentence when the provider's Retry-After is
+    // longer than pi's cap. It is a capacity signal, not a bug report:
+    //   "Server requested 120s retry delay (max: 60s). 503 Provider returned error"
+    || msg.includes('retry delay')
+    || msg.includes('retry-after')
     || msg.includes('engine_overloaded')
     || msg.includes('provider_overloaded');
 }
@@ -94,11 +109,20 @@ export function isCapacityFailureReason(reason: string | undefined): boolean {
  */
 export function parseRetryAfterMs(error: unknown): number | null {
   const message = error instanceof Error ? error.message : String(error);
-  const m = /["']?retry-after["']?\s*[:=]\s*["']?(\d{1,4})/i.exec(message);
+  // Three shapes are in the wild:
+  //   1. `retry-after: 30`              — a header echoed into the message
+  //   2. `retry after 30s`              — prose form
+  //   3. `Server requested 120s retry delay (max: 60s). 503 ...`
+  //      — pi's client refusing a window longer than its own cap. The provider's
+  //        number is the load-bearing one: it is the ONLY statement of when the
+  //        pool reopens, and the run has just been told to come back in 120s.
+  const m = /["']?retry-after["']?\s*[:=]\s*["']?(\d{1,4})/i.exec(message)
+    || /requested\s+(\d{1,4})\s*s(?:ec(?:onds?)?)?\s+retry\s+delay/i.exec(message)
+    || /retry\s+after\s+(\d{1,4})\s*s/i.exec(message);
   if (!m) return null;
   const seconds = Number(m[1]);
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
-  return Math.min(Math.max(seconds, 5), 60) * 1000;
+  return Math.min(Math.max(seconds, 5), STATED_RETRY_AFTER_MAX_MS / 1000) * 1000;
 }
 
 /**
@@ -115,6 +139,24 @@ export const RATE_LIMIT_BACKOFF_BASE_MS = 15_000;
  * fallback, so three retries cost at most 15s + 30s + 60s of waiting.
  */
 export const RATE_LIMIT_BACKOFF_MAX_MS = 60_000;
+
+/**
+ * Ceiling for a wait the PROVIDER stated, which is a different thing from the
+ * exponential ceiling above. A provider that asks for 120s has told us when its
+ * pool reopens. Clamping that to 60s does not make the request succeed — it
+ * guarantees the next attempt fails too, and burns one of three attempts to learn
+ * nothing. 180s still bounds a run: PI_RESEARCH_TIMEOUT_MS defaults to 900s.
+ */
+export const STATED_RETRY_AFTER_MAX_MS = 180_000;
+
+/**
+ * Total time ONE researcher may spend waiting on provider capacity across its
+ * attempts. Three stated 120s windows would be six minutes inside a single
+ * researcher, which is most of a run's budget spent on one call. Past this bound
+ * the loop stops and says WHEN to rerun, instead of sleeping into the run timeout
+ * and reporting a failure with no cause.
+ */
+export const RATE_LIMIT_TOTAL_WAIT_MAX_MS = 240_000;
 
 /**
  * How long to wait before retry `attempt` (2 = first retry).
@@ -135,7 +177,9 @@ export function rateLimitBackoffMs(
   random: () => number = Math.random,
 ): number {
   if (retryAfterMs !== null && Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
-    return clampRateLimitWait(retryAfterMs);
+    // A stated window keeps its full length up to STATED_RETRY_AFTER_MAX_MS; only
+    // the exponential fallback below is bounded by RATE_LIMIT_BACKOFF_MAX_MS.
+    return Math.min(Math.max(Math.round(retryAfterMs), 1_000), STATED_RETRY_AFTER_MAX_MS);
   }
   const exponent = Math.max(0, attempt - 2);
   const base = Math.min(RATE_LIMIT_BACKOFF_BASE_MS * Math.pow(2, exponent), RATE_LIMIT_BACKOFF_MAX_MS);

@@ -701,6 +701,25 @@ describe('isBusyPoolHealthFailure', () => {
     ] })).toBe(false);
   });
 
+  it('returns false when the configured SOCKS proxy is broken, even if every other failure is a timeout', () => {
+    // 2026-10-30: a one-way proxy made EVERY probe time out. The timeout-only rule
+    // called that "pool busy" and let a 36-query burst run into a dead tunnel for
+    // seven minutes. A broken proxy is a real fault, not congestion.
+    expect(isBusyPoolHealthFailure({ components: [
+      okCapability,
+      busyRuntime,
+      { component: 'SocksProxy', healthy: false, error: 'proxy at 127.0.0.1:1080 returned no data within 8000ms' },
+    ] })).toBe(false);
+  });
+
+  it('returns true when the proxy check is healthy and only the runtime probe timed out', () => {
+    expect(isBusyPoolHealthFailure({ components: [
+      okCapability,
+      busyRuntime,
+      { component: 'SocksProxy', healthy: true },
+    ] })).toBe(true);
+  });
+
   it('returns false when there are no unhealthy components', () => {
     expect(isBusyPoolHealthFailure({ components: [okCapability, { component: 'BrowserRuntime', healthy: true }] })).toBe(false);
   });

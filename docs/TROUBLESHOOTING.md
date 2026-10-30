@@ -70,9 +70,101 @@ Updating fixes it. To confirm the cause on an affected build, disable the proxy 
 
 **What the fix does and does not cover.** The check it exempts compares the address Firefox actually connected to against the address the hostname resolves to — that comparison is what catches DNS rebinding. A SOCKS5 proxy makes it impossible: Firefox never sees the origin address. So with a proxy configured, a page that rebinds a public hostname to an internal address is not caught at bake time. Two things still apply. Request-time DNS validation still runs on every navigation and every subresource the page pulls in, and rejects a hostname that resolves into private space before the request is allowed out. And `scripts/ddg-socks-proxy.mjs` (the proxy this project ships instructions for) now refuses to CONNECT to a loopback, private, link-local, CGNAT, multicast or reserved destination, checking both the requested host and every address it resolves to. A third-party SOCKS proxy you point `proxy.json` at does not have that guard — do not route through one you do not trust.
 
+## Every search fails: "Search completely failed: all N queries encountered worker errors"
+
+This is the whole burst failing, not one query. Most of the time it is network reachability for
+the search provider, and the most common local cause is a configured SOCKS proxy that is not
+forwarding. The error now names it when it can:
+
+```
+Search completely failed: all 36 queries encountered worker errors.
+SOCKS proxy check: proxy at 127.0.0.1:1080 completed the SOCKS handshake to example.com:80
+but returned no data within 3000ms (...). Every browser request is routed through the configured
+proxy, so no search can succeed until it forwards traffic or ~/.pi/research/proxy.json is removed.
+```
+
+Diagnose in this order.
+
+1. **Is a proxy configured?** `cat ~/.pi/research/proxy.json`. Absent means the browser connects
+   directly. Present means 100% of browser traffic goes through it, so a dead proxy is a dead
+   system.
+2. **Is it forwarding?** One command, and it must print an HTTP status code:
+   ```bash
+   curl -sS -x socks5h://127.0.0.1:1080 -o /dev/null -w '%{http_code}\n' https://example.com/
+   ```
+   `000` after 15s means the proxy is not returning data. `curl: (97)` means the proxy refused the
+   destination (see the ruleset section below).
+3. **Is the proxy process running the current script?** A systemd unit or a cron job keeps the code
+   it started with. After `pi update`, restart it:
+   ```bash
+   systemctl --user restart ddg-socks-proxy.service   # or whatever supervises it
+   ```
+   Verify what it actually loaded: `systemctl --user show ddg-socks-proxy.service -p ExecStart`.
+4. **Read the proxy's own log.** With the unit below it goes to journald
+   (`journalctl --user -u ddg-socks-proxy -n 50`); a unit that appends to a file puts it in that
+   file instead. `connected but sent no data within 8000ms` repeated, or `tunnel closed: Premature
+   close` in bulk, means the tunnel is established and nothing comes back.
+5. **No proxy needed?** Remove it: `mv ~/.pi/research/proxy.json ~/.pi/research/proxy.json.off`.
+   The file is read per scrape, so no restart is needed. Do this whenever direct egress works —
+   the proxy exists for an egress path that can reach only one DuckDuckGo front-door, and most
+   machines do not need it.
+
+If the proxy is healthy, the same error means the provider itself: DuckDuckGo timing out, or a
+blocked egress path. Check `PI_RESEARCH_SEARCH_TIMEOUT_MS` (45s by default) against a slow link,
+and try `curl https://lite.duckduckgo.com/lite/` from the same machine.
+
+## `health` says everything is OK but nothing can be searched
+
+Fixed in the release that adds the `SocksProxy` health component. Before it, `health` proved only
+that the browser was installed: `BrowserCapability` never touches the network, and `BrowserRuntime`
+returns `ready (idle)` without probing when the scheduler is idle. A one-way proxy therefore
+reported a clean bill of health while every run failed.
+
+Current builds check the configured proxy by speaking SOCKS5 to it and requiring **bytes back**, so a
+tunnel that connects and then returns nothing is reported as:
+
+```
+[FAIL] **SocksProxy** [CRITICAL]
+  - Error: proxy at 127.0.0.1:1080 completed the SOCKS handshake to example.com:80 but returned no data within 8000ms (...)
+```
+
+That check also runs before a research run starts, so the run stops in seconds with a diagnosis
+instead of spending its whole search burst first. Two other signals are worth knowing:
+
+- A readiness-probe timeout alone is treated as "pool busy" and the run proceeds. That rule is
+  deliberate (a loaded machine queues probes behind real work), and a broken proxy is excluded
+  from it.
+- `PI_RESEARCH_SKIP_HEALTHCHECK=1` skips the pre-flight check entirely. It does not skip the
+  proxy probe.
+
 ## The SOCKS proxy refuses a URL with "connection not allowed by ruleset"
 
 That is `scripts/ddg-socks-proxy.mjs` blocking an SSRF attempt, not a bug: the destination was loopback, private, link-local (`169.254.169.254` metadata included), CGNAT, multicast or reserved, spelled either as the host or as the address it resolves to. The log line names it: `[ddg-socks] refused private/reserved destination <host>:<port>` or `refused <host> — resolves to private/reserved <addr>`. A research run never needs such a destination. If you added the proxy for a private mirror, run that request without the proxy.
+
+Running the proxy under systemd (recommended over cron: it restarts, and its output lands in the
+journal) — the unit is a local file, not something this package installs:
+
+```ini
+[Unit]
+Description=DDG SOCKS5 pin proxy for pi-research
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/.pi/agent/extensions/pi-research   # or the npm install path
+Environment=DDG_SOCKS_PORT=1080
+Environment=DDG_PIN_IPS=52.250.42.157,40.89.244.232
+ExecStart=/usr/bin/node scripts/ddg-socks-proxy.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Point `ExecStart` at the Node binary that runs pi (`command -v node`). `DDG_PIN_IPS` is read only by
+the proxy, so changing it needs a restart. The pins are a snapshot of DuckDuckGo's front doors: if
+both go dead the proxy cannot recover by itself, and `curl` through it will stall — repin, or drop
+the proxy if direct egress works on your machine.
 
 ## A research run used a different model than `~/.pi/research/config.env` says
 

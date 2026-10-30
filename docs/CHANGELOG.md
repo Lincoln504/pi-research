@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.24] - 2026-10-30
+
+### Fixed
+
+- **The SOCKS proxy forwarded requests one way and black-holed every response.** 1.7.23 replaced
+  `client.pipe(upstream); upstream.pipe(client);` with `pipeline([client, upstream], ...)` while
+  closing an fd leak. `pipeline([a, b])` means `a → b`, so the return path was removed: the proxy
+  accepted the SOCKS handshake, connected upstream, forwarded the client's request, and never sent
+  a byte back. Every browser request through a configured proxy therefore timed out, and every
+  research run with `~/.pi/research/proxy.json` present failed: `Search completely failed: all 36
+  queries encountered worker errors` after seven minutes, twice on 2026-10-30, plus a 32-query run
+  on 2026-10-29. The tunnel is now two directional `pipeline()` calls, which keeps the fd-leak fix
+  (both sockets are still destroyed when either ends) and restores the return path. Normal tunnel
+  teardown no longer logs `Premature close` once per request. The tunnel wiring moved into an
+  exported `attachTunnel()` so it can be tested without network egress:
+  `test/unit/scripts/ddg-socks-proxy-tunnel.test.ts` pins both directions, the teardown rule, and
+  the two crash guards below. The published 1.7.23 npm tarball carries the broken script, so
+  upgrading is the only fix for a consumer who runs the shipped proxy.
+- **`pipeline()` throws on a dead endpoint, and the throw lands where nothing catches it.** Browsers
+  open speculative SOCKS connections and drop them, and the proxy's own 8s data deadline cuts both
+  ends on a stall, so `attachTunnel` regularly runs against an already-destroyed socket.
+  `pipeline()` raises `ERR_STREAM_UNABLE_TO_PIPE` synchronously, and the call sits inside a
+  socket `'connect'` handler — outside every promise chain and `try` in the file — so it killed the
+  daemon. Measured while validating this release: 20 restarts in a few minutes, every one this
+  error. Attaching to a dead pair is now a no-op, the attach path is wrapped, half-close and
+  already-dead teardown no longer log, and both crashes have tests.
+- **The proxy now exits non-zero when its port is already taken.** `server.on('error')` logged
+  `EADDRINUSE` and left the process running without listening, the one state a supervisor cannot
+  see: `Restart=always` never fires and every browser request fails at connect. It exits so the
+  supervisor retries.
+- **A broken proxy reported a clean bill of health.** `health` proved only that the browser was
+  installed (`BrowserCapability` never touches the network) and `BrowserRuntime` returns
+  `ready (idle)` without probing when the scheduler is idle, so a one-way tunnel produced "All
+  systems operational" while every search failed. There is now a **critical** `SocksProxy` health
+  component: when `proxy.json` exists it speaks SOCKS5 to the proxy, sends one request, and
+  requires **bytes back**, because the observed failure accepts the handshake and then forwards
+  nothing. `src/infrastructure/browser/proxy-health.ts`; tests
+  `test/unit/infrastructure/proxy-health.test.ts` cover the healthy path, a black-holed tunnel, a
+  ruleset refusal, a refused connection, a non-SOCKS greeting, and the not-configured case.
+- **A broken proxy is no longer mistaken for a busy pool.** `isBusyPoolHealthFailure` treats any set
+  of timeout-shaped probe failures as "pool busy, proceed" so sustained load cannot abort a healthy
+  run. A dead proxy produces exactly that signature, so the gate always said "operational" and let
+  the whole search burst run into the dead tunnel. An unhealthy `SocksProxy` now makes the gate
+  return false. Test: `test/unit/healthcheck/index.test.ts`.
+- **A deep run now checks the proxy before it searches.** Only the quick orchestrator and the UI
+  health gate ran a pre-flight check, so a deep run spent its entire burst first. The orchestrator
+  probes at the start (3s connect + 3s data, then one retry at 6s) and fails immediately with the
+  diagnosis. It requires two failed samples before stopping a run, because one refused connect
+  during a proxy restart must not abort work the next probe would clear.
+- **`Search completely failed` now names a broken proxy instead of listing three guesses.** When the
+  proxy probe fails on the total-failure path, the error says what is wrong and what to do, rather
+  than "Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under
+  extreme load".
+- **A 5xx with a stated cool-off burned the retry budget in seconds and killed the run** (issue
+  #22, "503 + provider Retry-After > 60s is retried 3x at 1s/2s and kills the whole run": eight
+  consecutive runs lost on 2026-10-28 while the search burst had already collected 48-104 results). Three gaps, all closed in `src/utils/provider-errors.ts`:
+  - `isRateLimitError` now classifies the 5xx overload class (`500`/`502`/`503`/`504`,
+    `Service Unavailable`, `Bad Gateway`, `Gateway Timeout`, `retry delay`, `retry-after`) as
+    capacity, so it takes the long-wait path instead of the ordinary 1s/2s curve.
+  - `parseRetryAfterMs` now reads pi's own sentence — `Server requested 120s retry delay (max:
+    60s)` — which is the only statement of when the pool reopens, plus the prose `retry after Ns`
+    form.
+  - A stated window is no longer clamped to 60s. 60s is the ceiling for the **exponential**
+    backoff, not for a window the provider stated: clamping 120s to 60s guaranteed the next attempt
+    failed too. Stated windows are honoured up to 180s (`STATED_RETRY_AFTER_MAX_MS`) and the
+    exponential fallback keeps its 60s ceiling.
+  - Total capacity waiting per researcher is bounded at 240s
+    (`RATE_LIMIT_TOTAL_WAIT_MAX_MS`). Past it the loop stops and reports the provider's window and
+    the time to rerun ("Rerun after 22:10:00Z") instead of sleeping into the run timeout and
+    reporting a failure with no cause. Tests: `test/unit/utils/provider-errors.test.ts`.
+
+### Documentation
+
+- **`docs/TROUBLESHOOTING.md` gained the two failures that actually happened:** every search failing
+  with "all N queries encountered worker errors" (proxy diagnosis in five steps, including the one
+  `curl` that proves forwarding, and the reminder that a supervisor keeps the code it started with),
+  and "`health` says everything is OK but nothing can be searched" (what `health` did and did not
+  prove, and what the `SocksProxy` component now reports).
+- **The proxy section now ships a systemd unit** instead of "run under cron", and states the
+  failure mode the pins have: they are a snapshot of DuckDuckGo's front doors, so both dying at once
+  cannot self-heal. `docs/CONFIGURATION.md` says the proxy is critical when configured and that
+  `DDG_PIN_IPS` needs a restart.
+
 ## [1.7.23] - 2026-10-26
 
 ### Security

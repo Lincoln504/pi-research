@@ -37,8 +37,11 @@ describe('isInFlightBudgetError', () => {
 });
 
 describe('parseRetryAfterMs', () => {
-  it('reads the Retry-After out of the real message and clamps to 60s', () => {
-    expect(parseRetryAfterMs(new Error(REAL_MESSAGE))).toBe(60000);
+  it('reads the Retry-After out of the real message and honours the stated 120s', () => {
+    // 60s is the ceiling for the EXPONENTIAL backoff, not for a window the provider
+    // stated. The account's own open requests settle when the provider says they do,
+    // so clamping 120s to 60s only guaranteed the retry happened too early.
+    expect(parseRetryAfterMs(new Error(REAL_MESSAGE))).toBe(120000);
   });
 
   it('honors a small value but floors it at 5s', () => {

@@ -24,7 +24,7 @@ import { isAbortSentinel, boundSessionAbort } from './abort-utils.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 import { search } from '../web-research/search.ts';
 import { RESEARCHER_DIGEST_SECTION } from '../utils/coverage-digest.ts';
-import { isRateLimitError, isSpentAccountError, parseRetryAfterMs, rateLimitBackoffMs } from '../utils/provider-errors.ts';
+import { isRateLimitError, isSpentAccountError, parseRetryAfterMs, rateLimitBackoffMs, RATE_LIMIT_TOTAL_WAIT_MAX_MS } from '../utils/provider-errors.ts';
 
 /**
  * Failures a retry cannot fix, because the next attempt sends the same request to
@@ -233,6 +233,11 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   // rate limit: the next backoff uses the provider's Retry-After (or the long
   // rate-limit step) instead of the small exponential 1-2s step.
   let inFlightBackoffMs: number | null = null;
+  // Provider-capacity waits already spent by THIS researcher. Bounds the case the
+  // rate-limit path made possible: a provider stating a long window on every
+  // attempt ("requested 120s retry delay"), which would otherwise spend most of a
+  // run's budget sleeping inside one researcher.
+  let capacityWaitSpentMs = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Launch boundary: never build a session for a run that is already cancelled
@@ -637,6 +642,28 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
           inFlightBackoffMs = rateLimitBackoffMs(attempt + 1, parseRetryAfterMs(err));
           metrics.increment('researcher_rate_limit_backoff_total', 1, { mode: 'deep', complexity: String(complexity) });
           logger.warn(`[ResearcherExecutor] Researcher ${id} hit a provider rate limit; backing off ${inFlightBackoffMs}ms before attempt ${attempt + 1}`);
+        }
+
+        // Bound total capacity waiting, and FAIL WITH A TIME when the bound is the
+        // reason. `break` (not throw) so the loop's own lastError wins and every
+        // caller keeps its existing failure classification. Issue #22: eight runs
+        // died on 3 x 1s/2s retries against a provider that had asked for 120s.
+        if (inFlightBackoffMs !== null) {
+          const remainingBudgetMs = RATE_LIMIT_TOTAL_WAIT_MAX_MS - capacityWaitSpentMs;
+          if (inFlightBackoffMs > remainingBudgetMs) {
+            const windowSeconds = Math.ceil(inFlightBackoffMs / 1000);
+            const retryAt = new Date(Date.now() + inFlightBackoffMs).toISOString().slice(11, 19);
+            lastError = new Error(
+              `Provider capacity: it asked for a ${windowSeconds}s cool-off, but this researcher ` +
+              `has only ${Math.max(0, Math.round(remainingBudgetMs / 1000))}s of its ` +
+              `${Math.round(RATE_LIMIT_TOTAL_WAIT_MAX_MS / 1000)}s capacity-wait budget left. ` +
+              `Rerun after ${retryAt}Z. Cause: ${errMsg}`,
+            );
+            logger.error(`[ResearcherExecutor] Researcher ${id} stopping instead of waiting ${inFlightBackoffMs}ms (capacity budget exhausted); rerun after ${retryAt}Z`);
+            metrics.increment('researcher_capacity_budget_exhausted_total', 1, { mode: 'deep', complexity: String(complexity) });
+            break;
+          }
+          capacityWaitSpentMs += inFlightBackoffMs;
         }
       }
 

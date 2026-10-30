@@ -16,6 +16,8 @@ import type { IStateManager, IHealthRegistryService, IKnowledgeStoreService, ISc
 import { healthRegistry as globalHealthRegistry } from './registry.ts';
 import { isNativeStackUnavailableError } from '../knowledge/embedder-utils.ts';
 import { probeKnowledgeStoreAvailability } from '../knowledge/availability.ts';
+import { getSocksProxyEndpoint } from '../infrastructure/browser/proxy-prefs.ts';
+import { probeSocksProxyForwarding } from '../infrastructure/browser/proxy-health.ts';
 
 /**
  * Standalone BrowserCapability check, exported so tests can call it directly
@@ -108,6 +110,35 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     // to return — reporting a merely busy pool as unhealthy, the exact failure
     // class the derived budget exists to prevent, one call-frame further out.
   }, { timeoutMs: Math.max(healthTimeoutMs, 150000, getHealthCheckBudgetMs(config)), critical: true });
+
+  // Register SOCKS Proxy Check — only meaningful when `proxy.json` exists, and
+  // CRITICAL when it does: every browser request goes through it, so a proxy that
+  // is not forwarding means 100% of searches fail. Before this check existed, a
+  // one-way tunnel (1.7.23) reported "All systems operational" while every run
+  // died, because BrowserCapability only proves the browser is installed and the
+  // browser runtime check short-circuits to "ready (idle)" when idle.
+  //
+  // The probe speaks SOCKS5 and requires BYTES BACK, not just a successful
+  // CONNECT: the observed failure accepted the handshake and black-holed the
+  // response, so a connect-only check passes it.
+  registry.register('SocksProxy', async () => {
+    const endpoint = getSocksProxyEndpoint();
+    if (!endpoint) {
+      return { healthy: true, diagnostic: { status: 'not configured (browser connects directly)' } };
+    }
+    const probe = await probeSocksProxyForwarding(endpoint);
+    if (probe.healthy) {
+      return {
+        healthy: true,
+        diagnostic: {
+          status: `forwarding via ${endpoint.host}:${endpoint.port}`,
+          firstByteMs: probe.latencyMs,
+        },
+      };
+    }
+    return { healthy: false, error: probe.reason };
+    // 5s connect + 8s data deadlines, plus room for a loaded machine.
+  }, { timeoutMs: 25_000, critical: true });
 
   // Register Knowledge Store Check — NON-critical: the store is the optional cache
   // research must run without (see the darwin-x64 comment below). A failure here
@@ -334,7 +365,13 @@ export function isBusyPoolHealthFailure(
   // probe abort an otherwise-operational session. A non-timeout error (browser not
   // installed, "connection refused", embedder missing) is a real fault → returns false.
   const isTimeout = (c: { error?: string }) => /tim(e|ed)\s*out|timeout/i.test(String(c.error || ''));
-  return capabilityOk && unhealthy.length > 0 && unhealthy.every(isTimeout);
+  // A BROKEN PROXY IS NEVER "BUSY". Under total search failure every probe
+  // times out, so the timeout-only rule above would call the pool busy and let
+  // the run fan out its whole search burst into a dead tunnel (observed
+  // 2026-10-30: 36 searches, 7 minutes, one generic error). The proxy check
+  // distinguishes "no bytes came back" from "the pool is congested".
+  const proxyBroken = unhealthy.some(c => c.component === 'SocksProxy');
+  return capabilityOk && !proxyBroken && unhealthy.length > 0 && unhealthy.every(isTimeout);
 }
 
 /**
