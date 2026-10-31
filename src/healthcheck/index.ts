@@ -17,7 +17,11 @@ import { healthRegistry as globalHealthRegistry } from './registry.ts';
 import { isNativeStackUnavailableError } from '../knowledge/embedder-utils.ts';
 import { probeKnowledgeStoreAvailability } from '../knowledge/availability.ts';
 import { getSocksProxyEndpoint } from '../infrastructure/browser/proxy-prefs.ts';
-import { probeSocksProxyForwarding } from '../infrastructure/browser/proxy-health.ts';
+import {
+  probeSocksProxyForwarding,
+  NEUTRAL_TARGET_HOST,
+  NEUTRAL_TARGET_PORT,
+} from '../infrastructure/browser/proxy-health.ts';
 
 /**
  * Standalone BrowserCapability check, exported so tests can call it directly
@@ -126,7 +130,9 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     if (!endpoint) {
       return { healthy: true, diagnostic: { status: 'not configured (browser connects directly)' } };
     }
-    const probe = await probeSocksProxyForwarding(endpoint);
+    // Explicit budgets so the DDG probe plus the neutral fallback stay inside the
+    // 25s registration timeout below (4+5+4+5 = 18s worst case).
+    const probe = await probeSocksProxyForwarding(endpoint, { timeoutMs: 4_000, dataTimeoutMs: 5_000 });
     if (probe.healthy) {
       return {
         healthy: true,
@@ -136,8 +142,26 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
         },
       };
     }
+    // DuckDuckGo answered nothing. Ask the proxy for a neutral host before
+    // declaring the tunnel broken: that separates "the tunnel is dead" (restart
+    // the proxy) from "the tunnel works but DuckDuckGo's pinned front doors are
+    // dead" (repin or drop the proxy). Both make research impossible, but they
+    // are different repairs.
+    const neutral = await probeSocksProxyForwarding(endpoint, {
+      timeoutMs: 4_000,
+      dataTimeoutMs: 5_000,
+      targetHost: NEUTRAL_TARGET_HOST,
+      targetPort: NEUTRAL_TARGET_PORT,
+    });
+    if (neutral.healthy) {
+      return {
+        healthy: false,
+        error: `the proxy forwards traffic to ${NEUTRAL_TARGET_HOST}, but DuckDuckGo is unreachable through it (${probe.reason}). The tunnel works; the pinned front doors do not. Update DDG_PIN_IPS and restart the proxy, or remove ~/.pi/research/proxy.json.`,
+      };
+    }
     return { healthy: false, error: probe.reason };
-    // 5s connect + 8s data deadlines, plus room for a loaded machine.
+    // Two probes with explicit 4s/5s deadlines (18s worst case) plus room for a
+    // loaded machine, inside the 25s registration timeout.
   }, { timeoutMs: 25_000, critical: true });
 
   // Register Knowledge Store Check — NON-critical: the store is the optional cache

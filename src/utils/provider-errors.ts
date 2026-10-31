@@ -70,7 +70,12 @@ export function isRateLimitError(error: unknown): boolean {
     // this, a 503 fell through to the ordinary 1s/2s curve and killed the run
     // (2026-10-28, eight consecutive runs lost while the search burst had already
     // collected 48-104 results).
-    || /\b50[0234]\b/.test(msg)
+    // Anchored to STATUS CONTEXT on purpose. A bare `/\b50[0234]\b/` also matches
+    // "took 502ms", "max_tokens=500" and "504 results", and this classifier drives
+    // both the retry policy and the run-level stop threshold, so a false positive
+    // buys a long wait and stops counting a genuine failure.
+    || /\b(?:http|status|code|error|response|returned)\W{0,4}50[0234]\b/i.test(msg)
+    || /\b50[0234]\b\W{0,4}(?:provider|service|unavailable|bad|gateway|internal|error|timeout)/i.test(msg)
     || msg.includes('service unavailable')
     || msg.includes('bad gateway')
     || msg.includes('gateway timeout')
@@ -99,8 +104,10 @@ export function isCapacityFailureReason(reason: string | undefined): boolean {
 }
 
 /**
- * The `Retry-After` a provider error asked for, in ms, clamped to [5s, 60s], or null when
- * the error carries none. Read out of the message because every caller sees a serialized
+ * The `Retry-After` a provider error asked for, in ms, clamped to [5s, 180s], or null when
+ * the error carries none. 60s is only the EXPONENTIAL ceiling: a stated window is the
+ * provider telling us when its pool reopens, so it keeps its full length up to
+ * STATED_RETRY_AFTER_MAX_MS. Read out of the message because every caller sees a serialized
  * provider error, not the raw Response headers: pi's `after_provider_response` hook
  * (src/index.ts) is the only place with headers, and it does not feed these retry loops.
  *
@@ -134,9 +141,10 @@ export function parseRetryAfterMs(error: unknown): number | null {
 export const RATE_LIMIT_BACKOFF_BASE_MS = 15_000;
 
 /**
- * Ceiling for one rate-limit wait. The provider's own `Retry-After` wins when
- * present (clamped by parseRetryAfterMs to 60s); this only bounds the exponential
- * fallback, so three retries cost at most 15s + 30s + 60s of waiting.
+ * Ceiling for one EXPONENTIAL rate-limit wait. A provider's stated `Retry-After`
+ * bypasses this bound (parseRetryAfterMs clamps it to STATED_RETRY_AFTER_MAX_MS
+ * instead); this only bounds the exponential fallback, so three retries cost at
+ * most 15s + 30s + 60s of waiting.
  */
 export const RATE_LIMIT_BACKOFF_MAX_MS = 60_000;
 
@@ -187,7 +195,7 @@ export function rateLimitBackoffMs(
   return clampRateLimitWait(base + jitter);
 }
 
-/** Keep a wait inside [1s, 60s] — the same bounds parseRetryAfterMs applies to a stated window. */
+/** Keep an EXPONENTIAL wait inside [1s, 60s]. A provider-stated window is NOT clamped here. */
 export function clampRateLimitWait(ms: number): number {
   return Math.min(Math.max(Math.round(ms), 1_000), RATE_LIMIT_BACKOFF_MAX_MS);
 }

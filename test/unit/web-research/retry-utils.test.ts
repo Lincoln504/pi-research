@@ -167,6 +167,39 @@ describe('retry-utils', () => {
       expect(fn).toHaveBeenCalledTimes(2);
     });
 
+    it('refuses a wait that would exceed maxTotalDelayMs, and says when to rerun', async () => {
+      // Two stated 180s windows inside a 900s run would spend six minutes asleep and
+      // end with no actionable error. The cap turns that into an immediate throw that
+      // names the provider's window and the time to rerun.
+      const fn = vi.fn().mockRejectedValue(new Error('Server requested 120s retry delay (max: 60s). 503 Provider returned error'));
+      const promise = retryWithBackoff(fn, {
+        initialDelay: 100,
+        maxRetries: 2,
+        delayFor: () => 120_000,
+        maxTotalDelayMs: 50_000,
+      });
+      promise.catch(() => {});
+      await expect(promise).rejects.toThrow(/total-wait budget|Rerun after/);
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows waits up to maxTotalDelayMs and only refuses the one that crosses it', async () => {
+      // Always fails, so every attempt reaches the wait decision. 20s + 20s = 40s is
+      // inside the 50s budget; the third 20s wait would reach 60s and is refused.
+      const fn = vi.fn().mockRejectedValue(new Error('429 Too Many Requests'));
+      const promise = retryWithBackoff(fn, {
+        initialDelay: 100,
+        maxRetries: 4,
+        delayFor: () => 20_000,
+        maxTotalDelayMs: 50_000,
+      });
+      promise.catch(() => {});
+      await vi.advanceTimersByTimeAsync(20_100);
+      await vi.advanceTimersByTimeAsync(20_100);
+      await expect(promise).rejects.toThrow(/Rerun after/);
+      expect(fn).toHaveBeenCalledTimes(3);
+    });
+
     it('stops retrying and surfaces the original error when the signal aborts during backoff', async () => {
       vi.useRealTimers(); // deterministic real-time abort instead of fake-timer microtask juggling
       const controller = new AbortController();

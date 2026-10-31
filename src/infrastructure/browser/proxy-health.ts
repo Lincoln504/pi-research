@@ -33,7 +33,9 @@ export type ProxyProbeCode =
   | 'handshake-rejected'
   | 'connect-rejected'
   | 'no-data'
-  | 'protocol-error';
+  | 'protocol-error'
+  /** The caller's AbortSignal fired. Not a verdict on the proxy. */
+  | 'aborted';
 
 export interface ProxyProbeResult {
   readonly healthy: boolean;
@@ -51,15 +53,22 @@ export interface ProxyProbeOptions {
   /** Host:port the probe asks the proxy to reach. */
   readonly targetHost?: string;
   readonly targetPort?: number;
+  /** Cancel the probe. An aborted probe returns code 'aborted', not 'unhealthy'. */
+  readonly signal?: AbortSignal;
 }
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_DATA_TIMEOUT_MS = 8_000;
-// IANA's example host: automation-tolerant, tiny, stable, and reachable from
-// every egress path that can serve a research run. The proxy resolves non-DDG
-// names with normal DNS, so this also exercises its DNS path.
-const DEFAULT_TARGET_HOST = 'example.com';
+// DuckDuckGo's own front door on plain HTTP, deliberately NOT example.com: the
+// proxy pins *.duckduckgo.com addresses and rotates past a dead pin. A probe to
+// example.com resolves with ordinary DNS and never touches a pin, so it cannot
+// catch the failure this proxy has actually had (both pins dying at once). DDG
+// answers port 80 with a 301, and the probe only needs one byte back.
+const DEFAULT_TARGET_HOST = 'lite.duckduckgo.com';
 const DEFAULT_TARGET_PORT = 80;
+/** The neutral fallback target used to separate "proxy broken" from "DDG unreachable". */
+export const NEUTRAL_TARGET_HOST = 'example.com';
+export const NEUTRAL_TARGET_PORT = 80;
 
 function fail(
   code: ProxyProbeCode,
@@ -100,17 +109,35 @@ export function probeSocksProxyForwarding(
     let stage: 'greet' | 'connect' | 'data' = 'greet';
     let settled = false;
     let buffer = Buffer.alloc(0);
+    // Declared before `finish` so the already-aborted path can clear them without
+    // a temporal-dead-zone ReferenceError.
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    let dataTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const onAbort = () => {
+      finish(fail('aborted', 'proxy probe cancelled by the caller', endpoint, startedAt));
+    };
 
     const finish = (result: ProxyProbeResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(connectTimer);
       clearTimeout(dataTimer);
+      options.signal?.removeEventListener('abort', onAbort);
       socket.destroy();
       resolve(result);
     };
 
-    const connectTimer = setTimeout(() => {
+    // A probe runs at the START of a run and on the health path, both of which a
+    // user can cancel. Without this, Esc during a dead proxy's 3s+4s+3s+4s probe
+    // sequence did nothing until the sequence finished.
+    if (options.signal?.aborted) {
+      onAbort();
+      return;
+    }
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+
+    connectTimer = setTimeout(() => {
       finish(fail(
         stage === 'greet' ? 'unreachable' : 'no-data',
         stage === 'greet'
@@ -124,7 +151,6 @@ export function probeSocksProxyForwarding(
 
     // Armed only after the success reply, so it measures the thing that broke:
     // the proxy said "connected" and then delivered nothing.
-    let dataTimer: ReturnType<typeof setTimeout> | undefined;
     const armDataTimer = () => {
       dataTimer = setTimeout(() => {
         finish(fail(
@@ -263,17 +289,54 @@ export function probeSocksProxyForwarding(
  * health registry: this one is bounded tighter, because it runs while the user
  * is already waiting for an error.
  */
-export async function describeProxyIfBroken(): Promise<string | null> {
+export interface ProxyDiagnosisOptions {
+  /** Per-probe connect deadline. Default 3s. */
+  readonly timeoutMs?: number;
+  /** Per-probe first-byte deadline. Default 3s (4s on the second sample). */
+  readonly dataTimeoutMs?: number;
+}
+
+export async function describeProxyIfBroken(
+  signal?: AbortSignal,
+  options: ProxyDiagnosisOptions = {},
+): Promise<string | null> {
   const endpoint = getSocksProxyEndpoint();
   if (!endpoint) return null;
-  // TWO attempts. This verdict STOPS a run, so it must not rest on one sample: a
-  // single refused connect during a proxy restart, or one oversized response,
-  // would abort work that the next probe would have cleared. A genuinely dead
-  // or one-way tunnel fails both attempts.
-  let last = await probeSocksProxyForwarding(endpoint, { timeoutMs: 3_000, dataTimeoutMs: 3_000 });
+  const opts = {
+    timeoutMs: options.timeoutMs ?? 3_000,
+    dataTimeoutMs: options.dataTimeoutMs ?? 3_000,
+    signal,
+  } as const;
+
+  // TWO attempts against DuckDuckGo. This verdict STOPS a run, so it must not rest
+  // on one sample: a single refused connect during a proxy restart, or one
+  // oversized response, would abort work the next probe would have cleared. A
+  // genuinely dead or one-way tunnel fails both attempts.
+  let last = await probeSocksProxyForwarding(endpoint, opts);
+  if (last.code === 'aborted') return null;
   if (!last.healthy) {
-    last = await probeSocksProxyForwarding(endpoint, { timeoutMs: 3_000, dataTimeoutMs: 6_000 });
+    last = await probeSocksProxyForwarding(endpoint, {
+      ...opts,
+      dataTimeoutMs: (options.dataTimeoutMs ?? 4_000),
+    });
+    if (last.code === 'aborted') return null;
   }
   if (last.healthy) return null;
-  return `SOCKS proxy check: ${last.reason}.`;
+
+  // DDG failed twice. Before blaming the proxy, ask it for a neutral host: that
+  // separates "the tunnel is dead" from "the tunnel works but DDG is blocked or
+  // its pins are dead". Both stop a run, but only one is fixed by restarting the
+  // proxy, and the message should say which.
+  const neutral = await probeSocksProxyForwarding(endpoint, {
+    ...opts,
+    targetHost: NEUTRAL_TARGET_HOST,
+    targetPort: NEUTRAL_TARGET_PORT,
+  });
+  if (neutral.code === 'aborted') return null;
+  if (neutral.healthy) {
+    return 'SOCKS proxy check: the proxy forwards traffic to example.com, but DuckDuckGo is '
+      + `unreachable through it (${last.reason}). The tunnel works; the pinned DuckDuckGo front `
+      + 'doors are not answering. Update DDG_PIN_IPS in the proxy service or remove ~/.pi/research/proxy.json.';
+  }
+  return `SOCKS proxy check: ${last.reason}. The proxy did not forward traffic to example.com either, so the tunnel itself is broken.`;
 }

@@ -345,12 +345,14 @@ export async function performSearch(
         // none of them is "the local SOCKS proxy is a black hole", which is what
         // every one of these failures was between 2026-10-28 and 2026-10-30.
         // Cheap: this branch only runs after a burst has already failed.
-        const proxyDiagnosis = await describeProxyIfBroken();
+        // Pass the run signal: if the caller cancels mid-diagnosis, the two DDG
+        // samples plus the neutral check must stop at once, not run to completion.
+        const proxyDiagnosis = await describeProxyIfBroken(signal);
         throw new Error(
             `Search completely failed: ${reason}. ` +
             (proxyDiagnosis
                 ? `${proxyDiagnosis} Every browser request is routed through the configured proxy, ` +
-                  `so no search can succeed until it forwards traffic or ~/.pi/research/proxy.json is removed.`
+                  `so no search can succeed until it forwards DuckDuckGo traffic or ~/.pi/research/proxy.json is removed.`
                 : `Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under extreme load.`) +
             (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
         );

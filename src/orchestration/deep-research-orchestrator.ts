@@ -157,9 +157,13 @@ export class DeepResearchOrchestrator {
     // first (36 queries, ~7 minutes on 2026-10-30) and then dies with the
     // generic "Search completely failed". One probe costs seconds.
     //
-    // Bounded generously (3s connect + 6s data): the point is to catch a dead or
-    // one-way tunnel, not to convict a proxy that is merely slow on a loaded box.
-    const proxyDiagnosis = await describeProxyIfBroken();
+    // Bounded generously (3s connect + 3-4s data, then a neutral-host check): the
+    // point is to catch a dead or one-way tunnel, not to convict a proxy that is
+    // merely slow on a loaded box.
+    // The run signal is passed through so Esc during a dead proxy's probe sequence
+    // cancels immediately instead of waiting out both attempts.
+    const proxyDiagnosis = await describeProxyIfBroken(signal);
+    if (signal?.aborted) return '';
     if (proxyDiagnosis) {
       throw new Error(
         `Research cannot start: ${proxyDiagnosis} ` +

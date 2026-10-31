@@ -20,6 +20,8 @@ import { Duplex } from 'node:stream';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
+import { mkdtempSync, symlinkSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 // The proxy is deliberately plain, dependency-free JS (it must run standalone
 // under cron), so it is type-checked as JS rather than declared.
 import { attachTunnel } from '../../../scripts/ddg-socks-proxy.mjs';
@@ -142,6 +144,53 @@ describe('ddg-socks-proxy tunnel', () => {
     expect(code).not.toBe(0);
     expect(stderr.join('')).toContain('EADDRINUSE');
   }, 15_000);
+
+  it('starts when launched through a symlink (the documented install path)', async () => {
+    // The documented install links ~/.pi/research/scripts/ddg-socks-proxy.mjs to
+    // the copy in the repo. A string comparison of argv[1] against import.meta.url
+    // says "imported" for a symlinked script FILE, so the proxy exits 0 without
+    // ever listening — the supervisor then reports a healthy service that refuses
+    // every connection. Compare REAL paths instead.
+    const dir = mkdtempSync(path.join(tmpdir(), 'pi-proxy-link-'));
+    try {
+      const script = path.resolve(__dirname, '../../../scripts/ddg-socks-proxy.mjs');
+      const link = path.join(dir, 'proxy.mjs');
+      symlinkSync(script, link);
+
+      const freePort = await new Promise<number>((resolve, reject) => {
+        const srv = net.createServer();
+        srv.once('error', reject);
+        srv.listen(0, '127.0.0.1', () => {
+          const addr = srv.address();
+          const port = typeof addr === 'object' && addr ? addr.port : 0;
+          srv.close(() => resolve(port));
+        });
+      });
+
+      const child = spawn(process.execPath, [link], {
+        env: { ...process.env, DDG_SOCKS_PORT: String(freePort) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const stdout: string[] = [];
+      child.stdout.on('data', (b: Buffer) => stdout.push(b.toString()));
+
+      const listening = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), 10_000);
+        child.stdout.on('data', () => {
+          if (stdout.join('').includes('listening')) {
+            clearTimeout(timer);
+            resolve(true);
+          }
+        });
+        child.once('exit', () => { clearTimeout(timer); resolve(false); });
+      });
+      child.kill('SIGKILL');
+      expect(listening).toBe(true);
+      expect(stdout.join('')).toContain(`127.0.0.1:${freePort}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it('tears down the upstream when the client ends, and vice versa', async () => {
     const [client, clientPeer] = makePair();

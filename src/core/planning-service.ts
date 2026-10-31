@@ -17,7 +17,7 @@ import type {
 } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import { isRateLimitError, parseRetryAfterMs, rateLimitBackoffMs } from '../utils/provider-errors.ts';
+import { isRateLimitError, parseRetryAfterMs, rateLimitBackoffMs, RATE_LIMIT_TOTAL_WAIT_MAX_MS } from '../utils/provider-errors.ts';
 import { completeSimple } from './llm/pi-ai-completion.ts';
 import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
@@ -502,6 +502,9 @@ export class PlanningService implements IPlanningService {
           signal,
           isTransientError: (err) => isRetriableLlmError(err, signal),
           delayFor: rateLimitDelayFor,
+          // Bound the TOTAL wait for THIS call: a provider that keeps asking for
+          // a long window must not spend the run's whole budget sleeping here.
+          maxTotalDelayMs: RATE_LIMIT_TOTAL_WAIT_MAX_MS,
         },
       );
 
@@ -1172,6 +1175,9 @@ export class PlanningService implements IPlanningService {
         signal,
         isTransientError: (err) => isRetriableLlmError(err, signal),
         delayFor: rateLimitDelayFor,
+        // Bound the TOTAL wait for THIS call: a provider that keeps asking for
+        // a long window must not spend the run's whole budget sleeping here.
+        maxTotalDelayMs: RATE_LIMIT_TOTAL_WAIT_MAX_MS,
       },
     );
 

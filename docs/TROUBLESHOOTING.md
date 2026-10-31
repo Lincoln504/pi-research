@@ -78,7 +78,7 @@ forwarding. The error now names it when it can:
 
 ```
 Search completely failed: all 36 queries encountered worker errors.
-SOCKS proxy check: proxy at 127.0.0.1:1080 completed the SOCKS handshake to example.com:80
+SOCKS proxy check: proxy at 127.0.0.1:1080 completed the SOCKS handshake to lite.duckduckgo.com:80
 but returned no data within 3000ms (...). Every browser request is routed through the configured
 proxy, so no search can succeed until it forwards traffic or ~/.pi/research/proxy.json is removed.
 ```
@@ -125,7 +125,7 @@ tunnel that connects and then returns nothing is reported as:
 
 ```
 [FAIL] **SocksProxy** [CRITICAL]
-  - Error: proxy at 127.0.0.1:1080 completed the SOCKS handshake to example.com:80 but returned no data within 8000ms (...)
+  - Error: proxy at 127.0.0.1:1080 completed the SOCKS handshake to lite.duckduckgo.com:80 but returned no data within 5000ms (...)
 ```
 
 That check also runs before a research run starts, so the run stops in seconds with a diagnosis

@@ -30,7 +30,8 @@
 import net from 'node:net';
 import dns from 'node:dns';
 import { pipeline } from 'node:stream';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { isBlockedDestination, isBlockedProxyTarget } from './lib/private-addresses.mjs';
 
 const PORT = Number(process.env.DDG_SOCKS_PORT || 1080);
@@ -348,9 +349,18 @@ export function startProxy(port = PORT) {
 }
 
 // Main-module guard: `process.argv[1]` is absent when imported by a test runner.
+//
+// Compare REAL paths, not URL strings. The documented install links
+// ~/.pi/research/scripts/ddg-socks-proxy.mjs to the copy in the repo (the same
+// layout a ~/bin wrapper uses). `import.meta.url` is already the real path, but
+// `process.argv[1]` is the symlink, so a string comparison says "imported" and
+// the proxy exits 0 without ever listening: the supervisor then reports a
+// healthy service that refuses every connection. A symlinked DIRECTORY with a
+// relative entry is fine (Node resolves the cwd); a symlinked script FILE is not.
 const isMainModule = (() => {
   try {
-    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+    if (!process.argv[1]) return false;
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
   } catch {
     return false;
   }

@@ -47,6 +47,17 @@ export interface RetryOptions {
    * `rateLimitDelayFor` in src/core/planning-service.ts.
    */
   readonly delayFor?: (nextAttempt: number, error: Error) => number | null;
+  /**
+   * Hard ceiling on the SUM of the waits this one call may spend.
+   *
+   * `delayFor` lets a provider-mandated window (up to 180s) bypass `maxDelay`, which
+   * is correct per attempt and unbounded across attempts. The planning/router calls
+   * retry up to twice, so two stated 180s windows are six minutes inside a 900s run
+   * — most of the budget spent sleeping, and no actionable error at the end of it.
+   * Past this bound the call throws the provider's own window and the time to
+   * rerun instead of sleeping into the caller's timeout.
+   */
+  readonly maxTotalDelayMs?: number;
 }
 
 /**
@@ -299,7 +310,7 @@ export async function retryWithBackoff<T>(
 ): Promise<T> {
   // `delayFor` stays optional (absent for every caller that does not override the wait),
   // so it is excluded from the Required<> normalization rather than given a default.
-  const opts: Required<Omit<RetryOptions, 'signal' | 'delayFor'>> & RetryOptions = {
+  const opts: Required<Omit<RetryOptions, 'signal' | 'delayFor' | 'maxTotalDelayMs'>> & RetryOptions = {
     maxRetries: 3,
     initialDelay: 1000,
     maxDelay: 10000,
@@ -311,6 +322,8 @@ export async function retryWithBackoff<T>(
   const startTime = Date.now();
   let lastError: Error | null = null;
   let attempt = 0;
+  // Sum of the waits actually slept, for the optional maxTotalDelayMs ceiling.
+  let totalDelayMs = 0;
   metrics.increment('retry_attempts_total', 1, { label: opts.label });
 
   while (attempt <= opts.maxRetries) {
@@ -344,6 +357,21 @@ export async function retryWithBackoff<T>(
       const delay = override != null && Number.isFinite(override) && override > 0
         ? Math.round(override)
         : Math.min(baseDelay + jitter, opts.maxDelay);
+
+      // Bound the TOTAL waiting before sleeping, so a provider that keeps asking
+      // for a long window cannot spend the caller's whole timeout here.
+      if (opts.maxTotalDelayMs !== undefined && totalDelayMs + delay > opts.maxTotalDelayMs) {
+        const retryAt = new Date(Date.now() + delay).toISOString().slice(11, 19);
+        metrics.increment('retry_total_delay_exhausted_total', 1, { label: opts.label });
+        throw new Error(
+          `Provider capacity: ${opts.label} asked for a ${Math.round(delay / 1000)}s wait, but only `
+          + `${Math.max(0, Math.round((opts.maxTotalDelayMs - totalDelayMs) / 1000))}s of its `
+          + `${Math.round(opts.maxTotalDelayMs / 1000)}s total-wait budget is left. Rerun after ${retryAt}Z. `
+          + `Cause: ${lastError.message}`,
+          { cause: error },
+        );
+      }
+      totalDelayMs += delay;
 
       metrics.increment('retry_backoff_total', 1, { attempt: String(attempt), label: opts.label });
       metrics.observe('retry_backoff_delay_ms', delay, { attempt: String(attempt), label: opts.label });

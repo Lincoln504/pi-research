@@ -20,30 +20,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (both sockets are still destroyed when either ends) and restores the return path. Normal tunnel
   teardown no longer logs `Premature close` once per request. The tunnel wiring moved into an
   exported `attachTunnel()` so it can be tested without network egress:
-  `test/unit/scripts/ddg-socks-proxy-tunnel.test.ts` pins both directions, the teardown rule, and
-  the two crash guards below. The published 1.7.23 npm tarball carries the broken script, so
-  upgrading is the only fix for a consumer who runs the shipped proxy.
+  `test/unit/scripts/ddg-socks-proxy-tunnel.test.ts` pins both directions and the teardown rule.
+  The published 1.7.23 npm tarball carries the broken script, so upgrading is the only fix for a
+  consumer who runs the shipped proxy.
 - **`pipeline()` throws on a dead endpoint, and the throw lands where nothing catches it.** Browsers
   open speculative SOCKS connections and drop them, and the proxy's own 8s data deadline cuts both
   ends on a stall, so `attachTunnel` regularly runs against an already-destroyed socket.
   `pipeline()` raises `ERR_STREAM_UNABLE_TO_PIPE` synchronously, and the call sits inside a
   socket `'connect'` handler — outside every promise chain and `try` in the file — so it killed the
-  daemon. Measured while validating this release: 20 restarts in a few minutes, every one this
+  daemon. Measured while validating this release: 20 restarts in 25 minutes, every one this
   error. Attaching to a dead pair is now a no-op, the attach path is wrapped, half-close and
-  already-dead teardown no longer log, and both crashes have tests.
-- **The proxy now exits non-zero when its port is already taken.** `server.on('error')` logged
-  `EADDRINUSE` and left the process running without listening, the one state a supervisor cannot
-  see: `Restart=always` never fires and every browser request fails at connect. It exits so the
-  supervisor retries.
+  already-dead teardown no longer log, and the crash guards have tests.
+- **The proxy now exits non-zero when it cannot listen.** `server.on('error')` logged the failure
+  and left the process running without a listening socket, the one state a supervisor cannot see:
+  `Restart=always` never fires and every browser request fails at connect. It exits so the
+  supervisor retries. This covers `EADDRINUSE` (port already taken) and other listen failures such
+  as `EACCES`.
+- **The main-module guard broke when the script was installed as a symlink.** It compared
+  `process.argv[1]` with `import.meta.url` as strings. The documented install links
+  `~/.pi/research/scripts/ddg-socks-proxy.mjs` to the copy in the repo, so `argv[1]` is the symlink
+  and `import.meta.url` is the real path: the comparison says "imported", the proxy exits 0 without
+  ever listening, and the supervisor reports a healthy service that refuses every connection. (A
+  symlinked directory with a relative entry is fine — Node resolves the cwd. A symlinked script
+  file is not.) It now compares real paths (`realpathSync`), and a test spawns the script through a
+  temp symlink and asserts it reaches "listening".
 - **A broken proxy reported a clean bill of health.** `health` proved only that the browser was
   installed (`BrowserCapability` never touches the network) and `BrowserRuntime` returns
   `ready (idle)` without probing when the scheduler is idle, so a one-way tunnel produced "All
   systems operational" while every search failed. There is now a **critical** `SocksProxy` health
-  component: when `proxy.json` exists it speaks SOCKS5 to the proxy, sends one request, and
-  requires **bytes back**, because the observed failure accepts the handshake and then forwards
-  nothing. `src/infrastructure/browser/proxy-health.ts`; tests
-  `test/unit/infrastructure/proxy-health.test.ts` cover the healthy path, a black-holed tunnel, a
-  ruleset refusal, a refused connection, a non-SOCKS greeting, and the not-configured case.
+  component: when `proxy.json` exists it speaks SOCKS5 to the proxy, sends one request to
+  **DuckDuckGo's own front door** (`lite.duckduckgo.com:80`, which exercises the proxy's pinned
+  addresses rather than ordinary DNS), and requires **bytes back**, because the observed failure
+  accepts the handshake and then forwards nothing. If DuckDuckGo answers nothing it probes a
+  neutral host, so the report distinguishes "the tunnel is dead" (restart the proxy) from "the
+  tunnel works but DuckDuckGo's pinned front doors are dead" (repin or drop the proxy). Explicit
+  4s/5s per-probe budgets keep the pair inside the 25s registration timeout.
+  `src/infrastructure/browser/proxy-health.ts`; tests `test/unit/infrastructure/proxy-health.test.ts`
+  cover the healthy path, a black-holed tunnel, a ruleset refusal, a refused connection, a
+  non-SOCKS greeting, the not-configured case, the dead-pin/neutral-host split, the two-sample
+  retry, and abort handling.
 - **A broken proxy is no longer mistaken for a busy pool.** `isBusyPoolHealthFailure` treats any set
   of timeout-shaped probe failures as "pool busy, proceed" so sustained load cannot abort a healthy
   run. A dead proxy produces exactly that signature, so the gate always said "operational" and let
@@ -51,22 +66,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return false. Test: `test/unit/healthcheck/index.test.ts`.
 - **A deep run now checks the proxy before it searches.** Only the quick orchestrator and the UI
   health gate ran a pre-flight check, so a deep run spent its entire burst first. The orchestrator
-  probes at the start (3s connect + 3s data, then one retry at 6s) and fails immediately with the
-  diagnosis. It requires two failed samples before stopping a run, because one refused connect
-  during a proxy restart must not abort work the next probe would clear.
+  probes at the start (3s connect + 3s data, a second sample at 3s/4s, then the neutral-host check)
+  and fails immediately with the diagnosis. It requires two failed samples before stopping a run,
+  because one refused connect during a proxy restart must not abort work the next probe would
+  clear. The run's `AbortSignal` is passed through, so Esc during a dead proxy's probe sequence
+  cancels at once instead of waiting it out. The deep start path is covered by
+  `test/integration/research-workflow.test.ts`; the diagnostic path it calls is unit-tested.
 - **`Search completely failed` now names a broken proxy instead of listing three guesses.** When the
   proxy probe fails on the total-failure path, the error says what is wrong and what to do, rather
   than "Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under
   extreme load".
 - **A 5xx with a stated cool-off burned the retry budget in seconds and killed the run** (issue
   #22, "503 + provider Retry-After > 60s is retried 3x at 1s/2s and kills the whole run": eight
-  consecutive runs lost on 2026-10-28 while the search burst had already collected 48-104 results). Three gaps, all closed in `src/utils/provider-errors.ts`:
-  - `isRateLimitError` now classifies the 5xx overload class (`500`/`502`/`503`/`504`,
-    `Service Unavailable`, `Bad Gateway`, `Gateway Timeout`, `retry delay`, `retry-after`) as
-    capacity, so it takes the long-wait path instead of the ordinary 1s/2s curve.
+  consecutive runs lost on 2026-10-28 while the search burst had already collected 48-104 results).
+  Gaps closed in `src/utils/provider-errors.ts` and the retry callers:
+  - `isRateLimitError` now classifies the 5xx overload class as capacity, so it takes the long-wait
+    path instead of the ordinary 1s/2s curve. The numeric match is anchored to status context
+    (`http`/`status`/`code`/`error`/`response`/`returned`, or a 5xx followed by a provider/gateway
+    word) so a message that merely contains "502ms" or "max_tokens=500" is not misread as an
+    outage — this classifier also drives the run-level stop threshold.
   - `parseRetryAfterMs` now reads pi's own sentence — `Server requested 120s retry delay (max:
     60s)` — which is the only statement of when the pool reopens, plus the prose `retry after Ns`
-    form.
+    form. Its doc comment no longer claims the 60s exponential ceiling applies to a stated window.
   - A stated window is no longer clamped to 60s. 60s is the ceiling for the **exponential**
     backoff, not for a window the provider stated: clamping 120s to 60s guaranteed the next attempt
     failed too. Stated windows are honoured up to 180s (`STATED_RETRY_AFTER_MAX_MS`) and the
@@ -74,7 +95,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Total capacity waiting per researcher is bounded at 240s
     (`RATE_LIMIT_TOTAL_WAIT_MAX_MS`). Past it the loop stops and reports the provider's window and
     the time to rerun ("Rerun after 22:10:00Z") instead of sleeping into the run timeout and
-    reporting a failure with no cause. Tests: `test/unit/utils/provider-errors.test.ts`.
+    reporting a failure with no cause.
+  - The planner/router/synthesizer retries now take the same total bound (`maxTotalDelayMs` in
+    `retryWithBackoff`, set to `RATE_LIMIT_TOTAL_WAIT_MAX_MS` in `planning-service.ts`). Their
+    per-attempt delay already honoured a stated window; without a sum bound, two 180s windows were
+    six minutes of sleeping inside one 900s run. Tests: `test/unit/utils/provider-errors.test.ts`
+    (classification and stated windows) and `test/unit/web-research/retry-utils.test.ts` (the
+    total-wait cap).
 
 ### Documentation
 
